@@ -27,7 +27,15 @@
 2. A user can register/log in; roles `admin` and `agent` exist; an admin can invite/manage users; protected routes are enforced server-side.
 3. Every domain table carries a `workspaceId`; a data-access helper scopes all queries to the active workspace (verified by a test seeding two workspaces).
 4. Prisma schema + migrations are committed; `.env.example` documents required config; `LICENSE` (Apache-2.0) and a skeleton README are present.
-**Plans:** TBD (`/gsd:plan-phase 1`)
+**Plans:** 8 plans (6 waves)
+- [ ] 01-01-PLAN.md — Project scaffold, tooling, shadcn/ui design system + documented .env.example (Wave 1)
+- [ ] 01-02-PLAN.md — Database + auth backbone: Prisma 7, Better Auth (org + admin), schema, initial migration (Wave 2)
+- [ ] 01-03-PLAN.md — Multi-tenant data access: scopedDb + AIDA-11 real-Postgres isolation test + session bridge (Wave 3)
+- [ ] 01-04-PLAN.md — Background worker + heartbeat job + /api/health liveness (Wave 3)
+- [ ] 01-05-PLAN.md — Auth flow: middleware guard, self-disabling setup wizard, login, env bootstrap (Wave 3)
+- [ ] 01-06-PLAN.md — App shell + Tickets/KB stubs + tenant-scoped AI toggle ("full shell, empty rooms") (Wave 4)
+- [ ] 01-07-PLAN.md — Self-host: multi-stage Dockerfile, docker-compose (db+app+worker+caddy), Caddyfile (Wave 5)
+- [ ] 01-08-PLAN.md — Visual verification checkpoint: human walkthrough of the self-hosted experience (Wave 6)
 
 ### Phase 2: Core Ticketing
 **Timebox:** ~2 weeks · **Depends on:** Phase 1 · **Requirements:** AIDA-01, AIDA-02, AIDA-03, AIDA-04, AIDA-05, AIDA-06, AIDA-07, AIDA-08, AIDA-12 (partial)
@@ -111,4 +119,4 @@
 **Coverage: 23/23 MVP requirements mapped. No orphans.** (AIDA-18 deferred to backlog.)
 
 ---
-*Last updated: 2026-06-28 — v1 roadmap created (7 phases, MVP-first).*
+*Last updated: 2026-06-29 — Phase 1 decomposed into 8 plans (6 waves) via /gsd:plan-phase.*
