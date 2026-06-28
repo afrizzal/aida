@@ -61,13 +61,12 @@ Exceptions:
 
 | Role | Size | Weight | Line Height | Usage |
 |------|------|--------|-------------|-------|
-| Display | 24px | 700 | 1.1 | Setup wizard page title, login page heading |
+| Display | 24px | 600 | 1.1 | Setup wizard page title, login page heading |
 | Heading | 18px | 600 | 1.2 | Page section headings, stub page empty-state headings, settings section titles |
 | Body | 14px | 400 | 1.5 | Form field text, descriptions, empty-state body copy, nav label text |
-| Label | 12px | 500 | 1.4 | Form field labels, muted meta text, badge text, version string |
+| Label | 12px | 400 | 1.4 | Form field labels, muted meta text, badge text, version string |
 
-Weights in use: 400 (regular) and 500 (medium) and 600 (semibold) and 700 (bold).
-Note: this phase uses 4 weights to support Display hierarchy; subsequent phases should not add more.
+Weights in use: 400 (regular) and 600 (semibold). Two weights only — no 500 (medium) or 700 (bold).
 
 Font loading: `next/font/google` with `Inter` at subsets `["latin"]`. Variable: `--font-inter`. Applied to `<html>` via `className={inter.variable}`. CSS: `font-family: var(--font-inter), system-ui, sans-serif`.
 
@@ -173,7 +172,7 @@ Install each component with `npx shadcn@latest add {component}`:
 
 - **Width:** 240px fixed, not collapsible in Phase 1 (collapsible is Phase 2+)
 - **Background:** `--muted` (secondary surface)
-- **Logo area:** "AIDA" wordmark (text, not image) at 18px / weight 700, top of sidebar, 16px padding
+- **Logo area:** "AIDA" wordmark (text, not image) at 18px / weight 600, top of sidebar, 16px padding
 - **Nav items:** Tickets, Knowledge Base, Settings — each 36px tall, 8px vertical padding, 12px horizontal padding, 14px body text
 - **Active state:** `--primary` background, `--primary-foreground` text
 - **Hover state:** `--accent` background (distinct from active)
@@ -188,6 +187,7 @@ Install each component with `npx shadcn@latest add {component}`:
 - **Left:** page title (current section name, 18px / 600 weight)
 - **Right:** theme toggle icon button (Lucide `Sun`/`Moon`, 20px) + user dropdown trigger
 - **Theme toggle:** calls `setTheme()` from next-themes; tooltip shows "Light mode" / "Dark mode"
+- **User dropdown trigger:** avatar `<Button variant="ghost">` wrapping the `<Avatar>` component; must declare `aria-label="Open user menu"` on the button element
 
 ### Settings — AI Toggle
 
@@ -227,6 +227,7 @@ Install each component with `npx shadcn@latest add {component}`:
 | User menu: sign out | "Sign out" | App shell (dropdown) |
 | Theme toggle tooltip (light mode) | "Switch to light mode" | Top bar |
 | Theme toggle tooltip (dark mode) | "Switch to dark mode" | Top bar |
+| User menu trigger aria-label | "Open user menu" | Top bar |
 | Tickets stub heading | "Your inbox is empty" | Tickets stub |
 | Tickets stub body | "New tickets from customers will appear here. Set up an email channel or embed a web form to start receiving requests." | Tickets stub |
 | KB stub heading | "No articles yet" | KB stub |
@@ -267,6 +268,10 @@ No third-party registries declared for Phase 1. Registry safety gate: not applic
 
 8. **Lucide icons for nav:** `Inbox` (Tickets), `BookOpen` (Knowledge Base), `Settings2` (Settings). Size: `h-4 w-4` (16px). Gap to label: `gap-2` (8px).
 
+9. **Typography — two weights only:** Use Tailwind's `font-normal` (400) and `font-semibold` (600). Do NOT use `font-medium` (500) or `font-bold` (700) anywhere in Phase 1.
+
+10. **User menu trigger accessibility:** The avatar button in the top bar must render as `<Button variant="ghost" aria-label="Open user menu">`. No tooltip needed — the aria-label satisfies the accessibility contract for this icon-only trigger.
+
 ---
 
 ## Checker Sign-Off
@@ -284,4 +289,5 @@ No third-party registries declared for Phase 1. Registry safety gate: not applic
 
 *Phase: 01-foundation*
 *UI-SPEC created: 2026-06-29*
+*UI-SPEC revised: 2026-06-29 — fixed typography weights (4→2) and added user menu aria-label*
 *Sources: CONTEXT.md (D-22, D-23, D-24, D-25), RESEARCH.md (Standard Stack, Architecture Patterns), researcher defaults*
