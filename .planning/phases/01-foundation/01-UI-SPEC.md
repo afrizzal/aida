@@ -1,7 +1,8 @@
 ---
 phase: 1
 slug: foundation
-status: draft
+status: approved
+reviewed_at: 2026-06-29
 shadcn_initialized: false
 preset: new-york/zinc
 created: 2026-06-29
