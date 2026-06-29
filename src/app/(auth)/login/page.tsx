@@ -3,6 +3,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { prisma } from "@/lib/db";
 import { LoginForm } from "./login-form";
 
+// Always server-render: reads DB at request time to redirect to /setup if needed
+export const dynamic = "force-dynamic";
+
 interface LoginPageProps {
   searchParams: Promise<{ setup?: string }>;
 }

@@ -3,6 +3,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { prisma } from "@/lib/db";
 import { SetupForm } from "./setup-form";
 
+// Always server-render: reads DB at request time to check user count
+export const dynamic = "force-dynamic";
+
 export default async function SetupPage() {
   const userCount = await prisma.user.count();
   if (userCount > 0) redirect("/login");

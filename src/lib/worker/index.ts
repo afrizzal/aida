@@ -10,6 +10,10 @@ async function main() {
   boss.on("error", (err: Error) => console.error("[worker] pg-boss error:", err));
   await boss.start();
 
+  // pg-boss v12+: queues must be explicitly created before work() or schedule().
+  // createQueue() is idempotent (safe to call on every restart).
+  await boss.createQueue("heartbeat");
+
   // v10+ pattern: work handler receives an array — destructure the first element
   await boss.work("heartbeat", async ([job]: Job[]) => {
     await heartbeatHandler(job.data);

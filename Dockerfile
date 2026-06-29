@@ -14,24 +14,35 @@ RUN pnpm install --frozen-lockfile
 # Generate Prisma client, build Next.js standalone, bundle worker with esbuild (D-10)
 FROM base AS builder
 WORKDIR /app
+# prisma.config.ts uses env("DATABASE_URL") which throws at module load time even for
+# `prisma generate` (which doesn't connect to a DB). Provide a placeholder so the
+# CLI loads correctly; the real URL comes from compose at runtime.
+ARG DATABASE_URL=postgresql://placeholder:placeholder@placeholder:5432/placeholder
+ENV DATABASE_URL=${DATABASE_URL}
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # Generate Prisma client first — Prisma 7 does not auto-generate after migrate
 RUN pnpm prisma generate
 # Build Next.js app → produces .next/standalone (output: "standalone" in next.config.ts)
 RUN pnpm build
-# Bundle worker into a single self-contained CJS file (Pitfall 4: pnpm symlinks)
-# --tsconfig resolves @/ path aliases (→ ./src/*); driver adapters = no native engine binary
-# If esbuild cannot bundle @prisma/client (e.g. dynamic requires), add:
-#   --external:@prisma/client --external:@prisma/adapter-pg --external:pg
-# and COPY those node_modules subpaths + src/generated/prisma into the runner.
+# Bundle worker into an ESM file.
+# --format=esm: Prisma generated client uses import.meta.url (ESM-only; undefined in CJS → crash).
+# --external:pg: traced into standalone/node_modules by Next.js NFT.
+# --external:@prisma/client: runtime/client.js uses require('node:path') which esbuild's __require2
+#   shim cannot resolve in ESM bundles; must stay external and be copied explicitly to runner.
+# @prisma/adapter-pg and pg-boss (+ pure-JS deps) bundle cleanly.
+# Physically copy @prisma/client to /tmp to resolve pnpm symlinks before COPY --from.
 RUN pnpm exec esbuild src/lib/worker/index.ts \
     --bundle \
     --platform=node \
-    --format=cjs \
+    --format=esm \
     --target=node22 \
     --tsconfig=tsconfig.json \
-    --outfile=dist/worker.cjs
+    --external:pg \
+    --external:@prisma/client \
+    --outfile=dist/worker.mjs && \
+    PRISMA_STORE=$(find /app/node_modules/.pnpm -maxdepth 1 -type d -name "@prisma+client@7.8.0*" | head -1) && \
+    cp -rL "${PRISMA_STORE}/node_modules/@prisma" /tmp/prisma-scope
 
 # ---- Stage 4: runner ----
 # Minimal production image shared by app (node server.js) and worker (node dist/worker.cjs)
@@ -46,8 +57,14 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
-# Worker esbuild bundle (self-contained CJS; reuses node_modules from standalone at runtime)
+# Worker ESM bundle; reuses pg from standalone node_modules at runtime
 COPY --from=builder /app/dist ./dist
+
+# @prisma/client is external in the worker bundle (its CJS runtime uses require('node:path') which
+# esbuild's __require2 shim can't resolve in ESM bundles). Copy the entire @prisma scope so that
+# @prisma/client-runtime-utils and any other intra-scope transitive deps are available at runtime.
+# cp -rL in builder stage dereferences pnpm symlinks → plain files, no .pnpm virtual store needed.
+COPY --from=builder /tmp/prisma-scope ./node_modules/@prisma
 
 # Prisma schema directory — needed by the migrate service for prisma migrate deploy
 COPY --from=builder /app/prisma ./prisma
