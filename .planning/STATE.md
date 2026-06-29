@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-last_updated: "2026-06-29T04:50:16.954Z"
+status: awaiting-human-verification
+last_updated: "2026-06-29T04:59:00Z"
 last_activity: 2026-06-29
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 8
   completed_plans: 8
-  percent: 88
+  percent: 100
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -26,12 +26,12 @@ progress:
 
 ## Current Position
 
-Phase: 01 (foundation) — EXECUTING
-Plan: 8 of 8 (01-07 COMPLETE — ready for 01-08)
-Status: Ready to execute
+Phase: 01 (foundation) — AWAITING HUMAN VERIFICATION
+Plan: 8 of 8 (01-08 checkpoint prepared — gate open)
+Status: Checkpoint gate: human must run 8-step walkthrough and reply "approved" (or defect list)
 Last activity: 2026-06-29
 
-Progress: [█████████░] 88% (7/8 plans in phase 01)
+Progress: [██████████] 100% (8/8 plans in phase 01 — checkpoint pending sign-off)
 
 ## Accumulated Context
 
@@ -70,7 +70,7 @@ Progress: [█████████░] 88% (7/8 plans in phase 01)
 
 ### Open Todos
 
-- Execute Phase 1 plan 01-08 (README + quick-start docs).
+- Human acceptance gate (01-08): run 8-step walkthrough (http://localhost) and reply "approved" or defect list.
 
 ### Blockers
 
@@ -78,9 +78,9 @@ None.
 
 ## Session Continuity
 
-**Last action:** Plan 01-07 executed — one-command self-host complete: `docker compose up` brings db (pgvector:pg16) + migrate + app (healthy) + worker (heartbeat running) + caddy up in ~45s. 8 deviation fixes applied (all Rule 1). tsc clean, biome clean.
+**Last action:** Plan 01-08 checkpoint prepared — human acceptance gate checklist (steps 1-8) presented. Stack is up via Plan 07's `docker compose up`. Awaiting human walkthrough sign-off.
 
-**Next action:** `/gsd:execute-phase 1` plan 08 — README + quick-start docs.
+**Next action:** Human runs 8-step walkthrough at http://localhost and replies "approved" or lists failing steps. If approved → `/gsd:verify-work` then `/gsd:plan-phase 2`. If defects → `/gsd:plan-phase 1 --gaps`.
 
 **Critical context for next session:**
 
@@ -94,4 +94,4 @@ None.
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
 ---
-*Last updated: 2026-06-29 — Plan 01-07 complete: one-command self-host (Dockerfile + docker-compose + Caddyfile; worker heartbeat confirmed; `docker compose up` → healthy in ~45s).*
+*Last updated: 2026-06-29 — Plan 01-08 checkpoint gate open: human acceptance walkthrough (steps 1-8) prepared; stack running via docker compose up; awaiting sign-off.*
