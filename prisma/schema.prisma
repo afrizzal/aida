@@ -1,13 +1,12 @@
 datasource db {
   provider   = "postgresql"
-  url        = env("DATABASE_URL")
   extensions = [vector]
 }
 
 generator client {
   provider        = "prisma-client"
   output          = "../src/generated/prisma"
-  previewFeatures = ["postgresqlExtensions", "driverAdapters"]
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 // ---------------------------------------------------------------------------
