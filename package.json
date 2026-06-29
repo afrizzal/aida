@@ -72,5 +72,8 @@
     "typescript": "^6.0.3",
     "vitest": "4.1.9",
     "vitest-environment-prisma-postgres": "2.0.0"
+  },
+  "volta": {
+    "node": "22.23.1"
   }
 }
