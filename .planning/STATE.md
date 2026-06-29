@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-06-29T02:57:54.250Z"
+last_updated: "2026-06-29T03:30:00.000Z"
 last_activity: 2026-06-29
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 8
-  completed_plans: 3
-  percent: 25
+  completed_plans: 5
+  percent: 63
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 01 (foundation) — EXECUTING
-Plan: 4 of 8
+Plan: 6 of 8
 Status: Ready to execute
 Last activity: 2026-06-29
 
-Progress: [████░░░░░░] 38% (3/8 plans in phase 01)
+Progress: [██████░░░░] 63% (5/8 plans in phase 01)
 
 ## Accumulated Context
 
@@ -51,6 +51,12 @@ Progress: [████░░░░░░] 38% (3/8 plans in phase 01)
 - Session property path: `session.session.activeOrganizationId` — outer `.session` is getSession return; inner `.session` is the DB record.
 - Node 22 required for Testcontainers (undici@8 / testcontainers@12); use `volta run --node 22 pnpm test:integration`.
 - `getScopedDb()` is the standard pattern for all protected Server Components: `const { db, orgId } = await getScopedDb();`.
+- pg-boss 12.x: named export `{ PgBoss }` (no default); work handler receives `Job[]` array — use `([job]: Job[]) =>` destructuring; `schedule()` is idempotent.
+- Worker uses relative imports only (no `@/`) for esbuild bundling. Health route uses `@/lib/db` (Next.js webpack handles it).
+- `SystemSetting['heartbeat:lastRunAt']` = ISO-8601 string written by worker, read by `GET /api/health` to report liveness.
+- Middleware uses `getSessionCookie` (edge-safe, no Prisma); redirects unauthenticated (app) routes to `/login`; allows `/login`, `/setup`, `/api/auth/*`, `/api/health`.
+- Setup wizard: Server Action calls `auth.api.signUpEmail` then `auth.api.createOrganization({ userId })`; marks `SystemSetting.setupComplete`; self-disables on any existing user.
+- Login: no public register or Forgot Password; bad-creds shown inline; success redirects to `/tickets`.
 
 ### Open Todos
 
@@ -62,9 +68,9 @@ None.
 
 ## Session Continuity
 
-**Last action:** Plan 01-03 executed — scopedDb(orgId) + AIDA-11 real-Postgres isolation test + session helpers complete; tsc clean; 2/2 integration tests green.
+**Last action:** Plans 01-03, 01-04, 01-05 executed in parallel (Wave 3) — scoped DB tenancy + worker + auth flow all complete; tsc clean.
 
-**Next action:** `/gsd:execute-phase 1` plan 04 — pg-boss worker + heartbeat job.
+**Next action:** `/gsd:execute-phase 1` plan 06 — app shell ("full shell, empty rooms").
 
 **Critical context for next session:**
 
@@ -78,4 +84,4 @@ None.
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
 ---
-*Last updated: 2026-06-29 — Plan 01-03 complete: scopedDb + AIDA-11 Testcontainers integration test + session helpers.*
+*Last updated: 2026-06-29 — Wave 3 complete: Plans 01-03, 01-04, 01-05 executed in parallel.*
