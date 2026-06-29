@@ -55,12 +55,14 @@ Progress: [██████░░░░] 63% (5/8 plans in phase 01)
 - Worker uses relative imports only (no `@/`) for esbuild bundling. Health route uses `@/lib/db` (Next.js webpack handles it).
 - `SystemSetting['heartbeat:lastRunAt']` = ISO-8601 string written by worker, read by `GET /api/health` to report liveness.
 - Middleware uses `getSessionCookie` (edge-safe, no Prisma); redirects unauthenticated (app) routes to `/login`; allows `/login`, `/setup`, `/api/auth/*`, `/api/health`.
+- Better Auth system action: pass `userId` to `createOrganization` body (no session headers) to bypass `allowUserToCreateOrganization: false`; creator auto-gets `"owner"` role.
+- `activeOrganizationId` set at login via `databaseHooks.session.create.before` — no explicit `setActiveOrganization` call needed in setup flow.
 - Setup wizard: Server Action calls `auth.api.signUpEmail` then `auth.api.createOrganization({ userId })`; marks `SystemSetting.setupComplete`; self-disables on any existing user.
 - Login: no public register or Forgot Password; bad-creds shown inline; success redirects to `/tickets`.
 
 ### Open Todos
 
-- `/gsd:plan-phase 1` to decompose Phase 1 (Foundation) into plans. CONTEXT.md is ready.
+- Execute Phase 1 plans 01-06 through 01-08.
 
 ### Blockers
 
@@ -68,7 +70,7 @@ None.
 
 ## Session Continuity
 
-**Last action:** Plans 01-03, 01-04, 01-05 executed in parallel (Wave 3) — scoped DB tenancy + worker + auth flow all complete; tsc clean.
+**Last action:** Plans 01-03, 01-04, 01-05 executed in parallel (Wave 3) — scoped DB tenancy + worker + auth flow all complete; tsc clean; tests green.
 
 **Next action:** `/gsd:execute-phase 1` plan 06 — app shell ("full shell, empty rooms").
 
