@@ -1,0 +1,102 @@
+services:
+  # ── Postgres 16 + pgvector ────────────────────────────────────────────────
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aida}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-aida}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aida}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── One-shot migration (runs prisma migrate deploy on startup) ────────────
+  # Uses the builder stage which has the full pnpm node_modules + Prisma CLI
+  migrate:
+    build:
+      context: .
+      target: builder
+    command: ["pnpm", "prisma", "migrate", "deploy"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-aida}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-aida}
+    restart: "no"
+
+  # ── Next.js app (node server.js — standalone output) ─────────────────────
+  # Shared image with worker; only the command differs (D-09)
+  app:
+    build: .
+    command: ["node", "server.js"]
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-aida}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-aida}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_NAME: ${ADMIN_NAME:-}
+      HOSTNAME: "0.0.0.0"
+      DB_POOL_MAX: "10"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  # ── pg-boss worker (node dist/worker.cjs — esbuild bundle) ───────────────
+  # Same image as app; independent restart policy and higher memory limit
+  worker:
+    build: .
+    command: ["node", "dist/worker.cjs"]
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-aida}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-aida}
+      DB_POOL_MAX: "5"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  # ── Caddy reverse proxy (auto-HTTPS for real domains, local CA for localhost) ──
+  caddy:
+    image: caddy:2
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    restart: unless-stopped
+
+volumes:
+  # Single source of truth for Postgres data — backup = snapshot this volume (D-11)
+  postgres_data:
+  caddy_data:
+  caddy_config:
