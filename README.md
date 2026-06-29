@@ -18,12 +18,9 @@ Your tickets never leave your server. No per-resolution fees.
 
 ## Why AIDA
 
-Helpdesk software today forces a bad trade-off:
+Most helpdesk software treats AI as a paywalled add-on with per-resolution fees, while your ticket data lives on someone else's servers.
 
-- **Commercial tools** (Zendesk, Intercom, Freshdesk) bolt AI on at a steep price — Intercom's Fin bills **~$0.99 per resolution** (and still counts a "resolution" when a customer just stops replying); Zendesk's AI agent runs **~$1.50–$2.00 per resolution + a $50/agent/mo add-on**. Your conversations live on their servers.
-- **Open-source tools** (osTicket, Zammad, FreeScout) are affordable and self-hostable, but their AI is **absent or bolted on as an afterthought** — Peppermint ships none; Zammad needs you to wire up Ollama yourself.
-
-**AIDA closes the gap:** AI is the *core*, not a paywalled add-on. Self-host it, point it at any LLM (including a fully local one), and keep every ticket on your own infrastructure.
+**AIDA is different:** AI is the *core*, not an afterthought. Self-host it on your own server, point it at any LLM (including a fully local one via Ollama), and keep every ticket on your own infrastructure — no per-resolution fees, no data leaving your control.
 
 ## Features
 
@@ -46,16 +43,6 @@ docker compose up
 ```
 
 Open `http://localhost:3000`. That's it — one server, no managed cloud required.
-
-## How it compares
-
-| | AIDA | Zendesk / Intercom | osTicket / Zammad |
-|---|:---:|:---:|:---:|
-| Open-source & self-hostable | ✅ | ❌ | ✅ |
-| AI as a core feature | ✅ | 💰 paid add-on | ⚠️ none / DIY |
-| Bring-your-own / local LLM | ✅ | ⚠️ limited | ⚠️ DIY |
-| Per-resolution AI fees | ❌ none | 💰 yes | — |
-| Your data stays on your server | ✅ | ❌ | ✅ |
 
 ## Tech stack
 
