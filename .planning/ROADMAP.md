@@ -27,9 +27,9 @@
 2. A user can register/log in; roles `admin` and `agent` exist; an admin can invite/manage users; protected routes are enforced server-side.
 3. Every domain table carries a `workspaceId`; a data-access helper scopes all queries to the active workspace (verified by a test seeding two workspaces).
 4. Prisma schema + migrations are committed; `.env.example` documents required config; `LICENSE` (Apache-2.0) and a skeleton README are present.
-**Plans:** 8 plans (6 waves)
+**Plans:** 2/8 plans executed
 - [x] 01-01-PLAN.md — Project scaffold, tooling, shadcn/ui design system + documented .env.example (Wave 1)
-- [ ] 01-02-PLAN.md — Database + auth backbone: Prisma 7, Better Auth (org + admin), schema, initial migration (Wave 2)
+- [x] 01-02-PLAN.md — Database + auth backbone: Prisma 7, Better Auth (org + admin), schema, initial migration (Wave 2)
 - [ ] 01-03-PLAN.md — Multi-tenant data access: scopedDb + AIDA-11 real-Postgres isolation test + session bridge (Wave 3)
 - [ ] 01-04-PLAN.md — Background worker + heartbeat job + /api/health liveness (Wave 3)
 - [ ] 01-05-PLAN.md — Auth flow: middleware guard, self-disabling setup wizard, login, env bootstrap (Wave 3)

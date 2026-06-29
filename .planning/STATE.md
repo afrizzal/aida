@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-06-29T01:33:31.189Z"
+last_updated: "2026-06-29T02:30:00.000Z"
 last_activity: 2026-06-29
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 8
-  completed_plans: 1
-  percent: 0
+  completed_plans: 2
+  percent: 25
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 01 (foundation) — EXECUTING
-Plan: 2 of 8
+Plan: 3 of 8
 Status: Ready to execute
 Last activity: 2026-06-29
 
-Progress: ░░░░░░░░░░ 0% (0/7 phases)
+Progress: [███░░░░░░░] 25% (2/8 plans in phase 01)
 
 ## Accumulated Context
 
@@ -43,6 +43,10 @@ Progress: ░░░░░░░░░░ 0% (0/7 phases)
 - Single server: Next.js + Prisma + Postgres + pgvector + pg-boss + Caddy, one `docker compose up`.
 - AI sequenced AFTER core helpdesk works; human-in-the-loop for customer-facing sends; citations required.
 - Repo health (README/GIF/docs) is a milestone deliverable.
+- Prisma 7: `url` must live in `prisma.config.ts` only (not in schema.prisma); `driverAdapters` is now stable — no previewFeatures needed.
+- Better Auth `Organization` IS the workspace; all domain tables carry `organizationId`. `Setting` = org-scoped, `SystemSetting` = global.
+- Generated client import path: `@/generated/prisma/client` (never `@prisma/client`). `prisma generate` must run in CI before build.
+- `auth.ts` must always use bare `prisma` (never `scopedDb`) — BA models lack `organizationId`.
 
 ### Open Todos
 
@@ -54,9 +58,9 @@ None.
 
 ## Session Continuity
 
-**Last action:** Phase 1 discuss-phase — 25 implementation decisions locked in `.planning/phases/01-foundation/01-CONTEXT.md`.
+**Last action:** Plan 01-02 executed — Prisma 7 + Better Auth database + auth backbone complete; initial migration committed; typed client generated; tsc clean.
 
-**Next action:** `/gsd:plan-phase 1` — CONTEXT.md is ready, proceed directly to planning.
+**Next action:** `/gsd:execute-phase 1` plan 03 — scopedDb Prisma extension + workspace isolation integration test.
 
 **Critical context for next session:**
 
