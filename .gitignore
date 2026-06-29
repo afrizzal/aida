@@ -46,3 +46,6 @@ desktop.ini
 # Claude Code local settings (may contain sensitive paths or keys)
 .claude/settings.json
 .claude/settings.local.json
+
+# Generated code (Prisma client output)
+/src/generated/
