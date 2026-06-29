@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-06-29T03:30:00.000Z"
+last_updated: "2026-06-29T03:24:27.250Z"
 last_activity: 2026-06-29
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 8
-  completed_plans: 5
-  percent: 63
+  completed_plans: 6
+  percent: 75
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 01 (foundation) — EXECUTING
-Plan: 6 of 8
+Plan: 7 of 8
 Status: Ready to execute
 Last activity: 2026-06-29
 
-Progress: [██████░░░░] 63% (5/8 plans in phase 01)
+Progress: [████████░░] 75% (6/8 plans in phase 01)
 
 ## Accumulated Context
 
@@ -59,10 +59,13 @@ Progress: [██████░░░░] 63% (5/8 plans in phase 01)
 - `activeOrganizationId` set at login via `databaseHooks.session.create.before` — no explicit `setActiveOrganization` call needed in setup flow.
 - Setup wizard: Server Action calls `auth.api.signUpEmail` then `auth.api.createOrganization({ userId })`; marks `SystemSetting.setupComplete`; self-disables on any existing user.
 - Login: no public register or Forgot Password; bad-creds shown inline; success redirects to `/tickets`.
+- scopedDb findFirst+create/update pattern for domain models with compound unique keys: scopedDb's upsert hook injects `organizationId` into the top-level `where` which Prisma rejects for upsert (not a unique identifier); use `findFirst` (auto-scoped) + conditional `update`-by-id / `create` (orgId auto-injected).
+- App shell: `(app)/layout.tsx` calls `requireSession()` (AIDA-10 server-side); `activeOrganizationId` null-guard shows fallback message; Sidebar + TopBar are Client Components using `usePathname()`.
+- `resolvedTheme` (not `theme`) from next-themes: correctly handles `"system"` theme value; always resolves to `"light"` or `"dark"`.
 
 ### Open Todos
 
-- Execute Phase 1 plans 01-06 through 01-08.
+- Execute Phase 1 plans 01-07 and 01-08.
 
 ### Blockers
 
@@ -70,9 +73,9 @@ None.
 
 ## Session Continuity
 
-**Last action:** Plans 01-03, 01-04, 01-05 executed in parallel (Wave 3) — scoped DB tenancy + worker + auth flow all complete; tsc clean; tests green.
+**Last action:** Plan 01-06 executed — app shell ("full shell, empty rooms") complete: auth-gated layout, sidebar, top bar, empty states, AI toggle via scopedDb. tsc clean, biome clean.
 
-**Next action:** `/gsd:execute-phase 1` plan 06 — app shell ("full shell, empty rooms").
+**Next action:** `/gsd:execute-phase 1` plan 07 — Docker compose + one-command self-host.
 
 **Critical context for next session:**
 
@@ -86,4 +89,4 @@ None.
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
 ---
-*Last updated: 2026-06-29 — Wave 3 complete: Plans 01-03, 01-04, 01-05 executed in parallel.*
+*Last updated: 2026-06-29 — Plan 01-06 complete: app shell (sidebar + top bar + theme toggle + user menu + empty states + AI toggle).*

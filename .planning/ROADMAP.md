@@ -27,13 +27,13 @@
 2. A user can register/log in; roles `admin` and `agent` exist; an admin can invite/manage users; protected routes are enforced server-side.
 3. Every domain table carries a `workspaceId`; a data-access helper scopes all queries to the active workspace (verified by a test seeding two workspaces).
 4. Prisma schema + migrations are committed; `.env.example` documents required config; `LICENSE` (Apache-2.0) and a skeleton README are present.
-**Plans:** 5/8 plans executed
+**Plans:** 6/8 plans executed
 - [x] 01-01-PLAN.md — Project scaffold, tooling, shadcn/ui design system + documented .env.example (Wave 1)
 - [x] 01-02-PLAN.md — Database + auth backbone: Prisma 7, Better Auth (org + admin), schema, initial migration (Wave 2)
 - [x] 01-03-PLAN.md — Multi-tenant data access: scopedDb + AIDA-11 real-Postgres isolation test + session bridge (Wave 3)
 - [x] 01-04-PLAN.md — Background worker + heartbeat job + /api/health liveness (Wave 3)
 - [x] 01-05-PLAN.md — Auth flow: middleware guard, self-disabling setup wizard, login, env bootstrap (Wave 3)
-- [ ] 01-06-PLAN.md — App shell + Tickets/KB stubs + tenant-scoped AI toggle ("full shell, empty rooms") (Wave 4)
+- [x] 01-06-PLAN.md — App shell + Tickets/KB stubs + tenant-scoped AI toggle ("full shell, empty rooms") (Wave 4)
 - [ ] 01-07-PLAN.md — Self-host: multi-stage Dockerfile, docker-compose (db+app+worker+caddy), Caddyfile (Wave 5)
 - [ ] 01-08-PLAN.md — Visual verification checkpoint: human walkthrough of the self-hosted experience (Wave 6)
 
