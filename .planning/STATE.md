@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-06-29T03:24:27.250Z"
+last_updated: "2026-06-29T04:50:16.954Z"
 last_activity: 2026-06-29
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 8
-  completed_plans: 6
-  percent: 75
+  completed_plans: 8
+  percent: 88
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 01 (foundation) — EXECUTING
-Plan: 7 of 8
+Plan: 8 of 8 (01-07 COMPLETE — ready for 01-08)
 Status: Ready to execute
 Last activity: 2026-06-29
 
-Progress: [████████░░] 75% (6/8 plans in phase 01)
+Progress: [█████████░] 88% (7/8 plans in phase 01)
 
 ## Accumulated Context
 
@@ -52,6 +52,7 @@ Progress: [████████░░] 75% (6/8 plans in phase 01)
 - Node 22 required for Testcontainers (undici@8 / testcontainers@12); use `volta run --node 22 pnpm test:integration`.
 - `getScopedDb()` is the standard pattern for all protected Server Components: `const { db, orgId } = await getScopedDb();`.
 - pg-boss 12.x: named export `{ PgBoss }` (no default); work handler receives `Job[]` array — use `([job]: Job[]) =>` destructuring; `schedule()` is idempotent.
+- pg-boss v12 explicit queue creation: `boss.createQueue(name)` BEFORE `boss.work()` / `boss.schedule()` — v12 removed implicit queue creation; idempotent on restart.
 - Worker uses relative imports only (no `@/`) for esbuild bundling. Health route uses `@/lib/db` (Next.js webpack handles it).
 - `SystemSetting['heartbeat:lastRunAt']` = ISO-8601 string written by worker, read by `GET /api/health` to report liveness.
 - Middleware uses `getSessionCookie` (edge-safe, no Prisma); redirects unauthenticated (app) routes to `/login`; allows `/login`, `/setup`, `/api/auth/*`, `/api/health`.
@@ -62,10 +63,14 @@ Progress: [████████░░] 75% (6/8 plans in phase 01)
 - scopedDb findFirst+create/update pattern for domain models with compound unique keys: scopedDb's upsert hook injects `organizationId` into the top-level `where` which Prisma rejects for upsert (not a unique identifier); use `findFirst` (auto-scoped) + conditional `update`-by-id / `create` (orgId auto-injected).
 - App shell: `(app)/layout.tsx` calls `requireSession()` (AIDA-10 server-side); `activeOrganizationId` null-guard shows fallback message; Sidebar + TopBar are Client Components using `usePathname()`.
 - `resolvedTheme` (not `theme`) from next-themes: correctly handles `"system"` theme value; always resolves to `"light"` or `"dark"`.
+- Docker one-command self-host: one runner image for app+worker (compose CMD override); esbuild `--format=esm` for worker (Prisma 7 generated client uses import.meta.url — CJS makes it undefined); `@prisma/client` external from esbuild + copied from pnpm virtual store (`cp -rL .pnpm/@prisma+client@.../node_modules/@prisma /tmp/`) to get `client-runtime-utils` alongside; Alpine healthcheck uses `127.0.0.1` not `localhost` (IPv6 resolution mismatch).
+- `better-call@1.3.7` lockfile override required: `better-auth@1.6.22` needs `kAPIErrorHeaderSymbol` export (added in 1.3.7); Turbopack catches missing export at `next build` time even though `next dev` works.
+- Pages that read DB at request time (`/setup`, `/login`) must have `export const dynamic = "force-dynamic"` to prevent static prerender during `next build`.
+- DATABASE_URL build arg with placeholder for `prisma generate` in Docker: `prisma.config.ts` calls `env("DATABASE_URL")` at module load → even generate (no DB connection) fails without it.
 
 ### Open Todos
 
-- Execute Phase 1 plans 01-07 and 01-08.
+- Execute Phase 1 plan 01-08 (README + quick-start docs).
 
 ### Blockers
 
@@ -73,9 +78,9 @@ None.
 
 ## Session Continuity
 
-**Last action:** Plan 01-06 executed — app shell ("full shell, empty rooms") complete: auth-gated layout, sidebar, top bar, empty states, AI toggle via scopedDb. tsc clean, biome clean.
+**Last action:** Plan 01-07 executed — one-command self-host complete: `docker compose up` brings db (pgvector:pg16) + migrate + app (healthy) + worker (heartbeat running) + caddy up in ~45s. 8 deviation fixes applied (all Rule 1). tsc clean, biome clean.
 
-**Next action:** `/gsd:execute-phase 1` plan 07 — Docker compose + one-command self-host.
+**Next action:** `/gsd:execute-phase 1` plan 08 — README + quick-start docs.
 
 **Critical context for next session:**
 
@@ -89,4 +94,4 @@ None.
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
 ---
-*Last updated: 2026-06-29 — Plan 01-06 complete: app shell (sidebar + top bar + theme toggle + user menu + empty states + AI toggle).*
+*Last updated: 2026-06-29 — Plan 01-07 complete: one-command self-host (Dockerfile + docker-compose + Caddyfile; worker heartbeat confirmed; `docker compose up` → healthy in ~45s).*
