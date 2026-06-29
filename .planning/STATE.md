@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-06-29T02:30:00.000Z"
+last_updated: "2026-06-29T02:57:54.250Z"
 last_activity: 2026-06-29
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 8
-  completed_plans: 2
+  completed_plans: 3
   percent: 25
 ---
 
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 01 (foundation) — EXECUTING
-Plan: 3 of 8
+Plan: 4 of 8
 Status: Ready to execute
 Last activity: 2026-06-29
 
-Progress: [███░░░░░░░] 25% (2/8 plans in phase 01)
+Progress: [████░░░░░░] 38% (3/8 plans in phase 01)
 
 ## Accumulated Context
 
@@ -47,6 +47,10 @@ Progress: [███░░░░░░░] 25% (2/8 plans in phase 01)
 - Better Auth `Organization` IS the workspace; all domain tables carry `organizationId`. `Setting` = org-scoped, `SystemSetting` = global.
 - Generated client import path: `@/generated/prisma/client` (never `@prisma/client`). `prisma generate` must run in CI before build.
 - `auth.ts` must always use bare `prisma` (never `scopedDb`) — BA models lack `organizationId`.
+- `scopedDb(orgId)` via Prisma `$extends` with DOMAIN_MODELS=["Setting"] allowlist — injects organizationId into 9 operation hooks; Better Auth models never touched.
+- Session property path: `session.session.activeOrganizationId` — outer `.session` is getSession return; inner `.session` is the DB record.
+- Node 22 required for Testcontainers (undici@8 / testcontainers@12); use `volta run --node 22 pnpm test:integration`.
+- `getScopedDb()` is the standard pattern for all protected Server Components: `const { db, orgId } = await getScopedDb();`.
 
 ### Open Todos
 
@@ -58,9 +62,9 @@ None.
 
 ## Session Continuity
 
-**Last action:** Plan 01-02 executed — Prisma 7 + Better Auth database + auth backbone complete; initial migration committed; typed client generated; tsc clean.
+**Last action:** Plan 01-03 executed — scopedDb(orgId) + AIDA-11 real-Postgres isolation test + session helpers complete; tsc clean; 2/2 integration tests green.
 
-**Next action:** `/gsd:execute-phase 1` plan 03 — scopedDb Prisma extension + workspace isolation integration test.
+**Next action:** `/gsd:execute-phase 1` plan 04 — pg-boss worker + heartbeat job.
 
 **Critical context for next session:**
 
@@ -74,4 +78,4 @@ None.
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
 ---
-*Last updated: 2026-06-29 — Phase 1 context gathered; 25 implementation decisions locked.*
+*Last updated: 2026-06-29 — Plan 01-03 complete: scopedDb + AIDA-11 Testcontainers integration test + session helpers.*
