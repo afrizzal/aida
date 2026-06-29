@@ -31,7 +31,7 @@
 - [x] 01-01-PLAN.md — Project scaffold, tooling, shadcn/ui design system + documented .env.example (Wave 1)
 - [x] 01-02-PLAN.md — Database + auth backbone: Prisma 7, Better Auth (org + admin), schema, initial migration (Wave 2)
 - [ ] 01-03-PLAN.md — Multi-tenant data access: scopedDb + AIDA-11 real-Postgres isolation test + session bridge (Wave 3)
-- [ ] 01-04-PLAN.md — Background worker + heartbeat job + /api/health liveness (Wave 3)
+- [x] 01-04-PLAN.md — Background worker + heartbeat job + /api/health liveness (Wave 3)
 - [ ] 01-05-PLAN.md — Auth flow: middleware guard, self-disabling setup wizard, login, env bootstrap (Wave 3)
 - [ ] 01-06-PLAN.md — App shell + Tickets/KB stubs + tenant-scoped AI toggle ("full shell, empty rooms") (Wave 4)
 - [ ] 01-07-PLAN.md — Self-host: multi-stage Dockerfile, docker-compose (db+app+worker+caddy), Caddyfile (Wave 5)

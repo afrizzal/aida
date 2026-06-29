@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-06-29T02:30:00.000Z"
+last_updated: "2026-06-29T02:41:46.148Z"
 last_activity: 2026-06-29
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 8
-  completed_plans: 2
-  percent: 25
+  completed_plans: 4
+  percent: 38
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 01 (foundation) — EXECUTING
-Plan: 3 of 8
+Plan: 5 of 8
 Status: Ready to execute
 Last activity: 2026-06-29
 
-Progress: [███░░░░░░░] 25% (2/8 plans in phase 01)
+Progress: [████░░░░░░] 38% (4/8 plans in phase 01)
 
 ## Accumulated Context
 
@@ -47,6 +47,9 @@ Progress: [███░░░░░░░] 25% (2/8 plans in phase 01)
 - Better Auth `Organization` IS the workspace; all domain tables carry `organizationId`. `Setting` = org-scoped, `SystemSetting` = global.
 - Generated client import path: `@/generated/prisma/client` (never `@prisma/client`). `prisma generate` must run in CI before build.
 - `auth.ts` must always use bare `prisma` (never `scopedDb`) — BA models lack `organizationId`.
+- pg-boss 12.x: named export `{ PgBoss }` (no default); work handler receives `Job[]` array — use `([job]: Job[]) =>` destructuring; `schedule()` is idempotent.
+- Worker uses relative imports only (no `@/`) for esbuild bundling. Health route uses `@/lib/db` (Next.js webpack handles it).
+- `SystemSetting['heartbeat:lastRunAt']` = ISO-8601 string written by worker, read by `GET /api/health` to report liveness.
 
 ### Open Todos
 
@@ -58,9 +61,9 @@ None.
 
 ## Session Continuity
 
-**Last action:** Plan 01-02 executed — Prisma 7 + Better Auth database + auth backbone complete; initial migration committed; typed client generated; tsc clean.
+**Last action:** Plan 01-04 executed — pg-boss worker entrypoint + heartbeat job + /api/health route handler; unit tests green; tsc clean.
 
-**Next action:** `/gsd:execute-phase 1` plan 03 — scopedDb Prisma extension + workspace isolation integration test.
+**Next action:** `/gsd:execute-phase 1` plan 05 — auth UI (login page + setup wizard).
 
 **Critical context for next session:**
 
