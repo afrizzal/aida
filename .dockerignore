@@ -1,0 +1,14 @@
+node_modules
+.next
+.git
+.planning
+dist
+coverage
+tests
+**/*.test.ts
+.env
+.env.*
+!.env.example
+src/generated
+Dockerfile
+docker-compose.yml
