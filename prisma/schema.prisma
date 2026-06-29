@@ -9,3 +9,145 @@ generator client {
   output          = "../src/generated/prisma"
   previewFeatures = ["postgresqlExtensions", "driverAdapters"]
 }
+
+// ---------------------------------------------------------------------------
+// Better Auth core tables
+// ---------------------------------------------------------------------------
+
+model user {
+  id            String    @id
+  name          String
+  email         String    @unique
+  emailVerified Boolean
+  image         String?
+  createdAt     DateTime
+  updatedAt     DateTime
+  // admin plugin fields
+  role          String?
+  banned        Boolean?
+  banReason     String?
+  banExpires    DateTime?
+
+  sessions    session[]
+  accounts    account[]
+  members     member[]
+  invitations invitation[]
+}
+
+model session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime
+  updatedAt DateTime
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      user     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // admin plugin field
+  impersonatedBy       String?
+  // organization plugin field
+  activeOrganizationId String?
+
+  @@index([userId])
+}
+
+model account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  user      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime
+  updatedAt             DateTime
+
+  @@index([userId])
+}
+
+model verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime
+  updatedAt  DateTime
+
+  @@index([identifier])
+}
+
+// ---------------------------------------------------------------------------
+// Better Auth organization plugin tables
+// ---------------------------------------------------------------------------
+
+model organization {
+  id        String   @id
+  name      String
+  slug      String   @unique
+  logo      String?
+  createdAt DateTime
+  metadata  String?
+
+  members     member[]
+  invitations invitation[]
+  settings    Setting[]
+}
+
+model member {
+  id             String       @id
+  organizationId String
+  userId         String
+  role           String
+  createdAt      DateTime
+  organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           user         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([userId])
+}
+
+model invitation {
+  id             String       @id
+  organizationId String
+  email          String
+  role           String?
+  status         String
+  expiresAt      DateTime
+  createdAt      DateTime
+  inviterId      String
+  organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           user         @relation(fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([email])
+}
+
+// ---------------------------------------------------------------------------
+// Domain models (Phase 1)
+// ---------------------------------------------------------------------------
+
+model Setting {
+  id             String       @id @default(cuid())
+  organizationId String
+  key            String
+  value          String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, key])
+  @@index([organizationId])
+}
+
+model SystemSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}
