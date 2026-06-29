@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-06-29T02:30:00.000Z"
+last_updated: "2026-06-29T02:50:11.690Z"
 last_activity: 2026-06-29
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 8
-  completed_plans: 2
-  percent: 25
+  completed_plans: 4
+  percent: 50
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 01 (foundation) — EXECUTING
-Plan: 3 of 8
-Status: Ready to execute
+Plan: 5 of 8 (01-05 complete)
+Status: Executing
 Last activity: 2026-06-29
 
-Progress: [███░░░░░░░] 25% (2/8 plans in phase 01)
+Progress: [████░░░░░░] 50% (4/8 plans in phase 01)
 
 ## Accumulated Context
 
@@ -47,6 +47,10 @@ Progress: [███░░░░░░░] 25% (2/8 plans in phase 01)
 - Better Auth `Organization` IS the workspace; all domain tables carry `organizationId`. `Setting` = org-scoped, `SystemSetting` = global.
 - Generated client import path: `@/generated/prisma/client` (never `@prisma/client`). `prisma generate` must run in CI before build.
 - `auth.ts` must always use bare `prisma` (never `scopedDb`) — BA models lack `organizationId`.
+- Better Auth system action: pass `userId` to `createOrganization` body (no session headers) to bypass `allowUserToCreateOrganization: false`; creator auto-gets `"owner"` role.
+- Edge middleware must NOT import Prisma; use `getSessionCookie` from `better-auth/cookies` only; authoritative checks in Node Server Components.
+- `activeOrganizationId` set at login via `databaseHooks.session.create.before` — no explicit `setActiveOrganization` call needed in setup flow.
+- Login flow: /login → /tickets on success. `/setup` self-disables once users > 0. No public register (D-23).
 
 ### Open Todos
 
@@ -58,9 +62,9 @@ None.
 
 ## Session Continuity
 
-**Last action:** Plan 01-02 executed — Prisma 7 + Better Auth database + auth backbone complete; initial migration committed; typed client generated; tsc clean.
+**Last action:** Plan 01-05 executed — edge middleware auth-gate (AIDA-10) + self-disabling setup wizard + credentials login + env-var bootstrap complete; 5 unit tests green; tsc + biome clean.
 
-**Next action:** `/gsd:execute-phase 1` plan 03 — scopedDb Prisma extension + workspace isolation integration test.
+**Next action:** `/gsd:execute-phase 1` plan 06 — App shell (sidebar + top bar + stub pages).
 
 **Critical context for next session:**
 
