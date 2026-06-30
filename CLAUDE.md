@@ -28,6 +28,29 @@ Differentiator: **AI is the core, not a paid add-on.** Self-host on one server, 
 - Quality gates: typecheck clean (`tsc --noEmit`), tests for logic, dogfood through the real UI (no hardcoded shortcuts).
 - **Repo health is a feature.** README with a hero GIF, clean docs, and a frictionless quick-start are deliverables, not afterthoughts — they convert visitors into stars.
 
+## UI / Design System (mandatory — read before any UI work)
+
+**Every UI change in every phase MUST conform to `.planning/DESIGN-SYSTEM.md`.**
+
+Key rules (full details in the file):
+- **Token-only**: use CSS design tokens (`text-primary`, `bg-sidebar`, etc.) — never hardcode oklch/hex values in components.
+- **Sidebar**: always `border-r border-sidebar-border bg-sidebar` + `sidebar-*` tokens. Brand icon: `Sparkles` in `bg-sidebar-primary` box.
+- **Top bar**: always `sticky top-0 z-10 backdrop-blur-sm border-border/70`.
+- **Empty state**: always use halo + icon box pattern (`bg-primary/10 border border-primary/15 rounded-xl`).
+- **Auth pages**: never self-wrap; rely on `(auth)/layout.tsx` for the decorative background.
+- **Typography**: use explicit sizes `text-[Npx]` not Tailwind named sizes (`text-lg`, `text-xl`).
+- After any UI phase: run **design checklist** (§9 of DESIGN-SYSTEM.md) before marking phase complete.
+
+## Loop Engineering (mandatory — read before any new phase)
+
+**`.planning/LOOP-ENGINEERING.md` defines the loop architecture for this project.**
+
+Key rules:
+- `STATE.md` is the single source of truth across all sessions — never let it go stale.
+- Every phase has a **hard stop condition** checkable by a command (`tsc --noEmit`, `pnpm test`, checklist) — "agent says it's done" is not a stop condition.
+- Phase loop: `discuss → plan (Opus) → execute (Sonnet) → design-check → verify → human sign-off → update STATE.md`.
+- Current autonomy level: **2** (draft + human applies). Do not self-upgrade.
+
 ## Context
 
 Maintainer: Afrizzal. This OSS product also serves as portfolio evidence of governed/applied AI + service-desk engineering, but that is secondary to it being genuinely useful, safe, and star-worthy. See `docs/BRIEF.md` for positioning and `.planning/` for the plan.

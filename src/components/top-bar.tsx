@@ -31,7 +31,7 @@ export function TopBar({ user }: TopBarProps) {
   const title = getPageTitle(pathname);
 
   return (
-    <header className="flex h-14 items-center justify-between border-b bg-background px-6">
+    <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b border-border/70 bg-background/80 px-6 backdrop-blur-sm supports-[backdrop-filter]:bg-background/65">
       <h1 className="text-[18px] font-semibold">{title}</h1>
       <div className="flex items-center gap-2">
         <ThemeToggle />

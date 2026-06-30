@@ -11,7 +11,7 @@ export default async function SetupPage() {
   if (userCount > 0) redirect("/login");
 
   return (
-    <Card className="w-full max-w-[400px]">
+    <Card className="w-full max-w-[400px] border-border/70 shadow-xl shadow-primary/5">
       <CardHeader>
         <CardTitle className="text-2xl font-semibold">Set up AIDA</CardTitle>
         <CardDescription>

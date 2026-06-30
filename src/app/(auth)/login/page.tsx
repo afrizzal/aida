@@ -18,7 +18,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const showSetupComplete = params.setup === "complete";
 
   return (
-    <Card className="w-full max-w-[400px]">
+    <Card className="w-full max-w-[400px] border-border/70 shadow-xl shadow-primary/5">
       <CardHeader>
         <CardTitle className="text-2xl font-semibold">Sign in to AIDA</CardTitle>
       </CardHeader>
