@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: phase-1-verified
-last_updated: "2026-07-01T13:36:00Z"
+status: phase-2-context-gathered
+last_updated: "2026-07-01T00:00:00Z"
 last_activity: 2026-07-01
 progress:
   total_phases: 7
@@ -26,9 +26,9 @@ progress:
 
 ## Current Position
 
-Phase: 01 (foundation) — ✅ VERIFIED & COMPLETE
-Plan: 8 of 8 (01-08 acceptance gate CLEARED)
-Status: Phase 1 human acceptance gate PASSED — 9/9 UAT tests, 0 issues (01-UAT.md). Ready to plan Phase 2.
+Phase: 02 (core-ticketing) — 🟡 CONTEXT GATHERED (ready to plan)
+Plan: Phase 1 complete (8/8); Phase 2 not yet planned.
+Status: Phase 2 discuss-phase complete — 4 gray areas decided, 02-CONTEXT.md written. Ready to plan Phase 2.
 Last activity: 2026-07-01
 
 Progress: [██████████] 100% (8/8 plans in phase 01 — verified via conversational UAT)
@@ -70,7 +70,7 @@ Progress: [██████████] 100% (8/8 plans in phase 01 — verif
 
 ### Open Todos
 
-- Plan Phase 2 (Core Ticketing): `/gsd:plan-phase 2`.
+- Plan Phase 2 (Core Ticketing): `/gsd:plan-phase 2` — context is ready (`.planning/phases/02-core-ticketing/02-CONTEXT.md`).
 
 ### Blockers
 
@@ -78,9 +78,11 @@ None.
 
 ## Session Continuity
 
-**Last action:** Phase 1 verified via `/gsd:verify-work` — conversational UAT (01-UAT.md), 9/9 tests passed, 0 issues. `/api/health` confirmed live (worker heartbeat advancing). Acceptance gate CLEARED; STATE + 01-08-SUMMARY updated to APPROVED.
+**Last action:** Phase 2 `/gsd:discuss-phase` complete — all 4 gray areas decided (inbox & workflow; contacts & conversation; SLA/tags/custom-fields; web intake & attachments). Wrote `02-CONTEXT.md` (23 decisions D-01..D-23 + Claude's-discretion notes) and `02-DISCUSSION-LOG.md`; committed `ab070ff`.
 
-**Next action:** `/gsd:plan-phase 2` (Core Ticketing — shared inbox, ticket lifecycle, contacts, replies/notes, tags, SLA, web intake). Requirements: AIDA-01..08, AIDA-12 (partial).
+**Next action:** `/gsd:plan-phase 2` (Core Ticketing — shared inbox, ticket lifecycle, contacts, replies/notes, tags, SLA, web intake). Requirements: AIDA-01..08, AIDA-12 (partial). `/clear` first for a fresh context window.
+
+**Phase 2 locked decisions (see 02-CONTEXT.md):** 2-pane shared inbox (list + reading pane), views as filter chips; flexible status + auto-reopen on requester reply; priority Low/Normal/High/Urgent; per-workspace sequential ticket # (+cuid); auto-link contacts by normalized email (merge deferred); Markdown→sanitized-HTML composer with Public-Reply/Internal-Note toggle (amber notes); 24/7 SLA clock, per-priority targets in Settings, pg-boss job stamps isAtRisk/isBreached + color chips; free-form tags w/ autocomplete + admin management; admin custom fields (text/select/number/checkbox/date); public web form (honeypot + rate-limit, no CAPTCHA); tokenized `/status/[token]` page (public thread + follow-up reopen); local `/data/uploads` volume behind FileStorage interface, 10MB + MIME allowlist. Discretion: Postgres FTS; individual assignment only; bulk actions deferred; fixed views. Reminder: extend `scopedDb` DOMAIN_MODELS allowlist for all new models; make ticket-number generator concurrency-safe.
 
 **Critical context for next session:**
 
@@ -94,4 +96,4 @@ None.
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
 ---
-*Last updated: 2026-07-01 — Phase 1 verified via /gsd:verify-work (9/9 UAT tests, 0 issues); acceptance gate cleared; ready for /gsd:plan-phase 2.*
+*Last updated: 2026-07-01 — Phase 2 /gsd:discuss-phase complete; 02-CONTEXT.md written (23 decisions); ready for /gsd:plan-phase 2.*
