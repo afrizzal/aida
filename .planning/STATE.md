@@ -2,7 +2,7 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: phase-2-research-done
+status: phase-2-ui-spec-approved
 last_updated: "2026-07-02T00:00:00Z"
 last_activity: 2026-07-02
 progress:
@@ -26,9 +26,9 @@ progress:
 
 ## Current Position
 
-Phase: 02 (core-ticketing) — 🟡 RESEARCH DONE (UI-SPEC gate next, then plan)
+Phase: 02 (core-ticketing) — 🟡 RESEARCH + UI-SPEC DONE (ready to plan)
 Plan: Phase 1 complete (8/8); Phase 2 not yet planned.
-Status: Phase 2 research complete (02-RESEARCH.md, commit 5450c4b). /gsd:plan-phase 2 paused at the UI Design Contract gate — user chose to generate UI-SPEC first. Next: /gsd:ui-phase 2, then re-run /gsd:plan-phase 2.
+Status: Phase 2 research (02-RESEARCH.md, 5450c4b) AND UI design contract (02-UI-SPEC.md, 5bb5dd5) both complete. UI-SPEC passed gsd-ui-checker 6/6 dimensions after 2 revision rounds. Next: re-run /gsd:plan-phase 2 (reuses research + UI-SPEC, goes straight to gsd-planner).
 Last activity: 2026-07-02
 
 Progress: [██████████] 100% (8/8 plans in phase 01 — verified via conversational UAT)
@@ -70,7 +70,7 @@ Progress: [██████████] 100% (8/8 plans in phase 01 — verif
 
 ### Open Todos
 
-- Generate Phase 2 UI-SPEC, then plan: `/gsd:ui-phase 2` → `/gsd:plan-phase 2`. Context + research ready (`02-CONTEXT.md`, `02-RESEARCH.md`); paused at the UI Design Contract gate.
+- Plan Phase 2: `/gsd:plan-phase 2`. Context + research + UI-SPEC all ready (`02-CONTEXT.md`, `02-RESEARCH.md`, `02-UI-SPEC.md`). Re-running plan-phase will reuse research, detect the UI-SPEC, skip both gates, and go straight to the gsd-planner (Opus) → gsd-plan-checker (Sonnet) loop.
 
 ### Blockers
 
@@ -78,9 +78,9 @@ None.
 
 ## Session Continuity
 
-**Last action:** Phase 2 `/gsd:plan-phase 2` started — user chose to research first. `gsd-phase-researcher` (Sonnet) wrote `02-RESEARCH.md` (committed `5450c4b`): locked FTS = hand-written tsvector migration + org-safe `$queryRaw` helper (scopedDb `$extends` never touches raw SQL — manual `organizationId` filter mandatory); ticket # = `TicketCounter` row upsert in the create txn (never `count()+1`); Markdown = `unified`+`remark`+`rehype-sanitize` (no jsdom); uploads = Route Handlers (Server Actions cap bodies at 1MB) + `file-type` byte-sniffing; plus SLA model/job, custom-fields EAV, Postgres honeypot rate-limit, scopedDb allowlist additions. Workflow then hit the UI Design Contract gate; user chose to generate UI-SPEC first, so planning paused (no PLAN.md yet).
+**Last action:** Phase 2 `/gsd:ui-phase 2` complete. `gsd-ui-researcher` (Sonnet) wrote `02-UI-SPEC.md`, then `gsd-ui-checker` (Sonnet) validated it across 6 design dimensions. Took 2 revision rounds: round 1 fixed bare-`Save` CTAs (→ `Save SLA Targets`/`Create Field`), the undeclared `text-warning-foreground` token (→ tint style `bg-warning/10 text-warning border border-warning/30`), and a false spacing "Exceptions: none" claim; round 2 completed the spacing-exceptions inventory (`gap-1.5`/`py-0.5`/`gap-2.5` all disclosed + code-verified), fixed a sidebar-vs-`(auth)/layout.tsx` brand-box misattribution, and normalized off-convention icon sizes (`size-3.5`/`size-5`→`size-4`). Final verdict APPROVED 6/6 (commit `5bb5dd5`). Key UI-SPEC outputs: 2 NEW tokens to add in Phase-2 execution (`--warning` amber, `--success` emerald — single-token convention, NO `-foreground`); 5 new shadcn components to add (`textarea`,`popover`,`command`,`checkbox`,`skeleton`); D-10 amber+lock internal-note distinction, D-15 3-state SLA due chip, D-21 server-side internal-note exclusion all locked. UI-SPEC has a "Assumptions (review these)" section (~9 defaults) worth a human skim.
 
-**Next action:** `/gsd:ui-phase 2` to produce `02-UI-SPEC.md` (inbox, thread, contact pages, public form, status page), THEN re-run `/gsd:plan-phase 2` (it will reuse existing `02-RESEARCH.md`, detect the UI-SPEC, and proceed to the planner). Requirements: AIDA-01..08, AIDA-12 (partial). `/clear` first for a fresh context window.
+**Next action:** `/gsd:plan-phase 2` (Core Ticketing). It reuses `02-RESEARCH.md` + `02-UI-SPEC.md`, skips the research and UI gates, and runs gsd-planner (Opus) → gsd-plan-checker (Sonnet). Requirements: AIDA-01..08, AIDA-12 (partial). `/clear` first for a fresh context window.
 
 **Phase 2 research open questions (resolve during planning — researcher's recommended defaults):** (1) public status-page token = a dedicated unguessable random token, NOT the raw ticket cuid; (2) single-workspace v1 web-form org resolution = `findFirstOrThrow()`; (3) SLA "at-risk" threshold = proportional 20% of target duration remaining, not a flat cutoff.
 
@@ -98,4 +98,4 @@ None.
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
 ---
-*Last updated: 2026-07-02 — Phase 2 research complete (02-RESEARCH.md, 5450c4b); /gsd:plan-phase 2 paused at UI Design Contract gate; next: /gsd:ui-phase 2 → /gsd:plan-phase 2.*
+*Last updated: 2026-07-02 — Phase 2 research (5450c4b) + UI-SPEC (5bb5dd5, checker 6/6) complete; next: /gsd:plan-phase 2 (goes straight to planner).*
