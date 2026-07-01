@@ -2,7 +2,7 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: phase-2-ui-spec-approved
+status: phase-2-planned
 last_updated: "2026-07-02T00:00:00Z"
 last_activity: 2026-07-02
 progress:
@@ -26,9 +26,9 @@ progress:
 
 ## Current Position
 
-Phase: 02 (core-ticketing) — 🟡 RESEARCH + UI-SPEC DONE (ready to plan)
-Plan: Phase 1 complete (8/8); Phase 2 not yet planned.
-Status: Phase 2 research (02-RESEARCH.md, 5450c4b) AND UI design contract (02-UI-SPEC.md, 5bb5dd5) both complete. UI-SPEC passed gsd-ui-checker 6/6 dimensions after 2 revision rounds. Next: re-run /gsd:plan-phase 2 (reuses research + UI-SPEC, goes straight to gsd-planner).
+Phase: 02 (core-ticketing) — 🟢 PLANNED (ready to execute)
+Plan: Phase 1 complete (8/8); Phase 2 planned — 12 plans across 5 waves.
+Status: Phase 2 planning complete. gsd-planner (Opus) produced 12 plans (02-01..02-12, 5 waves); gsd-plan-checker (Sonnet) ran 3 verification passes (max iterations) — 0 blockers throughout, all 9 requirement IDs (AIDA-01..08, AIDA-12 partial) covered. Fixed during revision: `changePriority` now clears stale SLA flags on downgrade, `ticket-list-panel.tsx` added to 02-08 frontmatter, `Message.triggeredReopen` column + end-to-end `ThreadSystemEvent` wiring (plan 01 → 09 → 12), `searchTickets` limit threading in 02-08. User force-proceeded past 3 remaining low-risk warnings (organizationId omitted in some illustrative create() calls — self-correcting via each task's tsc verify gate; "New Ticket" CTA placement ambiguous between plans 08/09 — watch during execution for zero-ticket cold-start reachability; plans 07/09 are file-count-heavy but judged justified). Next: /gsd:execute-phase 2.
 Last activity: 2026-07-02
 
 Progress: [██████████] 100% (8/8 plans in phase 01 — verified via conversational UAT)
@@ -70,7 +70,9 @@ Progress: [██████████] 100% (8/8 plans in phase 01 — verif
 
 ### Open Todos
 
-- Plan Phase 2: `/gsd:plan-phase 2`. Context + research + UI-SPEC all ready (`02-CONTEXT.md`, `02-RESEARCH.md`, `02-UI-SPEC.md`). Re-running plan-phase will reuse research, detect the UI-SPEC, skip both gates, and go straight to the gsd-planner (Opus) → gsd-plan-checker (Sonnet) loop.
+- Execute Phase 2: `/gsd:execute-phase 2`. 12 plans ready across 5 waves (02-01/02 → 02-03..07 → 02-08/10/11 → 02-09 → 02-12).
+- Watch during execution: "New Ticket" CTA must land in the inbox top bar (plan 08 territory) so a zero-ticket workspace has an agent-reachable creation path — plan 09's task text left this ambiguous ("list panel header or reading-pane header"); the reading-pane-only option would break cold start.
+- Watch during execution: a few illustrative `create()`/`upsert()` snippets in 02-01/02-03/02-09 omit explicit `organizationId` — each task's `tsc --noEmit` verify gate will force the fix, but the 02-01 tenant-in-tx smoke test specifically should use `workspace-isolation.test.ts`'s type-cast pattern rather than passing `organizationId` explicitly, or it stops proving auto-injection.
 
 ### Blockers
 
@@ -78,11 +80,11 @@ None.
 
 ## Session Continuity
 
-**Last action:** Phase 2 `/gsd:ui-phase 2` complete. `gsd-ui-researcher` (Sonnet) wrote `02-UI-SPEC.md`, then `gsd-ui-checker` (Sonnet) validated it across 6 design dimensions. Took 2 revision rounds: round 1 fixed bare-`Save` CTAs (→ `Save SLA Targets`/`Create Field`), the undeclared `text-warning-foreground` token (→ tint style `bg-warning/10 text-warning border border-warning/30`), and a false spacing "Exceptions: none" claim; round 2 completed the spacing-exceptions inventory (`gap-1.5`/`py-0.5`/`gap-2.5` all disclosed + code-verified), fixed a sidebar-vs-`(auth)/layout.tsx` brand-box misattribution, and normalized off-convention icon sizes (`size-3.5`/`size-5`→`size-4`). Final verdict APPROVED 6/6 (commit `5bb5dd5`). Key UI-SPEC outputs: 2 NEW tokens to add in Phase-2 execution (`--warning` amber, `--success` emerald — single-token convention, NO `-foreground`); 5 new shadcn components to add (`textarea`,`popover`,`command`,`checkbox`,`skeleton`); D-10 amber+lock internal-note distinction, D-15 3-state SLA due chip, D-21 server-side internal-note exclusion all locked. UI-SPEC has a "Assumptions (review these)" section (~9 defaults) worth a human skim.
+**Last action:** Phase 2 `/gsd:plan-phase 2` complete. `gsd-planner` (Opus) produced 12 plans (02-01..02-12) in 5 waves, reusing existing `02-CONTEXT.md`/`02-RESEARCH.md`/`02-UI-SPEC.md` (research + UI gates both skipped since artifacts existed). `gsd-plan-checker` (Sonnet) ran 3 verification passes (max iterations reached): pass 1 found 0 blockers/3 warnings/1 info (real bug: `changePriority` didn't clear stale SLA flags on downgrade; missing `files_modified` entry); pass 2 after revision found 0 blockers/1 warning/2 info (new: `ThreadSystemEvent` component built but never wired to real data — UI-SPEC's mandated auto-reopen row; `searchTickets` limit not threaded through, silently capping FTS-filtered "Load more" at 25); pass 3 after a second revision (added `Message.triggeredReopen` column in plan 01, wired end-to-end through plans 09→12) found 0 blockers/3 warnings/3 info, all low-risk. User selected "Force proceed" at the max-iteration gate — checker itself recommended proceeding. Commits: `c7d94fb`/`b98423a` (initial 12 plans + roadmap), `abd3a71` (revision 1: SLA flag fix + frontmatter), `afb1082` (revision 2: ThreadSystemEvent wiring + searchTickets limit).
 
-**Next action:** `/gsd:plan-phase 2` (Core Ticketing). It reuses `02-RESEARCH.md` + `02-UI-SPEC.md`, skips the research and UI gates, and runs gsd-planner (Opus) → gsd-plan-checker (Sonnet). Requirements: AIDA-01..08, AIDA-12 (partial). `/clear` first for a fresh context window.
+**Next action:** `/gsd:execute-phase 2`. 12 plans, 5 waves: W1 (02-01 schema/migrations, 02-02 deps/tokens/renderMarkdown) → W2 (02-03 ticket-core, 02-04 FTS+attachments, 02-05 SLA worker+rate-limit, 02-06 chips, 02-07 settings) → W3 (02-08 inbox, 02-10 contacts, 02-11 public intake) → W4 (02-09 reading pane) → W5 (02-12 public status page). `/clear` first for a fresh context window.
 
-**Phase 2 research open questions (resolve during planning — researcher's recommended defaults):** (1) public status-page token = a dedicated unguessable random token, NOT the raw ticket cuid; (2) single-workspace v1 web-form org resolution = `findFirstOrThrow()`; (3) SLA "at-risk" threshold = proportional 20% of target duration remaining, not a flat cutoff.
+**Phase 2 research open questions (resolved during planning, researcher's recommended defaults all adopted):** (1) public status-page token = a dedicated unguessable random token, NOT the raw ticket cuid; (2) single-workspace v1 web-form org resolution = `findFirstOrThrow()`; (3) SLA "at-risk" threshold = proportional 20% of target duration remaining, not a flat cutoff.
 
 **Phase 2 locked decisions (see 02-CONTEXT.md):** 2-pane shared inbox (list + reading pane), views as filter chips; flexible status + auto-reopen on requester reply; priority Low/Normal/High/Urgent; per-workspace sequential ticket # (+cuid); auto-link contacts by normalized email (merge deferred); Markdown→sanitized-HTML composer with Public-Reply/Internal-Note toggle (amber notes); 24/7 SLA clock, per-priority targets in Settings, pg-boss job stamps isAtRisk/isBreached + color chips; free-form tags w/ autocomplete + admin management; admin custom fields (text/select/number/checkbox/date); public web form (honeypot + rate-limit, no CAPTCHA); tokenized `/status/[token]` page (public thread + follow-up reopen); local `/data/uploads` volume behind FileStorage interface, 10MB + MIME allowlist. Discretion: Postgres FTS; individual assignment only; bulk actions deferred; fixed views. Reminder: extend `scopedDb` DOMAIN_MODELS allowlist for all new models; make ticket-number generator concurrency-safe.
 
@@ -98,4 +100,4 @@ None.
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
 ---
-*Last updated: 2026-07-02 — Phase 2 research (5450c4b) + UI-SPEC (5bb5dd5, checker 6/6) complete; next: /gsd:plan-phase 2 (goes straight to planner).*
+*Last updated: 2026-07-02 — Phase 2 planned: 12 plans/5 waves (afb1082), checker 0 blockers after 3 iterations, user force-proceeded past remaining warnings; next: /gsd:execute-phase 2.*
