@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: phase-2-planned
-last_updated: "2026-07-02T00:00:00Z"
+status: executing
+last_updated: "2026-07-01T23:49:58Z"
 last_activity: 2026-07-02
 progress:
   total_phases: 7
   completed_phases: 1
-  total_plans: 8
-  completed_plans: 8
-  percent: 100
+  total_plans: 20
+  completed_plans: 9
+  percent: 45
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -26,12 +26,12 @@ progress:
 
 ## Current Position
 
-Phase: 02 (core-ticketing) — 🟢 PLANNED (ready to execute)
-Plan: Phase 1 complete (8/8); Phase 2 planned — 12 plans across 5 waves.
-Status: Phase 2 planning complete. gsd-planner (Opus) produced 12 plans (02-01..02-12, 5 waves); gsd-plan-checker (Sonnet) ran 3 verification passes (max iterations) — 0 blockers throughout, all 9 requirement IDs (AIDA-01..08, AIDA-12 partial) covered. Fixed during revision: `changePriority` now clears stale SLA flags on downgrade, `ticket-list-panel.tsx` added to 02-08 frontmatter, `Message.triggeredReopen` column + end-to-end `ThreadSystemEvent` wiring (plan 01 → 09 → 12), `searchTickets` limit threading in 02-08. User force-proceeded past 3 remaining low-risk warnings (organizationId omitted in some illustrative create() calls — self-correcting via each task's tsc verify gate; "New Ticket" CTA placement ambiguous between plans 08/09 — watch during execution for zero-ticket cold-start reachability; plans 07/09 are file-count-heavy but judged justified). Next: /gsd:execute-phase 2.
+Phase: 02 (core-ticketing) — 🟡 IN PROGRESS (wave 1 of 5)
+Plan: 1 of 12 core-ticketing plans complete (02-02 done; 02-01 still pending — both wave 1, no dependency between them)
+Status: Executing Phase 2. Plan 02-02 (deps/tokens/renderMarkdown) complete: 7 markdown/file-type packages + 5 shadcn primitives installed, --warning/--success tokens + Badge variants added, renderMarkdown() sanitized Markdown pipeline TDD'd (6/6 green). Plan 02-01 (schema/migrations/scopedDb allowlist) still needs to run before any Wave-2 plan that touches Ticket/Contact/Message models. Next: run 02-01, then Wave 2 (02-03..02-07).
 Last activity: 2026-07-02
 
-Progress: [██████████] 100% (8/8 plans in phase 01 — verified via conversational UAT)
+Progress: [█████░░░░░] 45% (9/20 plans complete — 8/8 phase 01 + 1/12 phase 02)
 
 ## Accumulated Context
 
@@ -67,10 +67,14 @@ Progress: [██████████] 100% (8/8 plans in phase 01 — verif
 - `better-call@1.3.7` lockfile override required: `better-auth@1.6.22` needs `kAPIErrorHeaderSymbol` export (added in 1.3.7); Turbopack catches missing export at `next build` time even though `next dev` works.
 - Pages that read DB at request time (`/setup`, `/login`) must have `export const dynamic = "force-dynamic"` to prevent static prerender during `next build`.
 - DATABASE_URL build arg with placeholder for `prisma generate` in Docker: `prisma.config.ts` calls `env("DATABASE_URL")` at module load → even generate (no DB connection) fails without it.
+- `renderMarkdown()` (`src/lib/markdown/render.ts`) is the ONE Markdown->sanitized-HTML pipeline (unified/remark/rehype); never add a second `dangerouslySetInnerHTML` call site that bypasses it.
+- `rehype-sanitize`'s `defaultSchema` allowlist only lets `target`/`rel` attributes SURVIVE sanitization if already present on the node — it does not add them. A custom `rehypeSafeLinks` unified plugin (via `unist-util-visit`) stamps `target="_blank"` + `rel="nofollow noopener noreferrer"` on every link before the sanitize pass.
+- `hast-util-sanitize` must be an explicit `devDependency` (not left implicit/transitive) — pnpm's strict `node_modules` linking makes transitive-only packages unresolvable for direct type imports.
+- Fresh worktree/clone bootstrap: `cp .env.example .env && pnpm prisma generate` is required before `tsc --noEmit` will pass (generated client + `.env` are both gitignored).
 
 ### Open Todos
 
-- Execute Phase 2: `/gsd:execute-phase 2`. 12 plans ready across 5 waves (02-01/02 → 02-03..07 → 02-08/10/11 → 02-09 → 02-12).
+- Execute Phase 2: `/gsd:execute-phase 2`. 12 plans ready across 5 waves (02-01/02 → 02-03..07 → 02-08/10/11 → 02-09 → 02-12). **02-02 done** (this session); **02-01 still pending** (wave 1, no dependency between the two — 02-01 can run independently next).
 - Watch during execution: "New Ticket" CTA must land in the inbox top bar (plan 08 territory) so a zero-ticket workspace has an agent-reachable creation path — plan 09's task text left this ambiguous ("list panel header or reading-pane header"); the reading-pane-only option would break cold start.
 - Watch during execution: a few illustrative `create()`/`upsert()` snippets in 02-01/02-03/02-09 omit explicit `organizationId` — each task's `tsc --noEmit` verify gate will force the fix, but the 02-01 tenant-in-tx smoke test specifically should use `workspace-isolation.test.ts`'s type-cast pattern rather than passing `organizationId` explicitly, or it stops proving auto-injection.
 
@@ -80,9 +84,9 @@ None.
 
 ## Session Continuity
 
-**Last action:** Phase 2 `/gsd:plan-phase 2` complete. `gsd-planner` (Opus) produced 12 plans (02-01..02-12) in 5 waves, reusing existing `02-CONTEXT.md`/`02-RESEARCH.md`/`02-UI-SPEC.md` (research + UI gates both skipped since artifacts existed). `gsd-plan-checker` (Sonnet) ran 3 verification passes (max iterations reached): pass 1 found 0 blockers/3 warnings/1 info (real bug: `changePriority` didn't clear stale SLA flags on downgrade; missing `files_modified` entry); pass 2 after revision found 0 blockers/1 warning/2 info (new: `ThreadSystemEvent` component built but never wired to real data — UI-SPEC's mandated auto-reopen row; `searchTickets` limit not threaded through, silently capping FTS-filtered "Load more" at 25); pass 3 after a second revision (added `Message.triggeredReopen` column in plan 01, wired end-to-end through plans 09→12) found 0 blockers/3 warnings/3 info, all low-risk. User selected "Force proceed" at the max-iteration gate — checker itself recommended proceeding. Commits: `c7d94fb`/`b98423a` (initial 12 plans + roadmap), `abd3a71` (revision 1: SLA flag fix + frontmatter), `afb1082` (revision 2: ThreadSystemEvent wiring + searchTickets limit).
+**Last action:** Executed plan 02-02 (deps/tokens/renderMarkdown, wave 1, `depends_on: []`). Installed the 7 markdown/file-type packages (`unified`, `remark-parse`, `remark-gfm`, `remark-rehype`, `rehype-sanitize`, `rehype-stringify`, `file-type`) + 5 shadcn primitives (`textarea`, `popover`, `command`, `checkbox`, `skeleton` — `command` transitively pulled in `dialog`/`input-group`). Added `--warning`/`--success` tokens (light+dark, `@theme inline`) and matching tint-only `Badge` variants. Built `renderMarkdown()` (TDD: RED → GREEN → REFACTOR, 6/6 assertions green) — required an unplanned custom `rehypeSafeLinks` plugin since `rehype-sanitize`'s `defaultSchema` doesn't actively add `target`/`rel`, only allowlists them. Also fixed two blocking issues: `hast-util-sanitize` needed as an explicit devDependency (pnpm strict linking), and this worktree needed a bootstrapped `.env` + `pnpm prisma generate` before `tsc --noEmit` could run at all (worktree was 15 commits behind `master` at session start — fast-forwarded first). 5 commits: `64acb84` (Task 1), `fc7166c` (Task 2), `a758621`/`63ce2c5`/`2441fa3` (Task 3 TDD test→feat→refactor). SUMMARY: `.planning/phases/02-core-ticketing/02-02-SUMMARY.md`.
 
-**Next action:** `/gsd:execute-phase 2`. 12 plans, 5 waves: W1 (02-01 schema/migrations, 02-02 deps/tokens/renderMarkdown) → W2 (02-03 ticket-core, 02-04 FTS+attachments, 02-05 SLA worker+rate-limit, 02-06 chips, 02-07 settings) → W3 (02-08 inbox, 02-10 contacts, 02-11 public intake) → W4 (02-09 reading pane) → W5 (02-12 public status page). `/clear` first for a fresh context window.
+**Next action:** Run plan 02-01 (schema/migrations/scopedDb allowlist) — also wave 1, no dependency on 02-02, safe to run next/in parallel. After both wave-1 plans are done: Wave 2 (02-03 ticket-core, 02-04 FTS+attachments, 02-05 SLA worker+rate-limit, 02-06 chips, 02-07 settings) → Wave 3 (02-08 inbox, 02-10 contacts, 02-11 public intake) → Wave 4 (02-09 reading pane) → Wave 5 (02-12 public status page).
 
 **Phase 2 research open questions (resolved during planning, researcher's recommended defaults all adopted):** (1) public status-page token = a dedicated unguessable random token, NOT the raw ticket cuid; (2) single-workspace v1 web-form org resolution = `findFirstOrThrow()`; (3) SLA "at-risk" threshold = proportional 20% of target duration remaining, not a flat cutoff.
 
@@ -100,4 +104,4 @@ None.
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
 ---
-*Last updated: 2026-07-02 — Phase 2 planned: 12 plans/5 waves (afb1082), checker 0 blockers after 3 iterations, user force-proceeded past remaining warnings; next: /gsd:execute-phase 2.*
+*Last updated: 2026-07-02 — Plan 02-02 executed (deps/tokens/renderMarkdown, 5 commits, 6/6 TDD assertions green); 1/12 phase-2 plans complete; next: plan 02-01 (schema/migrations), also wave 1.*
