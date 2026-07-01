@@ -20,7 +20,7 @@ created: 2026-07-02
 | Tool | shadcn (already initialized — `components.json` present) |
 | Preset | `style=radix-nova`, `baseColor=neutral`, `cssVariables=true`; brand palette overridden in `globals.css` per DESIGN-SYSTEM.md §1–2 (indigo-violet, hue family 277–280) |
 | Component library | Radix primitives via shadcn (`radix-ui` package) |
-| Icon library | Lucide React (DESIGN-SYSTEM.md §5) — `size-4` inline, `size-6` in icon boxes, `size-3` inside chips/badges |
+| Icon library | Lucide React (DESIGN-SYSTEM.md §5) — `size-4` inline, `size-6` in icon boxes, `size-3` inside chips/badges; `size-7` is a documented exception reserved solely for the public-page brand mark, inherited unchanged from the sidebar brand box (`src/components/sidebar.tsx`) |
 | Font | Inter (`--font-inter`, `font-sans`) |
 
 No third-party registries used or declared this phase. `components.json` `"registries": {}` confirmed empty. Registry vetting gate: not applicable.
@@ -53,7 +53,12 @@ Phase 2 component-specific values (all multiples of 4, declared for this phase's
 | Settings section card | `p-6`, `gap-4` | Matches DESIGN-SYSTEM §4.5 default Card |
 | Public page Card | `p-8` | Wider breathing room than the 400px auth Card (see §Public Pages) |
 
-Exceptions (justified, inherited from already-shipped shadcn component internals): `gap-1.5` (6px) is Button's built-in default gap; `py-0.5` (2px) is Badge's built-in default vertical padding. Both are intentionally reused unchanged so Phase-2 chips/tabs match existing components exactly; all NEW Phase-2 spacing values remain 4px-grid-aligned.
+**Non-4px-grid exceptions (all inherited from already-shipped Phase-1 shadcn components; reused unchanged for visual consistency, not new Phase-2 invention):**
+- `gap-1.5` (6px) — shadcn Button's built-in default gap; reused wherever this spec needs chip-like micro-spacing (filter chips/tabs, the TicketListRow chip row, the AttachmentChip row).
+- `py-0.5` (2px) — shadcn Badge's built-in default vertical padding; reused for badge-like elements and inline `<code>` in rendered Markdown.
+- `gap-2.5` (10px) — the sidebar brand-box spacing (`src/components/sidebar.tsx`), reused verbatim by the public-page brand mark so it matches the in-app brand box exactly.
+
+All NEW spacing values introduced by Phase 2 (not inherited from a shipped component) remain 4px-grid-aligned.
 
 ---
 
@@ -82,7 +87,7 @@ No new font sizes are introduced this phase (deliberate — reusing the existing
 |------|-------|-------|
 | Dominant (60%) | `bg-background` | Page canvas, reading-pane body, public page canvas |
 | Secondary (30%) | `bg-card`, `bg-muted`, `bg-sidebar` | Ticket list rows, reading-pane header, settings cards, contact cards, sidebar (unchanged) |
-| Accent (10%) | `bg-primary` / `text-primary` | **Reserved for:** primary CTA buttons (Send Reply, Submit Request, Send Follow-up, Save in Settings forms), active filter chip/tab indicator, active sidebar nav item (existing), focus rings, "New"/"Open" status chip, empty-state icon box halo (existing pattern), brand mark on public pages |
+| Accent (10%) | `bg-primary` / `text-primary` | **Reserved for:** primary CTA buttons (`Send Reply`, `Submit Request`, `Send Follow-up`, and primary Settings form actions — `Save SLA Targets`, `Create Field`), active filter chip/tab indicator, active sidebar nav item (existing), focus rings, "New"/"Open" status chip, empty-state icon box halo (existing pattern), brand mark on public pages |
 | Destructive | `bg-destructive` / `text-destructive` | Delete tag, delete custom field, "Overdue" SLA chip, "Urgent" priority chip |
 
 Accent is explicitly **not** used for: Pending/Resolved/Closed status chips, priority chips other than Urgent, tag chips (use `secondary`), assignee avatars (use `sidebar-primary`/`primary` at low opacity tint only, matching the existing sidebar avatar pattern — not solid primary).
@@ -218,7 +223,7 @@ Two-column layout inside the existing `(app)` content area (D-01, no third colum
 **States:**
 - Loading: 6× `Skeleton` rows in the list column (matching the 80px row height, 3 skeleton bars each); reading pane shows a single centered `Skeleton` block set.
 - Empty (workspace has zero tickets ever): reuse `EmptyState` pattern exactly (DESIGN-SYSTEM §4.3) — `Inbox` icon, heading `"Your inbox is empty"`, body `"New tickets will appear here as customers reach out through your web form. Share your intake link to start receiving requests."` Rendered in the reading-pane area (list column shows nothing above the fold, or is hidden/collapsed to full-width empty state — Claude's discretion, list column may collapse to 0 width when there is truly nothing to show).
-- Empty (filtered view has zero matches, e.g. "Unassigned" with none): smaller inline empty state within the list column only (not full `EmptyState` halo pattern — too heavy for a filtered sub-state), icon + text centered, `py-12`: `CheckCircle2` icon (`size-5 text-muted-foreground`), text `"Nothing here — no tickets match this view."`
+- Empty (filtered view has zero matches, e.g. "Unassigned" with none): smaller inline empty state within the list column only (not full `EmptyState` halo pattern — too heavy for a filtered sub-state), icon + text centered, `py-12`: `CheckCircle2` icon (`size-4 text-muted-foreground`), text `"Nothing here — no tickets match this view."`
 - No ticket selected (list has tickets, none open): reading pane shows `EmptyState` pattern, `MessageSquare` icon, heading `"Select a ticket"`, body `"Choose a ticket from the list to view the conversation."`
 - Error (list fails to load): inline banner at top of list column, `bg-destructive/10 border border-destructive/20 rounded-lg p-3 text-[13px] text-destructive`, text `"Couldn't load tickets."` + inline `Button variant="link"` `"Retry"`.
 - Long lists: cursor-based pagination, `"Load more"` `Button variant="outline"` centered at the bottom of the list column, default page size 50 (Claude's discretion per CONTEXT — see Assumptions; no virtualization in v1).
@@ -231,7 +236,7 @@ Two-column layout inside the existing `(app)` content area (D-01, no third colum
 |---------|-----------|-------|
 | Inbound (from contact) | `bg-card border border-border rounded-lg p-3` | Contact name + relative time, no explicit "public" label needed |
 | Outbound (agent public reply) | `bg-primary/5 border border-primary/15 rounded-lg p-3` | Agent name + relative time |
-| Internal note | `bg-warning/10 border border-warning/30 border-l-2 border-l-warning rounded-lg p-3` | `Lock` icon (`size-3.5 text-warning`) + `"Internal Note"` (`text-[12px] font-medium uppercase tracking-wide text-warning`) + agent name + relative time |
+| Internal note | `bg-warning/10 border border-warning/30 border-l-2 border-l-warning rounded-lg p-3` | `Lock` icon (`size-4 text-warning`) + `"Internal Note"` (`text-[12px] font-medium uppercase tracking-wide text-warning`) + agent name + relative time |
 
 Message body: rendered sanitized HTML from `renderMarkdown()` (RESEARCH.md Topic 3) inside a `prose`-like wrapper constrained to `text-[14px] leading-relaxed text-foreground` — no Tailwind Typography plugin needed for v1; base element styling (`p`, `strong`, `code`, `ul`/`ol`, `a`) inherits from `globals.css` `@layer base` with minimal additions (`a` → `text-primary underline-offset-2 hover:underline`; `code` → `bg-muted rounded px-1 py-0.5 text-[13px]`).
 
@@ -244,7 +249,7 @@ Attachments: `AttachmentChip` row below message body (`flex flex-wrap gap-1.5 mt
 - Below the toggle: `Textarea` (Markdown source, `min-h-[96px]`), container background shifts with mode: Public = `bg-background`, Internal Note = `bg-warning/5 border border-warning/30 rounded-lg` wrapping the textarea.
 - Toolbar row (`flex items-center justify-between mt-2`): left — `Paperclip` icon `Button variant="ghost" size="icon-sm"` (attach file, `aria-label="Attach file"`, triggers native file input, enforces 10MB/allowlist client-side per D-23 with server-side re-check); right — primary action button:
   - Public mode: `Button` default (primary indigo) — label `"Send Reply"`.
-  - Internal Note mode: `Button` with warning-tint override, matching the codebase's existing tint-only destructive/warning convention (`badge.tsx`/`button.tsx` — no solid-fill destructive or warning button variant exists in this codebase, and no `--warning-foreground` companion token is declared): `bg-warning/10 text-warning border border-warning/30 hover:bg-warning/20`, still `size="default"` shape, `Lock` icon (`size-3.5`) + label `"Save Internal Note"`. (Deliberately never the indigo primary button in this mode — reinforces D-10's visual-distinction requirement all the way to the CTA.)
+  - Internal Note mode: `Button` with warning-tint override, matching the codebase's existing tint-only destructive/warning convention (`badge.tsx`/`button.tsx` — no solid-fill destructive or warning button variant exists in this codebase, and no `--warning-foreground` companion token is declared): `bg-warning/10 text-warning border border-warning/30 hover:bg-warning/20`, still `size="default"` shape, `Lock` icon (`size-4`) + label `"Save Internal Note"`. (Deliberately never the indigo primary button in this mode — reinforces D-10's visual-distinction requirement all the way to the CTA.)
 - Attached-but-unsent files: shown as removable `AttachmentChip`s above the toolbar row.
 
 **States:**
@@ -285,11 +290,12 @@ Extend the existing `/settings` page (currently just "AI Features") with a horiz
 
 ### 5. Public Web Intake Form — new `(public)` route group, e.g. `/request`
 
-**Layout wrapper** (`PublicPageShell`, mirrors `(auth)/layout.tsx` exactly per DESIGN-SYSTEM §4.4's "layout wraps, page renders content only" rule — public pages are unauthenticated but must feel on-brand):
+**Layout wrapper** (`PublicPageShell` — background/decoration mirrors `(auth)/layout.tsx` per DESIGN-SYSTEM §4.4's "layout wraps, page renders content only" rule; the brand-header markup itself reuses the sidebar brand-box pattern (`src/components/sidebar.tsx`) verbatim — public pages are unauthenticated but must feel on-brand):
 ```tsx
 <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-12">
   {/* same dotted-grid + primary-glow decoration as (auth)/layout.tsx, unchanged */}
   <div className="relative w-full max-w-[640px]">
+    {/* brand box reuses sidebar.tsx's brand-header pattern verbatim: gap-2.5, size-7, Sparkles, text-[15px] — inherited spacing/icon exception, see Spacing Scale exceptions */}
     <div className="mb-6 flex items-center justify-center gap-2.5">
       <div className="flex size-7 items-center justify-center rounded-md bg-sidebar-primary shadow-sm">
         <Sparkles className="size-4 text-sidebar-primary-foreground" />
