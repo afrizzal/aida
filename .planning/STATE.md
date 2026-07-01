@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: phase-2-context-gathered
-last_updated: "2026-07-01T00:00:00Z"
-last_activity: 2026-07-01
+status: phase-2-research-done
+last_updated: "2026-07-02T00:00:00Z"
+last_activity: 2026-07-02
 progress:
   total_phases: 7
   completed_phases: 1
@@ -26,10 +26,10 @@ progress:
 
 ## Current Position
 
-Phase: 02 (core-ticketing) — 🟡 CONTEXT GATHERED (ready to plan)
+Phase: 02 (core-ticketing) — 🟡 RESEARCH DONE (UI-SPEC gate next, then plan)
 Plan: Phase 1 complete (8/8); Phase 2 not yet planned.
-Status: Phase 2 discuss-phase complete — 4 gray areas decided, 02-CONTEXT.md written. Ready to plan Phase 2.
-Last activity: 2026-07-01
+Status: Phase 2 research complete (02-RESEARCH.md, commit 5450c4b). /gsd:plan-phase 2 paused at the UI Design Contract gate — user chose to generate UI-SPEC first. Next: /gsd:ui-phase 2, then re-run /gsd:plan-phase 2.
+Last activity: 2026-07-02
 
 Progress: [██████████] 100% (8/8 plans in phase 01 — verified via conversational UAT)
 
@@ -70,7 +70,7 @@ Progress: [██████████] 100% (8/8 plans in phase 01 — verif
 
 ### Open Todos
 
-- Plan Phase 2 (Core Ticketing): `/gsd:plan-phase 2` — context is ready (`.planning/phases/02-core-ticketing/02-CONTEXT.md`).
+- Generate Phase 2 UI-SPEC, then plan: `/gsd:ui-phase 2` → `/gsd:plan-phase 2`. Context + research ready (`02-CONTEXT.md`, `02-RESEARCH.md`); paused at the UI Design Contract gate.
 
 ### Blockers
 
@@ -78,9 +78,11 @@ None.
 
 ## Session Continuity
 
-**Last action:** Phase 2 `/gsd:discuss-phase` complete — all 4 gray areas decided (inbox & workflow; contacts & conversation; SLA/tags/custom-fields; web intake & attachments). Wrote `02-CONTEXT.md` (23 decisions D-01..D-23 + Claude's-discretion notes) and `02-DISCUSSION-LOG.md`; committed `ab070ff`.
+**Last action:** Phase 2 `/gsd:plan-phase 2` started — user chose to research first. `gsd-phase-researcher` (Sonnet) wrote `02-RESEARCH.md` (committed `5450c4b`): locked FTS = hand-written tsvector migration + org-safe `$queryRaw` helper (scopedDb `$extends` never touches raw SQL — manual `organizationId` filter mandatory); ticket # = `TicketCounter` row upsert in the create txn (never `count()+1`); Markdown = `unified`+`remark`+`rehype-sanitize` (no jsdom); uploads = Route Handlers (Server Actions cap bodies at 1MB) + `file-type` byte-sniffing; plus SLA model/job, custom-fields EAV, Postgres honeypot rate-limit, scopedDb allowlist additions. Workflow then hit the UI Design Contract gate; user chose to generate UI-SPEC first, so planning paused (no PLAN.md yet).
 
-**Next action:** `/gsd:plan-phase 2` (Core Ticketing — shared inbox, ticket lifecycle, contacts, replies/notes, tags, SLA, web intake). Requirements: AIDA-01..08, AIDA-12 (partial). `/clear` first for a fresh context window.
+**Next action:** `/gsd:ui-phase 2` to produce `02-UI-SPEC.md` (inbox, thread, contact pages, public form, status page), THEN re-run `/gsd:plan-phase 2` (it will reuse existing `02-RESEARCH.md`, detect the UI-SPEC, and proceed to the planner). Requirements: AIDA-01..08, AIDA-12 (partial). `/clear` first for a fresh context window.
+
+**Phase 2 research open questions (resolve during planning — researcher's recommended defaults):** (1) public status-page token = a dedicated unguessable random token, NOT the raw ticket cuid; (2) single-workspace v1 web-form org resolution = `findFirstOrThrow()`; (3) SLA "at-risk" threshold = proportional 20% of target duration remaining, not a flat cutoff.
 
 **Phase 2 locked decisions (see 02-CONTEXT.md):** 2-pane shared inbox (list + reading pane), views as filter chips; flexible status + auto-reopen on requester reply; priority Low/Normal/High/Urgent; per-workspace sequential ticket # (+cuid); auto-link contacts by normalized email (merge deferred); Markdown→sanitized-HTML composer with Public-Reply/Internal-Note toggle (amber notes); 24/7 SLA clock, per-priority targets in Settings, pg-boss job stamps isAtRisk/isBreached + color chips; free-form tags w/ autocomplete + admin management; admin custom fields (text/select/number/checkbox/date); public web form (honeypot + rate-limit, no CAPTCHA); tokenized `/status/[token]` page (public thread + follow-up reopen); local `/data/uploads` volume behind FileStorage interface, 10MB + MIME allowlist. Discretion: Postgres FTS; individual assignment only; bulk actions deferred; fixed views. Reminder: extend `scopedDb` DOMAIN_MODELS allowlist for all new models; make ticket-number generator concurrency-safe.
 
@@ -96,4 +98,4 @@ None.
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
 ---
-*Last updated: 2026-07-01 — Phase 2 /gsd:discuss-phase complete; 02-CONTEXT.md written (23 decisions); ready for /gsd:plan-phase 2.*
+*Last updated: 2026-07-02 — Phase 2 research complete (02-RESEARCH.md, 5450c4b); /gsd:plan-phase 2 paused at UI Design Contract gate; next: /gsd:ui-phase 2 → /gsd:plan-phase 2.*
