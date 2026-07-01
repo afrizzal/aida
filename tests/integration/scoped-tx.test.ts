@@ -47,7 +47,15 @@ describe("Wave-0 smoke test: scopedDb organizationId injection inside $transacti
 
       // organizationId is the @id here, so `where: { organizationId }` is a valid unique
       // target — scopedDb re-injecting the same value into `where` is a harmless no-op.
-      return tx.ticketCounter.upsert({
+      // `create` intentionally omits organizationId — this asserts the scopedDb upsert
+      // hook injects it even inside an interactive $transaction callback.
+      return (
+        tx.ticketCounter.upsert as (a: {
+          where: { organizationId: string };
+          create: Record<string, unknown>;
+          update: Record<string, unknown>;
+        }) => Promise<{ organizationId: string }>
+      )({
         where: { organizationId: org.id },
         create: { lastNumber: 1 },
         update: { lastNumber: { increment: 1 } },
