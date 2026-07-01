@@ -53,7 +53,7 @@ Phase 2 component-specific values (all multiples of 4, declared for this phase's
 | Settings section card | `p-6`, `gap-4` | Matches DESIGN-SYSTEM §4.5 default Card |
 | Public page Card | `p-8` | Wider breathing room than the 400px auth Card (see §Public Pages) |
 
-Exceptions: none beyond the table above — all values remain 4px-grid-aligned.
+Exceptions (justified, inherited from already-shipped shadcn component internals): `gap-1.5` (6px) is Button's built-in default gap; `py-0.5` (2px) is Badge's built-in default vertical padding. Both are intentionally reused unchanged so Phase-2 chips/tabs match existing components exactly; all NEW Phase-2 spacing values remain 4px-grid-aligned.
 
 ---
 
@@ -64,8 +64,10 @@ Inherited scale (DESIGN-SYSTEM.md §3) — Phase 2 introduces **no new sizes**, 
 | Role | Size | Weight | Line Height | Phase 2 usage |
 |------|------|--------|-------------|----------------|
 | Label | 12px | 400 (regular) | 1.4 | Timestamps, captions, tag chip text, avatar fallback, chip labels |
+| Micro-label | 13px | 500 (medium) | 1.4 | Pill tabs (filter chips, settings sub-nav), ticket-list contact-row name, key/value `dl` lists (contact detail header), rate-limit banner text |
 | Body | 14px | 400 (regular) | 1.5 | Ticket list subject/contact, thread message text, composer textarea, form fields, settings body copy |
 | Body (emphasis) | 14px | 500 (medium) | 1.5 | Unread/new ticket subject, contact name in list rows, active filter chip label |
+| Brand mark | 15px | 600 (semibold) | 1.2 | Public page brand wordmark ("AIDA" in `PublicPageShell` header) |
 | Heading | 18px | 600 (semibold) | 1.2 | Page titles ("Inbox", "Contacts", "Settings"), reading-pane ticket subject, contact detail name, public page Card title |
 
 Font weights used: **400, 500, 600** — three weights, not the generic two-weight guideline. This is an explicit, documented deviation: DESIGN-SYSTEM.md §3 already establishes all three system-wide (Phase 1, e.g. sidebar user name at 500) and this phase introduces no new weight. Treat 600 as reserved for headings/page titles only; 500 for emphasis/active states; 400 for everything else.
@@ -96,7 +98,7 @@ Two semantic colors are required this phase that DESIGN-SYSTEM.md references onl
 | `--warning` | Amber semantic color (text + tint source) | "Pending" status chip, "At risk" SLA chip, "High" priority chip, Internal Note composer/message surface + lock icon |
 | `--success` | Emerald semantic color (text + tint source) | "Resolved" status chip |
 
-Follows the exact existing `--destructive` convention in this codebase (single token, no separate `-foreground` token, used directly as `text-{token}` and as a tint source via `bg-{token}/10`, `border-{token}/20` — confirmed via `badge.tsx`'s `destructive` variant, which has no companion `--destructive-foreground`).
+Follows the exact existing `--destructive` convention in this codebase (single token, no separate `-foreground` token, used directly as `text-{token}` and as a tint source via `bg-{token}/10`, `border-{token}/20` — confirmed via `badge.tsx`'s `destructive` variant, which has no companion `--destructive-foreground`, and via `button.tsx`'s `destructive` variant, which is likewise tint-only with no solid fill). No `--warning-foreground` or `--success-foreground` token is declared or used anywhere in this spec — every warning/success surface (chips, composer, thread message) uses the tint pattern (`bg-{token}/N text-{token} border border-{token}/N`), never a solid fill requiring a foreground companion.
 
 **Proposed values** (starting point — verify contrast visually per DESIGN-SYSTEM §7 dark-mode check before merging):
 
@@ -181,7 +183,7 @@ Icon `size-3` inline before label (matches `badge.tsx`'s `[&>svg]:size-3!` rule)
 Duration formatting: relative, coarse-grained (`45m`, `2h`, `1d`) — no seconds. Full timestamp on hover via native `title` attribute.
 
 ### TagChip (D-16)
-`Badge variant="secondary"` (`bg-secondary text-secondary-foreground`), rounded-full, with an inline `x` remove icon (`size-3`, shown only in edit contexts — reading pane, not list rows). "+N" overflow chip (`variant="outline"`) when a list row has more than 2 tags.
+`Badge variant="secondary"` (`bg-secondary text-secondary-foreground`), rounded-full, with an inline `x` remove icon (`size-3`, shown only in edit contexts — reading pane, not list rows); icon-only, requires `aria-label="Remove tag {tag}"`. "+N" overflow chip (`variant="outline"`) when a list row has more than 2 tags.
 
 ### Assignee Avatar
 `Avatar size="sm"` (24px) in list rows, `size="default"` (32px) in the reading-pane header. Fallback styling matches the existing sidebar pattern exactly: `bg-primary/10 text-primary text-[12px] font-medium` with initials. **Unassigned** state: no avatar — a dashed-outline circular placeholder (`size-6 rounded-full border border-dashed border-border`) containing a `UserPlus` icon (`size-3 text-muted-foreground`), `title="Unassigned"`.
@@ -192,7 +194,7 @@ Duration formatting: relative, coarse-grained (`45m`, `2h`, `1d`) — no seconds
 
 ### 1. Shared Inbox (2-pane) — `/tickets`, `/tickets/[id]`
 
-Two-column layout inside the existing `(app)` content area (D-01, no third column). List column fixed width `w-[360px]`, reading pane `flex-1`. Both columns scroll independently (`overflow-y-auto`), each with its own sticky header at `h-14` for vertical alignment.
+Two-column layout inside the existing `(app)` content area (D-01, no third column). List column fixed width `w-[360px]`, reading pane `flex-1`. Both columns scroll independently (`overflow-y-auto`), each with its own sticky header at `h-14` for vertical alignment. Focal points: the reading-pane subject heading and the composer's primary CTA are the two anchors that draw the eye first.
 
 **Filter row** (sticky top of list column, `h-14 px-4`, `border-b border-border`, `bg-background/80 backdrop-blur-sm` — same sticky/blur treatment as `TopBar` per DESIGN-SYSTEM §4.2):
 - Fixed tabs (D-02): `Unassigned` | `Mine` | `All` — pill buttons (`h-8 px-3 rounded-full text-[13px] font-medium`), active = `bg-primary/10 text-primary`, inactive = `text-muted-foreground hover:bg-muted`.
@@ -240,9 +242,9 @@ Attachments: `AttachmentChip` row below message body (`flex flex-wrap gap-1.5 mt
   - "Public Reply" — active state `bg-primary/10 text-primary`, inactive `text-muted-foreground hover:bg-muted`.
   - "Internal Note" — active state `bg-warning/10 text-warning`, inactive `text-muted-foreground hover:bg-muted`. **Never** uses primary/indigo styling, even hover, to keep the two modes unmistakably distinct (D-10 requirement).
 - Below the toggle: `Textarea` (Markdown source, `min-h-[96px]`), container background shifts with mode: Public = `bg-background`, Internal Note = `bg-warning/5 border border-warning/30 rounded-lg` wrapping the textarea.
-- Toolbar row (`flex items-center justify-between mt-2`): left — `Paperclip` icon `Button variant="ghost" size="icon-sm"` (attach file, triggers native file input, enforces 10MB/allowlist client-side per D-23 with server-side re-check); right — primary action button:
+- Toolbar row (`flex items-center justify-between mt-2`): left — `Paperclip` icon `Button variant="ghost" size="icon-sm"` (attach file, `aria-label="Attach file"`, triggers native file input, enforces 10MB/allowlist client-side per D-23 with server-side re-check); right — primary action button:
   - Public mode: `Button` default (primary indigo) — label `"Send Reply"`.
-  - Internal Note mode: `Button` with warning-tint override (`bg-warning text-warning-foreground hover:bg-warning/90`, still `size="default"` shape) — label `"Save Internal Note"`. (Deliberately never the indigo primary button in this mode — reinforces D-10's visual-distinction requirement all the way to the CTA.)
+  - Internal Note mode: `Button` with warning-tint override, matching the codebase's existing tint-only destructive/warning convention (`badge.tsx`/`button.tsx` — no solid-fill destructive or warning button variant exists in this codebase, and no `--warning-foreground` companion token is declared): `bg-warning/10 text-warning border border-warning/30 hover:bg-warning/20`, still `size="default"` shape, `Lock` icon (`size-3.5`) + label `"Save Internal Note"`. (Deliberately never the indigo primary button in this mode — reinforces D-10's visual-distinction requirement all the way to the CTA.)
 - Attached-but-unsent files: shown as removable `AttachmentChip`s above the toolbar row.
 
 **States:**
@@ -270,11 +272,11 @@ Not split-pane (D-08 calls out a "dedicated contact detail page" — full naviga
 
 Extend the existing `/settings` page (currently just "AI Features") with a horizontal `Tabs`-like sub-nav — **exception**: this is the one place `Tabs`-shaped navigation is justified (settings sections will keep growing in Phase 3/4), but implemented as simple `Link`s styled as pill tabs (same pattern as the inbox `FilterChipRow`, not a new dependency) rather than adding the shadcn `Tabs` package: `AI Features | SLA Policies | Tags | Custom Fields`, active = `bg-primary/10 text-primary`.
 
-**SLA Policies** (D-14): a `Card` per priority (4 total, fixed — Low/Normal/High/Urgent, no add/delete), each row: priority label (`PriorityChip`) + two `Input type="number"` fields (First Response target, Resolution target) with a unit toggle/suffix ("hours"), `Save` `Button` per-row or one form-level `Save` for all four. Seeded defaults shown as placeholders/initial values: Urgent 1h/8h, High 4h/24h, Normal 8h/48h, Low 24h/72h (illustrative — RESEARCH.md, planner confirms final numbers).
+**SLA Policies** (D-14): a `Card` per priority (4 total, fixed — Low/Normal/High/Urgent, no add/delete), each row: priority label (`PriorityChip`) + two `Input type="number"` fields (First Response target, Resolution target) with a unit toggle/suffix ("hours"), `"Save SLA Targets"` `Button` per-row or one form-level `"Save SLA Targets"` for all four. Seeded defaults shown as placeholders/initial values: Urgent 1h/8h, High 4h/24h, Normal 8h/48h, Low 24h/72h (illustrative — RESEARCH.md, planner confirms final numbers).
 
-**Tags** (D-17): flat list (`divide-y divide-border`), each row: `TagChip` + ticket-count (`text-[12px] text-muted-foreground`) + inline rename (`Input`, appears on click) + delete `Button variant="ghost" size="icon-sm"` (`Trash2` icon, `text-muted-foreground hover:text-destructive`). Delete triggers a `Dialog` confirmation (see Copywriting Contract — destructive actions).
+**Tags** (D-17): flat list (`divide-y divide-border`), each row: `TagChip` + ticket-count (`text-[12px] text-muted-foreground`) + inline rename (`Input`, appears on click) + delete `Button variant="ghost" size="icon-sm"` (`Trash2` icon, `text-muted-foreground hover:text-destructive`, `aria-label="Delete tag {tag}"`). Delete triggers a `Dialog` confirmation (see Copywriting Contract — destructive actions).
 
-**Custom Fields** (D-18): flat list, each row: label + `Badge variant="outline"` showing type (Text/Dropdown/Number/Checkbox/Date) + edit + delete (`Dialog` confirmation). "Add Field" `Button` opens a `Dialog` form: Label (`Input`), Type (`DropdownMenu` single-select of the 5 types), Options (only for Dropdown — repeatable `Input` list), Save.
+**Custom Fields** (D-18): flat list, each row: label + `Badge variant="outline"` showing type (Text/Dropdown/Number/Checkbox/Date) + edit (`Button variant="ghost" size="icon-sm"`, `Pencil` icon, `aria-label="Edit field {label}"`) + delete (`Button variant="ghost" size="icon-sm"`, `Trash2` icon, `text-muted-foreground hover:text-destructive`, `aria-label="Delete field {label}"`, `Dialog` confirmation). "Add Field" `Button` opens a `Dialog` form: Label (`Input`), Type (`DropdownMenu` single-select of the 5 types), Options (only for Dropdown — repeatable `Input` list), primary action `"Create Field"`.
 
 **States:**
 - Tags empty: inline text `"No tags yet — tags created from the ticket composer will appear here for management."`
@@ -335,6 +337,8 @@ Same `PublicPageShell` wrapper, Card max-width **720px** (wider than the intake 
 | Primary CTA (public intake form) | `Submit Request` |
 | Primary CTA (status page follow-up) | `Send Follow-up` |
 | Secondary CTA (agent-created ticket, inbox top bar) | `New Ticket` |
+| Primary CTA (SLA Policies settings form) | `Save SLA Targets` |
+| Primary CTA (Custom Field dialog) | `Create Field` |
 | Empty state — inbox, zero tickets ever | Heading: `Your inbox is empty` · Body: `New tickets will appear here as customers reach out through your web form. Share your intake link to start receiving requests.` |
 | Empty state — inbox, filtered view (e.g. Unassigned) | `Nothing here — no tickets match this view.` |
 | Empty state — no ticket selected | Heading: `Select a ticket` · Body: `Choose a ticket from the list to view the conversation.` |
@@ -373,7 +377,7 @@ Decisions made at the researcher's discretion where DESIGN-SYSTEM.md, CONTEXT.md
 3. **Ticket detail routing:** `/tickets/[id]` opens a ticket within the same 2-pane layout (list stays visible, deep-linkable); `/tickets` alone shows the list with a "Select a ticket" reading-pane placeholder. Not explicitly specified in CONTEXT.md — this is the standard shared-inbox pattern (Front/Missive-style) referenced in CONTEXT's `<specifics>`.
 4. **Public intake form path:** proposed as `/request` (not `/web-form` or `/contact`) for a clean customer-facing URL consistent with "request" terminology used elsewhere. Bikeshedding-safe to change.
 5. **Date custom-field type:** rendered as a native `<input type="date">` (via the existing `Input` component), not a calendar/date-picker popover — avoids adding a new shadcn dependency for a single field type in v1.
-6. **New `--warning`/`--success` oklch values** are proposed starting points tuned for text-legibility (mirroring how `--destructive` is used directly as `text-destructive`), not copied verbatim from DESIGN-SYSTEM.md §4.7's badge-background suggestion (which was tuned for a different usage — solid badge fill, not text-on-tint). Confirm visually in both light and dark mode before merging (DESIGN-SYSTEM §7 requirement).
+6. **New `--warning`/`--success` oklch values** are proposed starting points tuned for text-legibility (mirroring how `--destructive` is used directly as `text-destructive`), not copied verbatim from DESIGN-SYSTEM.md §4.7's badge-background suggestion (which was tuned for a different usage — solid badge fill, not text-on-tint). Confirm visually in both light and dark mode before merging (DESIGN-SYSTEM §7 requirement). Both tokens deliberately follow the single-token `--destructive` convention (no `-foreground` companion) — every warning/success surface in this spec uses the tint pattern, never a solid fill, so no companion foreground token is ever needed.
 7. **Success-page copy for the public form** ("We've sent a confirmation with a link to track your request.") pre-writes for Phase 3 email delivery even though no email exists yet in Phase 2 — the status link itself is shown immediately on the same page regardless, so the promise is not misleading (link is genuinely delivered, just not yet via email). Revisit copy if Phase 3 lands differently than expected.
 8. **Contacts list row style:** flat divided rows (`divide-y`) rather than a card grid — optimizes for scan-density consistent with the ticket list, not explicitly mandated by CONTEXT.md.
 9. **Settings sub-nav as pill-tab `Link`s** (not the shadcn `Tabs` package) — kept consistent with the inbox's `FilterChipRow` pattern and avoids adding a dependency used nowhere else in the app.
