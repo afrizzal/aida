@@ -2,8 +2,21 @@ import { prisma } from "./db";
 
 // Org-scoped DOMAIN models only. Better Auth models (user/session/organization/member/invitation/account/verification)
 // and global SystemSetting are intentionally EXCLUDED — they either have no organizationId field or are cross-tenant.
-// Append new org-scoped models here as future phases add them (e.g. "Ticket", "Contact", ...).
-export const DOMAIN_MODELS = ["Setting"] as const;
+// TicketTag (join table, scoped via parent Ticket nested writes) and RateLimitHit (not tenant-scoped) are
+// intentionally EXCLUDED too — see 02-RESEARCH.md.
+// Append new org-scoped models here as future phases add them.
+export const DOMAIN_MODELS = [
+  "Setting",
+  "Ticket",
+  "Contact",
+  "Message",
+  "Tag",
+  "SlaPolicy",
+  "CustomFieldDefinition",
+  "CustomFieldValue",
+  "Attachment",
+  "TicketCounter",
+] as const;
 
 const isDomain = (model?: string): boolean =>
   !!model && (DOMAIN_MODELS as readonly string[]).includes(model);
