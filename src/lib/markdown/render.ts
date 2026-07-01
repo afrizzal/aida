@@ -1,12 +1,12 @@
 import type { Element, Root } from "hast";
-import { unified } from "unified";
-import remarkParse from "remark-parse";
-import remarkGfm from "remark-gfm";
-import remarkRehype from "remark-rehype";
+import type { Schema } from "hast-util-sanitize";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeStringify from "rehype-stringify";
+import remarkGfm from "remark-gfm";
+import remarkParse from "remark-parse";
+import remarkRehype from "remark-rehype";
+import { unified } from "unified";
 import { visit } from "unist-util-visit";
-import type { Schema } from "hast-util-sanitize";
 
 // Single shared sanitization schema: github-style defaultSchema plus safe
 // rel/target attributes on links. Ticket text (agent + requester) is
