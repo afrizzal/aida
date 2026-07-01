@@ -86,11 +86,21 @@ The human acceptance gate covers the following 8 steps:
 
 ## Verification Outcome
 
-**Status: AWAITING HUMAN RESPONSE**
+**Status: APPROVED — 2026-07-01**
 
-Human sign-off required. See the Checkpoint section above for the structured walkthrough.
+Human sign-off received via `/gsd:verify-work` conversational UAT (`.planning/phases/01-foundation/01-UAT.md`). All 9 tests passed, 0 issues:
 
-_Update this section after human responds: "APPROVED — [date]" or list defects by step number._
+1. Cold Start Smoke Test — pass
+2. First-Run Setup Wizard — pass
+3. Setup Self-Disable + No Public Register — pass
+4. Login (wrong then correct credentials) — pass
+5. App Shell (sidebar, top bar, navigation) — pass
+6. Dark Mode Toggle — pass
+7. Settings AI Toggle Persistence — pass
+8. Server-Side Auth Guard — pass
+9. Worker Heartbeat Liveness — pass (verified live: `/api/health` → `{"status":"ok","db":"connected","worker":{"lastRunAt":"2026-07-01T13:35:13.861Z"}}`)
+
+Phase 1 acceptance gate is CLEARED. Ready for Phase 2 planning.
 
 ## Deviations from Plan
 
