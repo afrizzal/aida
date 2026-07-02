@@ -50,7 +50,7 @@
 - [x] 02-01-PLAN.md — Data model + relational/FTS migrations + scopedDb allowlist + tenant-in-tx smoke test (Wave 1)
 - [x] 02-02-PLAN.md — Deps + shadcn primitives + warning/success tokens + Badge variants + renderMarkdown (Wave 1)
 - [ ] 02-03-PLAN.md — Ticket core: status-token, SLA helpers, contact find-or-create, createTicket transaction (Wave 2)
-- [ ] 02-04-PLAN.md — Org-safe full-text search + attachment storage (FileStorage/local/constants) (Wave 2)
+- [x] 02-04-PLAN.md — Org-safe full-text search + attachment storage (FileStorage/local/constants) (Wave 2)
 - [ ] 02-05-PLAN.md — SLA-flag worker job + Postgres rate limiting + cleanup + worker wiring (Wave 2)
 - [ ] 02-06-PLAN.md — Reusable chip/avatar components (status/priority/SLA/tag/attachment/assignee) (Wave 2)
 - [ ] 02-07-PLAN.md — Settings surfaces: SLA policies, tags, custom fields + CustomFieldInput (admin-gated) (Wave 2)
