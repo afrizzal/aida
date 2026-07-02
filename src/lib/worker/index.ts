@@ -1,6 +1,8 @@
 import { PgBoss } from "pg-boss";
 import type { Job } from "pg-boss";
 import { heartbeatHandler } from "./jobs/heartbeat";
+import { rateLimitCleanupHandler } from "./jobs/rate-limit-cleanup";
+import { slaFlagHandler } from "./jobs/sla-flag";
 
 async function main() {
   const connectionString = process.env.DATABASE_URL;
@@ -21,6 +23,18 @@ async function main() {
 
   // idempotent upsert via schedule(); runs every minute
   await boss.schedule("heartbeat", "* * * * *", {});
+
+  await boss.createQueue("sla-flag");
+  await boss.work("sla-flag", async ([job]: Job[]) => {
+    await slaFlagHandler(job.data);
+  });
+  await boss.schedule("sla-flag", "*/5 * * * *", {});
+
+  await boss.createQueue("rate-limit-cleanup");
+  await boss.work("rate-limit-cleanup", async (_jobs: Job[]) => {
+    await rateLimitCleanupHandler();
+  });
+  await boss.schedule("rate-limit-cleanup", "0 3 * * *", {}); // daily 03:00
 
   console.log("[worker] started");
 
