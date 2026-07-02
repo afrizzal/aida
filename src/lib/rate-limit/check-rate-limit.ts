@@ -4,7 +4,9 @@ import { prisma } from "@/lib/db";
 const PEPPER = process.env.RATE_LIMIT_PEPPER ?? "aida-default-pepper";
 
 function hashIp(ip: string) {
-  return createHash("sha256").update(ip + PEPPER).digest("hex");
+  return createHash("sha256")
+    .update(ip + PEPPER)
+    .digest("hex");
 }
 
 export async function checkRateLimit(
