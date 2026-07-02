@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-02T00:10:00.000Z"
+last_updated: "2026-07-02T00:54:27.028Z"
 last_activity: 2026-07-02
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 20
-  completed_plans: 10
+  completed_plans: 11
   percent: 50
 ---
 
@@ -26,12 +26,12 @@ progress:
 
 ## Current Position
 
-Phase: 02 (core-ticketing) — 🟡 IN PROGRESS (wave 1 of 5 complete)
-Plan: 2 of 12 core-ticketing plans complete (02-01, 02-02 — both wave 1, no dependency between them)
-Status: Wave 1 complete. Plan 02-01 (schema/migrations/scopedDb allowlist) and plan 02-02 (deps/tokens/renderMarkdown) both done. Next: Wave 2 (02-03 ticket-core, 02-04 FTS+attachments, 02-05 SLA worker+rate-limit, 02-06 chips, 02-07 settings).
+Phase: 02 (core-ticketing) — 🟡 IN PROGRESS (wave 2 in progress)
+Plan: 3 of 12 core-ticketing plans complete (02-01, 02-02 wave 1; 02-06 wave 2 — chip vocabulary, no dependency beyond 02-02)
+Status: 02-06 (ticket chip vocabulary) complete. Wave 2 continues: 02-03, 02-04, 02-05, 02-07 still pending.
 Last activity: 2026-07-02
 
-Progress: [█████░░░░░] 50% (10/20 plans complete — 8/8 phase 01 + 2/12 phase 02)
+Progress: [██████░░░░] 55% (11/20 plans complete — 8/8 phase 01 + 3/12 phase 02)
 
 ## Accumulated Context
 
@@ -75,10 +75,11 @@ Progress: [█████░░░░░] 50% (10/20 plans complete — 8/8 pha
 - (02-02) `rehype-sanitize`'s `defaultSchema` allowlist only lets `target`/`rel` attributes SURVIVE sanitization if already present on the node — it does not add them. A custom `rehypeSafeLinks` unified plugin (via `unist-util-visit`) stamps `target="_blank"` + `rel="nofollow noopener noreferrer"` on every link before the sanitize pass.
 - (02-02) `hast-util-sanitize` must be an explicit `devDependency` (not left implicit/transitive) — pnpm's strict `node_modules` linking makes transitive-only packages unresolvable for direct type imports.
 - (02-02) Fresh worktree/clone bootstrap: `cp .env.example .env && pnpm prisma generate` is required before `tsc --noEmit` will pass (generated client + `.env` are both gitignored).
+- (02-06) Ticket chip vocabulary built in `src/components/tickets/`: `StatusChip` (5-state), `PriorityChip` (4-level), `SlaDueChip` (3-state, precedence breached > at-risk > on-track), `TagChip`/`TagOverflowChip`, `AttachmentChip`/`formatBytes`, `AssigneeAvatar` (+ dashed Unassigned placeholder), and `formatDueDuration` helper — all token-only (Badge base + `cn(sizeClasses, stateClasses)`, twMerge dedupes). Future inbox/reading-pane/contacts/public UI (plans 08/09/10/12) must reuse these, not re-derive status/priority/SLA color logic.
 
 ### Open Todos
 
-- Execute Phase 2: `/gsd:execute-phase 2`. Wave 1 (02-01, 02-02) complete. Next: Wave 2 (02-03..02-07) → Wave 3 (02-08/10/11) → Wave 4 (02-09) → Wave 5 (02-12).
+- Execute Phase 2: `/gsd:execute-phase 2`. Wave 1 (02-01, 02-02) complete; 02-06 (wave 2, chips) complete. Next: remaining Wave 2 (02-03 ticket-core, 02-04 FTS+attachments, 02-05 SLA worker+rate-limit, 02-07 settings) → Wave 3 (02-08/10/11) → Wave 4 (02-09) → Wave 5 (02-12).
 - Watch during execution: "New Ticket" CTA must land in the inbox top bar (plan 08 territory) so a zero-ticket workspace has an agent-reachable creation path — plan 09's task text left this ambiguous ("list panel header or reading-pane header"); the reading-pane-only option would break cold start.
 - 02-01 done: tenant-in-tx smoke test used the correct type-cast pattern (not explicit organizationId) — auto-injection genuinely proven, no fallback needed downstream.
 
@@ -88,13 +89,15 @@ None.
 
 ## Session Continuity
 
-**Last action:** Wave 1 of Phase 2 complete — both plans executed independently (no dependency between them):
-- **02-01** (core-ticketing data foundation): 11 Prisma models + 5 enums added, relational migration generated; FTS tsvector/GIN migration hand-written outside schema.prisma; scopedDb DOMAIN_MODELS extended to 9 tenant models; Wave-0 smoke test proves scopedDb auto-injects organizationId inside interactive `$transaction` (no fallback needed for plan 03). 4/4 integration tests green (Testcontainers). Commits: `cd4d067`, `133e86b`, `6b299c6`, `6fe228b`, `8c88164`. SUMMARY: `.planning/phases/02-core-ticketing/02-01-SUMMARY.md`.
-- **02-02** (deps/tokens/renderMarkdown): Installed 7 markdown/file-type packages + 5 shadcn primitives (`textarea`, `popover`, `command`, `checkbox`, `skeleton`). Added `--warning`/`--success` tokens (light+dark) and matching `Badge` variants. Built `renderMarkdown()` (TDD: RED → GREEN → REFACTOR, 6/6 assertions green) — required an unplanned custom `rehypeSafeLinks` plugin. Commits: `64acb84`, `fc7166c`, `a758621`, `63ce2c5`, `2441fa3`, `2d87e99`. SUMMARY: `.planning/phases/02-core-ticketing/02-02-SUMMARY.md`.
+**Last action:** Plan 02-06 (ticket chip vocabulary, wave 2) complete:
 
-Both worktree branches merged into `master` (merge commits `64f0888` and pending 02-02 merge).
+- **02-06** (ticket chip vocabulary): Built `StatusChip` (5-state), `PriorityChip` (4-level), `SlaDueChip` (3-state, breached > at-risk > on-track precedence), `TagChip`/`TagOverflowChip`, `AttachmentChip`/`formatBytes`, `AssigneeAvatar` (+ dashed Unassigned placeholder) and `formatDueDuration` — all in `src/components/tickets/` + `src/lib/tickets/format-duration.ts`, token-only (no hex/oklch), typed against generated Prisma enums. `pnpm exec tsc --noEmit` and `biome check` both clean. Commits: `16f1032` (Task 1), `daa38bb` (Task 2). SUMMARY: `.planning/phases/02-core-ticketing/02-06-SUMMARY.md`.
 
-**Next action:** Wave 2 (02-03 ticket-core depends on 02-01, 02-04 FTS+attachments, 02-05 SLA worker+rate-limit, 02-06 chips, 02-07 settings) — 5 plans, all depend on Wave 1's schema/scopedDb/tokens being in place. Then Wave 3 (02-08 inbox, 02-10 contacts, 02-11 public intake) → Wave 4 (02-09 reading pane) → Wave 5 (02-12 public status page).
+Note: this worktree branch was several waves behind `master` when execution started (Wave 1 plans 02-01/02-02 had already merged) — resolved via `git merge --ff-only master` + `pnpm install` + `pnpm prisma generate` before Task 1.
+
+Previously completed (Wave 1): **02-01** (core-ticketing data foundation) and **02-02** (deps/tokens/renderMarkdown) — see prior SUMMARY files for detail. Both merged into `master`.
+
+**Next action:** Remaining Wave 2 plans — 02-03 (ticket-core, depends on 02-01), 02-04 (FTS+attachments), 02-05 (SLA worker+rate-limit), 02-07 (settings). Then Wave 3 (02-08 inbox, 02-10 contacts, 02-11 public intake — inbox/contacts/public UI should now consume the 02-06 chip vocabulary) → Wave 4 (02-09 reading pane) → Wave 5 (02-12 public status page).
 
 **Phase 2 research open questions (resolved during planning, researcher's recommended defaults all adopted):** (1) public status-page token = a dedicated unguessable random token, NOT the raw ticket cuid; (2) single-workspace v1 web-form org resolution = `findFirstOrThrow()`; (3) SLA "at-risk" threshold = proportional 20% of target duration remaining, not a flat cutoff.
 
@@ -112,4 +115,4 @@ Both worktree branches merged into `master` (merge commits `64f0888` and pending
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
 ---
-*Last updated: 2026-07-02 — Wave 1 of Phase 2 complete: plan 02-01 (schema/migrations/scopedDb allowlist) and plan 02-02 (deps/tokens/renderMarkdown) both done, merged to master; next: Wave 2 (02-03..02-07).*
+*Last updated: 2026-07-02 — Plan 02-06 (ticket chip vocabulary) complete; Wave 2 continues with 02-03, 02-04, 02-05, 02-07.*
