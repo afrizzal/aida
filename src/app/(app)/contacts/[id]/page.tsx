@@ -96,9 +96,7 @@ export default async function ContactDetailPage({ params }: ContactDetailPagePro
                 href={`/tickets/${ticket.id}`}
                 className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/50"
               >
-                <span className="shrink-0 text-[13px] text-muted-foreground">
-                  #{ticket.number}
-                </span>
+                <span className="shrink-0 text-[13px] text-muted-foreground">#{ticket.number}</span>
                 <span className="min-w-0 flex-1 truncate text-[14px] text-foreground">
                   {ticket.subject}
                 </span>

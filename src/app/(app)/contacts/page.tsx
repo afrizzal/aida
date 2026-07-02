@@ -69,9 +69,7 @@ export default async function ContactsPage({ searchParams }: ContactsPageProps) 
                   </AvatarFallback>
                 </Avatar>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[14px] font-medium text-foreground">
-                    {displayName}
-                  </p>
+                  <p className="truncate text-[14px] font-medium text-foreground">{displayName}</p>
                   <p className="truncate text-[12px] text-muted-foreground">{contact.email}</p>
                 </div>
                 {contact.company ? (
