@@ -26,8 +26,19 @@ export interface ThreadMessageData {
  * internal note). `message.bodyHtml` is the ONLY value ever passed to
  * dangerouslySetInnerHTML — it is pre-sanitized exclusively by renderMarkdown()
  * (src/lib/markdown/render.ts); never render bodyMarkdown raw.
+ *
+ * `attachmentHrefBase` lets callers point attachment links at a different serving
+ * route (e.g. the public token-scoped route in plan 12) without duplicating this
+ * component. Defaults to the authenticated agent-facing route (plan 09 behavior
+ * unchanged).
  */
-export function ThreadMessage({ message }: { message: ThreadMessageData }) {
+export function ThreadMessage({
+  message,
+  attachmentHrefBase = "/api/attachments",
+}: {
+  message: ThreadMessageData;
+  attachmentHrefBase?: string;
+}) {
   const isInbound = message.authorContactId !== null;
   const isInternal = message.visibility === "INTERNAL";
 
@@ -69,7 +80,7 @@ export function ThreadMessage({ message }: { message: ThreadMessageData }) {
               key={attachment.id}
               filename={attachment.originalFilename}
               sizeLabel={formatBytes(attachment.sizeBytes)}
-              href={`/api/attachments/${attachment.id}`}
+              href={`${attachmentHrefBase}/${attachment.id}`}
             />
           ))}
         </div>
