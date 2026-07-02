@@ -27,6 +27,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import type { CustomFieldType, TicketStatus } from "@/generated/prisma/client";
 import { parseCfParam, serializeCfParam } from "@/lib/tickets/cf-param";
 import { cn } from "@/lib/utils";
+import { NewTicketDialog } from "./new-ticket-dialog";
 import { TicketSearchInput } from "./ticket-search-input";
 
 const VIEWS = [
@@ -146,8 +147,11 @@ export function FilterChipRow({ tags, customFieldDefinitions }: FilterChipRowPro
             </button>
           ))}
         </div>
-        <div className="ml-auto w-full max-w-[180px]">
-          <TicketSearchInput />
+        <div className="ml-auto flex items-center gap-2">
+          <NewTicketDialog />
+          <div className="w-full max-w-[180px]">
+            <TicketSearchInput />
+          </div>
         </div>
       </div>
 
