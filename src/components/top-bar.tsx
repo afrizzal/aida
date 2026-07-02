@@ -15,6 +15,7 @@ interface TopBarProps {
 
 const pageTitles: Record<string, string> = {
   "/tickets": "Tickets",
+  "/contacts": "Contacts",
   "/kb": "Knowledge Base",
   "/settings": "Settings",
 };
