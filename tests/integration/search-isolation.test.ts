@@ -40,11 +40,7 @@ async function seedTicket(params: {
   });
 }
 
-async function seedMessage(params: {
-  orgId: string;
-  ticketId: string;
-  bodyMarkdown: string;
-}) {
+async function seedMessage(params: { orgId: string; ticketId: string; bodyMarkdown: string }) {
   return prisma.message.create({
     data: {
       organizationId: params.orgId,
