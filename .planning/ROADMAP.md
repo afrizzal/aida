@@ -46,14 +46,14 @@
 3. Tickets link to contact records showing per-contact history; agents can assign tickets and post public replies vs private notes (visually distinct).
 4. Tags + basic custom fields work and are filterable; SLA first-response/resolution timers compute from priority and show at-risk/breached states.
 5. A public web form creates a ticket and returns a status link; the conversation thread supports attachments.
-**Plans:** 2/12 plans executed
+**Plans:** 3/12 plans executed
 - [x] 02-01-PLAN.md — Data model + relational/FTS migrations + scopedDb allowlist + tenant-in-tx smoke test (Wave 1)
 - [x] 02-02-PLAN.md — Deps + shadcn primitives + warning/success tokens + Badge variants + renderMarkdown (Wave 1)
 - [ ] 02-03-PLAN.md — Ticket core: status-token, SLA helpers, contact find-or-create, createTicket transaction (Wave 2)
 - [ ] 02-04-PLAN.md — Org-safe full-text search + attachment storage (FileStorage/local/constants) (Wave 2)
 - [ ] 02-05-PLAN.md — SLA-flag worker job + Postgres rate limiting + cleanup + worker wiring (Wave 2)
 - [ ] 02-06-PLAN.md — Reusable chip/avatar components (status/priority/SLA/tag/attachment/assignee) (Wave 2)
-- [ ] 02-07-PLAN.md — Settings surfaces: SLA policies, tags, custom fields + CustomFieldInput (admin-gated) (Wave 2)
+- [x] 02-07-PLAN.md — Settings surfaces: SLA policies, tags, custom fields + CustomFieldInput (admin-gated) (Wave 2)
 - [ ] 02-08-PLAN.md — Shared inbox: 2-pane shell, list rows, view/status/tag/custom-field filters + FTS search (Wave 3)
 - [ ] 02-09-PLAN.md — Reading pane: thread + composer (public/note) + attachments + ticket mutations + New Ticket (Wave 4)
 - [ ] 02-10-PLAN.md — Contacts list + detail + per-contact ticket history + Notes autosave (Wave 3)
