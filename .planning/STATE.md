@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-02T00:10:00.000Z"
+last_updated: "2026-07-02T01:03:22.618Z"
 last_activity: 2026-07-02
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 20
-  completed_plans: 10
-  percent: 50
+  completed_plans: 11
+  percent: 55
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -26,12 +26,12 @@ progress:
 
 ## Current Position
 
-Phase: 02 (core-ticketing) — 🟡 IN PROGRESS (wave 1 of 5 complete)
-Plan: 2 of 12 core-ticketing plans complete (02-01, 02-02 — both wave 1, no dependency between them)
-Status: Wave 1 complete. Plan 02-01 (schema/migrations/scopedDb allowlist) and plan 02-02 (deps/tokens/renderMarkdown) both done. Next: Wave 2 (02-03 ticket-core, 02-04 FTS+attachments, 02-05 SLA worker+rate-limit, 02-06 chips, 02-07 settings).
+Phase: 02 (core-ticketing) — 🟡 IN PROGRESS (wave 2 of 5 in progress: 02-03 done, 02-04/02-05/02-06/02-07 remaining)
+Plan: 3 of 12 core-ticketing plans complete (02-01, 02-02 both wave 1; 02-03 wave 2, depended on 02-01+02-02)
+Status: Ready to execute
 Last activity: 2026-07-02
 
-Progress: [█████░░░░░] 50% (10/20 plans complete — 8/8 phase 01 + 2/12 phase 02)
+Progress: [██████░░░░] 55% (11/20 plans complete — 8/8 phase 01 + 3/12 phase 02)
 
 ## Accumulated Context
 
@@ -75,12 +75,18 @@ Progress: [█████░░░░░] 50% (10/20 plans complete — 8/8 pha
 - (02-02) `rehype-sanitize`'s `defaultSchema` allowlist only lets `target`/`rel` attributes SURVIVE sanitization if already present on the node — it does not add them. A custom `rehypeSafeLinks` unified plugin (via `unist-util-visit`) stamps `target="_blank"` + `rel="nofollow noopener noreferrer"` on every link before the sanitize pass.
 - (02-02) `hast-util-sanitize` must be an explicit `devDependency` (not left implicit/transitive) — pnpm's strict `node_modules` linking makes transitive-only packages unresolvable for direct type imports.
 - (02-02) Fresh worktree/clone bootstrap: `cp .env.example .env && pnpm prisma generate` is required before `tsc --noEmit` will pass (generated client + `.env` are both gitignored).
+- (02-03) `createTicket(orgId, input)` (`src/lib/tickets/create-ticket.ts`) is the ONE code path that creates tickets — reused by the agent "New Ticket" flow (plan 08/09) and the public web form (plan 11). Never add a second ticket-creation call site.
+- (02-03) SLA seeded defaults finalized (not just illustrative): URGENT 1h/8h, HIGH 4h/24h, NORMAL 8h/48h, LOW 24h/72h (first-response/resolution minutes) — `src/lib/tickets/sla.ts` `DEFAULT_SLA_TARGETS`.
+- (02-03) Public status-page token = dedicated `crypto.randomBytes(24).toString("base64url")` secret (`Ticket.statusToken`), never the ticket cuid — `src/lib/tickets/status-token.ts` `generateStatusToken()`.
+- (02-03) Pattern: helpers called from inside `createTicket`'s interactive `$transaction` (e.g. `findOrCreateContact`, `getSlaTargets`) must type their `db` param as `Pick<ReturnType<typeof scopedDb>, "modelName">`, not the full `ReturnType<typeof scopedDb>` — the `tx` client structurally lacks `$connect`/`$disconnect`/`$extends`/`$transaction`, so the full type fails `tsc --noEmit` at call sites inside the transaction.
+- (02-03) `findOrCreateContact` only backfills currently-null name/phone/company on an existing Contact match; never overwrites a populated field (D-07 "missing fields fill in over time").
 
 ### Open Todos
 
-- Execute Phase 2: `/gsd:execute-phase 2`. Wave 1 (02-01, 02-02) complete. Next: Wave 2 (02-03..02-07) → Wave 3 (02-08/10/11) → Wave 4 (02-09) → Wave 5 (02-12).
+- Execute Phase 2: `/gsd:execute-phase 2`. Wave 1 (02-01, 02-02) complete. Wave 2: 02-03 (ticket-core) done. Next: 02-04 (FTS+attachments), 02-05 (SLA worker+rate-limit), 02-06 (tag chips), 02-07 (settings) — remaining Wave 2 plans, then Wave 3 (02-08/10/11) → Wave 4 (02-09) → Wave 5 (02-12).
 - Watch during execution: "New Ticket" CTA must land in the inbox top bar (plan 08 territory) so a zero-ticket workspace has an agent-reachable creation path — plan 09's task text left this ambiguous ("list panel header or reading-pane header"); the reading-pane-only option would break cold start.
 - 02-01 done: tenant-in-tx smoke test used the correct type-cast pattern (not explicit organizationId) — auto-injection genuinely proven, no fallback needed downstream.
+- 02-03 done: `createTicket()`, `findOrCreateContact()`, `getSlaTargets()`/`computeDueTimestamps()`, `generateStatusToken()` all available now for 02-08/09/11/12 to call directly.
 
 ### Blockers
 
@@ -88,13 +94,15 @@ None.
 
 ## Session Continuity
 
-**Last action:** Wave 1 of Phase 2 complete — both plans executed independently (no dependency between them):
+**Last action:** Wave 2 of Phase 2 in progress — plan 02-03 (ticket-creation domain core) complete:
+
 - **02-01** (core-ticketing data foundation): 11 Prisma models + 5 enums added, relational migration generated; FTS tsvector/GIN migration hand-written outside schema.prisma; scopedDb DOMAIN_MODELS extended to 9 tenant models; Wave-0 smoke test proves scopedDb auto-injects organizationId inside interactive `$transaction` (no fallback needed for plan 03). 4/4 integration tests green (Testcontainers). Commits: `cd4d067`, `133e86b`, `6b299c6`, `6fe228b`, `8c88164`. SUMMARY: `.planning/phases/02-core-ticketing/02-01-SUMMARY.md`.
 - **02-02** (deps/tokens/renderMarkdown): Installed 7 markdown/file-type packages + 5 shadcn primitives (`textarea`, `popover`, `command`, `checkbox`, `skeleton`). Added `--warning`/`--success` tokens (light+dark) and matching `Badge` variants. Built `renderMarkdown()` (TDD: RED → GREEN → REFACTOR, 6/6 assertions green) — required an unplanned custom `rehypeSafeLinks` plugin. Commits: `64acb84`, `fc7166c`, `a758621`, `63ce2c5`, `2441fa3`, `2d87e99`. SUMMARY: `.planning/phases/02-core-ticketing/02-02-SUMMARY.md`.
+- **02-03** (ticket-creation domain core): `generateStatusToken()`, `sla.ts` (`DEFAULT_SLA_TARGETS`/`getSlaTargets`/`computeDueTimestamps`), `findOrCreateContact()` (normalized-email dedup/backfill), and `createTicket(orgId, input)` — the single entrypoint wrapping contact link/create + `TicketCounter.upsert` + SLA stamping + sanitized initial `Message` in one `$transaction`. 3/3 integration tests green (sequential numbering; 20-way concurrency, zero duplicate numbers; `A@X.com`/`a@x.com` dedupe to one Contact). Commits: `8f9959b`, `b4d88e7`, `3cb499e`, `f3f2b1e`. SUMMARY: `.planning/phases/02-core-ticketing/02-03-SUMMARY.md`.
 
-Both worktree branches merged into `master` (merge commits `64f0888` and pending 02-02 merge).
+Both Wave 1 worktree branches merged into `master` (merge commits `64f0888`, `6871bd6`). 02-03 executed directly on a worktree fast-forwarded onto master (picked up Wave 1's schema/scopedDb/renderMarkdown) — not yet merged back.
 
-**Next action:** Wave 2 (02-03 ticket-core depends on 02-01, 02-04 FTS+attachments, 02-05 SLA worker+rate-limit, 02-06 chips, 02-07 settings) — 5 plans, all depend on Wave 1's schema/scopedDb/tokens being in place. Then Wave 3 (02-08 inbox, 02-10 contacts, 02-11 public intake) → Wave 4 (02-09 reading pane) → Wave 5 (02-12 public status page).
+**Next action:** Remaining Wave 2 plans — 02-04 (FTS+attachments), 02-05 (SLA worker+rate-limit), 02-06 (tag chips), 02-07 (settings) — all depend on Wave 1's schema/scopedDb/tokens being in place (already satisfied); 02-03 additionally unblocks anything needing `createTicket()`. Then Wave 3 (02-08 inbox, 02-10 contacts, 02-11 public intake) → Wave 4 (02-09 reading pane) → Wave 5 (02-12 public status page).
 
 **Phase 2 research open questions (resolved during planning, researcher's recommended defaults all adopted):** (1) public status-page token = a dedicated unguessable random token, NOT the raw ticket cuid; (2) single-workspace v1 web-form org resolution = `findFirstOrThrow()`; (3) SLA "at-risk" threshold = proportional 20% of target duration remaining, not a flat cutoff.
 
@@ -112,4 +120,4 @@ Both worktree branches merged into `master` (merge commits `64f0888` and pending
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
 ---
-*Last updated: 2026-07-02 — Wave 1 of Phase 2 complete: plan 02-01 (schema/migrations/scopedDb allowlist) and plan 02-02 (deps/tokens/renderMarkdown) both done, merged to master; next: Wave 2 (02-03..02-07).*
+*Last updated: 2026-07-02 — Wave 2 of Phase 2 in progress: plan 02-03 (ticket-creation domain core — createTicket/findOrCreateContact/sla/status-token) done, 3/3 integration tests green; next: 02-04, 02-05, 02-06, 02-07.*
