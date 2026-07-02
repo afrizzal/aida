@@ -31,6 +31,9 @@ model user {
   accounts    account[]
   members     member[]
   invitations invitation[]
+
+  assignedTickets  Ticket[]  @relation("TicketAssignee")
+  authoredMessages Message[] @relation("MessageAuthor")
 }
 
 model session {
@@ -96,6 +99,16 @@ model organization {
   members     member[]
   invitations invitation[]
   settings    Setting[]
+
+  tickets                Ticket[]
+  ticketCounter          TicketCounter?
+  contacts               Contact[]
+  messages               Message[]
+  tags                   Tag[]
+  slaPolicies            SlaPolicy[]
+  customFieldDefinitions CustomFieldDefinition[]
+  customFieldValues      CustomFieldValue[]
+  attachments            Attachment[]
 }
 
 model member {
@@ -149,4 +162,216 @@ model SystemSetting {
   key       String   @unique
   value     String
   updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Domain models (Phase 2 — core ticketing)
+// ---------------------------------------------------------------------------
+
+enum TicketStatus {
+  NEW
+  OPEN
+  PENDING
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageVisibility {
+  PUBLIC
+  INTERNAL
+}
+
+enum CustomFieldType {
+  TEXT
+  SELECT
+  NUMBER
+  CHECKBOX
+  DATE
+}
+
+model Ticket {
+  id                         String         @id @default(cuid())
+  organizationId             String
+  number                     Int
+  statusToken                String         @unique
+  subject                    String
+  status                     TicketStatus   @default(NEW)
+  priority                   TicketPriority @default(NORMAL)
+  contactId                  String
+  assigneeId                 String?
+  firstResponseTargetMinutes Int
+  resolutionTargetMinutes    Int
+  firstResponseDueAt         DateTime
+  resolutionDueAt            DateTime
+  firstRespondedAt           DateTime?
+  resolvedAt                 DateTime?
+  isAtRisk                   Boolean        @default(false)
+  isBreached                 Boolean        @default(false)
+  createdAt                  DateTime       @default(now())
+  updatedAt                  DateTime       @updatedAt
+  organization      organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contact           Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  assignee          user?              @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  messages          Message[]
+  tags              TicketTag[]
+  customFieldValues CustomFieldValue[]
+
+  @@unique([organizationId, number])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([contactId])
+}
+
+model TicketCounter {
+  organizationId String       @id
+  lastNumber     Int          @default(0)
+  organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model Contact {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String?
+  email          String
+  phone          String?
+  company        String?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  tickets        Ticket[]
+  messages       Message[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+}
+
+model Message {
+  id              String            @id @default(cuid())
+  organizationId  String
+  ticketId        String
+  direction       MessageDirection
+  visibility      MessageVisibility @default(PUBLIC)
+  authorUserId    String?
+  authorContactId String?
+  bodyMarkdown    String
+  bodyHtml        String
+  triggeredReopen Boolean           @default(false) // true ONLY on a requester follow-up that auto-reopened a RESOLVED/CLOSED ticket (D-04); drives the ThreadSystemEvent "Ticket reopened…" row in the thread (plans 09 agent view + 12 public page)
+  createdAt       DateTime          @default(now())
+  organization  organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ticket        Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorUser    user?        @relation("MessageAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+  authorContact Contact?     @relation(fields: [authorContactId], references: [id], onDelete: SetNull)
+  attachments   Attachment[]
+
+  @@index([ticketId])
+  @@index([organizationId])
+}
+
+model Tag {
+  id             String      @id @default(cuid())
+  organizationId String
+  name           String
+  createdAt      DateTime    @default(now())
+  organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  tickets        TicketTag[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model TicketTag {
+  ticketId String
+  tagId    String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  tag      Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([ticketId, tagId])
+  @@index([tagId])
+}
+
+model SlaPolicy {
+  id                         String         @id @default(cuid())
+  organizationId             String
+  priority                   TicketPriority
+  firstResponseTargetMinutes Int
+  resolutionTargetMinutes    Int
+  createdAt                  DateTime       @default(now())
+  updatedAt                  DateTime       @updatedAt
+  organization organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, priority])
+  @@index([organizationId])
+}
+
+model CustomFieldDefinition {
+  id             String          @id @default(cuid())
+  organizationId String
+  label          String
+  type           CustomFieldType
+  options        Json?
+  position       Int             @default(0)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  organization organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  values       CustomFieldValue[]
+
+  @@index([organizationId])
+}
+
+model CustomFieldValue {
+  id                      String    @id @default(cuid())
+  organizationId          String
+  ticketId                String
+  customFieldDefinitionId String
+  valueText               String?
+  valueNumber             Float?
+  valueBoolean            Boolean?
+  valueDate               DateTime?
+  organization organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ticket       Ticket                 @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  definition   CustomFieldDefinition  @relation(fields: [customFieldDefinitionId], references: [id], onDelete: Cascade)
+
+  @@unique([ticketId, customFieldDefinitionId])
+  @@index([organizationId])
+  @@index([customFieldDefinitionId, valueText])
+  @@index([customFieldDefinitionId, valueNumber])
+  @@index([customFieldDefinitionId, valueDate])
+}
+
+model Attachment {
+  id               String   @id @default(cuid())
+  organizationId   String
+  messageId        String
+  storageKey       String
+  originalFilename String
+  mimeType         String
+  sizeBytes        Int
+  createdAt        DateTime @default(now())
+  organization organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  message      Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@index([organizationId])
+}
+
+model RateLimitHit {
+  id        String   @id @default(cuid())
+  scope     String
+  ipHash    String
+  createdAt DateTime @default(now())
+
+  @@index([scope, ipHash, createdAt])
 }
