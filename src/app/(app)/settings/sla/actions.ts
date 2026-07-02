@@ -1,8 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireOrgAdmin } from "@/lib/authz";
 import type { TicketPriority } from "@/generated/prisma/client";
+import { requireOrgAdmin } from "@/lib/authz";
 import { getScopedDb } from "@/lib/session";
 
 interface SlaTargetInput {

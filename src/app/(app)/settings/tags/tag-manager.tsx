@@ -73,7 +73,6 @@ export function TagManager({ tags }: TagManagerProps) {
         {tags.map((tag) => (
           <div key={tag.id} className="flex items-center gap-3 px-4 py-3">
             {editingId === tag.id ? (
-              // biome-ignore lint/a11y/noAutofocus: inline rename input, opened by explicit user click
               <Input
                 autoFocus
                 value={draftName}
