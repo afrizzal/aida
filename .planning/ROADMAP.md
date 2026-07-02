@@ -57,7 +57,7 @@
 - [ ] 02-08-PLAN.md — Shared inbox: 2-pane shell, list rows, view/status/tag/custom-field filters + FTS search (Wave 3)
 - [ ] 02-09-PLAN.md — Reading pane: thread + composer (public/note) + attachments + ticket mutations + New Ticket (Wave 4)
 - [ ] 02-10-PLAN.md — Contacts list + detail + per-contact ticket history + Notes autosave (Wave 3)
-- [ ] 02-11-PLAN.md — Public web intake form + route (honeypot/rate-limit) + uploads volume + Caddy/middleware (Wave 3)
+- [x] 02-11-PLAN.md — Public web intake form + route (honeypot/rate-limit) + uploads volume + Caddy/middleware (Wave 3)
 - [ ] 02-12-PLAN.md — Tokenized public status page + follow-up (auto-reopen) + token-scoped attachment serve (Wave 5)
 
 ### Phase 3: Email Channel

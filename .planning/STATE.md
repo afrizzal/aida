@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-02T01:34:47.034Z"
-last_activity: 2026-07-02 -- Phase 02 execution started
+last_updated: "2026-07-02T02:02:34.084Z"
+last_activity: 2026-07-02 -- 02-11 (public web intake) complete
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 20
-  completed_plans: 15
-  percent: 75
+  completed_plans: 16
+  percent: 80
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -26,12 +26,12 @@ progress:
 
 ## Current Position
 
-Phase: 02 (core-ticketing) — 🟢 Wave 2 COMPLETE (7/12 plans); starting Wave 3
-Plan: 7 of 12 core-ticketing plans complete (02-01..02-07); Wave 3 next: 02-08 (inbox), 02-10 (contacts), 02-11 (public intake)
-Status: Executing — Wave 3 starting
+Phase: 02 (core-ticketing) — Wave 3 in progress (02-11 complete this session; 02-08/02-10 executed in parallel worktrees — check their SUMMARY files/merge status before assuming Wave 3 is fully done)
+Plan: 8 of 12 core-ticketing plans complete (02-01..02-07, 02-11); Wave 3 remaining: 02-08 (inbox), 02-10 (contacts) — status not visible from this worktree; Wave 4 next: 02-09 (reading pane); Wave 5: 02-12 (public status page)
+Status: 02-11 (public web intake) executed and committed on this worktree branch — awaiting merge to master alongside sibling Wave 3 plans
 Last activity: 2026-07-02
 
-Progress: [███████░░░] 75% (15/20 plans complete — 8/8 phase 01 + 7/12 phase 02)
+Progress: [████████░░] 80% (16/20 plans complete — 8/8 phase 01 + 8/12 phase 02)
 
 ## Accumulated Context
 
@@ -91,17 +91,20 @@ Progress: [███████░░░] 75% (15/20 plans complete — 8/8 pha
 - (02-07) Same-wave, non-declared-dependency plan outputs (02-03's `DEFAULT_SLA_TARGETS`, 02-06's `PriorityChip`/`TagChip`) were NOT imported cross-plan during execution (no declared `depends_on`) — 02-07 duplicated minimal, token-identical literals/inline components instead. **Consolidation pending**: now that 02-03/02-06 have merged, replace 02-07's inline `DEFAULT_TARGETS_MINUTES` (sla/page.tsx) and inline priority/tag Badge visuals (sla-form.tsx, tag-manager.tsx) with the shared `DEFAULT_SLA_TARGETS`/`PriorityChip`/`TagChip` — values/classes are already identical, this is a pure de-dup pass.
 - (02-07) `TicketTag` (join table) is excluded from scopedDb's `DOMAIN_MODELS` — per-tag ticket counts use bare `prisma.ticketTag.groupBy({ by: ["tagId"], _count: true, where: { tag: { organizationId } } })`, scoped via the `tag` relation rather than scopedDb.
 - (02-07) `CustomFieldDefinition.options` (Json?) must be set to `Prisma.JsonNull` (not plain `null`) when clearing it on `update` — Prisma's generated `NullableJsonNullValueInput` type rejects a bare `null` literal for Json columns.
+- (02-11) Public web intake (AIDA-08) shipped: `(public)` route group (layout mirrors `(auth)`'s decoration, no `requireSession`), `PublicPageShell` (brand mark + Card, `maxWidth` 640|720 — plan 12 reuses at 720) and `HoneypotField` (visually-hidden, NOT `type="hidden"`) in `src/components/public/`; `/request` form (react-hook-form + zod, no priority/category field per D-19); `POST /api/public/intake` — honeypot silent-success, `checkRateLimit("public-intake", ip)`, `prisma.organization.findFirstOrThrow()` single-org resolution, per-file `file-type` sniff + `MAX_BYTES`/`ALLOWED_MIME` + combined `MAX_TOTAL_REQUEST_BYTES`, `createTicket(orgId, { ..., direction: "INBOUND", priority: "NORMAL" })`, attachments linked to the ticket's initial inbound Message. `PUBLIC_PREFIXES` in `src/middleware.ts` now includes `/request`, `/status`, `/api/public`. `docker-compose.yml`'s `app` service mounts a new `uploads_data` volume (`UPLOADS_DIR=/data/uploads`); `Caddyfile` adds `request_body { max_size 12MB }`. Client submission pattern worth reusing: build the outgoing `FormData` from the live `<form>` DOM node inside react-hook-form's `handleSubmit` callback (`new FormData(event.target)`) rather than reserializing validated values — picks up the honeypot input and any selected files automatically.
+- (02-11) Attachment dropzone UI pattern: a real `<button type="button">` (not `<div role="button">`) as the visible drag/click target, with a visually-hidden sibling `<input type="file" multiple>` — click calls `fileInputRef.current.click()`, drop assigns `fileInputRef.current.files = event.dataTransfer.files`. Avoids retrofitting keyboard handlers and satisfies biome's `useSemanticElements` a11y rule; reuse this shape if a future plan (composer attachments) needs another dropzone.
 
 ### Open Todos
 
-- Execute Phase 2: `/gsd:execute-phase 2`. Wave 1 (02-01, 02-02) and Wave 2 (02-03..02-07) complete — 7/12 phase-2 plans done. Next: Wave 3 (02-08 inbox, 02-10 contacts, 02-11 public intake) → Wave 4 (02-09 reading pane) → Wave 5 (02-12 public status page).
+- Execute Phase 2: `/gsd:execute-phase 2`. Wave 1 (02-01, 02-02), Wave 2 (02-03..02-07), and 02-11 (public intake, Wave 3) complete — 8/12 phase-2 plans done. Remaining: Wave 3's 02-08 (inbox) and 02-10 (contacts) (status not visible from this worktree — check their own SUMMARY/merge state) → Wave 4 (02-09 reading pane) → Wave 5 (02-12 public status page).
 - Watch during execution: "New Ticket" CTA must land in the inbox top bar (plan 08 territory) so a zero-ticket workspace has an agent-reachable creation path — plan 09's task text left this ambiguous ("list panel header or reading-pane header"); the reading-pane-only option would break cold start.
 - 02-01 done: tenant-in-tx smoke test used the correct type-cast pattern (not explicit organizationId) — auto-injection genuinely proven, no fallback needed downstream.
-- 02-03 done: `createTicket()`, `findOrCreateContact()`, `getSlaTargets()`/`computeDueTimestamps()`, `generateStatusToken()` all available now for 02-08/09/11/12 to call directly.
-- Downstream plans (09 composer, 11 public intake, 12 public status page) still need to build the actual upload/serve Route Handlers on top of 02-04's `FileStorage`/`localFileStorage`/`buildStorageKey` primitives, per RESEARCH.md Topic 4's illustrative shape — not built in 02-04 (out of scope, storage/limits primitives only).
+- 02-03 done: `createTicket()`, `findOrCreateContact()`, `getSlaTargets()`/`computeDueTimestamps()`, `generateStatusToken()` all available now for 02-08/09/12 to call directly (02-11 already consumes all four).
+- 02-11 done: the public-facing half of AIDA-08 (intake) is built on 02-04's `FileStorage`/`localFileStorage`/`buildStorageKey` primitives exactly per RESEARCH.md Topic 4's illustrative shape. Plan 09 (composer attachments) and plan 12 (status-page follow-up) still need their own upload/serve Route Handlers on the same primitives — not shared code with 02-11's intake route, since auth/scoping differ per call site.
 - 02-05 done: plan 09 must remember to clear `isAtRisk`/`isBreached` in the same write as setting `firstRespondedAt`/`resolvedAt` (the sla-flag job is one-directional and only sets).
-- Plan 08/11 (public intake): call `checkRateLimit("public-intake", ip)` from `src/lib/rate-limit/check-rate-limit.ts` before creating a ticket from the public web form.
-- Consolidation follow-up: dedup 02-07's inline SLA/chip literals against 02-03/02-06 (see Key Decisions above) — do this before or as part of Wave 3 to avoid the inbox/settings UI showing divergent visuals.
+- 02-11 done: `checkRateLimit("public-intake", ip)` is wired into `POST /api/public/intake`. Plan 12 (public status-page follow-up composer) still needs its own `checkRateLimit` call per D-20 ("same guard on the public status-page follow-up composer").
+- Consolidation follow-up: dedup 02-07's inline SLA/chip literals against 02-03/02-06 (see Key Decisions above) — still pending, not touched by 02-11 (out of scope for this plan's files).
+- Plan 12 can reuse `PublicPageShell` (`maxWidth={720}`) and `HoneypotField` from `src/components/public/` unchanged — no new shared-component work needed there.
 
 ### Blockers
 
@@ -122,7 +125,9 @@ None.
 
 Wave 1 worktree branches merged into `master` (merge commits `64f0888`, `6871bd6`). 02-03 through 02-07 executed on worktrees fast-forwarded onto master, then merged back.
 
-**Next action:** Do the 02-07 consolidation pass (dedup SLA/chip literals), then Wave 3 (02-08 inbox, 02-10 contacts, 02-11 public intake — should consume the 02-06 chip vocabulary) → Wave 4 (02-09 reading pane, must clear SLA flags on first-response/resolve, should adopt 02-07's `CustomFieldInput`) → Wave 5 (02-12 public status page).
+- **02-11** (public web intake, Wave 3): Built the `(public)` route group — `layout.tsx` mirrors `(auth)`'s dotted-grid + primary-glow decoration (no `requireSession`); `PublicPageShell` (brand mark reusing sidebar.tsx's box verbatim + `Card`, `maxWidth` 640|720) and `HoneypotField` (visually-hidden `company_website` trap, not `type="hidden"`) in `src/components/public/`. `/request` form (react-hook-form + zod: name/email/subject/message, no priority/category picker; drag-or-click attachment zone with client-side pre-check; success state with `/status/{token}` link; 429 rate-limited banner). `POST /api/public/intake` Route Handler: honeypot silent-success, `checkRateLimit("public-intake", ip)`, zod validation, `prisma.organization.findFirstOrThrow()`, per-file `file-type` byte-sniff + `MAX_BYTES`/`ALLOWED_MIME` + combined `MAX_TOTAL_REQUEST_BYTES`, `createTicket(orgId, { direction: "INBOUND", priority: "NORMAL", ... })`, attachments linked to the initial inbound Message. `PUBLIC_PREFIXES` extended (`/request`, `/status`, `/api/public`); `docker-compose.yml` app service mounts a new `uploads_data` volume + `UPLOADS_DIR`/`RATE_LIMIT_PEPPER` env; `Caddyfile` adds a 12MB `request_body` ceiling; `.env.example` documents both new vars. `tsc --noEmit` clean, `biome check` clean on all plan files, `pnpm run build` succeeds (one pre-existing, out-of-scope Turbopack NFT-trace warning logged to `deferred-items.md`). Worktree was stale at start (still on Phase 1's last commit) — fast-forwarded onto `master` first. Commits: `7bc3f2e`, `91ee2c7`, `24bc3e2`. SUMMARY: `.planning/phases/02-core-ticketing/02-11-SUMMARY.md`.
+
+**Next action:** This worktree's work (02-11) is done and committed on branch `worktree-agent-a43a5dcdfc4cb65c5`, ready to merge into `master`. Remaining Phase 2 work (tracked separately, likely in sibling worktrees): finish Wave 3 (02-08 inbox, 02-10 contacts), the 02-07 consolidation pass (dedup SLA/chip literals against 02-03/02-06), then Wave 4 (02-09 reading pane — must clear SLA flags on first-response/resolve, should adopt 02-07's `CustomFieldInput`) → Wave 5 (02-12 public status page — reuse 02-11's `PublicPageShell`/`HoneypotField`, add its own `checkRateLimit` call on the follow-up composer per D-20).
 
 **Phase 2 research open questions (resolved during planning, researcher's recommended defaults all adopted):** (1) public status-page token = a dedicated unguessable random token, NOT the raw ticket cuid; (2) single-workspace v1 web-form org resolution = `findFirstOrThrow()`; (3) SLA "at-risk" threshold = proportional 20% of target duration remaining, not a flat cutoff.
 
@@ -140,4 +145,4 @@ Wave 1 worktree branches merged into `master` (merge commits `64f0888`, `6871bd6
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
 ---
-*Last updated: 2026-07-02 — Wave 2 of Phase 2 complete (02-03..02-07, 7/12 phase-2 plans done); next: 02-07 consolidation pass, then Wave 3 (02-08/10/11).*
+*Last updated: 2026-07-02 — 02-11 (public web intake, AIDA-08) complete, 8/12 phase-2 plans done; next: 02-08/02-10 (remaining Wave 3), 02-07 consolidation pass, Wave 4 (02-09), Wave 5 (02-12).*
