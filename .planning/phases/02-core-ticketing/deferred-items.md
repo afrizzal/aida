@@ -16,3 +16,7 @@ Out-of-scope discoveries logged during plan execution. Not fixed per SCOPE BOUND
 ## From 02-11 (public web intake channel)
 
 - **Turbopack build warning: "Encountered unexpected file in NFT list" tracing `next.config.ts` through `src/lib/attachments/local-file-storage.ts`.** `pnpm run build` succeeds (compiles, typechecks, generates all routes) but emits a Node File Tracing warning once `src/app/api/public/intake/route.ts` (new in this plan) imports `local-file-storage.ts` (created in plan 04, pre-existing, untouched by 02-11). Root cause is `local-file-storage.ts`'s `path.join(ROOT, orgId)` where `ROOT = process.env.UPLOADS_DIR ?? "/data/uploads"` — Turbopack's static analysis can't fully prove the join is scoped and over-traces. Cosmetic (standalone output already worked correctly for the Docker image in Phase 1/plan 07); not fixed here per SCOPE BOUNDARY (the flagged file belongs to plan 04, not 02-11). Revisit with a `/*turbopackIgnore*/` comment or `path.join(process.cwd(), ...)` scoping if a future plan needs a clean Turbopack trace.
+
+## From 02-08 (shared inbox — 2-pane layout/filters/search wiring)
+
+- **CRLF vs LF (same repo-wide issue as above), reproduced on `src/lib/tickets/search.ts` (plan 04, untouched by 02-08).** `biome check` flags it purely for CRLF line endings when this plan's new files (`list-query.ts`, `cf-param.ts`, `tickets/*.tsx`) are checked alongside it. Confirmed pre-existing and out of scope per the same reasoning as the 02-05 entry above — not fixed here.

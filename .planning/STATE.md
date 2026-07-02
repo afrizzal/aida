@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-02T02:02:34.084Z"
-last_activity: 2026-07-02 -- 02-10, 02-11 complete
+last_updated: "2026-07-02T02:13:37.417Z"
+last_activity: 2026-07-02 -- Wave 3 complete (02-08/02-10/02-11)
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 20
-  completed_plans: 17
-  percent: 85
+  completed_plans: 18
+  percent: 90
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -26,12 +26,12 @@ progress:
 
 ## Current Position
 
-Phase: 02 (core-ticketing) — 🟡 Wave 3 IN PROGRESS (9/12 plans); 02-10 (contacts), 02-11 (public intake) done
-Plan: 9 of 12 core-ticketing plans complete (02-01..02-07, 02-10, 02-11); Wave 3 remaining: 02-08 (inbox)
-Status: Executing — Wave 3 nearly complete
+Phase: 02 (core-ticketing) — 🟢 Wave 3 COMPLETE (10/12 plans); ready for Wave 4
+Plan: 10 of 12 core-ticketing plans complete (02-01..02-08, 02-10, 02-11); Wave 4 next: 02-09 (reading pane)
+Status: Executing — Wave 4 starting
 Last activity: 2026-07-02
 
-Progress: [████████░░] 85% (17/20 plans complete — 8/8 phase 01 + 9/12 phase 02)
+Progress: [█████████░] 90% (18/20 plans complete — 8/8 phase 01 + 10/12 phase 02)
 
 ## Accumulated Context
 
@@ -95,11 +95,16 @@ Progress: [████████░░] 85% (17/20 plans complete — 8/8 pha
 - (02-10) Client-side debounced search synced to the URL via `router.replace` (no `searchParams` in the effect deps — only rebuild `q`, avoids stale-closure churn) — first instance of this pattern; 02-08's ticket search should follow the same shape.
 - (02-11) Public web intake (AIDA-08) shipped: `(public)` route group (layout mirrors `(auth)`'s decoration, no `requireSession`), `PublicPageShell` (brand mark + Card, `maxWidth` 640|720 — plan 12 reuses at 720) and `HoneypotField` (visually-hidden, NOT `type="hidden"`) in `src/components/public/`; `/request` form (react-hook-form + zod, no priority/category field per D-19); `POST /api/public/intake` — honeypot silent-success, `checkRateLimit("public-intake", ip)`, `prisma.organization.findFirstOrThrow()` single-org resolution, per-file `file-type` sniff + `MAX_BYTES`/`ALLOWED_MIME` + combined `MAX_TOTAL_REQUEST_BYTES`, `createTicket(orgId, { ..., direction: "INBOUND", priority: "NORMAL" })`, attachments linked to the ticket's initial inbound Message. `PUBLIC_PREFIXES` in `src/middleware.ts` now includes `/request`, `/status`, `/api/public`. `docker-compose.yml`'s `app` service mounts a new `uploads_data` volume (`UPLOADS_DIR=/data/uploads`); `Caddyfile` adds `request_body { max_size 12MB }`. Client submission pattern worth reusing: build the outgoing `FormData` from the live `<form>` DOM node inside react-hook-form's `handleSubmit` callback (`new FormData(event.target)`) rather than reserializing validated values — picks up the honeypot input and any selected files automatically.
 - (02-11) Attachment dropzone UI pattern: a real `<button type="button">` (not `<div role="button">`) as the visible drag/click target, with a visually-hidden sibling `<input type="file" multiple>` — click calls `fileInputRef.current.click()`, drop assigns `fileInputRef.current.files = event.dataTransfer.files`. Avoids retrofitting keyboard handlers and satisfies biome's `useSemanticElements` a11y rule; reuse this shape if a future plan (composer attachments) needs another dropzone.
+- (02-08) Shared inbox is live: `tickets/layout.tsx` (edge-to-edge 2-pane, `-m-6` cancels the `(app)` shell's `p-6`) + `TicketListPanel` (async Server Component, `w-[360px]` list column, reused by future `[id]` route via an optional `basePath` prop) + `TicketListRow`/`FilterChipRow`/`TicketSearchInput` + `src/lib/tickets/list-query.ts` (`fetchTicketList`/`parseTicketListFilters`, all filter state lives in URL searchParams: `view`/`status`/`tag`/`cf`/`q`/`limit`).
+- (02-08) `searchTickets`'s `limit` defaults to 25 internally — any caller that paginates (take: N with N > 25) MUST pass its own limit as the 3rd arg or an FTS-active view silently truncates "Load more" below the page size. `fetchTicketList` forwards `filters.limit ?? 50`; any future FTS call site must do the same.
+- (02-08) Client/server bundle boundary: pure string-parsing helpers consumed by both a Client Component and a server-only module (that imports `prisma`/`pg` transitively) need their own dependency-free file (`src/lib/tickets/cf-param.ts`) — importing them from the server module directly breaks `next build` (Turbopack tries to bundle `pg`'s Node-only internals for the browser).
+- (02-08) AIDA-05 ("apply tags/labels to tickets and filter by them") is split across two plans: the filter half shipped in 02-08 (tag `Popover`+`Command`, custom-field filter); the apply half (ticket-level "+ Add tag" editor) is plan 09's job — do not mark AIDA-05 complete until 09 lands.
 
 ### Open Todos
 
-- Execute Phase 2: `/gsd:execute-phase 2`. Wave 1 (02-01, 02-02), Wave 2 (02-03..02-07), and 02-10/02-11 (Wave 3) complete — 9/12 phase-2 plans done. Remaining: Wave 3's 02-08 (inbox) → Wave 4 (02-09 reading pane) → Wave 5 (02-12 public status page).
-- Watch during execution: "New Ticket" CTA must land in the inbox top bar (plan 08 territory) so a zero-ticket workspace has an agent-reachable creation path — plan 09's task text left this ambiguous ("list panel header or reading-pane header"); the reading-pane-only option would break cold start.
+- Execute Phase 2: `/gsd:execute-phase 2`. Wave 1 (02-01, 02-02), Wave 2 (02-03..02-07), and all of Wave 3 (02-08, 02-10, 02-11) complete — 10/12 phase-2 plans done. Next: Wave 4 (02-09 reading pane) → Wave 5 (02-12 public status page).
+- Watch during execution: "New Ticket" CTA must land in the inbox top bar (plan 08 territory) so a zero-ticket workspace has an agent-reachable creation path — plan 09's task text left this ambiguous ("list panel header or reading-pane header"); the reading-pane-only option would break cold start. **Not yet added in 02-08** (02-08's scope was the list/filter/search shell only) — plan 09 must still add this CTA.
+- 02-08 done: plan 09's `/tickets/[id]/page.tsx` should render `<TicketListPanel searchParams={...} selectedId={id} basePath="/tickets/[id]"/>` (same component, just pass the ticket id + its own base path) to keep the list visible while a ticket is open, and must finish AIDA-05's ticket-level tag/custom-field editing (see Key Decisions above).
 - 02-01 done: tenant-in-tx smoke test used the correct type-cast pattern (not explicit organizationId) — auto-injection genuinely proven, no fallback needed downstream.
 - 02-03 done: `createTicket()`, `findOrCreateContact()`, `getSlaTargets()`/`computeDueTimestamps()`, `generateStatusToken()` all available now for 02-08/09/12 to call directly (02-11 already consumes all four).
 - 02-11 done: the public-facing half of AIDA-08 (intake) is built on 02-04's `FileStorage`/`localFileStorage`/`buildStorageKey` primitives exactly per RESEARCH.md Topic 4's illustrative shape. Plan 09 (composer attachments) and plan 12 (status-page follow-up) still need their own upload/serve Route Handlers on the same primitives — not shared code with 02-11's intake route, since auth/scoping differ per call site.
@@ -127,10 +132,13 @@ None.
 
 Wave 1 worktree branches merged into `master` (merge commits `64f0888`, `6871bd6`). 02-03 through 02-07 executed on worktrees fast-forwarded onto master, then merged back. The 02-07 consolidation pass (dedup SLA/chip literals against 02-03/02-06) has been done.
 
-- **02-10** (contacts list + detail + notes, Wave 3): `/contacts` (searchable Server Component list — name/email/company insensitive match, `_count.tickets`, `ContactSearch` debounced client input) + `/contacts/[id]` (header card with avatar/email/phone/company/`NotesForm`, full ticket history newest-first reusing `StatusChip` from 02-06) + `saveContactNotes` Server Action (getScopedDb + revalidatePath). Sidebar/top-bar nav updated (Contacts between Tickets and Knowledge Base). Added shared `src/lib/format-relative-time.ts`. `tsc --noEmit` and `pnpm run build` both clean; `biome check` clean on all new files. AIDA-03 fully satisfied. Commits: `7283537`, `eea4ee4`, `15ecfe1` (biome format fix). SUMMARY: `.planning/phases/02-core-ticketing/02-10-SUMMARY.md`.
-- **02-11** (public web intake, Wave 3): Built the `(public)` route group — `layout.tsx` mirrors `(auth)`'s dotted-grid + primary-glow decoration (no `requireSession`); `PublicPageShell` (brand mark reusing sidebar.tsx's box verbatim + `Card`, `maxWidth` 640|720) and `HoneypotField` (visually-hidden `company_website` trap, not `type="hidden"`) in `src/components/public/`. `/request` form (react-hook-form + zod: name/email/subject/message, no priority/category picker; drag-or-click attachment zone with client-side pre-check; success state with `/status/{token}` link; 429 rate-limited banner). `POST /api/public/intake` Route Handler: honeypot silent-success, `checkRateLimit("public-intake", ip)`, zod validation, `prisma.organization.findFirstOrThrow()`, per-file `file-type` byte-sniff + `MAX_BYTES`/`ALLOWED_MIME` + combined `MAX_TOTAL_REQUEST_BYTES`, `createTicket(orgId, { direction: "INBOUND", priority: "NORMAL", ... })`, attachments linked to the initial inbound Message. `PUBLIC_PREFIXES` extended (`/request`, `/status`, `/api/public`); `docker-compose.yml` app service mounts a new `uploads_data` volume + `UPLOADS_DIR`/`RATE_LIMIT_PEPPER` env; `Caddyfile` adds a 12MB `request_body` ceiling; `.env.example` documents both new vars. `tsc --noEmit` clean, `biome check` clean on all plan files, `pnpm run build` succeeds (one pre-existing, out-of-scope Turbopack NFT-trace warning logged to `deferred-items.md`). Commits: `7bc3f2e`, `91ee2c7`, `24bc3e2`. SUMMARY: `.planning/phases/02-core-ticketing/02-11-SUMMARY.md`.
+- **02-08** (shared inbox — 2-pane layout/filters/search): `tickets/layout.tsx` (edge-to-edge 2-pane flex row) + `TicketListRow`/`TicketListSkeleton` + `FilterChipRow` (view pills, status multi-select, tag combobox, custom-field filter) + `TicketSearchInput` (debounced) + `src/lib/tickets/list-query.ts` (`fetchTicketList`/`parseTicketListFilters`, forwards the pagination limit into `searchTickets` so FTS "Load more" doesn't truncate) + `ticket-list-panel.tsx` (data-fetching Server Component) + rewired `tickets/page.tsx`. `tsc --noEmit` and `pnpm run build` both clean. Commits: `fac955f`, `059d5c6`, `bb620f2`. SUMMARY: `.planning/phases/02-core-ticketing/02-08-SUMMARY.md`.
+- **02-10** (contacts list + detail + notes): `/contacts` (searchable Server Component list — name/email/company insensitive match, `_count.tickets`, `ContactSearch` debounced client input) + `/contacts/[id]` (header card with avatar/email/phone/company/`NotesForm`, full ticket history newest-first reusing `StatusChip` from 02-06) + `saveContactNotes` Server Action (getScopedDb + revalidatePath). Sidebar/top-bar nav updated (Contacts between Tickets and Knowledge Base). Added shared `src/lib/format-relative-time.ts`. `tsc --noEmit` and `pnpm run build` both clean; `biome check` clean on all new files. AIDA-03 fully satisfied. Commits: `7283537`, `eea4ee4`, `15ecfe1` (biome format fix). SUMMARY: `.planning/phases/02-core-ticketing/02-10-SUMMARY.md`.
+- **02-11** (public web intake): Built the `(public)` route group — `layout.tsx` mirrors `(auth)`'s dotted-grid + primary-glow decoration (no `requireSession`); `PublicPageShell` (brand mark reusing sidebar.tsx's box verbatim + `Card`, `maxWidth` 640|720) and `HoneypotField` (visually-hidden `company_website` trap, not `type="hidden"`) in `src/components/public/`. `/request` form (react-hook-form + zod: name/email/subject/message, no priority/category picker; drag-or-click attachment zone with client-side pre-check; success state with `/status/{token}` link; 429 rate-limited banner). `POST /api/public/intake` Route Handler: honeypot silent-success, `checkRateLimit("public-intake", ip)`, zod validation, `prisma.organization.findFirstOrThrow()`, per-file `file-type` byte-sniff + `MAX_BYTES`/`ALLOWED_MIME` + combined `MAX_TOTAL_REQUEST_BYTES`, `createTicket(orgId, { direction: "INBOUND", priority: "NORMAL", ... })`, attachments linked to the initial inbound Message. `PUBLIC_PREFIXES` extended (`/request`, `/status`, `/api/public`); `docker-compose.yml` app service mounts a new `uploads_data` volume + `UPLOADS_DIR`/`RATE_LIMIT_PEPPER` env; `Caddyfile` adds a 12MB `request_body` ceiling; `.env.example` documents both new vars. `tsc --noEmit` clean, `biome check` clean on all plan files, `pnpm run build` succeeds (one pre-existing, out-of-scope Turbopack NFT-trace warning logged to `deferred-items.md`). Commits: `7bc3f2e`, `91ee2c7`, `24bc3e2`. SUMMARY: `.planning/phases/02-core-ticketing/02-11-SUMMARY.md`.
 
-**Next action:** Finish Wave 3 (02-08 inbox — should consume the 02-06 chip vocabulary and 02-10's `formatRelativeTime`) → Wave 4 (02-09 reading pane, must clear SLA flags on first-response/resolve, should adopt 02-07's `CustomFieldInput`) → Wave 5 (02-12 public status page — reuse 02-11's `PublicPageShell`/`HoneypotField`, add its own `checkRateLimit` call on the follow-up composer per D-20).
+Wave 3 worktree branches merged into `master`. Phase 2 is now 10/12 plans complete.
+
+**Next action:** Wave 4 (02-09 reading pane: must add the "New Ticket" CTA, clear SLA flags on first-response/resolve, adopt 02-07's `CustomFieldInput`, finish AIDA-05's ticket-level tag editor, and reuse 02-08's `TicketListPanel` with `basePath="/tickets/[id]"`) → Wave 5 (02-12 public status page — reuse 02-11's `PublicPageShell`/`HoneypotField`, add its own `checkRateLimit` call on the follow-up composer per D-20).
 
 **Phase 2 research open questions (resolved during planning, researcher's recommended defaults all adopted):** (1) public status-page token = a dedicated unguessable random token, NOT the raw ticket cuid; (2) single-workspace v1 web-form org resolution = `findFirstOrThrow()`; (3) SLA "at-risk" threshold = proportional 20% of target duration remaining, not a flat cutoff.
 
@@ -148,4 +156,4 @@ Wave 1 worktree branches merged into `master` (merge commits `64f0888`, `6871bd6
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
 ---
-*Last updated: 2026-07-02 — 02-10 (contacts) and 02-11 (public web intake) complete, 9/12 phase-2 plans done; next: 02-08 (last Wave 3 plan), then Wave 4 (02-09), Wave 5 (02-12).*
+*Last updated: 2026-07-02 — Wave 3 of Phase 2 complete (02-08, 02-10, 02-11), 10/12 phase-2 plans done; next: Wave 4 (02-09), Wave 5 (02-12).*
