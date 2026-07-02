@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-02T01:34:47.034Z"
-last_activity: 2026-07-02 -- Phase 02 execution started
+last_updated: "2026-07-02T02:13:37.417Z"
+last_activity: 2026-07-02
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 20
-  completed_plans: 15
-  percent: 75
+  completed_plans: 16
+  percent: 80
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -26,12 +26,12 @@ progress:
 
 ## Current Position
 
-Phase: 02 (core-ticketing) — 🟢 Wave 2 COMPLETE (7/12 plans); starting Wave 3
-Plan: 7 of 12 core-ticketing plans complete (02-01..02-07); Wave 3 next: 02-08 (inbox), 02-10 (contacts), 02-11 (public intake)
-Status: Executing — Wave 3 starting
+Phase: 02 (core-ticketing) — 🟢 Wave 3 IN PROGRESS (8/12 plans); 02-08 done
+Plan: 8 of 12 core-ticketing plans complete (02-01..02-08); Wave 3 continues: 02-10 (contacts), 02-11 (public intake) next
+Status: Executing — Wave 3 in progress
 Last activity: 2026-07-02
 
-Progress: [███████░░░] 75% (15/20 plans complete — 8/8 phase 01 + 7/12 phase 02)
+Progress: [████████░░] 80% (16/20 plans complete — 8/8 phase 01 + 8/12 phase 02)
 
 ## Accumulated Context
 
@@ -91,11 +91,16 @@ Progress: [███████░░░] 75% (15/20 plans complete — 8/8 pha
 - (02-07) Same-wave, non-declared-dependency plan outputs (02-03's `DEFAULT_SLA_TARGETS`, 02-06's `PriorityChip`/`TagChip`) were NOT imported cross-plan during execution (no declared `depends_on`) — 02-07 duplicated minimal, token-identical literals/inline components instead. **Consolidation pending**: now that 02-03/02-06 have merged, replace 02-07's inline `DEFAULT_TARGETS_MINUTES` (sla/page.tsx) and inline priority/tag Badge visuals (sla-form.tsx, tag-manager.tsx) with the shared `DEFAULT_SLA_TARGETS`/`PriorityChip`/`TagChip` — values/classes are already identical, this is a pure de-dup pass.
 - (02-07) `TicketTag` (join table) is excluded from scopedDb's `DOMAIN_MODELS` — per-tag ticket counts use bare `prisma.ticketTag.groupBy({ by: ["tagId"], _count: true, where: { tag: { organizationId } } })`, scoped via the `tag` relation rather than scopedDb.
 - (02-07) `CustomFieldDefinition.options` (Json?) must be set to `Prisma.JsonNull` (not plain `null`) when clearing it on `update` — Prisma's generated `NullableJsonNullValueInput` type rejects a bare `null` literal for Json columns.
+- (02-08) Shared inbox is live: `tickets/layout.tsx` (edge-to-edge 2-pane, `-m-6` cancels the `(app)` shell's `p-6`) + `TicketListPanel` (async Server Component, `w-[360px]` list column, reused by future `[id]` route via an optional `basePath` prop) + `TicketListRow`/`FilterChipRow`/`TicketSearchInput` + `src/lib/tickets/list-query.ts` (`fetchTicketList`/`parseTicketListFilters`, all filter state lives in URL searchParams: `view`/`status`/`tag`/`cf`/`q`/`limit`).
+- (02-08) `searchTickets`'s `limit` defaults to 25 internally — any caller that paginates (take: N with N > 25) MUST pass its own limit as the 3rd arg or an FTS-active view silently truncates "Load more" below the page size. `fetchTicketList` forwards `filters.limit ?? 50`; any future FTS call site must do the same.
+- (02-08) Client/server bundle boundary: pure string-parsing helpers consumed by both a Client Component and a server-only module (that imports `prisma`/`pg` transitively) need their own dependency-free file (`src/lib/tickets/cf-param.ts`) — importing them from the server module directly breaks `next build` (Turbopack tries to bundle `pg`'s Node-only internals for the browser).
+- (02-08) AIDA-05 ("apply tags/labels to tickets and filter by them") is split across two plans: the filter half shipped in 02-08 (tag `Popover`+`Command`, custom-field filter); the apply half (ticket-level "+ Add tag" editor) is plan 09's job — do not mark AIDA-05 complete until 09 lands.
 
 ### Open Todos
 
-- Execute Phase 2: `/gsd:execute-phase 2`. Wave 1 (02-01, 02-02) and Wave 2 (02-03..02-07) complete — 7/12 phase-2 plans done. Next: Wave 3 (02-08 inbox, 02-10 contacts, 02-11 public intake) → Wave 4 (02-09 reading pane) → Wave 5 (02-12 public status page).
-- Watch during execution: "New Ticket" CTA must land in the inbox top bar (plan 08 territory) so a zero-ticket workspace has an agent-reachable creation path — plan 09's task text left this ambiguous ("list panel header or reading-pane header"); the reading-pane-only option would break cold start.
+- Execute Phase 2: `/gsd:execute-phase 2`. Wave 1 (02-01, 02-02), Wave 2 (02-03..02-07), and 02-08 complete — 8/12 phase-2 plans done. Next: rest of Wave 3 (02-10 contacts, 02-11 public intake) → Wave 4 (02-09 reading pane) → Wave 5 (02-12 public status page).
+- Watch during execution: "New Ticket" CTA must land in the inbox top bar (plan 08 territory) so a zero-ticket workspace has an agent-reachable creation path — plan 09's task text left this ambiguous ("list panel header or reading-pane header"); the reading-pane-only option would break cold start. **Not yet added in 02-08** (02-08's scope was the list/filter/search shell only, per its own task list) — plan 09 must still add this CTA.
+- 02-08 done: plan 09's `/tickets/[id]/page.tsx` should render `<TicketListPanel searchParams={...} selectedId={id} basePath="/tickets/[id]"/>` (same component, just pass the ticket id + its own base path) to keep the list visible while a ticket is open, and must finish AIDA-05's ticket-level tag/custom-field editing (see Key Decisions above).
 - 02-01 done: tenant-in-tx smoke test used the correct type-cast pattern (not explicit organizationId) — auto-injection genuinely proven, no fallback needed downstream.
 - 02-03 done: `createTicket()`, `findOrCreateContact()`, `getSlaTargets()`/`computeDueTimestamps()`, `generateStatusToken()` all available now for 02-08/09/11/12 to call directly.
 - Downstream plans (09 composer, 11 public intake, 12 public status page) still need to build the actual upload/serve Route Handlers on top of 02-04's `FileStorage`/`localFileStorage`/`buildStorageKey` primitives, per RESEARCH.md Topic 4's illustrative shape — not built in 02-04 (out of scope, storage/limits primitives only).
@@ -122,7 +127,9 @@ None.
 
 Wave 1 worktree branches merged into `master` (merge commits `64f0888`, `6871bd6`). 02-03 through 02-07 executed on worktrees fast-forwarded onto master, then merged back.
 
-**Next action:** Do the 02-07 consolidation pass (dedup SLA/chip literals), then Wave 3 (02-08 inbox, 02-10 contacts, 02-11 public intake — should consume the 02-06 chip vocabulary) → Wave 4 (02-09 reading pane, must clear SLA flags on first-response/resolve, should adopt 02-07's `CustomFieldInput`) → Wave 5 (02-12 public status page).
+**02-08** (shared inbox — 2-pane layout/filters/search): `tickets/layout.tsx` (edge-to-edge 2-pane flex row) + `TicketListRow`/`TicketListSkeleton` + `FilterChipRow` (view pills, status multi-select, tag combobox, custom-field filter) + `TicketSearchInput` (debounced) + `src/lib/tickets/list-query.ts` (`fetchTicketList`/`parseTicketListFilters`, forwards the pagination limit into `searchTickets` so FTS "Load more" doesn't truncate) + `ticket-list-panel.tsx` (data-fetching Server Component) + rewired `tickets/page.tsx`. `tsc --noEmit` and `pnpm run build` both clean. Commits: `fac955f`, `059d5c6`, `bb620f2`. SUMMARY: `.planning/phases/02-core-ticketing/02-08-SUMMARY.md`.
+
+**Next action:** Rest of Wave 3 — 02-10 (contacts) and 02-11 (public intake), consuming the 02-06 chip vocabulary and 02-08's `TicketListPanel`/`fetchTicketList` patterns where relevant → Wave 4 (02-09 reading pane: must add the "New Ticket" CTA, clear SLA flags on first-response/resolve, adopt 02-07's `CustomFieldInput`, finish AIDA-05's ticket-level tag editor, and reuse 02-08's `TicketListPanel` with `basePath="/tickets/[id]"`) → Wave 5 (02-12 public status page). The 02-07 consolidation pass (dedup SLA/chip literals) mentioned in the prior session note is still open — pick up whenever 02-07's files are next touched.
 
 **Phase 2 research open questions (resolved during planning, researcher's recommended defaults all adopted):** (1) public status-page token = a dedicated unguessable random token, NOT the raw ticket cuid; (2) single-workspace v1 web-form org resolution = `findFirstOrThrow()`; (3) SLA "at-risk" threshold = proportional 20% of target duration remaining, not a flat cutoff.
 
@@ -140,4 +147,4 @@ Wave 1 worktree branches merged into `master` (merge commits `64f0888`, `6871bd6
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
 ---
-*Last updated: 2026-07-02 — Wave 2 of Phase 2 complete (02-03..02-07, 7/12 phase-2 plans done); next: 02-07 consolidation pass, then Wave 3 (02-08/10/11).*
+*Last updated: 2026-07-02 — Plan 02-08 complete (shared inbox: 2-pane layout, list rows, filters, FTS search; 8/12 phase-2 plans done); next: rest of Wave 3 (02-10/02-11).*
