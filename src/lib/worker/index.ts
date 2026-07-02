@@ -1,5 +1,5 @@
-import { PgBoss } from "pg-boss";
 import type { Job } from "pg-boss";
+import { PgBoss } from "pg-boss";
 import { heartbeatHandler } from "./jobs/heartbeat";
 import { rateLimitCleanupHandler } from "./jobs/rate-limit-cleanup";
 import { slaFlagHandler } from "./jobs/sla-flag";

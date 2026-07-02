@@ -12,8 +12,14 @@ const PRIORITY_MAP: Record<TicketPriority, { classes: string; label: string }> =
   },
 };
 
-export function PriorityChip({ priority }: { priority: TicketPriority }) {
+export function PriorityChip({
+  priority,
+  className,
+}: {
+  priority: TicketPriority;
+  className?: string;
+}) {
   const { classes, label } = PRIORITY_MAP[priority];
 
-  return <Badge className={cn("h-5 px-2 py-0.5 text-[12px]", classes)}>{label}</Badge>;
+  return <Badge className={cn("h-5 px-2 py-0.5 text-[12px]", classes, className)}>{label}</Badge>;
 }

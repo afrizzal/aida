@@ -19,12 +19,8 @@ export function EmptyState({ icon: Icon, heading, body }: EmptyStateProps) {
         </div>
       </div>
       <div className="space-y-1.5">
-        <h2 className="text-[18px] font-semibold tracking-tight text-foreground">
-          {heading}
-        </h2>
-        <p className="mx-auto max-w-md text-[14px] leading-relaxed text-muted-foreground">
-          {body}
-        </p>
+        <h2 className="text-[18px] font-semibold tracking-tight text-foreground">{heading}</h2>
+        <p className="mx-auto max-w-md text-[14px] leading-relaxed text-muted-foreground">{body}</p>
       </div>
     </div>
   );

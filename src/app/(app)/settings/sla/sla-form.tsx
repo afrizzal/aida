@@ -4,30 +4,12 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod/v4";
-import { Badge } from "@/components/ui/badge";
+import { PriorityChip } from "@/components/tickets/priority-chip";
 import { Button } from "@/components/ui/button";
 import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import type { TicketPriority } from "@/generated/prisma/client";
-import { cn } from "@/lib/utils";
 import { saveSlaTargets } from "./actions";
-
-// Minimal inline priority label — NOT the shared PriorityChip component (that component is
-// built by plan 02-06, which this plan does not depend on and may not exist in this
-// worktree/wave yet). Token classes mirror the UI-SPEC PriorityChip table exactly so the
-// visual result matches once 02-06 lands.
-const PRIORITY_LABELS: Record<TicketPriority, string> = {
-  LOW: "Low",
-  NORMAL: "Normal",
-  HIGH: "High",
-  URGENT: "Urgent",
-};
-const PRIORITY_CLASSES: Record<TicketPriority, string> = {
-  LOW: "border border-border text-muted-foreground",
-  NORMAL: "border border-border text-foreground",
-  HIGH: "bg-warning/10 text-warning border border-warning/20",
-  URGENT: "bg-destructive/10 text-destructive border border-destructive/20",
-};
 
 const rowSchema = z.object({
   priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]),
@@ -73,9 +55,7 @@ export function SlaForm({ initialRows }: SlaFormProps) {
           {initialRows.map((row, index) => (
             <div key={row.priority} className="flex flex-wrap items-center gap-4 p-4">
               <input type="hidden" {...form.register(`rows.${index}.priority`)} />
-              <Badge className={cn("w-20 justify-center", PRIORITY_CLASSES[row.priority])}>
-                {PRIORITY_LABELS[row.priority]}
-              </Badge>
+              <PriorityChip priority={row.priority} className="w-20 justify-center" />
 
               <FormField
                 control={form.control}

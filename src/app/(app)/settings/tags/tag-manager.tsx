@@ -3,7 +3,7 @@
 import { Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
+import { TagChip } from "@/components/tickets/tag-chip";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -85,9 +85,7 @@ export function TagManager({ tags }: TagManagerProps) {
                 className="h-7 max-w-[200px]"
               />
             ) : (
-              <Badge variant="secondary" className="rounded-full">
-                {tag.name}
-              </Badge>
+              <TagChip label={tag.name} />
             )}
 
             <span className="text-[12px] text-muted-foreground">
