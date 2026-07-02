@@ -4,6 +4,11 @@
 # Real domain: Caddy auto-obtains a Let's Encrypt certificate (auto-HTTPS).
 
 {$DOMAIN:localhost} {
+  # Defense-in-depth ceiling above the 10MB app-level attachment limit (leaves
+  # headroom for multipart boundary/header overhead) — Caddy has no default limit.
+  request_body {
+    max_size 12MB
+  }
   reverse_proxy app:3000 {
     header_up X-Forwarded-Proto {scheme}
     header_up X-Forwarded-Host {host}

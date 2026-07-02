@@ -46,7 +46,7 @@
 3. Tickets link to contact records showing per-contact history; agents can assign tickets and post public replies vs private notes (visually distinct).
 4. Tags + basic custom fields work and are filterable; SLA first-response/resolution timers compute from priority and show at-risk/breached states.
 5. A public web form creates a ticket and returns a status link; the conversation thread supports attachments.
-**Plans:** 8/12 plans executed
+**Plans:** 9/12 plans executed
 - [x] 02-01-PLAN.md — Data model + relational/FTS migrations + scopedDb allowlist + tenant-in-tx smoke test (Wave 1)
 - [x] 02-02-PLAN.md — Deps + shadcn primitives + warning/success tokens + Badge variants + renderMarkdown (Wave 1)
 - [x] 02-03-PLAN.md — Ticket core: status-token, SLA helpers, contact find-or-create, createTicket transaction (Wave 2)
@@ -57,7 +57,7 @@
 - [ ] 02-08-PLAN.md — Shared inbox: 2-pane shell, list rows, view/status/tag/custom-field filters + FTS search (Wave 3)
 - [ ] 02-09-PLAN.md — Reading pane: thread + composer (public/note) + attachments + ticket mutations + New Ticket (Wave 4)
 - [x] 02-10-PLAN.md — Contacts list + detail + per-contact ticket history + Notes autosave (Wave 3)
-- [ ] 02-11-PLAN.md — Public web intake form + route (honeypot/rate-limit) + uploads volume + Caddy/middleware (Wave 3)
+- [x] 02-11-PLAN.md — Public web intake form + route (honeypot/rate-limit) + uploads volume + Caddy/middleware (Wave 3)
 - [ ] 02-12-PLAN.md — Tokenized public status page + follow-up (auto-reopen) + token-scoped attachment serve (Wave 5)
 
 ### Phase 3: Email Channel
