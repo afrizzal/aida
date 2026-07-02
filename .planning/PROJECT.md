@@ -24,29 +24,27 @@ Launch beachhead is **customer support**, but the ticketing core is built generi
 
 <!-- Filled in as phases complete. -->
 
-- (none yet — greenfield)
+- **AIDA-01** Ticket lifecycle (states, priority, subject/body) — Validated in Phase 2: core-ticketing
+- **AIDA-02** Shared inbox with views/filter/search — Validated in Phase 2: core-ticketing
+- **AIDA-03** Contacts/requesters linked to tickets with history — Validated in Phase 2: core-ticketing
+- **AIDA-04** Assignment + public replies vs private internal notes — Validated in Phase 2: core-ticketing
+- **AIDA-05** Tags/labels (+ basic custom fields) — Validated in Phase 2: core-ticketing
+- **AIDA-06** SLA first-response & resolution timers with breach indicators — Validated in Phase 2: core-ticketing
+- **AIDA-07** Conversation thread with attachments — Validated in Phase 2: core-ticketing
+- **AIDA-08** Web form / portal intake → ticket — Validated in Phase 2: core-ticketing
+- **AIDA-10** Auth + roles (admin, agent) + user management — Validated in Phase 1: foundation
+- **AIDA-11** Workspace/organization scoping (multi-tenant-ready) — Validated in Phase 1: foundation
+- **AIDA-21** One-command self-host (`docker compose up`) — Validated in Phase 1: foundation
 
 ### Active
 
 <!-- v1 MLP. Full statements in REQUIREMENTS.md. -->
 
-**Core ticketing**
-- [ ] **AIDA-01** Ticket lifecycle (states, priority, subject/body)
-- [ ] **AIDA-02** Shared inbox with views/filter/search
-- [ ] **AIDA-03** Contacts/requesters linked to tickets with history
-- [ ] **AIDA-04** Assignment + public replies vs private internal notes
-- [ ] **AIDA-05** Tags/labels (+ basic custom fields)
-- [ ] **AIDA-06** SLA first-response & resolution timers with breach indicators
-- [ ] **AIDA-07** Conversation thread with attachments
-
 **Channels**
-- [ ] **AIDA-08** Web form / portal intake → ticket
 - [ ] **AIDA-09** Email intake (inbound parse/threading) + outbound SMTP replies
 
 **Auth & multi-tenant**
-- [ ] **AIDA-10** Auth + roles (admin, agent) + user management
-- [ ] **AIDA-11** Workspace/organization scoping (multi-tenant-ready)
-- [ ] **AIDA-12** Settings (branding, SLA policies, channels, AI config)
+- [ ] **AIDA-12** Settings (branding, SLA policies, channels, AI config) — SLA policies/tags/custom-fields shipped in Phase 2; branding/channels/AI config land in Phases 4/7
 
 **AI**
 - [ ] **AIDA-13** Model-agnostic LLM layer (OpenAI/Anthropic/Ollama), AI toggle, encrypted keys
@@ -60,7 +58,6 @@ Launch beachhead is **customer support**, but the ticketing core is built generi
 - [ ] **AIDA-20** Untrusted-input & PII safeguards (prompt-injection defense, secret redaction, no egress beyond configured LLM)
 
 **Self-host & DX**
-- [ ] **AIDA-21** One-command self-host (`docker compose up`: app + Postgres/pgvector + worker)
 - [ ] **AIDA-22** Seed/demo data + demo mode for the README
 - [ ] **AIDA-23** Docs site + star-ready README with hero GIF
 - [ ] **AIDA-24** Backups + basic ops docs (single-server pg_dump)
@@ -121,4 +118,4 @@ Launch beachhead is **customer support**, but the ticketing core is built generi
 This document evolves at phase/milestone transitions (validated → move requirements; new ones → Active; decisions → table). v1 = Minimum Lovable Helpdesk; post-v1 candidates: KB autogen (AIDA-18), live chat, more channels, hosted offering.
 
 ---
-*Last updated: 2026-06-28 — project (re)initialized as a vendor-neutral open-source product (decoupled from any single company).*
+*Last updated: 2026-07-02 — Phase 2 (core-ticketing) complete: AIDA-01..08 validated, AIDA-12 partially validated (SLA/tags/custom-fields; branding/channels/AI config pending Phases 4/7).*
