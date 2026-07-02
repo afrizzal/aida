@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-last_updated: "2026-07-02T02:52:53.285Z"
+status: awaiting-verification
+last_updated: "2026-07-02T03:26:04.493Z"
 last_activity: 2026-07-02
 progress:
   total_phases: 7
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 20
-  completed_plans: 19
-  percent: 95
+  completed_plans: 20
+  percent: 100
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -26,12 +26,12 @@ progress:
 
 ## Current Position
 
-Phase: 02 (core-ticketing) — 🟢 Wave 4 COMPLETE (11/12 plans); ready for Wave 5
-Plan: 11 of 12 core-ticketing plans complete (02-01..02-11); Wave 5 next: 02-12 (public status page)
-Status: Executing — Wave 5 next
+Phase: 02 (core-ticketing) — 🟢 COMPLETE (12/12 plans, all 5 waves)
+Plan: 12 of 12 core-ticketing plans complete (02-01..02-12)
+Status: Phase 2 execution complete — awaiting design checklist + verification + human sign-off
 Last activity: 2026-07-02
 
-Progress: [█████████░] 95% (19/20 plans complete — 8/8 phase 01 + 11/12 phase 02)
+Progress: [██████████] 100% (20/20 plans complete — 8/8 phase 01 + 12/12 phase 02)
 
 ## Accumulated Context
 
@@ -104,14 +104,14 @@ Progress: [█████████░] 95% (19/20 plans complete — 8/8 pha
 - (02-09) Pitfall 5 (SLA flag clearing) now fully closed: `changeStatus` clears `isAtRisk`/`isBreached` + stamps `resolvedAt` on resolve (and clears `resolvedAt` on reopen); the messages route clears both flags + stamps `firstRespondedAt` on the first public reply; `changePriority` recomputes due timestamps from `createdAt` AND clears both flags in the same write (a downgrade no longer shows a stale "At risk"/"Overdue"). The sla-flag worker job (02-05) remains one-directional — these are the only three write paths that ever clear the flags.
 - (02-09) Server Actions colocated in a dynamic-segment route folder (`src/app/(app)/tickets/[id]/actions.ts`) can be imported directly into a sibling Client Component (`ticket-meta-header.tsx`) — parentheses/brackets in a path are literal for module resolution, not route-glob syntax; confirmed working via `tsc --noEmit` and `pnpm run build`.
 - (02-09) "New Ticket" CTA (agent-created ticket flow, `NewTicketDialog` + `createTicketAction` delegating to `createTicket()`) wired into `FilterChipRow`'s existing sticky `h-14` header row — not a new header bar, preserving the two-column vertical-rhythm alignment. This was a deviation from 02-09's declared `files_modified` (STATE.md itself had flagged it as a required open todo, now resolved).
+- (02-12) Phase 2 COMPLETE — `/status/[token]` public page ships: bare-`prisma` lookup by `statusToken` (unauthenticated bearer-token flow, never scopedDb), `where: { visibility: "PUBLIC" }` server-side message filter (internal notes never fetched, D-21), `ThreadMessage`/`ThreadSystemEvent` reused verbatim for rendering. `POST /api/public/status/[token]/follow-up`: honeypot + `checkRateLimit("status-follow-up", ip)`, creates an INBOUND/PUBLIC `Message`, and — gated on `ticket.status ∈ {RESOLVED, CLOSED}` — sets `triggeredReopen: true` on that message AND `status: OPEN, resolvedAt: null` on the ticket in the SAME transaction (mirrors 02-09's SLA-flag same-write pattern). `GET /api/public/status/[token]/attachments/[id]`: authorizes via a Prisma join (`attachment.message.{ticketId, visibility: PUBLIC}`), structurally incapable of ever serving an internal-note attachment — a dedicated route, never the authenticated `/api/attachments/[id]` route.
+- (02-12) `ThreadMessage` (`src/components/tickets/thread-message.tsx`) gained an optional `attachmentHrefBase` prop (default `/api/attachments`, fully backward-compatible with 02-09's agent-thread usage) so this public page can point attachment links at its own token-scoped serving route without forking the component. Any future caller needing a third attachment-serving route should follow the same pattern.
 
 ### Open Todos
 
-- Execute Phase 2: `/gsd:execute-phase 2`. Waves 1-4 (02-01..02-11, all except 02-12) complete — 11/12 phase-2 plans done. Next: Wave 5 (02-12 public status page) — the final plan in Phase 2.
-- 02-09 done: plan 12 (public status page) reuses `ThreadMessage` (filtered to `visibility: PUBLIC` only, server-side query — never rely on client-side filtering) and `ThreadSystemEvent` (verbatim, same auto-reopen copy) from `src/components/tickets/`. It needs its own upload/serve Route Handlers on the `localFileStorage`/`file-type` primitives — not shared code with 02-09's agent-side routes, since auth/scoping differ per call site (per RESEARCH.md Topic 4).
-- 02-11 done: `checkRateLimit("public-intake", ip)` is wired into `POST /api/public/intake`. Plan 12 (public status-page follow-up composer) still needs its own `checkRateLimit` call per D-20 ("same guard on the public status-page follow-up composer").
-- Consolidation follow-up: dedup 02-07's inline SLA/chip literals against 02-03/02-06 (see Key Decisions above) — still pending, out of scope for 02-09/02-11's files; revisit at Phase 2 close-out or defer to a later phase.
-- Plan 12 can reuse `PublicPageShell` (`maxWidth={720}`) and `HoneypotField` from `src/components/public/` unchanged — no new shared-component work needed there.
+- Phase 2 (core-ticketing) is fully executed (12/12 plans, all 5 waves). Next: run the Phase 2 design checklist (DESIGN-SYSTEM.md §9) + `/gsd:verify-work` + human sign-off per the phase loop in CLAUDE.md/LOOP-ENGINEERING.md, then `/gsd:plan-phase 3` (email intake).
+- Consolidation follow-up: dedup 02-07's inline SLA/chip literals against 02-03/02-06 (see Key Decisions above) — still pending; low-priority, does not block Phase 2 sign-off, revisit at Phase 2 close-out or defer to a later phase.
+- Phase 3 (email intake): mirror the auto-reopen logic from 02-12's follow-up route when handling inbound email replies to RESOLVED/CLOSED tickets (same `shouldReopen` + same-transaction pattern).
 
 ### Blockers
 
@@ -142,7 +142,11 @@ Wave 3 worktree branches merged into `master`. Phase 2 is now 10/12 plans comple
 
 Wave 4 complete. Phase 2 is now 11/12 plans complete — only 02-12 (public status page) remains.
 
-**Next action:** Wave 5 (02-12 public status page — reuse 02-11's `PublicPageShell`/`HoneypotField` and 02-09's `ThreadMessage`/`ThreadSystemEvent` (public-only query, filtered server-side), add its own `checkRateLimit` call on the follow-up composer per D-20, own upload/serve Route Handlers). This is the last plan in Phase 2 — after it lands, run the phase design checklist and verification before Phase 2 sign-off.
+- **02-12** (public status page + follow-up + auto-reopen — Wave 5, FINAL plan of Phase 2): `/status/[token]` Server Component (bare `prisma.ticket.findUnique({ where: { statusToken } })`, `messages: { where: { visibility: "PUBLIC" } }` — server-side exclusion, never client-filtered; invalid-token dead-end state) renders the thread via reused `ThreadMessage`/`ThreadSystemEvent` and a reduced `FollowUpForm` (no mode toggle, honeypot + client-side attachment pre-check). `POST /api/public/status/[token]/follow-up`: honeypot silent-success, `checkRateLimit("status-follow-up", ip)`, zod-validated message, `file-type`-sniffed attachments; one transaction creates the INBOUND/PUBLIC `Message` (`triggeredReopen` gated on `shouldReopen`) and, only when `shouldReopen`, updates the ticket to `status: OPEN, resolvedAt: null`. `GET /api/public/status/[token]/attachments/[id]`: internal-note-blind via a `{ ticketId, visibility: PUBLIC }` join, independent of the authenticated attachment route. Extended `ThreadMessage` with a backward-compatible `attachmentHrefBase` prop (deviation — see 02-12-SUMMARY.md) so public attachment links route to the new token-scoped serving path. `tsc --noEmit` and `pnpm run build` both clean. Commits: `f512115`, `8cb2d71`. SUMMARY: `.planning/phases/02-core-ticketing/02-12-SUMMARY.md`.
+
+Wave 5 complete. **Phase 2 (core-ticketing) is now fully executed: 12/12 plans, all 5 waves.**
+
+**Next action:** Run the Phase 2 design checklist (DESIGN-SYSTEM.md §9), then `/gsd:verify-work` for Phase 2, then human sign-off per the phase loop (CLAUDE.md/LOOP-ENGINEERING.md). Once signed off, proceed to `/gsd:plan-phase 3` (email intake/threading + outbound SMTP, AIDA-09) — the auto-reopen logic in 02-12's follow-up route should be mirrored there for inbound email replies.
 
 **Phase 2 research open questions (resolved during planning, researcher's recommended defaults all adopted):** (1) public status-page token = a dedicated unguessable random token, NOT the raw ticket cuid; (2) single-workspace v1 web-form org resolution = `findFirstOrThrow()`; (3) SLA "at-risk" threshold = proportional 20% of target duration remaining, not a flat cutoff.
 
@@ -160,4 +164,4 @@ Wave 4 complete. Phase 2 is now 11/12 plans complete — only 02-12 (public stat
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
 ---
-*Last updated: 2026-07-02 — Wave 4 of Phase 2 complete (02-09), 11/12 phase-2 plans done; next: Wave 5 (02-12), the last plan in Phase 2.*
+*Last updated: 2026-07-02 — Wave 5 of Phase 2 complete (02-12, the final plan): Phase 2 (core-ticketing) fully executed at 12/12 plans. Next: design checklist + verify-work + human sign-off, then Phase 3.*

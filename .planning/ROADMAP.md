@@ -8,7 +8,7 @@
 ## Phases
 
 - [x] **Phase 1: Foundation** — App scaffold, data model, auth + workspace scoping, one-command self-host shell (completed 2026-06-29)
-- [ ] **Phase 2: Core Ticketing** — Shared inbox, ticket lifecycle, contacts, replies/notes, tags, SLA, web intake
+- [x] **Phase 2: Core Ticketing** — Shared inbox, ticket lifecycle, contacts, replies/notes, tags, SLA, web intake (completed 2026-07-02)
 - [ ] **Phase 3: Email Channel** — Inbound email → ticket threading + outbound SMTP replies
 - [ ] **Phase 4: AI Foundation** — Model-agnostic LLM layer + auto-triage + audit log + untrusted-input safeguards
 - [ ] **Phase 5: RAG & Drafted Replies** — Knowledge base + embeddings + citation-backed drafts behind a human-approval gate
@@ -46,7 +46,7 @@
 3. Tickets link to contact records showing per-contact history; agents can assign tickets and post public replies vs private notes (visually distinct).
 4. Tags + basic custom fields work and are filterable; SLA first-response/resolution timers compute from priority and show at-risk/breached states.
 5. A public web form creates a ticket and returns a status link; the conversation thread supports attachments.
-**Plans:** 11/12 plans executed
+**Plans:** 12/12 plans complete
 - [x] 02-01-PLAN.md — Data model + relational/FTS migrations + scopedDb allowlist + tenant-in-tx smoke test (Wave 1)
 - [x] 02-02-PLAN.md — Deps + shadcn primitives + warning/success tokens + Badge variants + renderMarkdown (Wave 1)
 - [x] 02-03-PLAN.md — Ticket core: status-token, SLA helpers, contact find-or-create, createTicket transaction (Wave 2)
@@ -58,7 +58,7 @@
 - [x] 02-09-PLAN.md — Reading pane: thread + composer (public/note) + attachments + ticket mutations + New Ticket (Wave 4)
 - [x] 02-10-PLAN.md — Contacts list + detail + per-contact ticket history + Notes autosave (Wave 3)
 - [x] 02-11-PLAN.md — Public web intake form + route (honeypot/rate-limit) + uploads volume + Caddy/middleware (Wave 3)
-- [ ] 02-12-PLAN.md — Tokenized public status page + follow-up (auto-reopen) + token-scoped attachment serve (Wave 5)
+- [x] 02-12-PLAN.md — Tokenized public status page + follow-up (auto-reopen) + token-scoped attachment serve (Wave 5)
 
 ### Phase 3: Email Channel
 **Timebox:** ~1–1.5 weeks · **Depends on:** Phase 2 · **Requirements:** AIDA-09
