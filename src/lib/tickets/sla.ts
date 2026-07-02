@@ -15,14 +15,16 @@ export const DEFAULT_SLA_TARGETS: Record<TicketPriority, SlaTargets> = {
   LOW: { firstResponseMinutes: 1440, resolutionMinutes: 4320 },
 };
 
+// Narrowed to just the delegate this module needs so both a full scopedDb()
+// client and an in-flight interactive-$transaction `tx` client (which lacks
+// $connect/$disconnect/$extends/$transaction) satisfy this type structurally.
+type SlaDb = Pick<ReturnType<typeof scopedDb>, "slaPolicy">;
+
 /**
  * Reads the org's admin-configured SlaPolicy for `priority` (scopedDb auto-scopes org);
  * falls back to DEFAULT_SLA_TARGETS when no policy row exists yet.
  */
-export async function getSlaTargets(
-  db: ReturnType<typeof scopedDb>,
-  priority: TicketPriority,
-): Promise<SlaTargets> {
+export async function getSlaTargets(db: SlaDb, priority: TicketPriority): Promise<SlaTargets> {
   const policy = await db.slaPolicy.findFirst({ where: { priority } });
   if (policy) {
     return {
