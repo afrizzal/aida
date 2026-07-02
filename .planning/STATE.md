@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-02T01:34:47.034Z"
-last_activity: 2026-07-02 -- Phase 02 execution started
+last_updated: "2026-07-02T01:58:45.000Z"
+last_activity: 2026-07-02 -- 02-10 (contacts) complete
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 20
-  completed_plans: 15
-  percent: 75
+  completed_plans: 16
+  percent: 80
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -26,12 +26,12 @@ progress:
 
 ## Current Position
 
-Phase: 02 (core-ticketing) — 🟢 Wave 2 COMPLETE (7/12 plans); starting Wave 3
-Plan: 7 of 12 core-ticketing plans complete (02-01..02-07); Wave 3 next: 02-08 (inbox), 02-10 (contacts), 02-11 (public intake)
-Status: Executing — Wave 3 starting
+Phase: 02 (core-ticketing) — 🟡 Wave 3 IN PROGRESS (8/12 plans); 02-10 (contacts) done
+Plan: 8 of 12 core-ticketing plans complete (02-01..02-07, 02-10); Wave 3 remaining: 02-08 (inbox), 02-11 (public intake)
+Status: Executing — Wave 3 in progress
 Last activity: 2026-07-02
 
-Progress: [███████░░░] 75% (15/20 plans complete — 8/8 phase 01 + 7/12 phase 02)
+Progress: [████████░░] 80% (16/20 plans complete — 8/8 phase 01 + 8/12 phase 02)
 
 ## Accumulated Context
 
@@ -91,10 +91,12 @@ Progress: [███████░░░] 75% (15/20 plans complete — 8/8 pha
 - (02-07) Same-wave, non-declared-dependency plan outputs (02-03's `DEFAULT_SLA_TARGETS`, 02-06's `PriorityChip`/`TagChip`) were NOT imported cross-plan during execution (no declared `depends_on`) — 02-07 duplicated minimal, token-identical literals/inline components instead. **Consolidation pending**: now that 02-03/02-06 have merged, replace 02-07's inline `DEFAULT_TARGETS_MINUTES` (sla/page.tsx) and inline priority/tag Badge visuals (sla-form.tsx, tag-manager.tsx) with the shared `DEFAULT_SLA_TARGETS`/`PriorityChip`/`TagChip` — values/classes are already identical, this is a pure de-dup pass.
 - (02-07) `TicketTag` (join table) is excluded from scopedDb's `DOMAIN_MODELS` — per-tag ticket counts use bare `prisma.ticketTag.groupBy({ by: ["tagId"], _count: true, where: { tag: { organizationId } } })`, scoped via the `tag` relation rather than scopedDb.
 - (02-07) `CustomFieldDefinition.options` (Json?) must be set to `Prisma.JsonNull` (not plain `null`) when clearing it on `update` — Prisma's generated `NullableJsonNullValueInput` type rejects a bare `null` literal for Json columns.
+- (02-10) `/contacts` + `/contacts/[id]` built: searchable contacts list (name/email/company, insensitive, `_count.tickets`), contact detail with full ticket history (`StatusChip` per row) + autosaving Notes (`saveContactNotes` Server Action). AIDA-03 fully satisfied. Added `src/lib/format-relative-time.ts` (past-facing companion to `formatDueDuration`) — reusable by 02-08 (list row timestamps) and 02-09 (thread message timestamps).
+- (02-10) Client-side debounced search synced to the URL via `router.replace` (no `searchParams` in the effect deps — only rebuild `q`, avoids stale-closure churn) — first instance of this pattern; 02-08's ticket search should follow the same shape.
 
 ### Open Todos
 
-- Execute Phase 2: `/gsd:execute-phase 2`. Wave 1 (02-01, 02-02) and Wave 2 (02-03..02-07) complete — 7/12 phase-2 plans done. Next: Wave 3 (02-08 inbox, 02-10 contacts, 02-11 public intake) → Wave 4 (02-09 reading pane) → Wave 5 (02-12 public status page).
+- Execute Phase 2: `/gsd:execute-phase 2`. Wave 1 (02-01, 02-02), Wave 2 (02-03..02-07), and 02-10 (Wave 3) complete — 8/12 phase-2 plans done. Next: finish Wave 3 (02-08 inbox, 02-11 public intake) → Wave 4 (02-09 reading pane) → Wave 5 (02-12 public status page).
 - Watch during execution: "New Ticket" CTA must land in the inbox top bar (plan 08 territory) so a zero-ticket workspace has an agent-reachable creation path — plan 09's task text left this ambiguous ("list panel header or reading-pane header"); the reading-pane-only option would break cold start.
 - 02-01 done: tenant-in-tx smoke test used the correct type-cast pattern (not explicit organizationId) — auto-injection genuinely proven, no fallback needed downstream.
 - 02-03 done: `createTicket()`, `findOrCreateContact()`, `getSlaTargets()`/`computeDueTimestamps()`, `generateStatusToken()` all available now for 02-08/09/11/12 to call directly.
@@ -122,7 +124,9 @@ None.
 
 Wave 1 worktree branches merged into `master` (merge commits `64f0888`, `6871bd6`). 02-03 through 02-07 executed on worktrees fast-forwarded onto master, then merged back.
 
-**Next action:** Do the 02-07 consolidation pass (dedup SLA/chip literals), then Wave 3 (02-08 inbox, 02-10 contacts, 02-11 public intake — should consume the 02-06 chip vocabulary) → Wave 4 (02-09 reading pane, must clear SLA flags on first-response/resolve, should adopt 02-07's `CustomFieldInput`) → Wave 5 (02-12 public status page).
+- **02-10** (contacts list + detail + notes, Wave 3): `/contacts` (searchable Server Component list — name/email/company insensitive match, `_count.tickets`, `ContactSearch` debounced client input) + `/contacts/[id]` (header card with avatar/email/phone/company/`NotesForm`, full ticket history newest-first reusing `StatusChip` from 02-06) + `saveContactNotes` Server Action (getScopedDb + revalidatePath). Sidebar/top-bar nav updated (Contacts between Tickets and Knowledge Base). Added shared `src/lib/format-relative-time.ts`. `tsc --noEmit` and `pnpm run build` both clean; `biome check` clean on all new files. AIDA-03 fully satisfied. Commits: `7283537`, `eea4ee4`, `15ecfe1` (biome format fix). SUMMARY: `.planning/phases/02-core-ticketing/02-10-SUMMARY.md`.
+
+**Next action:** Do the 02-07 consolidation pass (dedup SLA/chip literals), then finish Wave 3 (02-08 inbox, 02-11 public intake — should consume the 02-06 chip vocabulary and 02-10's `formatRelativeTime`) → Wave 4 (02-09 reading pane, must clear SLA flags on first-response/resolve, should adopt 02-07's `CustomFieldInput`) → Wave 5 (02-12 public status page).
 
 **Phase 2 research open questions (resolved during planning, researcher's recommended defaults all adopted):** (1) public status-page token = a dedicated unguessable random token, NOT the raw ticket cuid; (2) single-workspace v1 web-form org resolution = `findFirstOrThrow()`; (3) SLA "at-risk" threshold = proportional 20% of target duration remaining, not a flat cutoff.
 
@@ -140,4 +144,4 @@ Wave 1 worktree branches merged into `master` (merge commits `64f0888`, `6871bd6
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
 ---
-*Last updated: 2026-07-02 — Wave 2 of Phase 2 complete (02-03..02-07, 7/12 phase-2 plans done); next: 02-07 consolidation pass, then Wave 3 (02-08/10/11).*
+*Last updated: 2026-07-02 — 02-10 (contacts) complete, 8/12 phase-2 plans done; next: 02-07 consolidation pass, then finish Wave 3 (02-08, 02-11).*
