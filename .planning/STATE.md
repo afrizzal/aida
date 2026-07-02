@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-02T01:03:22.618Z"
+last_updated: "2026-07-02T01:09:46.337Z"
 last_activity: 2026-07-02
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 20
-  completed_plans: 14
-  percent: 70
+  completed_plans: 15
+  percent: 75
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -26,12 +26,12 @@ progress:
 
 ## Current Position
 
-Phase: 02 (core-ticketing) — 🟡 IN PROGRESS (wave 2 of 5 in progress: 02-03/02-04/02-05/02-06 done, 02-07 remaining)
-Plan: 6 of 12 core-ticketing plans complete (02-01, 02-02 wave 1; 02-03, 02-04, 02-05, 02-06 wave 2 — mutually independent)
-Status: Executing — Wave 2 nearly complete (02-07 remaining)
+Phase: 02 (core-ticketing) — 🟢 Wave 2 COMPLETE (5/5: 02-03, 02-04, 02-05, 02-06, 02-07); ready for Wave 3
+Plan: 7 of 12 core-ticketing plans complete (02-01, 02-02 wave 1; 02-03..02-07 wave 2 — all mutually independent)
+Status: Wave 2 complete. Next: Wave 3 (02-08 inbox, 02-10 contacts, 02-11 public intake).
 Last activity: 2026-07-02
 
-Progress: [███████░░░] 70% (14/20 plans complete — 8/8 phase 01 + 6/12 phase 02)
+Progress: [███████░░░] 75% (15/20 plans complete — 8/8 phase 01 + 7/12 phase 02)
 
 ## Accumulated Context
 
@@ -87,16 +87,21 @@ Progress: [███████░░░] 70% (14/20 plans complete — 8/8 pha
 - (02-05) `RateLimitHit` is accessed via bare `prisma` (not `scopedDb`, confirmed not in the DOMAIN_MODELS allowlist) — Postgres-backed per-IP rate limiter (`checkRateLimit`, sha256(ip+pepper) hash, rolling-window count-then-insert) for public intake; a daily worker job prunes rows older than 48h. `check-rate-limit.ts` imports `@/lib/db` (webpack) while worker jobs import `../../db` (esbuild bundle) — same prisma singleton, two different bundling contexts, do not mix import styles between the two.
 - (02-05) `gsd-tools state update-progress` / `add-decision` CLI commands have a bug on this project's STATE.md: the case-insensitive `Progress:` regex matches the YAML frontmatter's lowercase `progress:` key before the body's `Progress:` line, so the body bar silently fails to update (tool reports success). `add-decision` similarly fails because this file's heading is `### Key Decisions`, not `### Decisions`/`### Decisions Made`. Both were hand-edited this session as a workaround — future sessions should hand-edit the body `Progress:` line and `### Key Decisions` list directly rather than trusting these two CLI commands' reported success on this file.
 - (02-06) Ticket chip vocabulary built in `src/components/tickets/`: `StatusChip` (5-state), `PriorityChip` (4-level), `SlaDueChip` (3-state, precedence breached > at-risk > on-track), `TagChip`/`TagOverflowChip`, `AttachmentChip`/`formatBytes`, `AssigneeAvatar` (+ dashed Unassigned placeholder), and `formatDueDuration` helper — all token-only (Badge base + `cn(sizeClasses, stateClasses)`, twMerge dedupes). Future inbox/reading-pane/contacts/public UI (plans 08/09/10/12) must reuse these, not re-derive status/priority/SLA color logic.
+- (02-07) `requireOrgAdmin()` (`src/lib/authz.ts`) is the standard server-side admin gate — call first in every mutating Settings Server Action (SECURITY.md: server-side authz, not just hidden UI). Uses bare `prisma` for the `member` lookup (Better Auth model, not in scopedDb's DOMAIN_MODELS).
+- (02-07) Same-wave, non-declared-dependency plan outputs (02-03's `DEFAULT_SLA_TARGETS`, 02-06's `PriorityChip`/`TagChip`) were NOT imported cross-plan during execution (no declared `depends_on`) — 02-07 duplicated minimal, token-identical literals/inline components instead. **Consolidation pending**: now that 02-03/02-06 have merged, replace 02-07's inline `DEFAULT_TARGETS_MINUTES` (sla/page.tsx) and inline priority/tag Badge visuals (sla-form.tsx, tag-manager.tsx) with the shared `DEFAULT_SLA_TARGETS`/`PriorityChip`/`TagChip` — values/classes are already identical, this is a pure de-dup pass.
+- (02-07) `TicketTag` (join table) is excluded from scopedDb's `DOMAIN_MODELS` — per-tag ticket counts use bare `prisma.ticketTag.groupBy({ by: ["tagId"], _count: true, where: { tag: { organizationId } } })`, scoped via the `tag` relation rather than scopedDb.
+- (02-07) `CustomFieldDefinition.options` (Json?) must be set to `Prisma.JsonNull` (not plain `null`) when clearing it on `update` — Prisma's generated `NullableJsonNullValueInput` type rejects a bare `null` literal for Json columns.
 
 ### Open Todos
 
-- Execute Phase 2: `/gsd:execute-phase 2`. Wave 1 (02-01, 02-02) complete. Wave 2: 02-03, 02-04, 02-05, 02-06 done. Remaining Wave 2: 02-07 (settings). Then Wave 3 (02-08/10/11) → Wave 4 (02-09) → Wave 5 (02-12).
+- Execute Phase 2: `/gsd:execute-phase 2`. Wave 1 (02-01, 02-02) and Wave 2 (02-03..02-07) complete — 7/12 phase-2 plans done. Next: Wave 3 (02-08 inbox, 02-10 contacts, 02-11 public intake) → Wave 4 (02-09 reading pane) → Wave 5 (02-12 public status page).
 - Watch during execution: "New Ticket" CTA must land in the inbox top bar (plan 08 territory) so a zero-ticket workspace has an agent-reachable creation path — plan 09's task text left this ambiguous ("list panel header or reading-pane header"); the reading-pane-only option would break cold start.
 - 02-01 done: tenant-in-tx smoke test used the correct type-cast pattern (not explicit organizationId) — auto-injection genuinely proven, no fallback needed downstream.
 - 02-03 done: `createTicket()`, `findOrCreateContact()`, `getSlaTargets()`/`computeDueTimestamps()`, `generateStatusToken()` all available now for 02-08/09/11/12 to call directly.
 - Downstream plans (09 composer, 11 public intake, 12 public status page) still need to build the actual upload/serve Route Handlers on top of 02-04's `FileStorage`/`localFileStorage`/`buildStorageKey` primitives, per RESEARCH.md Topic 4's illustrative shape — not built in 02-04 (out of scope, storage/limits primitives only).
 - 02-05 done: plan 09 must remember to clear `isAtRisk`/`isBreached` in the same write as setting `firstRespondedAt`/`resolvedAt` (the sla-flag job is one-directional and only sets).
 - Plan 08/11 (public intake): call `checkRateLimit("public-intake", ip)` from `src/lib/rate-limit/check-rate-limit.ts` before creating a ticket from the public web form.
+- Consolidation follow-up: dedup 02-07's inline SLA/chip literals against 02-03/02-06 (see Key Decisions above) — do this before or as part of Wave 3 to avoid the inbox/settings UI showing divergent visuals.
 
 ### Blockers
 
@@ -104,7 +109,7 @@ None.
 
 ## Session Continuity
 
-**Last action:** Wave 2 of Phase 2 in progress — plans 02-03 (ticket-creation domain core), 02-04 (FTS search + attachment storage), 02-05 (SLA-flag worker + rate limiter), and 02-06 (ticket chip vocabulary) all complete:
+**Last action:** Wave 2 of Phase 2 COMPLETE — all 5 plans done:
 
 - **02-01** (core-ticketing data foundation): 11 Prisma models + 5 enums added, relational migration generated; FTS tsvector/GIN migration hand-written outside schema.prisma; scopedDb DOMAIN_MODELS extended to 9 tenant models; Wave-0 smoke test proves scopedDb auto-injects organizationId inside interactive `$transaction` (no fallback needed for plan 03). 4/4 integration tests green (Testcontainers). Commits: `cd4d067`, `133e86b`, `6b299c6`, `6fe228b`, `8c88164`. SUMMARY: `.planning/phases/02-core-ticketing/02-01-SUMMARY.md`.
 - **02-02** (deps/tokens/renderMarkdown): Installed 7 markdown/file-type packages + 5 shadcn primitives (`textarea`, `popover`, `command`, `checkbox`, `skeleton`). Added `--warning`/`--success` tokens (light+dark) and matching `Badge` variants. Built `renderMarkdown()` (TDD: RED → GREEN → REFACTOR, 6/6 assertions green) — required an unplanned custom `rehypeSafeLinks` plugin. Commits: `64acb84`, `fc7166c`, `a758621`, `63ce2c5`, `2441fa3`, `2d87e99`. SUMMARY: `.planning/phases/02-core-ticketing/02-02-SUMMARY.md`.
@@ -113,10 +118,11 @@ None.
 
 - **02-05** (SLA-flag worker job + Postgres rate limiter): `slaFlagHandler` (two set-based `$executeRaw` UPDATEs — breach + proportional 20% at-risk, RESOLVED/CLOSED excluded, one-directional/sets-only), `checkRateLimit(scope, ip)` (sha256-hashed IP, rolling-window count-then-insert against `RateLimitHit`), `rateLimitCleanupHandler` (prunes rows >48h); all three wired into `src/lib/worker/index.ts` (createQueue/work/schedule, mirroring the heartbeat pattern — sla-flag every 5 min, rate-limit-cleanup daily 03:00). `tsc --noEmit` clean. Commits: `72da7e6`, `e901d86`, `fe9d39f`, `8cdd5ea` (biome format fix). SUMMARY: `.planning/phases/02-core-ticketing/02-05-SUMMARY.md`.
 - **02-06** (ticket chip vocabulary): Built `StatusChip` (5-state), `PriorityChip` (4-level), `SlaDueChip` (3-state, breached > at-risk > on-track precedence), `TagChip`/`TagOverflowChip`, `AttachmentChip`/`formatBytes`, `AssigneeAvatar` (+ dashed Unassigned placeholder) and `formatDueDuration` — all in `src/components/tickets/` + `src/lib/tickets/format-duration.ts`, token-only (no hex/oklch), typed against generated Prisma enums. `pnpm exec tsc --noEmit` and `biome check` both clean. Commits: `16f1032`, `daa38bb`. SUMMARY: `.planning/phases/02-core-ticketing/02-06-SUMMARY.md`.
+- **02-07** (settings admin surfaces): `src/lib/authz.ts` (`requireOrgAdmin`/`getOrgRole`) + Settings sub-nav (AI Features | SLA Policies | Tags | Custom Fields) + 3 admin-gated surfaces (SLA per-priority targets, tag rename/delete, 5-type custom field definitions) + reusable `CustomFieldInput` (for plan 09). Duplicated minimal inline equivalents of 02-03's `DEFAULT_SLA_TARGETS` and 02-06's `PriorityChip`/`TagChip` since those weren't in its worktree at execution time — **consolidation pending** (see Key Decisions). Commits: `eadc3b8`, `ac70538`, `dfee40d`. SUMMARY: `.planning/phases/02-core-ticketing/02-07-SUMMARY.md`.
 
-Wave 1 worktree branches merged into `master` (merge commits `64f0888`, `6871bd6`). 02-03, 02-04, 02-05, 02-06 executed on worktrees fast-forwarded onto master, then merged back.
+Wave 1 worktree branches merged into `master` (merge commits `64f0888`, `6871bd6`). 02-03 through 02-07 executed on worktrees fast-forwarded onto master, then merged back.
 
-**Next action:** Remaining Wave 2 plan — 02-07 (settings) — depends only on Wave 1's schema/scopedDb/tokens (already satisfied). Then Wave 3 (02-08 inbox, 02-10 contacts, 02-11 public intake — inbox/contacts/public UI should now consume the 02-06 chip vocabulary) → Wave 4 (02-09 reading pane, must clear SLA flags on first-response/resolve) → Wave 5 (02-12 public status page).
+**Next action:** Do the 02-07 consolidation pass (dedup SLA/chip literals), then Wave 3 (02-08 inbox, 02-10 contacts, 02-11 public intake — should consume the 02-06 chip vocabulary) → Wave 4 (02-09 reading pane, must clear SLA flags on first-response/resolve, should adopt 02-07's `CustomFieldInput`) → Wave 5 (02-12 public status page).
 
 **Phase 2 research open questions (resolved during planning, researcher's recommended defaults all adopted):** (1) public status-page token = a dedicated unguessable random token, NOT the raw ticket cuid; (2) single-workspace v1 web-form org resolution = `findFirstOrThrow()`; (3) SLA "at-risk" threshold = proportional 20% of target duration remaining, not a flat cutoff.
 
@@ -134,4 +140,4 @@ Wave 1 worktree branches merged into `master` (merge commits `64f0888`, `6871bd6
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
 ---
-*Last updated: 2026-07-02 — Wave 2 of Phase 2 nearly complete: plans 02-03, 02-04, 02-05, 02-06 done; next: 02-07.*
+*Last updated: 2026-07-02 — Wave 2 of Phase 2 complete (02-03..02-07, 7/12 phase-2 plans done); next: 02-07 consolidation pass, then Wave 3 (02-08/10/11).*
