@@ -31,6 +31,9 @@ logs/
 # Test / coverage
 coverage/
 .nyc_output/
+/playwright-report/
+/test-results/
+/tests/e2e/.auth/
 
 # OS / editor junk
 .DS_Store
