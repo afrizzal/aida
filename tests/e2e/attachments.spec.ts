@@ -10,7 +10,7 @@ test.use({ storageState: path.resolve(__dirname, ".auth/admin.json") });
 
 test("authenticated download works; public route only ever serves public-message attachments", async ({
   page,
-  context,
+  browser,
   request,
 }) => {
   // Two sequential message submissions + an explicit networkidle settle between them push
@@ -36,7 +36,9 @@ test("authenticated download works; public route only ever serves public-message
   // draft shows it as a removable staged-file chip), so a plain getByText can pass against
   // the draft while the real POST is still in flight, racing ahead of the DB write.
   const [publicPostRes] = await Promise.all([
-    page.waitForResponse((res) => res.url().includes(messagesPostUrl) && res.request().method() === "POST"),
+    page.waitForResponse(
+      (res) => res.url().includes(messagesPostUrl) && res.request().method() === "POST",
+    ),
     page.getByRole("button", { name: "Send Reply" }).click(),
   ]);
   expect(publicPostRes.status()).toBe(200);
@@ -51,12 +53,12 @@ test("authenticated download works; public route only ever serves public-message
   await page.reload();
 
   await page.getByRole("button", { name: "Internal Note" }).click();
-  await page
-    .getByPlaceholder("Write an internal note…")
-    .fill("Internal note with an attachment.");
+  await page.getByPlaceholder("Write an internal note…").fill("Internal note with an attachment.");
   await page.locator('input[type="file"]').setInputFiles(SAMPLE_ATTACHMENT);
   const [internalPostRes] = await Promise.all([
-    page.waitForResponse((res) => res.url().includes(messagesPostUrl) && res.request().method() === "POST"),
+    page.waitForResponse(
+      (res) => res.url().includes(messagesPostUrl) && res.request().method() === "POST",
+    ),
     page.getByRole("button", { name: "Save Internal Note" }).click(),
   ]);
   expect(internalPostRes.status()).toBe(200);
@@ -79,7 +81,12 @@ test("authenticated download works; public route only ever serves public-message
   const authedRes = await page.request.get(`/api/attachments/${publicAttachment.id}`);
   expect(authedRes.status()).toBe(200);
 
-  const anonContext = await context.browser()!.newContext();
+  // browser.newContext() inherits this file's test.use options — including the admin
+  // storageState — so a bare newContext() is NOT anonymous: it carries the admin cookies
+  // and gets a legitimate 200. Only an explicit empty storageState makes it cookie-less.
+  const anonContext = await browser.newContext({
+    storageState: { cookies: [], origins: [] },
+  });
   const anonRes = await anonContext.request.get(`/api/attachments/${publicAttachment.id}`);
   expect(anonRes.status()).toBe(401);
   await anonContext.close();
