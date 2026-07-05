@@ -76,7 +76,7 @@ export function TicketListRow({
         {ticket.subject}
       </p>
 
-      <div className="mt-1.5 flex items-center gap-1.5">
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
         <StatusChip status={ticket.status} />
         {(ticket.priority === "HIGH" || ticket.priority === "URGENT") && (
           <PriorityChip priority={ticket.priority} />
