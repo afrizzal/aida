@@ -28,8 +28,8 @@ progress:
 
 Phase: 3
 Plan: Not started
-Status: Phase 2 execution complete — awaiting design checklist + verification + human sign-off
-Last activity: 2026-07-05 - Completed quick task 260705-bau: middleware 401 JSON for unauthenticated /api/* + truly-anonymous e2e context (E2E suite now 24/24 green)
+Status: Phase 2 UAT COMPLETE — 30/30 tests passed (verify-work, Claude-driven through real UI/API). Awaiting design checklist (§9) + human sign-off.
+Last activity: 2026-07-05 - Phase 2 verify-work: 30/30 UAT pass; 2 issues found & fixed inline (.dockerignore worktree bloat 28eb0c7; Next 10MB proxy body cap b2b604a); uat-gaps E2E spec added; UAT committed 98693f8
 
 Progress: [██████████] 100% (20/20 plans complete — 8/8 phase 01 + 12/12 phase 02)
 
@@ -109,7 +109,9 @@ Progress: [██████████] 100% (20/20 plans complete — 8/8 ph
 
 ### Open Todos
 
-- Phase 2 (core-ticketing) is fully executed (12/12 plans, all 5 waves). Next: run the Phase 2 design checklist (DESIGN-SYSTEM.md §9) + `/gsd:verify-work` + human sign-off per the phase loop in CLAUDE.md/LOOP-ENGINEERING.md, then `/gsd:plan-phase 3` (email intake).
+- Phase 2: `/gsd:verify-work` DONE (2026-07-05, 30/30 pass — see `.planning/phases/02-core-ticketing/02-UAT.md`). Remaining before Phase 3: design checklist (DESIGN-SYSTEM.md §9) + human sign-off, then `/gsd:plan-phase 3` (email intake).
+- Rename `src/middleware.ts` → `proxy.ts` (Next 16 deprecation warning; non-blocking, surfaced during UAT).
+- Disk hygiene: 12 stale agent worktrees under `.claude/worktrees` (~11GB) — `git worktree prune` + delete after checking for uncommitted agent work (now dockerignored so builds are safe either way).
 - Consolidation follow-up: dedup 02-07's inline SLA/chip literals against 02-03/02-06 (see Key Decisions above) — still pending; low-priority, does not block Phase 2 sign-off, revisit at Phase 2 close-out or defer to a later phase.
 - Phase 3 (email intake): mirror the auto-reopen logic from 02-12's follow-up route when handling inbound email replies to RESOLVED/CLOSED tickets (same `shouldReopen` + same-transaction pattern).
 
@@ -152,7 +154,9 @@ Wave 4 complete. Phase 2 is now 11/12 plans complete — only 02-12 (public stat
 
 Wave 5 complete. **Phase 2 (core-ticketing) is now fully executed: 12/12 plans, all 5 waves.**
 
-**Next action:** Run the Phase 2 design checklist (DESIGN-SYSTEM.md §9), then `/gsd:verify-work` for Phase 2, then human sign-off per the phase loop (CLAUDE.md/LOOP-ENGINEERING.md). Once signed off, proceed to `/gsd:plan-phase 3` (email intake/threading + outbound SMTP, AIDA-09) — the auto-reopen logic in 02-12's follow-up route should be mirrored there for inbound email replies.
+**Phase 2 verify-work (2026-07-05, delegated to Claude):** 30/30 UAT tests pass. Evidence: E2E 24/24 + new `tests/e2e/uat-gaps.spec.ts` 9/9 (empty states, New Ticket dialog, contacts search, SLA/tags/custom-field admin, server-side attachment validation, intake rate limit) + integration 14/14 + unit 14/14 + real `docker compose` cold start (migrate applied, health ok, worker heartbeat fresh). Two issues found & fixed inline: (1) `.dockerignore` — `.claude/` worktrees (11.8GB) leaked into build context, root-anchored patterns missed nested node_modules → builds stalled >45min; now `**/`-prefixed + `.claude`/`test-results` excluded (28eb0c7). (2) Next.js buffers proxied bodies at 10MB, truncating intake uploads BEFORE the route's 413/415 checks → `experimental.proxyClientMaxBodySize = MAX_TOTAL_REQUEST_BYTES` in next.config.ts (b2b604a). UAT file committed 98693f8.
+
+**Next action:** Run the Phase 2 design checklist (DESIGN-SYSTEM.md §9), then human sign-off per the phase loop (CLAUDE.md/LOOP-ENGINEERING.md). Once signed off, proceed to `/gsd:plan-phase 3` (email intake/threading + outbound SMTP, AIDA-09) — the auto-reopen logic in 02-12's follow-up route should be mirrored there for inbound email replies.
 
 **Phase 2 research open questions (resolved during planning, researcher's recommended defaults all adopted):** (1) public status-page token = a dedicated unguessable random token, NOT the raw ticket cuid; (2) single-workspace v1 web-form org resolution = `findFirstOrThrow()`; (3) SLA "at-risk" threshold = proportional 20% of target duration remaining, not a flat cutoff.
 
@@ -170,4 +174,4 @@ Wave 5 complete. **Phase 2 (core-ticketing) is now fully executed: 12/12 plans, 
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
 ---
-*Last updated: 2026-07-02 — Wave 5 of Phase 2 complete (02-12, the final plan): Phase 2 (core-ticketing) fully executed at 12/12 plans. Next: design checklist + verify-work + human sign-off, then Phase 3.*
+*Last updated: 2026-07-05 — Phase 2 verify-work complete: 30/30 UAT pass, 2 inline fixes (.dockerignore, proxyClientMaxBodySize). Next: design checklist + human sign-off, then Phase 3.*
