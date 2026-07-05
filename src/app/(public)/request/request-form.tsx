@@ -123,7 +123,7 @@ export function RequestForm() {
     <>
       <div className="mb-6 space-y-1">
         <h1 className="text-[18px] font-semibold tracking-tight">Submit a request</h1>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-[14px] text-muted-foreground">
           Tell us what's going on and we'll get back to you.
         </p>
       </div>
@@ -198,7 +198,7 @@ export function RequestForm() {
           />
 
           <div className="space-y-2">
-            <span className="text-sm font-medium leading-none">Attachments (optional)</span>
+            <span className="text-[14px] font-medium leading-none">Attachments (optional)</span>
             <input
               ref={fileInputRef}
               type="file"
@@ -230,7 +230,7 @@ export function RequestForm() {
           )}
 
           {form.formState.errors.root && (
-            <p className="text-sm text-destructive">{form.formState.errors.root.message}</p>
+            <p className="text-[14px] text-destructive">{form.formState.errors.root.message}</p>
           )}
 
           <Button type="submit" className="w-full" disabled={isSubmitting}>
