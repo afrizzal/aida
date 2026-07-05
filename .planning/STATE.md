@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-last_updated: "2026-07-05T07:38:51.000Z"
+status: in_progress
+last_updated: "2026-07-05T08:16:47.000Z"
 last_activity: 2026-07-05
 progress:
   total_phases: 7
@@ -28,7 +28,7 @@ progress:
 
 Phase: 3
 Plan: Not started
-Status: Phase 2 UAT COMPLETE (30/30) + UI review COMPLETE (21/24, `02-UI-REVIEW.md`, commit 2737e74) — 3 priority UI fixes logged, fix-or-defer decision + human sign-off pending.
+Status: **Phase 2 SIGNED OFF** (2026-07-05, by Afrizzal) — UAT 30/30, UI review 21/24, all 3 priority UI fixes shipped (quick-260705-kg0, merge a887ce6). Phase 2 loop fully closed; ready to plan Phase 3.
 Last activity: 2026-07-05 - Completed quick task 260705-kg0: fix Phase 2 UI-review priority findings — 3 branded error boundaries (tickets/tickets[id]/contacts), request-form text-sm → text-[14px] (3 lines), ticket-list-row chip flex-wrap; executed on worktree, merged a887ce6, tsc clean post-merge
 
 Progress: [██████████] 100% (20/20 plans complete — 8/8 phase 01 + 12/12 phase 02)
@@ -109,9 +109,9 @@ Progress: [██████████] 100% (20/20 plans complete — 8/8 ph
 
 ### Open Todos
 
-- Phase 2: `/gsd:verify-work` DONE (30/30 — `02-UAT.md`) and `/gsd:ui-review` DONE (2026-07-05, 21/24 — `02-UI-REVIEW.md`, serves as the DESIGN-SYSTEM.md §9 design-check). Remaining before Phase 3: fix-or-defer the 3 priority UI fixes (error boundary for tickets/contacts data-fetch failures; `request-form.tsx` lines 126/201/233 `text-sm` → `text-[14px]`; `ticket-list-row.tsx:79` chip row needs `flex-wrap` in the fixed 360px column) + human sign-off, then `/gsd:plan-phase 3` (email intake).
+- Phase 2 CLOSED (2026-07-05): verify-work 30/30 (`02-UAT.md`), ui-review 21/24 (`02-UI-REVIEW.md`, DESIGN-SYSTEM.md §9 design-check), 3 priority UI fixes shipped (quick-260705-kg0), human sign-off recorded. Next: `/gsd:plan-phase 3` (email intake).
 - Rename `src/middleware.ts` → `proxy.ts` (Next 16 deprecation warning; non-blocking, surfaced during UAT).
-- Disk hygiene: 12 stale agent worktrees under `.claude/worktrees` (~11GB) — `git worktree prune` + delete after checking for uncommitted agent work (now dockerignored so builds are safe either way).
+- Disk hygiene: stale agent worktree dirs under `.claude/worktrees` (~11GB; 13 unregistered incl. the partially-deleted `agent-a52414ce120c5b506` remnant — its work IS merged (a887ce6) and branch/metadata already pruned — plus 3 still-registered worktrees) — delete after checking registered ones for uncommitted agent work (now dockerignored so builds are safe either way).
 - Consolidation follow-up: dedup 02-07's inline SLA/chip literals against 02-03/02-06 (see Key Decisions above) — still pending; low-priority, does not block Phase 2 sign-off, revisit at Phase 2 close-out or defer to a later phase.
 - Phase 3 (email intake): mirror the auto-reopen logic from 02-12's follow-up route when handling inbound email replies to RESOLVED/CLOSED tickets (same `shouldReopen` + same-transaction pattern).
 
@@ -157,7 +157,7 @@ Wave 5 complete. **Phase 2 (core-ticketing) is now fully executed: 12/12 plans, 
 
 **Phase 2 verify-work (2026-07-05, delegated to Claude):** 30/30 UAT tests pass. Evidence: E2E 24/24 + new `tests/e2e/uat-gaps.spec.ts` 9/9 (empty states, New Ticket dialog, contacts search, SLA/tags/custom-field admin, server-side attachment validation, intake rate limit) + integration 14/14 + unit 14/14 + real `docker compose` cold start (migrate applied, health ok, worker heartbeat fresh). Two issues found & fixed inline: (1) `.dockerignore` — `.claude/` worktrees (11.8GB) leaked into build context, root-anchored patterns missed nested node_modules → builds stalled >45min; now `**/`-prefixed + `.claude`/`test-results` excluded (28eb0c7). (2) Next.js buffers proxied bodies at 10MB, truncating intake uploads BEFORE the route's 413/415 checks → `experimental.proxyClientMaxBodySize = MAX_TOTAL_REQUEST_BYTES` in next.config.ts (b2b604a). UAT file committed 98693f8.
 
-**Next action:** Human sign-off for Phase 2 (UAT 30/30 + UI review 21/24 both done; decide fix-now vs defer for the 3 priority fixes in `02-UI-REVIEW.md`). Once signed off, proceed to `/gsd:plan-phase 3` (email intake/threading + outbound SMTP, AIDA-09) — the auto-reopen logic in 02-12's follow-up route should be mirrored there for inbound email replies.
+**Next action:** `/gsd:plan-phase 3` (email intake/threading + outbound SMTP, AIDA-09) — the auto-reopen logic in 02-12's follow-up route should be mirrored there for inbound email replies. Phase 2 is fully signed off (2026-07-05): UAT 30/30, UI review 21/24, 3 priority UI fixes shipped via quick-260705-kg0 (3 branded error.tsx boundaries for tickets/tickets-[id]/contacts; request-form text-[14px]; ticket-list-row chip flex-wrap).
 
 **Phase 2 research open questions (resolved during planning, researcher's recommended defaults all adopted):** (1) public status-page token = a dedicated unguessable random token, NOT the raw ticket cuid; (2) single-workspace v1 web-form org resolution = `findFirstOrThrow()`; (3) SLA "at-risk" threshold = proportional 20% of target duration remaining, not a flat cutoff.
 
@@ -175,4 +175,4 @@ Wave 5 complete. **Phase 2 (core-ticketing) is now fully executed: 12/12 plans, 
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
 ---
-*Last updated: 2026-07-05 — Phase 2 UI review complete (/gsd:ui-review): 21/24, 3 priority fixes logged in 02-UI-REVIEW.md. Next: fix-or-defer + human sign-off, then Phase 3.*
+*Last updated: 2026-07-05 — Phase 2 SIGNED OFF: UAT 30/30 + UI review 21/24 + 3 priority UI fixes shipped (quick-260705-kg0, merge a887ce6). Next: /gsd:plan-phase 3 (email intake).*
