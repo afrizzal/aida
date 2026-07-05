@@ -1,10 +1,11 @@
 ---
 phase: 3
 slug: email-channel
-status: draft
+status: approved
 shadcn_initialized: true
 preset: "style=radix-nova, baseColor=neutral, cssVariables=true (components.json) — brand tokens already overridden per DESIGN-SYSTEM.md indigo-violet palette in src/app/globals.css (unchanged this phase)"
 created: 2026-07-06
+reviewed_at: 2026-07-06
 ---
 
 # Phase 3 — UI Design Contract: Email Channel
@@ -57,6 +58,11 @@ Phase 3 component-specific values (all reused verbatim from existing components,
 | Test-connection inline result row | `mt-2`, `gap-1.5` | Matches `thread-message.tsx`'s attachment-row `mt-1`/`gap-1.5` spacing rhythm |
 | FAILED delivery chip + Retry row | `mt-1.5`, `gap-2` | Matches `thread-message.tsx`'s existing attachment-row shape (`mt-1 flex flex-wrap gap-1.5`), widened slightly (`gap-2`) to separate the badge from the button tap target |
 | Health line row | `gap-2` (error banner) / plain text (healthy state) | Matches the destructive banner shape proposed in `02-UI-SPEC.md` §1 ("Couldn't load tickets.") |
+
+**Exceptions to the 4px grid** (mirrors `02-UI-SPEC.md` §Spacing's identical exception list — these are shadcn `Button`/`Badge` built-in defaults reused verbatim, not new arbitrary values):
+- `gap-1.5` (6px) — `TestConnectionButton`'s result row, `DeliveryFailedChip`'s badge+button row's icon-to-label gap.
+- `mt-1.5` (6px) — `DeliveryFailedChip`'s row offset from the message body/attachments above it.
+- `py-0.5` (2px) — inside the reused `Badge` class string (`SlaDueChip`'s exact "Overdue" shape), a shadcn `Badge` component default, not a phase-specific choice.
 
 ---
 
@@ -116,6 +122,8 @@ None. Every primitive needed already exists in `src/components/ui/`.
 ## Screen Contracts
 
 ### 1. Settings → Email tab — new `/settings/email`
+
+**Visual hierarchy / focal point:** the `Save email settings` button is the primary visual anchor (bottom of form, `bg-primary`, the only accent-colored element on the page besides the active nav pill and focus rings). The `EmailChannelToggle` at the top is the secondary anchor (first thing the eye meets on page load, establishes on/off state before any config detail). `EmailHealthLine` and the `TestConnectionButton` result rows are tertiary — status feedback, not primary actions — rendered in muted/success/destructive text, never accent, so they don't compete with Save.
 
 **Nav:** add one entry to the existing `navItems` array in `src/app/(app)/settings/settings-nav.tsx`:
 ```ts
@@ -267,11 +275,11 @@ Decisions made at the researcher's discretion where CONTEXT.md/RESEARCH.md did n
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
+- [x] Dimension 1 Copywriting: PASS
+- [x] Dimension 2 Visuals: FLAG → addressed (focal-point statement added to Screen Contract 1)
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: FLAG (inherited, documented, non-blocking — see Typography section note)
+- [x] Dimension 5 Spacing: FLAG → addressed (Exceptions list added to Spacing Scale)
+- [x] Dimension 6 Registry Safety: PASS
 
-**Approval:** pending
+**Approval:** APPROVED (2026-07-06) — 0 blocking issues, 3 flags raised and 2 resolved inline; the typography flag is an accepted, pre-existing project-wide deviation (DESIGN-SYSTEM.md §3), not new debt.
