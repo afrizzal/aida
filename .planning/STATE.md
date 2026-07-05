@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: verifying
-last_updated: "2026-07-02T03:50:55.987Z"
-last_activity: 2026-07-02
+last_updated: "2026-07-05T01:08:13.986Z"
+last_activity: 2026-07-05
 progress:
   total_phases: 7
   completed_phases: 2
@@ -29,7 +29,7 @@ progress:
 Phase: 3
 Plan: Not started
 Status: Phase 2 execution complete — awaiting design checklist + verification + human sign-off
-Last activity: 2026-07-02
+Last activity: 2026-07-05 - Completed quick task 260705-bau: middleware 401 JSON for unauthenticated /api/* + truly-anonymous e2e context (E2E suite now 24/24 green)
 
 Progress: [██████████] 100% (20/20 plans complete — 8/8 phase 01 + 12/12 phase 02)
 
@@ -116,6 +116,12 @@ Progress: [██████████] 100% (20/20 plans complete — 8/8 ph
 ### Blockers
 
 None.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260705-bau | middleware 401 JSON for unauthenticated /api/* + truly-anonymous e2e context | 2026-07-05 | e0fb9e5 | [260705-bau-middleware-401-json-for-unauthenticated-](./quick/260705-bau-middleware-401-json-for-unauthenticated-/) |
 
 ## Session Continuity
 
