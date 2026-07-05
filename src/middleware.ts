@@ -16,7 +16,13 @@ export function middleware(request: NextRequest) {
   if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) return NextResponse.next();
 
   const sessionCookie = getSessionCookie(request);
-  if (!sessionCookie) return NextResponse.redirect(new URL("/login", request.url));
+  if (!sessionCookie) {
+    // API callers need a machine-readable 401 — a redirect lands them on the login page's HTML with a 200.
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
   return NextResponse.next();
 }
 
