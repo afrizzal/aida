@@ -29,7 +29,7 @@ progress:
 Phase: 3
 Plan: Not started
 Status: Phase 2 UAT COMPLETE (30/30) + UI review COMPLETE (21/24, `02-UI-REVIEW.md`, commit 2737e74) — 3 priority UI fixes logged, fix-or-defer decision + human sign-off pending.
-Last activity: 2026-07-05 - /gsd:ui-review Phase 2: 6-pillar audit vs 02-UI-SPEC.md — 21/24 (Copy 4, Visuals 3, Color 4, Type 3, Spacing 4, XD 3); top fixes: missing tickets/contacts error.tsx boundary, request-form.tsx text-sm drift (3 lines), ticket-list-row chip overflow in 360px column
+Last activity: 2026-07-05 - Completed quick task 260705-kg0: fix Phase 2 UI-review priority findings — 3 branded error boundaries (tickets/tickets[id]/contacts), request-form text-sm → text-[14px] (3 lines), ticket-list-row chip flex-wrap; executed on worktree, merged a887ce6, tsc clean post-merge
 
 Progress: [██████████] 100% (20/20 plans complete — 8/8 phase 01 + 12/12 phase 02)
 
@@ -124,6 +124,7 @@ None.
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 260705-bau | middleware 401 JSON for unauthenticated /api/* + truly-anonymous e2e context | 2026-07-05 | e0fb9e5 | [260705-bau-middleware-401-json-for-unauthenticated-](./quick/260705-bau-middleware-401-json-for-unauthenticated-/) |
+| 260705-kg0 | fix Phase 2 UI-review priority findings: error boundaries, request-form typography, chip-row wrap | 2026-07-05 | a887ce6 | [260705-kg0-fix-phase-2-ui-review-priority-findings-](./quick/260705-kg0-fix-phase-2-ui-review-priority-findings-/) |
 
 ## Session Continuity
 
