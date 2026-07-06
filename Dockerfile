@@ -27,6 +27,10 @@ RUN pnpm prisma generate
 RUN pnpm build
 # Bundle worker into an ESM file.
 # --format=esm: Prisma generated client uses import.meta.url (ESM-only; undefined in CJS → crash).
+# --banner:js createRequire: bundled CJS deps (mailparser→@zone-eu/mailsplit, nodemailer, imapflow)
+#   call require('stream')/other builtins at module load; esbuild's ESM __require shim throws
+#   "Dynamic require of X is not supported" unless a real top-level `require` exists for it to
+#   delegate to. The banner provides one via node:module's createRequire.
 # --external:pg: traced into standalone/node_modules by Next.js NFT.
 # --external:@prisma/client: runtime/client.js uses require('node:path') which esbuild's __require2
 #   shim cannot resolve in ESM bundles; must stay external and be copied explicitly to runner.
@@ -38,6 +42,7 @@ RUN pnpm exec esbuild src/lib/worker/index.ts \
     --format=esm \
     --target=node22 \
     --tsconfig=tsconfig.json \
+    --banner:js="import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" \
     --external:pg \
     --external:@prisma/client \
     --outfile=dist/worker.mjs && \
