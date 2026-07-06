@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import type { CustomFieldType, TicketPriority, TicketStatus } from "@/generated/prisma/client";
+import { getBoss } from "@/lib/queue/boss-client";
 import { getScopedDb } from "@/lib/session";
 import { computeDueTimestamps, getSlaTargets } from "@/lib/tickets/sla";
 
@@ -68,6 +69,25 @@ export async function changePriority(
   });
 
   revalidatePath(`/tickets/${ticketId}`);
+  return { ok: true };
+}
+
+/**
+ * Re-enqueues a FAILED outbound public reply's SMTP send (D-21 "Retry" affordance). Verifies
+ * the message exists in this org before touching it (scopedDb-scoped findFirst).
+ */
+export async function retryOutboundSend(messageId: string): Promise<{ ok: boolean }> {
+  const { db } = await getScopedDb();
+
+  const message = await db.message.findFirst({ where: { id: messageId } });
+  if (!message) return { ok: false };
+
+  await db.message.update({ where: { id: messageId }, data: { deliveryStatus: "QUEUED" } });
+
+  const boss = await getBoss();
+  await boss.send("email-outbound-send", { messageId });
+
+  revalidatePath(`/tickets/${message.ticketId}`);
   return { ok: true };
 }
 

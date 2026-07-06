@@ -1,6 +1,7 @@
 import { Lock } from "lucide-react";
 import { AttachmentChip, formatBytes } from "@/components/tickets/attachment-chip";
-import type { MessageVisibility } from "@/generated/prisma/client";
+import { DeliveryFailedChip } from "@/components/tickets/delivery-failed-chip";
+import type { MessageDeliveryStatus, MessageVisibility } from "@/generated/prisma/client";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import { cn } from "@/lib/utils";
 
@@ -19,6 +20,9 @@ export interface ThreadMessageData {
   authorUser: { name: string } | null;
   authorContact: { name: string | null; email: string } | null;
   attachments: ThreadMessageAttachment[];
+  /** Email-channel delivery status (D-21) — null/undefined for non-email-sent messages
+   * (internal notes, web-form-originated replies, pre-Phase-3 historical messages). */
+  deliveryStatus?: MessageDeliveryStatus | null;
 }
 
 /**
@@ -84,6 +88,12 @@ export function ThreadMessage({
             />
           ))}
         </div>
+      )}
+
+      {/* D-21: only an outbound public-reply message ever carries a FAILED delivery status —
+          QUEUED/SENT render no additional chrome (03-UI-SPEC: no persistent send-status system). */}
+      {!isInbound && !isInternal && message.deliveryStatus === "FAILED" && (
+        <DeliveryFailedChip messageId={message.id} />
       )}
     </div>
   );
