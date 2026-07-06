@@ -9,6 +9,7 @@ const navItems = [
   { href: "/settings/sla", label: "SLA Policies" },
   { href: "/settings/tags", label: "Tags" },
   { href: "/settings/custom-fields", label: "Custom Fields" },
+  { href: "/settings/email", label: "Email" },
 ] as const;
 
 export function SettingsNav() {
