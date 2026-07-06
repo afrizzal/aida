@@ -52,6 +52,9 @@ services:
       DB_POOL_MAX: "10"
       UPLOADS_DIR: /data/uploads
       RATE_LIMIT_PEPPER: ${RATE_LIMIT_PEPPER:-}
+      # Credential encryption at rest (email IMAP/SMTP passwords, future LLM keys) —
+      # required for saving channel credentials in Settings; see .env.example
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
     volumes:
       - uploads_data:/data/uploads
     healthcheck:
@@ -80,6 +83,8 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-aida}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-aida}
       DB_POOL_MAX: "5"
+      # Worker decrypts stored IMAP/SMTP credentials for the poll + outbound-send jobs
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
     restart: unless-stopped
     deploy:
       resources:
