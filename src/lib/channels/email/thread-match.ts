@@ -34,12 +34,10 @@ export function collectCandidateMessageIds(
 // which auto-injects organizationId (STATE.md 02-01).
 type ThreadMatchDb = {
   message: {
-    findFirst: (args: unknown) => Promise<{ ticketId: string } | null>;
+    findFirst(args: unknown): Promise<{ ticketId: string } | null>;
   };
   ticket: {
-    findFirst: (
-      args: unknown,
-    ) => Promise<{ id: string; status: string; contactId: string } | null>;
+    findFirst(args: unknown): Promise<{ id: string; status: string; contactId: string } | null>;
   };
 };
 

@@ -9,6 +9,8 @@ export type CreateTicketInput = {
   subject: string;
   priority: TicketPriority;
   body: string;
+  /** Pre-rendered/sanitized HTML body (email ingest); falls back to renderMarkdown(body) when omitted. */
+  bodyHtml?: string | null;
   contact: {
     email: string;
     name?: string | null;
@@ -17,12 +19,17 @@ export type CreateTicketInput = {
   };
   direction: MessageDirection;
   authorUserId?: string | null;
+  /** Email identity fields (D-08) — carried through only when the ticket originates from inbound email. */
+  emailMessageId?: string | null;
+  emailInReplyTo?: string | null;
+  emailReferences?: string[];
 };
 
 export type CreateTicketResult = {
   id: string;
   number: number;
   statusToken: string;
+  messageId: string;
 };
 
 // single-org v1: callers resolve orgId; public intake uses organization.findFirstOrThrow (plan 11).
@@ -82,7 +89,11 @@ export async function createTicket(
       },
     });
 
-    await (tx.message.create as (a: { data: Record<string, unknown> }) => Promise<unknown>)({
+    const message = await (
+      tx.message.create as (a: {
+        data: Record<string, unknown>;
+      }) => Promise<{ id: string }>
+    )({
       data: {
         ticketId: ticket.id,
         direction: input.direction,
@@ -90,10 +101,18 @@ export async function createTicket(
         authorContactId: input.direction === "INBOUND" ? contact.id : null,
         authorUserId: input.authorUserId ?? null,
         bodyMarkdown: input.body,
-        bodyHtml: renderMarkdown(input.body),
+        bodyHtml: input.bodyHtml ?? renderMarkdown(input.body),
+        emailMessageId: input.emailMessageId ?? null,
+        emailInReplyTo: input.emailInReplyTo ?? null,
+        emailReferences: input.emailReferences ?? [],
       },
     });
 
-    return { id: ticket.id, number: ticket.number, statusToken: ticket.statusToken };
+    return {
+      id: ticket.id,
+      number: ticket.number,
+      statusToken: ticket.statusToken,
+      messageId: message.id,
+    };
   });
 }
