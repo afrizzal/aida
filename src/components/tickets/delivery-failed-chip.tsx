@@ -3,6 +3,7 @@
 import { CircleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { toast } from "sonner";
 import { retryOutboundSend } from "@/app/(app)/tickets/[id]/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,7 +19,12 @@ export function DeliveryFailedChip({ messageId }: { messageId: string }) {
 
   async function handleRetry() {
     setRetrying(true);
-    await retryOutboundSend(messageId);
+    const result = await retryOutboundSend(messageId).catch(() => null);
+    if (!result?.ok) {
+      setRetrying(false);
+      toast.error("Retry failed. Please try again.");
+      return;
+    }
     router.refresh();
   }
 

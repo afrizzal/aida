@@ -10,7 +10,8 @@ type Status = "idle" | "testing" | "success" | "failure";
 
 interface TestConnectionButtonProps {
   kind: "imap" | "smtp";
-  getValues: () => EmailSettingsInput;
+  /** Validates the section's fields first; resolves null when invalid (field errors show inline). */
+  getValues: () => Promise<EmailSettingsInput | null>;
 }
 
 /**
@@ -22,9 +23,17 @@ export function TestConnectionButton({ kind, getValues }: TestConnectionButtonPr
   const [error, setError] = useState<string | undefined>(undefined);
 
   async function handleClick() {
+    const values = await getValues();
+    if (!values) {
+      setStatus("idle");
+      return;
+    }
+
     setStatus("testing");
-    const values = getValues();
-    const result = await (kind === "imap" ? testImapConnection(values) : testSmtpConnection(values));
+    const result = await (kind === "imap"
+      ? testImapConnection(values)
+      : testSmtpConnection(values)
+    ).catch(() => ({ ok: false as const, error: "Unexpected error — please try again." }));
 
     if (result.ok) {
       setStatus("success");
@@ -55,19 +64,22 @@ export function TestConnectionButton({ kind, getValues }: TestConnectionButtonPr
         )}
       </Button>
 
-      {status === "success" && (
-        <div className="mt-2 flex items-center gap-1.5 text-[12px] text-success">
-          <CheckCircle2 className="size-3.5" />
-          Connected successfully
-        </div>
-      )}
+      {/* Always-mounted live region so screen readers announce the async result when it lands. */}
+      <div role="status" aria-live="polite">
+        {status === "success" && (
+          <div className="mt-2 flex items-center gap-1.5 text-[12px] text-success">
+            <CheckCircle2 className="size-3.5" />
+            Connected successfully
+          </div>
+        )}
 
-      {status === "failure" && (
-        <div className="mt-2 flex items-center gap-1.5 text-[12px] text-destructive">
-          <XCircle className="size-3.5" />
-          Connection failed: {error}
-        </div>
-      )}
+        {status === "failure" && (
+          <div className="mt-2 flex items-center gap-1.5 text-[12px] text-destructive">
+            <XCircle className="size-3.5" />
+            Connection failed: {error}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

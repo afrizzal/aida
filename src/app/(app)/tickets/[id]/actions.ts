@@ -82,10 +82,14 @@ export async function retryOutboundSend(messageId: string): Promise<{ ok: boolea
   const message = await db.message.findFirst({ where: { id: messageId } });
   if (!message) return { ok: false };
 
-  await db.message.update({ where: { id: messageId }, data: { deliveryStatus: "QUEUED" } });
+  try {
+    await db.message.update({ where: { id: messageId }, data: { deliveryStatus: "QUEUED" } });
 
-  const boss = await getBoss();
-  await boss.send("email-outbound-send", { messageId });
+    const boss = await getBoss();
+    await boss.send("email-outbound-send", { messageId });
+  } catch {
+    return { ok: false };
+  }
 
   revalidatePath(`/tickets/${message.ticketId}`);
   return { ok: true };

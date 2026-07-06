@@ -147,7 +147,13 @@ export function EmailSettingsForm({ initial, health }: EmailSettingsFormProps) {
             />
           </div>
 
-          <TestConnectionButton kind="imap" getValues={() => form.getValues() as EmailSettingsInput} />
+          <TestConnectionButton
+            kind="imap"
+            getValues={async () => {
+              const valid = await form.trigger(["imapHost", "imapPort", "imapUser"]);
+              return valid ? (form.getValues() as EmailSettingsInput) : null;
+            }}
+          />
         </div>
 
         <div className="space-y-4 rounded-lg border border-border/70 p-4">
@@ -236,7 +242,13 @@ export function EmailSettingsForm({ initial, health }: EmailSettingsFormProps) {
             />
           </div>
 
-          <TestConnectionButton kind="smtp" getValues={() => form.getValues() as EmailSettingsInput} />
+          <TestConnectionButton
+            kind="smtp"
+            getValues={async () => {
+              const valid = await form.trigger(["smtpHost", "smtpPort", "smtpUser"]);
+              return valid ? (form.getValues() as EmailSettingsInput) : null;
+            }}
+          />
         </div>
 
         <FormField
