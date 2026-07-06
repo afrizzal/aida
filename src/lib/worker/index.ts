@@ -1,5 +1,7 @@
 import type { Job } from "pg-boss";
 import { PgBoss } from "pg-boss";
+import { emailInboundPollHandler } from "./jobs/email-inbound-poll";
+import { emailOutboundSendHandler } from "./jobs/email-outbound-send";
 import { heartbeatHandler } from "./jobs/heartbeat";
 import { rateLimitCleanupHandler } from "./jobs/rate-limit-cleanup";
 import { slaFlagHandler } from "./jobs/sla-flag";
@@ -35,6 +37,26 @@ async function main() {
     await rateLimitCleanupHandler();
   });
   await boss.schedule("rate-limit-cleanup", "0 3 * * *", {}); // daily 03:00
+
+  // Inbound poll: singleton policy so a slow/overrunning IMAP session never overlaps
+  // the next minute's scheduled run (unlike the idempotent set-based SQL jobs above).
+  await boss.createQueue("email-inbound-poll", { policy: "singleton" });
+  await boss.work("email-inbound-poll", async ([job]: Job[]) => {
+    await emailInboundPollHandler(job.data);
+  });
+  await boss.schedule("email-inbound-poll", "* * * * *", {});
+
+  // Outbound send: on-demand queue enqueued by the app (messages Route Handler via
+  // src/lib/queue/boss-client.ts) — no schedule(). Options mirror boss-client.ts's
+  // createQueue call exactly so this createQueue is a no-op if the app made it first.
+  await boss.createQueue("email-outbound-send", {
+    retryLimit: 2,
+    retryBackoff: true,
+    retryDelayMax: 300,
+  });
+  await boss.work("email-outbound-send", async ([job]: Job<{ messageId: string }>[]) => {
+    await emailOutboundSendHandler(job.data);
+  });
 
   console.log("[worker] started");
 
