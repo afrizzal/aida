@@ -132,6 +132,7 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
                     originalFilename: attachment.originalFilename,
                     sizeBytes: attachment.sizeBytes,
                   })),
+                  deliveryStatus: message.deliveryStatus,
                 }}
               />
               {message.triggeredReopen && (

@@ -2,7 +2,9 @@ import { fileTypeFromBuffer } from "file-type";
 import { NextResponse } from "next/server";
 import { ALLOWED_MIME, MAX_BYTES } from "@/lib/attachments/constants";
 import { buildStorageKey, localFileStorage } from "@/lib/attachments/local-file-storage";
+import { getEmailSettings } from "@/lib/channels/email/settings";
 import { renderMarkdown } from "@/lib/markdown/render";
+import { getBoss } from "@/lib/queue/boss-client";
 import { getScopedDb } from "@/lib/session";
 
 // File-bearing endpoints must run on the Node.js runtime (Buffer/node:fs), never Edge.
@@ -70,7 +72,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     });
   }
 
-  await db.$transaction(async (tx) => {
+  // D-26: channel-off (or unconfigured) replies behave exactly as in Phase 2 — no enqueue,
+  // no deliveryStatus. Computed BEFORE the transaction; the send handler re-checks the actual
+  // contact email, this gate only needs to know a contact is linked at all.
+  const emailSettings = await getEmailSettings(db);
+  const shouldQueue = mode === "public" && emailSettings.enabled && !!ticket.contactId;
+
+  const messageId = await db.$transaction(async (tx) => {
     const message = await tx.message.create({
       data: {
         organizationId: orgId,
@@ -80,6 +88,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         authorUserId: session.user.id,
         bodyMarkdown: body,
         bodyHtml: renderMarkdown(body),
+        deliveryStatus: shouldQueue ? "QUEUED" : undefined,
       },
     });
 
@@ -104,7 +113,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         data: { firstRespondedAt: new Date(), isAtRisk: false, isBreached: false },
       });
     }
+
+    return message.id;
   });
+
+  // Enqueue AFTER commit so the worker never races an uncommitted row.
+  if (shouldQueue) {
+    const boss = await getBoss();
+    await boss.send("email-outbound-send", { messageId });
+  }
 
   return NextResponse.json({ ok: true });
 }

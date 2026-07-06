@@ -3,8 +3,10 @@
 // Imported by BOTH the Next.js app (settings actions, messages route — via
 // `@/lib/channels/email/settings`) AND the worker (poll job — via a relative path,
 // esbuild-bundled). Therefore this file's OWN internal imports MUST stay relative (no `@/`)
-// so esbuild can bundle it for the worker.
+// so esbuild can bundle it for the worker. `scopedDb` is a type-only import (erased at
+// compile time — safe for esbuild's runtime bundle of the worker).
 import { decryptSecret, encryptSecret } from "../../crypto/secret-box";
+import type { scopedDb } from "../../scoped-db";
 
 // The exact 14 `email:*` keys (see 03-RESEARCH.md "Settings key scheme").
 export const EMAIL_SETTING_KEYS = {
@@ -42,17 +44,11 @@ export interface EmailSettings {
 }
 
 /**
- * Minimal db shape this module needs — works with any scopedDb client (Next.js app or worker),
- * without coupling to generated Prisma types across the two different bundling contexts.
+ * Narrowed to just the delegate this module needs (mirrors src/lib/tickets/sla.ts's `SlaDb`
+ * precedent) — both a full `scopedDb()` client (Next.js app + worker) and an in-flight
+ * interactive-`$transaction` `tx` client satisfy this structurally.
  */
-type SettingDb = {
-  setting: {
-    findMany: (a: unknown) => Promise<Array<{ key: string; value: string; id: string }>>;
-    findFirst: (a: unknown) => Promise<{ id: string } | null>;
-    create: (a: unknown) => Promise<unknown>;
-    update: (a: unknown) => Promise<unknown>;
-  };
-};
+type SettingDb = Pick<ReturnType<typeof scopedDb>, "setting">;
 
 /** Input for saveEmailSettings — every field optional; only provided keys are written. */
 export interface SaveEmailSettingsInput {
