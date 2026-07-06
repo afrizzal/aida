@@ -109,6 +109,7 @@ model organization {
   customFieldDefinitions CustomFieldDefinition[]
   customFieldValues      CustomFieldValue[]
   attachments            Attachment[]
+  emailIngestFailures    EmailIngestFailure[]
 }
 
 model member {
@@ -193,6 +194,12 @@ enum MessageVisibility {
   INTERNAL
 }
 
+enum MessageDeliveryStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
 enum CustomFieldType {
   TEXT
   SELECT
@@ -269,6 +276,10 @@ model Message {
   bodyMarkdown    String
   bodyHtml        String
   triggeredReopen Boolean           @default(false) // true ONLY on a requester follow-up that auto-reopened a RESOLVED/CLOSED ticket (D-04); drives the ThreadSystemEvent "Ticket reopened…" row in the thread (plans 09 agent view + 12 public page)
+  emailMessageId  String?
+  emailInReplyTo  String?
+  emailReferences String[]               @default([])
+  deliveryStatus  MessageDeliveryStatus?
   createdAt       DateTime          @default(now())
   organization  organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   ticket        Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
@@ -278,6 +289,7 @@ model Message {
 
   @@index([ticketId])
   @@index([organizationId])
+  @@index([organizationId, emailMessageId])
 }
 
 model Tag {
@@ -364,6 +376,20 @@ model Attachment {
   message      Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@index([messageId])
+  @@index([organizationId])
+}
+
+model EmailIngestFailure {
+  id             String   @id @default(cuid())
+  organizationId String
+  emailMessageId String
+  failureCount   Int      @default(1)
+  lastError      String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, emailMessageId])
   @@index([organizationId])
 }
 
