@@ -35,13 +35,11 @@ Launch beachhead is **customer support**, but the ticketing core is built generi
 - **AIDA-10** Auth + roles (admin, agent) + user management — Validated in Phase 1: foundation
 - **AIDA-11** Workspace/organization scoping (multi-tenant-ready) — Validated in Phase 1: foundation
 - **AIDA-21** One-command self-host (`docker compose up`) — Validated in Phase 1: foundation
+- **AIDA-09** Email intake (inbound parse/threading) + outbound SMTP replies — Validated in Phase 3: email-channel
 
 ### Active
 
 <!-- v1 MLP. Full statements in REQUIREMENTS.md. -->
-
-**Channels**
-- [ ] **AIDA-09** Email intake (inbound parse/threading) + outbound SMTP replies
 
 **Auth & multi-tenant**
 - [ ] **AIDA-12** Settings (branding, SLA policies, channels, AI config) — SLA policies/tags/custom-fields shipped in Phase 2; branding/channels/AI config land in Phases 4/7
@@ -118,4 +116,4 @@ Launch beachhead is **customer support**, but the ticketing core is built generi
 This document evolves at phase/milestone transitions (validated → move requirements; new ones → Active; decisions → table). v1 = Minimum Lovable Helpdesk; post-v1 candidates: KB autogen (AIDA-18), live chat, more channels, hosted offering.
 
 ---
-*Last updated: 2026-07-02 — Phase 2 (core-ticketing) complete: AIDA-01..08 validated, AIDA-12 partially validated (SLA/tags/custom-fields; branding/channels/AI config pending Phases 4/7).*
+*Last updated: 2026-07-06 — Phase 3 (email-channel) execution complete: AIDA-09 validated (6/6 plans). Pending phase-level verify-work/UI-review/human sign-off before Phase 3 is formally closed.*

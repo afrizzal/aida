@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-06T04:21:49.575Z"
-last_activity: 2026-07-06 - Executed 03-04-PLAN.md (createTicket email-identity extension, IMAP client factory, ingestMessage orchestrator with dedupe/thread-match/sanitize/attach/auto-reopen, poll-inbox poison guard + health persistence, worker/index.ts registers both email-inbound-poll and email-outbound-send; esbuild worker-bundle hard stop passed; 6/6 fixture-based integration tests green) — wave 3 of 4 complete.
+last_updated: "2026-07-06T04:31:52.336Z"
+last_activity: 2026-07-06 - Executed 03-06-PLAN.md (Settings Email tab: admin-gated actions, page/toggle/health-line, IMAP/SMTP/from-address form + Test Connection button) — Phase 3 (email-channel) fully executed, 6/6 plans.
 progress:
   total_phases: 7
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 26
-  completed_plans: 25
-  percent: 96
+  completed_plans: 26
+  percent: 100
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 3
-Plan: 05 of 06 complete (wave 3 of 4 done)
-Status: Phase 3 (Email Channel) execution in progress — wave 1 (03-01, 03-02) + wave 2 (03-03, 03-05) + wave 3 (03-04) complete; only 03-06 (wave 4, Settings Email tab) remains.
-Last activity: 2026-07-06 - Executed 03-04-PLAN.md (createTicket email-identity extension, IMAP client factory, ingestMessage orchestrator with dedupe/thread-match/sanitize/attach/auto-reopen, poll-inbox poison guard + health persistence, worker/index.ts registers both email-inbound-poll and email-outbound-send; esbuild worker-bundle hard stop passed; 6/6 fixture-based integration tests green) — wave 3 of 4 complete.
+Plan: 6 of 06 complete (all 4 waves done)
+Status: Phase 3 (Email Channel) execution complete — 6/6 plans, AIDA-09 validated. Pending phase-level verify-work/UI-review/human sign-off before formal close (LOOP-ENGINEERING.md loop).
+Last activity: 2026-07-06 - Executed 03-06-PLAN.md (admin-gated Settings Email tab — see below) — wave 4 of 4 complete, Phase 3 fully executed.
 
-Progress: [██████████] 96% (25/26 plans complete — 8/8 phase 01 + 12/12 phase 02 + 5/6 phase 03)
+Progress: [██████████] 100% (26/26 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03)
 
 ## Accumulated Context
 
@@ -129,11 +129,12 @@ Progress: [██████████] 96% (25/26 plans complete — 8/8 pha
 - (03-04) Deviation: `src/lib/channels/email/thread-match.ts`'s internal `ThreadMatchDb` type had its `findFirst` members switched from function-typed properties to method-shorthand syntax — this plan is the first real caller passing an actual `scopedDb()` client (03-03's own tests only used hand-typed fakes), and TypeScript's strict (non-bivariant) property-function-type checking rejected the real client's narrower `*FindFirstArgs` parameter against the declared `unknown` parameter. Method shorthand restores standard bivariant method-parameter checking. No behavior change; `ThreadMatchDb` is internal/unexported.
 - (03-04) `createTicket()`'s `CreateTicketResult` now includes `messageId` (the initial Message row's id) so callers that need to attach files to that first message (email ingest) don't need a second lookup; `CreateTicketInput` gained `bodyHtml?`/`emailMessageId?`/`emailInReplyTo?`/`emailReferences?`, all optional and backward-compatible with every existing caller (New Ticket flow, public web intake).
 - (03-04) AIDA-09 is STILL intentionally NOT marked complete in REQUIREMENTS.md — inbound (03-04) and outbound (03-05) are both now code-complete and integration-tested, but 03-06 (Settings Email tab: IMAP/SMTP/from-address config + Test Connection + the health line this plan writes) is the last remaining plan before an operator can actually configure and validate the channel end-to-end.
+- (03-06) Settings → Email tab shipped: `src/app/(app)/settings/email/{actions,page,email-channel-toggle,email-health-line,email-settings-form,test-connection-button}.tsx` + `settings-nav.tsx` Email entry. Four `requireOrgAdmin()`-gated Server Actions (save/toggle/test-imap/test-smtp); `testImapConnection`/`testSmtpConnection` both apply a 10s timeout (`createImapClient`/`createSmtpTransport`'s `timeoutMs` option) and fall back to the stored decrypted password via `getEmailSettings(db)` when the submitted form field is blank — the form's password inputs always start empty (plan 02's "blank = keep existing" contract, never round-tripping a decrypted secret to the client). Authorization is admin-gated ACTIONS only, no page-level guard — confirmed the 03-UI-SPEC Assumption 1 reading, matching the SLA/Tags/Custom-Fields precedent exactly. `pnpm exec tsc --noEmit` and `biome check src/app/(app)/settings/email` both clean. Commits: `3724e7e`, `d4ab3dc`, `97f6c7a`. SUMMARY: `.planning/phases/03-email-channel/03-06-SUMMARY.md`. **AIDA-09 is now fully code-complete end-to-end (inbound poll/ingest + outbound send + credential encryption + this configuration UI) — marked Validated in PROJECT.md.** Phase 3 (email-channel) is now 6/6 plans complete, all 4 waves done; ROADMAP.md's Phase 3 checkbox is checked. Still pending: phase-level verify-work/UI-review/human sign-off (LOOP-ENGINEERING.md loop) before Phase 3 is formally closed out like Phase 2 was.
 
 ### Open Todos
 
 - Phase 2 CLOSED (2026-07-05): verify-work 30/30 (`02-UAT.md`), ui-review 21/24 (`02-UI-REVIEW.md`, DESIGN-SYSTEM.md §9 design-check), 3 priority UI fixes shipped (quick-260705-kg0), human sign-off recorded.
-- Phase 3 (email-channel) planned (2026-07-06): 6 plans across 4 waves (see 03-CONTEXT.md/03-RESEARCH.md/03-UI-SPEC.md). Wave 1 (03-01, 03-02), wave 2 (03-03, 03-05), and wave 3 (03-04, inbound ingest + worker wiring) all complete; only 03-06 (wave 4, Settings Email tab) remains before Phase 3 sign-off and AIDA-09 completion.
+- Phase 3 (email-channel) EXECUTION COMPLETE (2026-07-06): all 6 plans across 4 waves done (see 03-CONTEXT.md/03-RESEARCH.md/03-UI-SPEC.md); AIDA-09 validated in PROJECT.md. Next: phase-level verify-work + UI-review (DESIGN-SYSTEM.md §9) + human sign-off (mirrors Phase 2's close-out) before Phase 3 is formally CLOSED and `/gsd:plan-phase 4` starts.
 - Rename `src/middleware.ts` → `proxy.ts` (Next 16 deprecation warning; non-blocking, surfaced during UAT).
 - Disk hygiene: stale agent worktree dirs under `.claude/worktrees` (~11GB; 13 unregistered incl. the partially-deleted `agent-a52414ce120c5b506` remnant — its work IS merged (a887ce6) and branch/metadata already pruned — plus 3 still-registered worktrees) — delete after checking registered ones for uncommitted agent work (now dockerignored so builds are safe either way).
 - Consolidation follow-up: dedup 02-07's inline SLA/chip literals against 02-03/02-06 (see Key Decisions above) — still pending; low-priority, does not block Phase 2 sign-off, revisit at Phase 2 close-out or defer to a later phase.
@@ -220,5 +221,11 @@ Wave 2 complete. Phase 3 is now 4/6 plans complete.
 
 Wave 3 complete. Phase 3 is now 5/6 plans complete — only 03-06 (Settings Email tab UI) remains.
 
+**Phase 3 execution — Wave 4, 03-06 complete (2026-07-06), FINAL plan of Phase 3:** Settings → Email tab shipped: `src/app/(app)/settings/email/actions.ts` (four `requireOrgAdmin()`-gated Server Actions — `saveEmailSettings`/`setEmailChannelEnabled`/`testImapConnection`/`testSmtpConnection`; the two Test Connection actions apply a 10s timeout via `createImapClient`/`createSmtpTransport`'s `timeoutMs` option and fall back to the stored decrypted password via `getEmailSettings(db)` when the submitted field is blank) + `page.tsx` (`force-dynamic` server component, loads `getEmailSettings`, never forwards decrypted passwords to the client) + `email-channel-toggle.tsx` (mirrors `AiToggle`'s optimistic Switch + revert-on-failure shape) + `email-health-line.tsx` (three D-25 states: failing/healthy-ever-polled/healthy-never-polled, reusing the destructive-banner class string from `02-UI-SPEC.md`) + `email-settings-form.tsx` (react-hook-form + zod, mirrors `SlaForm`'s shape — IMAP/SMTP sections + top-level from-address field + single bottom Save submit; password fields always start blank per plan 02's "blank = keep existing" contract) + `test-connection-button.tsx` (reusable idle/testing/success/failure component, one instance per connection kind). `settings-nav.tsx` gained the Email tab entry. `pnpm exec tsc --noEmit` and `biome check src/app/(app)/settings/email` both clean. Commits: `3724e7e` (Task 1), `d4ab3dc` (Task 2), `97f6c7a` (Task 3). SUMMARY: `.planning/phases/03-email-channel/03-06-SUMMARY.md`.
+
+Wave 4 complete. **Phase 3 (email-channel) is now fully executed: 6/6 plans, all 4 waves.** AIDA-09 marked Validated in PROJECT.md (moved from Active to Validated). ROADMAP.md's Phase 3 checkbox is now checked (`roadmap update-plan-progress 3` confirmed `plan_count === summary_count`).
+
+**Next action:** Phase-level verify-work + UI-review (DESIGN-SYSTEM.md §9 design checklist) + human sign-off for Phase 3 (mirrors Phase 2's 2026-07-05 close-out: UAT suite, UI-review pass, priority-fix quick task, then STATE.md/ROADMAP.md updated to reflect the formal close). Once signed off, `/gsd:plan-phase 4` (AI Foundation: model-agnostic LLM layer, auto-triage, audit log, untrusted-input safeguards) is next.
+
 ---
-*Last updated: 2026-07-06 — Phase 3 (email-channel) execution in progress: Wave 1 complete (03-01, 03-02) + Wave 2 complete (03-03, 03-05) + Wave 3 complete (03-04), 5/6 plans. Next: Wave 4 (03-06 Settings Email tab — IMAP/SMTP/from-address config, Test Connection, lastPollAt/lastPollError health line). Once 03-06 lands, AIDA-09 can be marked complete and Phase 3 signed off.*
+*Last updated: 2026-07-06 — Phase 3 (email-channel) execution COMPLETE: all 6 plans across 4 waves done (03-01..03-06). AIDA-09 validated. Pending phase-level verify-work/UI-review/human sign-off before formal close-out, then `/gsd:plan-phase 4`.*
