@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-06T03:14:30.280Z"
-last_activity: 2026-07-06 - Executed 03-01-PLAN.md (email-channel npm libraries installed; Message extended with emailMessageId/emailInReplyTo/emailReferences/deliveryStatus + MessageDeliveryStatus enum; EmailIngestFailure model added; migration hand-verified additive; scopedDb DOMAIN_MODELS extended) and 03-02-PLAN.md (AES-256-GCM secret-box helper + typed email-settings module over Setting) in parallel.
+last_updated: "2026-07-06T03:46:32.644Z"
+last_activity: 2026-07-06
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 26
-  completed_plans: 22
+  completed_plans: 23
   percent: 85
 ---
 
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 3
-Plan: 02 of 06 complete (wave 1 of 4 done)
-Status: Phase 3 (Email Channel) execution in progress — wave 1 (03-01 data foundation + 03-02 crypto/email-settings) complete; 03-03..03-06 remaining.
-Last activity: 2026-07-06 - Executed 03-01-PLAN.md (email-channel npm libraries installed; Message extended with emailMessageId/emailInReplyTo/emailReferences/deliveryStatus + MessageDeliveryStatus enum; EmailIngestFailure model added; migration hand-verified additive; scopedDb DOMAIN_MODELS extended) and 03-02-PLAN.md (AES-256-GCM secret-box helper + typed email-settings module over Setting) in parallel.
+Plan: 03 of 06 complete (wave 1 done; wave 2's 03-05 done — 03-03 status depends on its own parallel executor)
+Status: Phase 3 (Email Channel) execution in progress — wave 1 (03-01, 03-02) + wave 2's 03-05 (outbound SMTP send + delivery-failed retry) complete; 03-03, 03-04, 03-06 remaining (or in-flight on parallel workers).
+Last activity: 2026-07-06 - Executed 03-05-PLAN.md (SMTP transport + MIME composer with TDD-verified bracket-consistent Message-ID round-trip; app-side pg-boss singleton — first non-worker enqueue in the codebase; emailOutboundSendHandler with SENT/FAILED deliveryStatus transitions; messages route enqueues after commit; "Failed to send — Retry" thread affordance). Note: this plan's worktree was found stale (checked out before Phase 3 wave 1 landed) and was fast-forward-merged to master before execution — see 03-05-SUMMARY.md Deviations.
 
-Progress: [████████░░] 85% (22/26 plans complete — 8/8 phase 01 + 12/12 phase 02 + 2/6 phase 03)
+Progress: [█████████░] 88% (23/26 plans complete — 8/8 phase 01 + 12/12 phase 02 + 3/6 phase 03)
 
 ## Accumulated Context
 
@@ -114,6 +114,11 @@ Progress: [████████░░] 85% (22/26 plans complete — 8/8 pha
 - (03-01) `requirements: [AIDA-09]` is declared on every Phase 3 PLAN.md's frontmatter (phase-level requirement), but 03-01 only laid the schema/dependency foundation — no inbound parsing/threading/poll job or outbound send exists yet. Mirroring the 02-08 precedent for split requirements: AIDA-09 is intentionally NOT marked complete in REQUIREMENTS.md yet; only mark it once the full inbound+outbound flow is built and validated (likely the final wave/plan of Phase 3).
 - (03-02) `src/lib/crypto/secret-box.ts` is the codebase's ONE AES-256-GCM encrypt/decrypt-at-rest primitive: `node:crypto` only (no project imports, bundleable by both webpack and esbuild), fresh 12-byte IV per call, blob layout `iv(12B) | authTag(16B) | ciphertext` base64-packed into the existing `Setting.value: String` column. Phase 4's LLM provider keys MUST reuse this verbatim, never re-derive their own cipher wrapper.
 - (03-02) `src/lib/channels/email/settings.ts` owns all 14 `email:*` Setting keys (`getEmailSettings`/`saveEmailSettings`/`updateEmailHealth`); imports `secret-box` via the RELATIVE path `"../../crypto/secret-box"` (not `@/`) since the worker's poll job (plan 04) will import it too. `saveEmailSettings`: an empty/undefined password on save means "keep the existing stored value" — the Settings Email tab (plan 06) never needs to round-trip the plaintext password back into the form.
+- (03-05) `src/lib/queue/boss-client.ts` `getBoss()` is the codebase's FIRST app-side (non-worker) pg-boss singleton — globalThis-cached `Promise<PgBoss>` (mirrors `db.ts`'s pattern), creates the `email-outbound-send` queue with `retryLimit: 2`/`retryBackoff: true`/`retryDelayMax: 300` (~3 attempts). Any future on-demand job enqueue from a Route Handler/Server Action should reuse this singleton, not construct a second `PgBoss` instance.
+- (03-05) `emailOutboundSendHandler` (`src/lib/worker/jobs/email-outbound-send.ts`) exports the handler only — registering it in `src/lib/worker/index.ts` (createQueue/work) is deliberately plan 04's job, since 04 owns the worker entrypoint. Until 04 lands, `email-outbound-send` jobs enqueue but sit unprocessed (no worker subscribed) — expected for this wave.
+- (03-05) Outbound Message-IDs are generated bracket-consistent with mailparser's inbound format (`buildOutboundMessageId`: `` `<${randomBytes(16).toString("hex")}@${domain}>` ``), reused verbatim on retry (never regenerated), and the References/In-Reply-To query EXCLUDES the message being sent (`id: { not: message.id }`) to avoid a self-referential References header on retries — a correctness fix beyond the plan's literal query text (see 03-05-SUMMARY.md Deviations).
+- (03-05) `getEmailSettings`'s `SettingDb` type (03-02) was an ad hoc `unknown`-arg interface that failed `tsc` against a real `scopedDb()` client on its first real call site — fixed to `Pick<ReturnType<typeof scopedDb>, "setting">`, mirroring `src/lib/tickets/sla.ts`'s `SlaDb` precedent. Any future narrow-db-param helper should follow this same `Pick<ReturnType<typeof scopedDb>, ...>` pattern, not an ad hoc structural interface.
+- (03-05) This plan's assigned worktree was found checked out at Phase-2-completion (missing all of Phase 3's planning docs + wave 1 code) and had to be fast-forward-merged to `master` before any execution could begin — see 03-05-SUMMARY.md Deviations. If a future parallel-execution session reports a plan's declared dependencies (files/docs) as missing, check for this same stale-worktree cause before assuming the dependency plan never ran.
 
 ### Open Todos
 
@@ -193,5 +198,7 @@ Wave 1 (03-01) complete. Phase 3 is now 1/6 plans complete. Next: remaining Wave
 
 **Phase 3 execution — Wave 1 (parallel), 03-02 complete (2026-07-06):** `src/lib/crypto/secret-box.ts` (AES-256-GCM `encryptSecret`/`decryptSecret`, `node:crypto`-only, fresh 12-byte IV per call, `iv|authTag|ciphertext` base64-packed blob — Phase 4 LLM keys reuse this verbatim) + `tests/unit/secret-box.test.ts` (TDD, 5/5 green: round-trip/fresh-IV/tamper-throws/key-validation) + `src/lib/channels/email/settings.ts` (`EMAIL_SETTING_KEYS`, `getEmailSettings`/`saveEmailSettings`/`updateEmailHealth` over the 14 `email:*` Setting keys, relative-imports the crypto helper for worker esbuild bundling, "empty password = keep existing value" save semantics) + documented `APP_ENCRYPTION_KEY` in `.env.example`. `pnpm test` (19/19) and `tsc --noEmit` both clean. Commits: `af3a78b` (test), `a4dc840` (feat), `6315b76` (feat). SUMMARY: `.planning/phases/03-email-channel/03-02-SUMMARY.md`. This plan was independent of 03-01 and ran in the same wave — other Wave 1 plans (03-01, and waves 2+ covering IMAP poll/threading/outbound send/Settings UI) still pending as of this note.
 
+**Phase 3 execution — Wave 2, 03-05 complete (2026-07-06):** `src/lib/channels/email/smtp-client.ts` (`createSmtpTransport`, explicit 10s connection/greeting/socket timeouts) + `src/lib/channels/email/compose-outbound.ts` (`buildOutboundMessageId`, `wrapEmailSafeHtml`, `composeMail` — multipart/alternative via nodemailer, TDD-verified Message-ID bracket round-trip through `MailComposer`→`simpleParser`) + `src/lib/queue/boss-client.ts` (`getBoss()` — the codebase's first app-side pg-boss singleton, `email-outbound-send` queue with `retryLimit: 2`) + `src/lib/worker/jobs/email-outbound-send.ts` (`emailOutboundSendHandler` — loads message+ticket+contact+org, gates on OUTBOUND/PUBLIC/enabled, derives References/In-Reply-To excluding itself, sends via SMTP, flips `deliveryStatus` SENT/FAILED, rethrows for pg-boss retry) + `messages/route.ts` (computes `shouldQueue` pre-transaction, stamps `deliveryStatus: "QUEUED"`, enqueues post-commit; channel-off unchanged, D-26) + `DeliveryFailedChip`/`retryOutboundSend` (thread-visible Retry affordance). `pnpm test` (23/23), `tsc --noEmit`, `pnpm run build`, and `biome check` all clean. Commits: `4e74652`, `caa0336`, `8926f47`. SUMMARY: `.planning/phases/03-email-channel/03-05-SUMMARY.md`. Deviation: fixed `getEmailSettings`'s `SettingDb` type (03-02) to structurally accept a real `scopedDb()` client (its first real caller) — see SUMMARY Deviations. This plan's worktree was found stale (pre-Phase-3) and fast-forward-merged to master before execution. `emailOutboundSendHandler` is NOT yet registered in `worker/index.ts` — that's plan 04's job. 03-03/03-04/03-06 status depends on their own (possibly parallel) executors.
+
 ---
-*Last updated: 2026-07-06 — Phase 3 (email-channel) execution in progress: Wave 1 complete — 03-01 (data foundation) + 03-02 (credential encryption + email settings module), 2/6 plans. Next: Wave 2 (03-03, 03-05).*
+*Last updated: 2026-07-06 — Phase 3 (email-channel) execution in progress: Wave 1 complete (03-01, 03-02) + Wave 2's 03-05 (outbound SMTP send) complete, 3/6 plans. Remaining: 03-03 (inbound parsing), 03-04 (inbound poll job + worker registration), 03-06 (Settings Email tab UI) — check each plan's own SUMMARY.md for current status before resuming.*
