@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: "Phase 3 (Email Channel) execution in progress — wave 1 plan 03-01 (data foundation) complete."
+status: "Phase 3 (Email Channel) execution in progress — wave 1 (03-01 data foundation + 03-02 crypto/email-settings) complete."
 last_updated: "2026-07-06T03:01:47.588Z"
-last_activity: "2026-07-06 - Executed 03-01-PLAN.md (email-channel data foundation): email libraries installed, Message email-identity fields + EmailIngestFailure model + migration + scopedDb allowlist."
+last_activity: "2026-07-06 - Executed 03-01-PLAN.md (email-channel data foundation) and 03-02-PLAN.md (AES-256-GCM secret-box + typed email-settings module) in parallel — wave 1 of 4 complete."
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 26
-  completed_plans: 21
-  percent: 81
+  completed_plans: 22
+  percent: 85
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 3
-Plan: 01 of 06 complete (wave 1 of 4)
-Status: Phase 3 (Email Channel) execution in progress — 03-01 (data foundation) complete; 03-02..03-06 remaining.
-Last activity: 2026-07-06 - Executed 03-01-PLAN.md: email-channel npm libraries installed; Message extended with emailMessageId/emailInReplyTo/emailReferences/deliveryStatus + MessageDeliveryStatus enum; EmailIngestFailure model added (org-scoped poison-message guard); migration 20260706025051_email_channel generated and hand-verified additive (searchVector untouched); scopedDb DOMAIN_MODELS extended.
+Plan: 02 of 06 complete (wave 1 of 4 done)
+Status: Phase 3 (Email Channel) execution in progress — wave 1 (03-01 data foundation + 03-02 crypto/email-settings) complete; 03-03..03-06 remaining.
+Last activity: 2026-07-06 - Executed 03-01-PLAN.md (email-channel npm libraries installed; Message extended with emailMessageId/emailInReplyTo/emailReferences/deliveryStatus + MessageDeliveryStatus enum; EmailIngestFailure model added; migration hand-verified additive; scopedDb DOMAIN_MODELS extended) and 03-02-PLAN.md (AES-256-GCM secret-box helper + typed email-settings module over Setting) in parallel.
 
-Progress: [████████░░] 81% (21/26 plans complete — 8/8 phase 01 + 12/12 phase 02 + 1/6 phase 03)
+Progress: [████████░░] 85% (22/26 plans complete — 8/8 phase 01 + 12/12 phase 02 + 2/6 phase 03)
 
 ## Accumulated Context
 
@@ -112,11 +112,13 @@ Progress: [████████░░] 81% (21/26 plans complete — 8/8 pha
 - (03-01) Recurrence of Pitfall 3: `prisma migrate dev`'s diff engine again tried to `DROP` the hand-written `searchVector` tsvector columns/GIN indexes (still intentionally absent from `schema.prisma`, per 02-01) when generating the `email_channel` migration. Fixed by hand-editing `migration.sql` to remove the DROP statements, then re-verified end-to-end: destroyed and recreated a disposable Postgres container, ran `prisma migrate deploy` from scratch (all 4 migrations), confirmed via `psql \d "Message"` that `searchVector` (column + GIN index) survives alongside the new email fields. Any future migration touching `Message`/`Ticket` must repeat this manual review.
 - (03-01) The project's `docker-compose.yml` `db` service publishes no host port by design (one-command self-host stack, internal network only) — generating/verifying a Prisma migration locally requires a separate disposable `pgvector/pgvector:pg16` container (unique name + random host port) rather than the running compose stack. Torn down after use; `.env` reset to the repo-default `DATABASE_URL` (`localhost:5432`) afterward.
 - (03-01) `requirements: [AIDA-09]` is declared on every Phase 3 PLAN.md's frontmatter (phase-level requirement), but 03-01 only laid the schema/dependency foundation — no inbound parsing/threading/poll job or outbound send exists yet. Mirroring the 02-08 precedent for split requirements: AIDA-09 is intentionally NOT marked complete in REQUIREMENTS.md yet; only mark it once the full inbound+outbound flow is built and validated (likely the final wave/plan of Phase 3).
+- (03-02) `src/lib/crypto/secret-box.ts` is the codebase's ONE AES-256-GCM encrypt/decrypt-at-rest primitive: `node:crypto` only (no project imports, bundleable by both webpack and esbuild), fresh 12-byte IV per call, blob layout `iv(12B) | authTag(16B) | ciphertext` base64-packed into the existing `Setting.value: String` column. Phase 4's LLM provider keys MUST reuse this verbatim, never re-derive their own cipher wrapper.
+- (03-02) `src/lib/channels/email/settings.ts` owns all 14 `email:*` Setting keys (`getEmailSettings`/`saveEmailSettings`/`updateEmailHealth`); imports `secret-box` via the RELATIVE path `"../../crypto/secret-box"` (not `@/`) since the worker's poll job (plan 04) will import it too. `saveEmailSettings`: an empty/undefined password on save means "keep the existing stored value" — the Settings Email tab (plan 06) never needs to round-trip the plaintext password back into the form.
 
 ### Open Todos
 
 - Phase 2 CLOSED (2026-07-05): verify-work 30/30 (`02-UAT.md`), ui-review 21/24 (`02-UI-REVIEW.md`, DESIGN-SYSTEM.md §9 design-check), 3 priority UI fixes shipped (quick-260705-kg0), human sign-off recorded.
-- Phase 3 (email-channel) planned (2026-07-06): 6 plans across 4 waves (see 03-CONTEXT.md/03-RESEARCH.md/03-UI-SPEC.md). Wave 1 (03-01, data foundation) is complete; 03-02 through 03-06 remain — resume with the next wave's plan(s).
+- Phase 3 (email-channel) planned (2026-07-06): 6 plans across 4 waves (see 03-CONTEXT.md/03-RESEARCH.md/03-UI-SPEC.md). Wave 1 (03-01 data foundation + 03-02 crypto/email-settings) is complete; 03-03 through 03-06 remain — resume with Wave 2 (03-03, 03-05).
 - Rename `src/middleware.ts` → `proxy.ts` (Next 16 deprecation warning; non-blocking, surfaced during UAT).
 - Disk hygiene: stale agent worktree dirs under `.claude/worktrees` (~11GB; 13 unregistered incl. the partially-deleted `agent-a52414ce120c5b506` remnant — its work IS merged (a887ce6) and branch/metadata already pruned — plus 3 still-registered worktrees) — delete after checking registered ones for uncommitted agent work (now dockerignored so builds are safe either way).
 - Consolidation follow-up: dedup 02-07's inline SLA/chip literals against 02-03/02-06 (see Key Decisions above) — still pending; low-priority, does not block Phase 2 sign-off, revisit at Phase 2 close-out or defer to a later phase.
@@ -189,5 +191,7 @@ Wave 1 (03-01) complete. Phase 3 is now 1/6 plans complete. Next: remaining Wave
 - **AI:** Zero LLM code in Phase 1. Only `aiEnabled` toggle in workspace settings. `lib/llm/` is Phase 4.
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
+**Phase 3 execution — Wave 1 (parallel), 03-02 complete (2026-07-06):** `src/lib/crypto/secret-box.ts` (AES-256-GCM `encryptSecret`/`decryptSecret`, `node:crypto`-only, fresh 12-byte IV per call, `iv|authTag|ciphertext` base64-packed blob — Phase 4 LLM keys reuse this verbatim) + `tests/unit/secret-box.test.ts` (TDD, 5/5 green: round-trip/fresh-IV/tamper-throws/key-validation) + `src/lib/channels/email/settings.ts` (`EMAIL_SETTING_KEYS`, `getEmailSettings`/`saveEmailSettings`/`updateEmailHealth` over the 14 `email:*` Setting keys, relative-imports the crypto helper for worker esbuild bundling, "empty password = keep existing value" save semantics) + documented `APP_ENCRYPTION_KEY` in `.env.example`. `pnpm test` (19/19) and `tsc --noEmit` both clean. Commits: `af3a78b` (test), `a4dc840` (feat), `6315b76` (feat). SUMMARY: `.planning/phases/03-email-channel/03-02-SUMMARY.md`. This plan was independent of 03-01 and ran in the same wave — other Wave 1 plans (03-01, and waves 2+ covering IMAP poll/threading/outbound send/Settings UI) still pending as of this note.
+
 ---
-*Last updated: 2026-07-06 — Phase 3 (email-channel) execution started: 03-01 (data foundation — email deps, Message email-identity fields, EmailIngestFailure, additive migration, scopedDb allowlist) complete, 1/6 plans. Next: 03-02..03-06.*
+*Last updated: 2026-07-06 — Phase 3 (email-channel) execution in progress: Wave 1 complete — 03-01 (data foundation) + 03-02 (credential encryption + email settings module), 2/6 plans. Next: Wave 2 (03-03, 03-05).*
