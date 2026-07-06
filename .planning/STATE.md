@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: in_progress
-last_updated: "2026-07-05T09:08:30.000Z"
-last_activity: 2026-07-05
+status: "Phase 3 (Email Channel) execution in progress — wave 1 plan 03-01 (data foundation) complete."
+last_updated: "2026-07-06T03:01:47.588Z"
+last_activity: "2026-07-06 - Executed 03-01-PLAN.md (email-channel data foundation): email libraries installed, Message email-identity fields + EmailIngestFailure model + migration + scopedDb allowlist."
 progress:
   total_phases: 7
   completed_phases: 2
-  total_plans: 20
-  completed_plans: 20
-  percent: 100
+  total_plans: 26
+  completed_plans: 21
+  percent: 81
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 3
-Plan: Not started
-Status: Phase 3 (Email Channel) context gathered (2026-07-05) — 03-CONTEXT.md + 03-DISCUSSION-LOG.md committed (60257fa). Ready for `/gsd:plan-phase 3`.
-Last activity: 2026-07-05 - Ran /gsd:discuss-phase 3: maintainer front-loaded a comprehensive locked-decision set across all 4 gray areas (inbound IMAP-poll mechanism, threading/auto-reply-safety, email body/attachments, outbound send/config surfacing); verified against current schema/codebase — no conflicts found.
+Plan: 01 of 06 complete (wave 1 of 4)
+Status: Phase 3 (Email Channel) execution in progress — 03-01 (data foundation) complete; 03-02..03-06 remaining.
+Last activity: 2026-07-06 - Executed 03-01-PLAN.md: email-channel npm libraries installed; Message extended with emailMessageId/emailInReplyTo/emailReferences/deliveryStatus + MessageDeliveryStatus enum; EmailIngestFailure model added (org-scoped poison-message guard); migration 20260706025051_email_channel generated and hand-verified additive (searchVector untouched); scopedDb DOMAIN_MODELS extended.
 
-Progress: [██████████] 100% (20/20 plans complete — 8/8 phase 01 + 12/12 phase 02)
+Progress: [████████░░] 81% (21/26 plans complete — 8/8 phase 01 + 12/12 phase 02 + 1/6 phase 03)
 
 ## Accumulated Context
 
@@ -106,10 +106,17 @@ Progress: [██████████] 100% (20/20 plans complete — 8/8 ph
 - (02-09) "New Ticket" CTA (agent-created ticket flow, `NewTicketDialog` + `createTicketAction` delegating to `createTicket()`) wired into `FilterChipRow`'s existing sticky `h-14` header row — not a new header bar, preserving the two-column vertical-rhythm alignment. This was a deviation from 02-09's declared `files_modified` (STATE.md itself had flagged it as a required open todo, now resolved).
 - (02-12) Phase 2 COMPLETE — `/status/[token]` public page ships: bare-`prisma` lookup by `statusToken` (unauthenticated bearer-token flow, never scopedDb), `where: { visibility: "PUBLIC" }` server-side message filter (internal notes never fetched, D-21), `ThreadMessage`/`ThreadSystemEvent` reused verbatim for rendering. `POST /api/public/status/[token]/follow-up`: honeypot + `checkRateLimit("status-follow-up", ip)`, creates an INBOUND/PUBLIC `Message`, and — gated on `ticket.status ∈ {RESOLVED, CLOSED}` — sets `triggeredReopen: true` on that message AND `status: OPEN, resolvedAt: null` on the ticket in the SAME transaction (mirrors 02-09's SLA-flag same-write pattern). `GET /api/public/status/[token]/attachments/[id]`: authorizes via a Prisma join (`attachment.message.{ticketId, visibility: PUBLIC}`), structurally incapable of ever serving an internal-note attachment — a dedicated route, never the authenticated `/api/attachments/[id]` route.
 - (02-12) `ThreadMessage` (`src/components/tickets/thread-message.tsx`) gained an optional `attachmentHrefBase` prop (default `/api/attachments`, fully backward-compatible with 02-09's agent-thread usage) so this public page can point attachment links at its own token-scoped serving route without forking the component. Any future caller needing a third attachment-serving route should follow the same pattern.
+- (03-01) Email-channel dependency stack installed: `imapflow@1.4.6` (IMAP fetch), `mailparser@3.9.14` (MIME parsing), `nodemailer@9.0.3` (SMTP send), `html-to-text@10.0.0` (HTML→plaintext fallback, explicit dep despite being transitive via mailparser — pnpm strict linking, mirrors 02-02's `hast-util-sanitize` precedent), `rehype-parse@9.0.1` (parses raw inbound HTML for a future `sanitizeEmailHtml()`).
+- (03-01) `Message` gained `emailMessageId`/`emailInReplyTo`/`emailReferences: String[]`/`deliveryStatus: MessageDeliveryStatus?` (all nullable/defaulted, purely additive) + `@@index([organizationId, emailMessageId])` for threading lookups. Field names deliberately avoid `messageId` to not collide with `Attachment.messageId`.
+- (03-01) New `EmailIngestFailure` model (org-scoped: `organizationId`, `emailMessageId` unique-together, `failureCount`, `lastError`) is the poison-message guard — ingest failures happen BEFORE any `Message` row exists, so this is a dedicated table, not a `Message` flag. Now in `scopedDb`'s `DOMAIN_MODELS`.
+- (03-01) Recurrence of Pitfall 3: `prisma migrate dev`'s diff engine again tried to `DROP` the hand-written `searchVector` tsvector columns/GIN indexes (still intentionally absent from `schema.prisma`, per 02-01) when generating the `email_channel` migration. Fixed by hand-editing `migration.sql` to remove the DROP statements, then re-verified end-to-end: destroyed and recreated a disposable Postgres container, ran `prisma migrate deploy` from scratch (all 4 migrations), confirmed via `psql \d "Message"` that `searchVector` (column + GIN index) survives alongside the new email fields. Any future migration touching `Message`/`Ticket` must repeat this manual review.
+- (03-01) The project's `docker-compose.yml` `db` service publishes no host port by design (one-command self-host stack, internal network only) — generating/verifying a Prisma migration locally requires a separate disposable `pgvector/pgvector:pg16` container (unique name + random host port) rather than the running compose stack. Torn down after use; `.env` reset to the repo-default `DATABASE_URL` (`localhost:5432`) afterward.
+- (03-01) `requirements: [AIDA-09]` is declared on every Phase 3 PLAN.md's frontmatter (phase-level requirement), but 03-01 only laid the schema/dependency foundation — no inbound parsing/threading/poll job or outbound send exists yet. Mirroring the 02-08 precedent for split requirements: AIDA-09 is intentionally NOT marked complete in REQUIREMENTS.md yet; only mark it once the full inbound+outbound flow is built and validated (likely the final wave/plan of Phase 3).
 
 ### Open Todos
 
-- Phase 2 CLOSED (2026-07-05): verify-work 30/30 (`02-UAT.md`), ui-review 21/24 (`02-UI-REVIEW.md`, DESIGN-SYSTEM.md §9 design-check), 3 priority UI fixes shipped (quick-260705-kg0), human sign-off recorded. Next: `/gsd:plan-phase 3` (email intake).
+- Phase 2 CLOSED (2026-07-05): verify-work 30/30 (`02-UAT.md`), ui-review 21/24 (`02-UI-REVIEW.md`, DESIGN-SYSTEM.md §9 design-check), 3 priority UI fixes shipped (quick-260705-kg0), human sign-off recorded.
+- Phase 3 (email-channel) planned (2026-07-06): 6 plans across 4 waves (see 03-CONTEXT.md/03-RESEARCH.md/03-UI-SPEC.md). Wave 1 (03-01, data foundation) is complete; 03-02 through 03-06 remain — resume with the next wave's plan(s).
 - Rename `src/middleware.ts` → `proxy.ts` (Next 16 deprecation warning; non-blocking, surfaced during UAT).
 - Disk hygiene: stale agent worktree dirs under `.claude/worktrees` (~11GB; 13 unregistered incl. the partially-deleted `agent-a52414ce120c5b506` remnant — its work IS merged (a887ce6) and branch/metadata already pruned — plus 3 still-registered worktrees) — delete after checking registered ones for uncommitted agent work (now dockerignored so builds are safe either way).
 - Consolidation follow-up: dedup 02-07's inline SLA/chip literals against 02-03/02-06 (see Key Decisions above) — still pending; low-priority, does not block Phase 2 sign-off, revisit at Phase 2 close-out or defer to a later phase.
@@ -165,6 +172,12 @@ Wave 5 complete. **Phase 2 (core-ticketing) is now fully executed: 12/12 plans, 
 
 **Phase 2 locked decisions (see 02-CONTEXT.md):** 2-pane shared inbox (list + reading pane), views as filter chips; flexible status + auto-reopen on requester reply; priority Low/Normal/High/Urgent; per-workspace sequential ticket # (+cuid); auto-link contacts by normalized email (merge deferred); Markdown→sanitized-HTML composer with Public-Reply/Internal-Note toggle (amber notes); 24/7 SLA clock, per-priority targets in Settings, pg-boss job stamps isAtRisk/isBreached + color chips; free-form tags w/ autocomplete + admin management; admin custom fields (text/select/number/checkbox/date); public web form (honeypot + rate-limit, no CAPTCHA); tokenized `/status/[token]` page (public thread + follow-up reopen); local `/data/uploads` volume behind FileStorage interface, 10MB + MIME allowlist. Discretion: Postgres FTS; individual assignment only; bulk actions deferred; fixed views. Reminder: extend `scopedDb` DOMAIN_MODELS allowlist for all new models; make ticket-number generator concurrency-safe.
 
+**Phase 3 planned (2026-07-06):** `/gsd:plan-phase 3` produced 6 plans across 4 waves (`.planning/phases/03-email-channel/03-01-PLAN.md` .. `03-06-PLAN.md`, `03-RESEARCH.md`, `03-UI-SPEC.md`).
+
+- **03-01** (email-channel data foundation, Wave 1, no deps): Installed `imapflow`/`mailparser`/`nodemailer`/`html-to-text`/`rehype-parse` + `@types/nodemailer`/`@types/mailparser`. Extended `Message` with `emailMessageId`/`emailInReplyTo`/`emailReferences: String[]`/`deliveryStatus: MessageDeliveryStatus?` (all nullable/defaulted) + threading index; added `MessageDeliveryStatus` enum; added org-scoped `EmailIngestFailure` poison-message-guard model + `organization` back-relation. Generated migration `20260706025051_email_channel` via a disposable Postgres container (the compose stack's `db` service has no published host port), then hand-edited to strip the diff engine's spurious `searchVector` DROP statements (Pitfall 3 recurrence) and re-verified end-to-end from a fresh container. `scopedDb` `DOMAIN_MODELS` now includes `EmailIngestFailure`. `pnpm prisma generate` + `tsc --noEmit` both clean. Commits: `a226bd3`, `dc2df1e`. SUMMARY: `.planning/phases/03-email-channel/03-01-SUMMARY.md`.
+
+Wave 1 (03-01) complete. Phase 3 is now 1/6 plans complete. Next: remaining Wave 1/2/3/4 plans (03-02 through 03-06 — parsing/threading helpers, inbound-poll worker job, outbound-send worker job + AES-256-GCM credential encryption, Settings Email tab UI, and whatever plan owns final integration/AIDA-09 sign-off; see the individual PLAN.md files and their `depends_on`/`wave` frontmatter for exact sequencing).
+
 **Critical context for next session:**
 
 - **Auth:** Better Auth (Prisma adapter + database sessions + organization plugin + admin plugin). Better Auth's `Organization` IS the workspace — no separate Workspace model. All domain tables carry `organizationId`.
@@ -177,4 +190,4 @@ Wave 5 complete. **Phase 2 (core-ticketing) is now fully executed: 12/12 plans, 
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
 ---
-*Last updated: 2026-07-05 — Phase 2 SIGNED OFF: UAT 30/30 + UI review 21/24 + 3 priority UI fixes shipped (quick-260705-kg0, merge a887ce6). Next: /gsd:plan-phase 3 (email intake).*
+*Last updated: 2026-07-06 — Phase 3 (email-channel) execution started: 03-01 (data foundation — email deps, Message email-identity fields, EmailIngestFailure, additive migration, scopedDb allowlist) complete, 1/6 plans. Next: 03-02..03-06.*
