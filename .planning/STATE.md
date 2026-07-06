@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: in_progress
-last_updated: "2026-07-05T09:08:30.000Z"
-last_activity: 2026-07-05
+status: executing
+last_updated: "2026-07-06T02:54:49.608Z"
+last_activity: 2026-07-06 -- Phase 03 wave 1, 03-02 (crypto + email settings) executed
 progress:
   total_phases: 7
   completed_phases: 2
-  total_plans: 20
-  completed_plans: 20
-  percent: 100
+  total_plans: 26
+  completed_plans: 21
+  percent: 81
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -26,12 +26,12 @@ progress:
 
 ## Current Position
 
-Phase: 3
-Plan: Not started
-Status: Phase 3 (Email Channel) context gathered (2026-07-05) — 03-CONTEXT.md + 03-DISCUSSION-LOG.md committed (60257fa). Ready for `/gsd:plan-phase 3`.
-Last activity: 2026-07-05 - Ran /gsd:discuss-phase 3: maintainer front-loaded a comprehensive locked-decision set across all 4 gray areas (inbound IMAP-poll mechanism, threading/auto-reply-safety, email body/attachments, outbound send/config surfacing); verified against current schema/codebase — no conflicts found.
+Phase: 03 (email-channel) — EXECUTING
+Plan: 1 of 6 (wave 1: 03-01 + 03-02 in parallel; this worktree completed 03-02)
+Status: Executing Phase 03 — wave 1 plan 03-02 (crypto + email settings) complete
+Last activity: 2026-07-06 -- 03-02 executed: AES-256-GCM secret-box helper + typed email-settings module over Setting
 
-Progress: [██████████] 100% (20/20 plans complete — 8/8 phase 01 + 12/12 phase 02)
+Progress: [████████░░] 81% (21/26 plans complete — 8/8 phase 01 + 12/12 phase 02 + 1/6 phase 03)
 
 ## Accumulated Context
 
@@ -106,6 +106,8 @@ Progress: [██████████] 100% (20/20 plans complete — 8/8 ph
 - (02-09) "New Ticket" CTA (agent-created ticket flow, `NewTicketDialog` + `createTicketAction` delegating to `createTicket()`) wired into `FilterChipRow`'s existing sticky `h-14` header row — not a new header bar, preserving the two-column vertical-rhythm alignment. This was a deviation from 02-09's declared `files_modified` (STATE.md itself had flagged it as a required open todo, now resolved).
 - (02-12) Phase 2 COMPLETE — `/status/[token]` public page ships: bare-`prisma` lookup by `statusToken` (unauthenticated bearer-token flow, never scopedDb), `where: { visibility: "PUBLIC" }` server-side message filter (internal notes never fetched, D-21), `ThreadMessage`/`ThreadSystemEvent` reused verbatim for rendering. `POST /api/public/status/[token]/follow-up`: honeypot + `checkRateLimit("status-follow-up", ip)`, creates an INBOUND/PUBLIC `Message`, and — gated on `ticket.status ∈ {RESOLVED, CLOSED}` — sets `triggeredReopen: true` on that message AND `status: OPEN, resolvedAt: null` on the ticket in the SAME transaction (mirrors 02-09's SLA-flag same-write pattern). `GET /api/public/status/[token]/attachments/[id]`: authorizes via a Prisma join (`attachment.message.{ticketId, visibility: PUBLIC}`), structurally incapable of ever serving an internal-note attachment — a dedicated route, never the authenticated `/api/attachments/[id]` route.
 - (02-12) `ThreadMessage` (`src/components/tickets/thread-message.tsx`) gained an optional `attachmentHrefBase` prop (default `/api/attachments`, fully backward-compatible with 02-09's agent-thread usage) so this public page can point attachment links at its own token-scoped serving route without forking the component. Any future caller needing a third attachment-serving route should follow the same pattern.
+- (03-02) `src/lib/crypto/secret-box.ts` is the codebase's ONE AES-256-GCM encrypt/decrypt-at-rest primitive: `node:crypto` only (no project imports, bundleable by both webpack and esbuild), fresh 12-byte IV per call, blob layout `iv(12B) | authTag(16B) | ciphertext` base64-packed into the existing `Setting.value: String` column. Phase 4's LLM provider keys MUST reuse this verbatim, never re-derive their own cipher wrapper.
+- (03-02) `src/lib/channels/email/settings.ts` owns all 14 `email:*` Setting keys (`getEmailSettings`/`saveEmailSettings`/`updateEmailHealth`); imports `secret-box` via the RELATIVE path `"../../crypto/secret-box"` (not `@/`) since the worker's poll job (plan 04) will import it too. `saveEmailSettings`: an empty/undefined password on save means "keep the existing stored value" — the Settings Email tab (plan 06) never needs to round-trip the plaintext password back into the form.
 
 ### Open Todos
 
@@ -176,5 +178,7 @@ Wave 5 complete. **Phase 2 (core-ticketing) is now fully executed: 12/12 plans, 
 - **AI:** Zero LLM code in Phase 1. Only `aiEnabled` toggle in workspace settings. `lib/llm/` is Phase 4.
 - Single-server only; pg-boss (no Redis); pgvector in the same Postgres.
 
+**Phase 3 execution — Wave 1 (parallel), 03-02 complete (2026-07-06):** `src/lib/crypto/secret-box.ts` (AES-256-GCM `encryptSecret`/`decryptSecret`, `node:crypto`-only, fresh 12-byte IV per call, `iv|authTag|ciphertext` base64-packed blob — Phase 4 LLM keys reuse this verbatim) + `tests/unit/secret-box.test.ts` (TDD, 5/5 green: round-trip/fresh-IV/tamper-throws/key-validation) + `src/lib/channels/email/settings.ts` (`EMAIL_SETTING_KEYS`, `getEmailSettings`/`saveEmailSettings`/`updateEmailHealth` over the 14 `email:*` Setting keys, relative-imports the crypto helper for worker esbuild bundling, "empty password = keep existing value" save semantics) + documented `APP_ENCRYPTION_KEY` in `.env.example`. `pnpm test` (19/19) and `tsc --noEmit` both clean. Commits: `af3a78b` (test), `a4dc840` (feat), `6315b76` (feat). SUMMARY: `.planning/phases/03-email-channel/03-02-SUMMARY.md`. This plan was independent of 03-01 and ran in the same wave — other Wave 1 plans (03-01, and waves 2+ covering IMAP poll/threading/outbound send/Settings UI) still pending as of this note.
+
 ---
-*Last updated: 2026-07-05 — Phase 2 SIGNED OFF: UAT 30/30 + UI review 21/24 + 3 priority UI fixes shipped (quick-260705-kg0, merge a887ce6). Next: /gsd:plan-phase 3 (email intake).*
+*Last updated: 2026-07-06 — Phase 3 (email-channel) execution in progress: Wave 1 plan 03-02 (credential encryption + email settings module) complete.*
