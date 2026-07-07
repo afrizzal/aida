@@ -110,6 +110,7 @@ model organization {
   customFieldValues      CustomFieldValue[]
   attachments            Attachment[]
   emailIngestFailures    EmailIngestFailure[]
+  auditEvents            AuditEvent[]
 }
 
 model member {
@@ -208,6 +209,34 @@ enum CustomFieldType {
   DATE
 }
 
+// ---------------------------------------------------------------------------
+// Domain models (Phase 4 — AI foundation)
+// ---------------------------------------------------------------------------
+
+enum TriageCategory {
+  BILLING
+  TECHNICAL
+  ACCOUNT
+  FEATURE_REQUEST
+  OTHER
+}
+
+enum TriageSentiment {
+  POSITIVE
+  NEUTRAL
+  NEGATIVE
+}
+
+enum TriageStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum AuditActionType {
+  TRIAGE
+}
+
 model Ticket {
   id                         String         @id @default(cuid())
   organizationId             String
@@ -226,6 +255,10 @@ model Ticket {
   resolvedAt                 DateTime?
   isAtRisk                   Boolean        @default(false)
   isBreached                 Boolean        @default(false)
+  triageCategory             TriageCategory?
+  triageSentiment            TriageSentiment?
+  triageLanguage             String?        // ISO 639-1 code, e.g. "en"
+  triageStatus               TriageStatus?  // null = never enqueued (AI off); else PENDING/COMPLETED/FAILED
   createdAt                  DateTime       @default(now())
   updatedAt                  DateTime       @updatedAt
   organization      organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -391,6 +424,23 @@ model EmailIngestFailure {
 
   @@unique([organizationId, emailMessageId])
   @@index([organizationId])
+}
+
+model AuditEvent {
+  id             String          @id @default(cuid())
+  organizationId String
+  actionType     AuditActionType
+  ticketId       String?
+  messageId      String?
+  provider       String          // e.g. "openai"
+  model          String          // e.g. "gpt-5.4-mini"
+  input          String          // full REDACTED prompt — self-contained copy (D-17)
+  output         String          // full model output (JSON string)
+  createdAt      DateTime        @default(now())
+  organization   organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([organizationId, ticketId])
 }
 
 model RateLimitHit {

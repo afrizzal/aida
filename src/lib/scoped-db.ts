@@ -17,6 +17,7 @@ export const DOMAIN_MODELS = [
   "Attachment",
   "TicketCounter",
   "EmailIngestFailure",
+  "AuditEvent",
 ] as const;
 
 const isDomain = (model?: string): boolean =>
