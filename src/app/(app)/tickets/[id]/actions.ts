@@ -1,7 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { CustomFieldType, TicketPriority, TicketStatus } from "@/generated/prisma/client";
+import type {
+  CustomFieldType,
+  TicketPriority,
+  TicketStatus,
+  TriageCategory,
+  TriageSentiment,
+} from "@/generated/prisma/client";
 import { getBoss } from "@/lib/queue/boss-client";
 import { getScopedDb } from "@/lib/session";
 import { computeDueTimestamps, getSlaTargets } from "@/lib/tickets/sla";
@@ -115,6 +121,53 @@ export async function rerunTriage(ticketId: string): Promise<{ ok: boolean }> {
   } catch {
     return { ok: false };
   }
+
+  revalidatePath(`/tickets/${ticketId}`);
+  return { ok: true };
+}
+
+/**
+ * Agent override for the AI-populated triage category (AIDA-14/D-09). A pure field write —
+ * category/sentiment/language never affect SLA due timestamps, only priority does (handled by
+ * the existing changePriority above), so no SLA recompute happens here.
+ */
+export async function setTriageCategory(
+  ticketId: string,
+  category: TriageCategory,
+): Promise<{ ok: boolean }> {
+  const { db } = await getScopedDb();
+
+  await db.ticket.update({ where: { id: ticketId }, data: { triageCategory: category } });
+
+  revalidatePath(`/tickets/${ticketId}`);
+  return { ok: true };
+}
+
+/** Agent override for the AI-populated triage sentiment (AIDA-14/D-09). Plain field write. */
+export async function setTriageSentiment(
+  ticketId: string,
+  sentiment: TriageSentiment,
+): Promise<{ ok: boolean }> {
+  const { db } = await getScopedDb();
+
+  await db.ticket.update({ where: { id: ticketId }, data: { triageSentiment: sentiment } });
+
+  revalidatePath(`/tickets/${ticketId}`);
+  return { ok: true };
+}
+
+/**
+ * Agent override for the AI-populated triage language (AIDA-14/D-09). Language is ISO 639-1
+ * free text; normalised to a 2-char lowercase code, empty input clears it (null).
+ */
+export async function setTriageLanguage(
+  ticketId: string,
+  language: string,
+): Promise<{ ok: boolean }> {
+  const { db } = await getScopedDb();
+
+  const code = language.trim().toLowerCase().slice(0, 2);
+  await db.ticket.update({ where: { id: ticketId }, data: { triageLanguage: code || null } });
 
   revalidatePath(`/tickets/${ticketId}`);
   return { ok: true };
