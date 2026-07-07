@@ -102,6 +102,10 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
             resolvedAt: ticket.resolvedAt,
             isAtRisk: ticket.isAtRisk,
             isBreached: ticket.isBreached,
+            triageCategory: ticket.triageCategory,
+            triageSentiment: ticket.triageSentiment,
+            triageLanguage: ticket.triageLanguage,
+            triageStatus: ticket.triageStatus,
           }}
           assigneeName={ticket.assignee?.name ?? null}
           members={members.map((member) => ({ id: member.user.id, name: member.user.name }))}

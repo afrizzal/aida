@@ -10,6 +10,9 @@ import {
   changeStatus,
   removeTag,
   setCustomFieldValue,
+  setTriageCategory,
+  setTriageLanguage,
+  setTriageSentiment,
 } from "@/app/(app)/tickets/[id]/actions";
 import { AssigneeAvatar } from "@/components/tickets/assignee-avatar";
 import {
@@ -21,6 +24,10 @@ import { PriorityChip } from "@/components/tickets/priority-chip";
 import { SlaDueChip } from "@/components/tickets/sla-due-chip";
 import { StatusChip } from "@/components/tickets/status-chip";
 import { TagChip } from "@/components/tickets/tag-chip";
+import { TriageCategoryChip } from "@/components/tickets/triage-category-chip";
+import { TriageSentimentChip } from "@/components/tickets/triage-sentiment-chip";
+import { TriageStatusChip } from "@/components/tickets/triage-status-chip";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -37,8 +44,15 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import type { TicketPriority, TicketStatus } from "@/generated/prisma/client";
+import type {
+  TicketPriority,
+  TicketStatus,
+  TriageCategory,
+  TriageSentiment,
+  TriageStatus,
+} from "@/generated/prisma/client";
 
 const STATUSES: { value: TicketStatus; label: string }[] = [
   { value: "NEW", label: "New" },
@@ -53,6 +67,20 @@ const PRIORITIES: { value: TicketPriority; label: string }[] = [
   { value: "NORMAL", label: "Normal" },
   { value: "HIGH", label: "High" },
   { value: "URGENT", label: "Urgent" },
+];
+
+const CATEGORIES: { value: TriageCategory; label: string }[] = [
+  { value: "BILLING", label: "Billing" },
+  { value: "TECHNICAL", label: "Technical" },
+  { value: "ACCOUNT", label: "Account" },
+  { value: "FEATURE_REQUEST", label: "Feature Request" },
+  { value: "OTHER", label: "Other" },
+];
+
+const SENTIMENTS: { value: TriageSentiment; label: string }[] = [
+  { value: "POSITIVE", label: "Positive" },
+  { value: "NEUTRAL", label: "Neutral" },
+  { value: "NEGATIVE", label: "Negative" },
 ];
 
 const UNASSIGNED_VALUE = "unassigned";
@@ -70,6 +98,10 @@ export interface TicketMetaHeaderTicket {
   resolvedAt: Date | string | null;
   isAtRisk: boolean;
   isBreached: boolean;
+  triageCategory: TriageCategory | null;
+  triageSentiment: TriageSentiment | null;
+  triageLanguage: string | null;
+  triageStatus: TriageStatus | null;
 }
 
 export interface TicketMetaHeaderMember {
@@ -113,6 +145,7 @@ export function TicketMetaHeader({
 }: TicketMetaHeaderProps) {
   const [, startTransition] = useTransition();
   const [tagPopoverOpen, setTagPopoverOpen] = useState(false);
+  const [languagePopoverOpen, setLanguagePopoverOpen] = useState(false);
 
   const activeDue = getActiveDue(ticket);
   const untaggedAvailable = availableTags.filter((t) => !tags.some((tg) => tg.id === t.id));
@@ -128,6 +161,28 @@ export function TicketMetaHeader({
     startTransition(async () => {
       const result = await changePriority(ticket.id, priority).catch(() => null);
       if (!result?.ok) toast.error("Couldn't update priority. Try again.");
+    });
+  }
+
+  function handleCategoryChange(category: TriageCategory) {
+    startTransition(async () => {
+      const result = await setTriageCategory(ticket.id, category).catch(() => null);
+      if (!result?.ok) toast.error("Couldn't update category. Try again.");
+    });
+  }
+
+  function handleSentimentChange(sentiment: TriageSentiment) {
+    startTransition(async () => {
+      const result = await setTriageSentiment(ticket.id, sentiment).catch(() => null);
+      if (!result?.ok) toast.error("Couldn't update sentiment. Try again.");
+    });
+  }
+
+  function handleLanguageChange(code: string) {
+    setLanguagePopoverOpen(false);
+    startTransition(async () => {
+      const result = await setTriageLanguage(ticket.id, code).catch(() => null);
+      if (!result?.ok) toast.error("Couldn't update language. Try again.");
     });
   }
 
@@ -248,6 +303,78 @@ export function TicketMetaHeader({
       </div>
 
       <div className="flex flex-wrap items-center gap-2 border-border/70 border-b px-6 py-2">
+        {ticket.triageCategory !== null && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button type="button" aria-label="Change category">
+                <TriageCategoryChip category={ticket.triageCategory} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuRadioGroup
+                value={ticket.triageCategory}
+                onValueChange={(value) => handleCategoryChange(value as TriageCategory)}
+              >
+                {CATEGORIES.map((category) => (
+                  <DropdownMenuRadioItem key={category.value} value={category.value}>
+                    {category.label}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+
+        {ticket.triageSentiment !== null && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button type="button" aria-label="Change sentiment">
+                <TriageSentimentChip sentiment={ticket.triageSentiment} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuRadioGroup
+                value={ticket.triageSentiment}
+                onValueChange={(value) => handleSentimentChange(value as TriageSentiment)}
+              >
+                {SENTIMENTS.map((sentiment) => (
+                  <DropdownMenuRadioItem key={sentiment.value} value={sentiment.value}>
+                    {sentiment.label}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+
+        {ticket.triageLanguage !== null && (
+          <Popover open={languagePopoverOpen} onOpenChange={setLanguagePopoverOpen}>
+            <PopoverTrigger asChild>
+              <button type="button" aria-label="Change language">
+                <Badge className="h-5 px-2 py-0.5 text-[12px] border border-border text-muted-foreground">
+                  {ticket.triageLanguage.toUpperCase()}
+                </Badge>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-40 p-2">
+              <Input
+                defaultValue={ticket.triageLanguage}
+                maxLength={2}
+                placeholder="en"
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    handleLanguageChange((event.target as HTMLInputElement).value);
+                  }
+                }}
+              />
+            </PopoverContent>
+          </Popover>
+        )}
+
+        {ticket.triageStatus !== null && (
+          <TriageStatusChip ticketId={ticket.id} triageStatus={ticket.triageStatus} />
+        )}
+
         {tags.map((tag) => (
           <TagChip key={tag.id} label={tag.name} onRemove={() => handleRemoveTag(tag.id)} />
         ))}
