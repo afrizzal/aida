@@ -89,7 +89,7 @@
 - [x] 04-03-PLAN.md — Triage engine: schema + fenced/escaped prompt (D-12) + runTriage + recordAuditEvent + injection test (D-15) (Wave 3)
 - [x] 04-04-PLAN.md — Settings "AI Features" page: provider/model/key config + Test Connection + toggle gating (D-21) (Wave 3)
 - [x] 04-05-PLAN.md — Runtime wiring: ai-triage pg-boss queue + post-commit enqueue + rerunTriage action (Wave 4)
-- [ ] 04-06-PLAN.md — Triage UI: result chips + edit affordance + AI Activity section + Re-run button + failure badge (Wave 5)
+- [x] 04-06-PLAN.md — Triage UI: result chips + edit affordance + AI Activity section + Re-run button + failure badge (Wave 5)
 
 ### Phase 5: RAG & Drafted Replies
 **Timebox:** ~2–2.5 weeks · **Depends on:** Phase 4 (LLM layer) · **Requirements:** AIDA-15, AIDA-16

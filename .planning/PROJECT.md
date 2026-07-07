@@ -36,6 +36,8 @@ Launch beachhead is **customer support**, but the ticketing core is built generi
 - **AIDA-11** Workspace/organization scoping (multi-tenant-ready) — Validated in Phase 1: foundation
 - **AIDA-21** One-command self-host (`docker compose up`) — Validated in Phase 1: foundation
 - **AIDA-09** Email intake (inbound parse/threading) + outbound SMTP replies — Validated in Phase 3: email-channel
+- **AIDA-14** Auto-triage: category, priority, sentiment, language, routing — Validated in Phase 4: ai-foundation
+- **AIDA-19** Append-only audit log of AI actions (triage/draft/send) — Validated in Phase 4: ai-foundation
 
 ### Active
 
@@ -46,13 +48,11 @@ Launch beachhead is **customer support**, but the ticketing core is built generi
 
 **AI**
 - [ ] **AIDA-13** Model-agnostic LLM layer (OpenAI/Anthropic/Ollama), AI toggle, encrypted keys
-- [ ] **AIDA-14** Auto-triage: category, priority, sentiment, language, routing
 - [ ] **AIDA-15** Knowledge base: author/import + chunk + embed (pgvector)
 - [ ] **AIDA-16** RAG drafted reply with citations behind a human-approval gate
 - [ ] **AIDA-17** AIDA Insight: recurring-issue clustering, KB-gap detection, volume drivers, SLA/CSAT insight
 
 **Trust & governance**
-- [ ] **AIDA-19** Append-only audit log of AI actions (triage/draft/send)
 - [ ] **AIDA-20** Untrusted-input & PII safeguards (prompt-injection defense, secret redaction, no egress beyond configured LLM)
 
 **Self-host & DX**
@@ -116,4 +116,4 @@ Launch beachhead is **customer support**, but the ticketing core is built generi
 This document evolves at phase/milestone transitions (validated → move requirements; new ones → Active; decisions → table). v1 = Minimum Lovable Helpdesk; post-v1 candidates: KB autogen (AIDA-18), live chat, more channels, hosted offering.
 
 ---
-*Last updated: 2026-07-06 — Phase 3 (email-channel) execution complete: AIDA-09 validated (6/6 plans). Pending phase-level verify-work/UI-review/human sign-off before Phase 3 is formally closed.*
+*Last updated: 2026-07-07 — Phase 4 (ai-foundation) execution complete: AIDA-14 and AIDA-19 validated (6/6 plans, 5/5 waves). Pending phase-level verify-work/UI-review/human sign-off before Phase 4 is formally closed.*

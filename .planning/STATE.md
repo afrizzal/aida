@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-last_updated: "2026-07-07T07:15:17.308Z"
+status: verifying
+last_updated: "2026-07-07T07:33:58.163Z"
 last_activity: 2026-07-07
 progress:
   total_phases: 7
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 32
-  completed_plans: 31
-  percent: 97
+  completed_plans: 32
+  percent: 100
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -26,12 +26,12 @@ progress:
 
 ## Current Position
 
-Phase: 04 (ai-foundation) — EXECUTING
-Plan: 6 of 6 (04-05 complete — Wave 4 done; Wave 5 (04-06, final plan) next)
-Status: Ready to execute
-Last activity: 2026-07-07 -- 04-05 (ai-triage runtime wiring) complete
+Phase: 04 (ai-foundation) — EXECUTION COMPLETE
+Plan: 6 of 6 (04-06 complete — Wave 5 done, all 6 plans/5 waves shipped)
+Status: Phase complete — ready for verification (verify-work + UI-review + human sign-off pending, mirrors Phase 2/3 close-out)
+Last activity: 2026-07-07
 
-Progress: [██████████] 97% (31/32 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 5/6 phase 04)
+Progress: [██████████] 100% (32/32 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 6/6 phase 04)
 
 ## Accumulated Context
 
@@ -149,11 +149,13 @@ Progress: [██████████] 97% (31/32 plans complete — 8/8 pha
 - (04-05) `createTicket()`'s `db.$transaction(...)` result is now captured into `const result` (previously returned directly) so a post-commit block can run the `aiEnabled` check + `boss.send("ai-triage", ...)` strictly AFTER the Prisma transaction commits (D-07) — the transaction body itself is unchanged. Because this is the single ticket-creation entrypoint, all three call sites (agent "New Ticket", email ingest, public intake) get auto-triage for free, with zero duplication.
 - (04-05) Worker-bundle hard stop re-verified: the Dockerfile's exact esbuild command now bundles `runTriage -> lib/llm -> {openai, @anthropic-ai/sdk, ollama}` into the worker for the first time (6.2MB `dist/worker-verify.mjs`, up from 03-04's pre-`lib/llm` 4.6MB baseline) — succeeded with zero `--external` changes needed for any of the three provider SDKs.
 - (04-05) AIDA-14 intentionally still NOT marked complete in REQUIREMENTS.md — its acceptance statement includes "an agent can override", which is 04-06's job (override Server Actions + ticket-page UI). The full automatic enqueue -> worker -> classify -> write path is otherwise live end-to-end as of this plan. Mirrors the established split-requirement precedent (02-08/03-01/04-01/04-02/04-03/04-04).
+- (04-06) Triage/audit backend (04-01…04-05) is now fully wired into the ticket-detail UI: `setTriageCategory`/`setTriageSentiment`/`setTriageLanguage` override Server Actions (plain field writes, no SLA recompute — only `changePriority` touches SLA); `TriageCategoryChip`/`TriageSentimentChip` presentational Badges + `TriageStatusChip` (Triaging…/Triage failed+Re-run/Re-run AI triage, calling 04-05's `rerunTriage`) mirroring `PriorityChip`/`DeliveryFailedChip`'s exact shapes; a read-only `AiActivitySection` (native `<details>`, no client JS) lists `AuditEvent` triage runs (provider/model/time/parsed result) below the thread, deliberately never rendering `AuditEvent.input` (D-13). Every triage UI piece is gated on `!== null`/`.length === 0` so a never-triaged ticket (AI off) shows zero triage chrome. **AIDA-14 and AIDA-19 are now both fully code-complete end-to-end and marked Validated in PROJECT.md / REQUIREMENTS.md.** Phase 4 (ai-foundation) is now 6/6 plans complete across all 5 waves.
 
 ### Open Todos
 
 - Phase 2 CLOSED (2026-07-05): verify-work 30/30 (`02-UAT.md`), ui-review 21/24 (`02-UI-REVIEW.md`, DESIGN-SYSTEM.md §9 design-check), 3 priority UI fixes shipped (quick-260705-kg0), human sign-off recorded.
 - Phase 3 (email-channel) EXECUTION COMPLETE (2026-07-06): all 6 plans across 4 waves done (see 03-CONTEXT.md/03-RESEARCH.md/03-UI-SPEC.md); AIDA-09 validated in PROJECT.md. Next: phase-level verify-work + UI-review (DESIGN-SYSTEM.md §9) + human sign-off (mirrors Phase 2's close-out) before Phase 3 is formally CLOSED and `/gsd:plan-phase 4` starts.
+- Phase 4 (ai-foundation) EXECUTION COMPLETE (2026-07-07): all 6 plans across 5 waves done (see 04-CONTEXT.md/04-RESEARCH.md); AIDA-14 and AIDA-19 validated in PROJECT.md this plan. AIDA-13/AIDA-20's full acceptance (provider-agnostic UI + injection defense were shipped in 04-03/04-04, but final validation is deferred to the phase-level close-out review, per 04-04's note) remains a close-out task, not an 04-06 scope item. Next: phase-level verify-work + UI-review (DESIGN-SYSTEM.md §9) + human sign-off (mirrors Phase 2/3's close-out) before Phase 4 is formally CLOSED and `/gsd:plan-phase 5` starts.
 - Rename `src/middleware.ts` → `proxy.ts` (Next 16 deprecation warning; non-blocking, surfaced during UAT).
 - Disk hygiene: stale agent worktree dirs under `.claude/worktrees` (~11GB; 13 unregistered incl. the partially-deleted `agent-a52414ce120c5b506` remnant — its work IS merged (a887ce6) and branch/metadata already pruned — plus 3 still-registered worktrees) — delete after checking registered ones for uncommitted agent work (now dockerignored so builds are safe either way).
 - Consolidation follow-up: dedup 02-07's inline SLA/chip literals against 02-03/02-06 (see Key Decisions above) — still pending; low-priority, does not block Phase 2 sign-off, revisit at Phase 2 close-out or defer to a later phase.
