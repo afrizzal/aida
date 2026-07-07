@@ -1,6 +1,7 @@
 import { MessageSquare } from "lucide-react";
 import { Fragment } from "react";
 import { EmptyState } from "@/components/empty-state";
+import { AiActivitySection } from "@/components/tickets/ai-activity-section";
 import { Composer } from "@/components/tickets/composer";
 import type { CustomFieldInputDefinition } from "@/components/tickets/custom-field-input";
 import { ThreadMessage } from "@/components/tickets/thread-message";
@@ -51,10 +52,11 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
 
   // Better Auth's `member` model is excluded from scopedDb's DOMAIN_MODELS allowlist —
   // bare prisma + explicit organizationId filter, same idiom as src/lib/authz.ts.
-  const [members, definitions, availableTags] = await Promise.all([
+  const [members, definitions, availableTags, auditEvents] = await Promise.all([
     prisma.member.findMany({ where: { organizationId: orgId }, include: { user: true } }),
     db.customFieldDefinition.findMany({ orderBy: { position: "asc" } }),
     db.tag.findMany({ orderBy: { name: "asc" } }),
+    db.auditEvent.findMany({ where: { ticketId: id }, orderBy: { createdAt: "desc" }, take: 20 }),
   ]);
 
   const customFields = definitions.map((definition) => {
@@ -147,6 +149,16 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
             </Fragment>
           ))}
         </div>
+
+        <AiActivitySection
+          events={auditEvents.map((event) => ({
+            id: event.id,
+            provider: event.provider,
+            model: event.model,
+            createdAt: event.createdAt,
+            output: event.output,
+          }))}
+        />
 
         <Composer ticketId={ticket.id} />
       </div>
