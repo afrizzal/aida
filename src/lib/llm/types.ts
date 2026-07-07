@@ -3,9 +3,9 @@
 // Relative imports only (no `@/`) — this module family is worker-bundleable via esbuild
 // (future triage worker job) as well as consumed by the Next.js app.
 //
-// NOTE: there is deliberately NO `tools`/`tool_choice` anywhere in this file. The triage call
-// surface has zero tool-calling capability by construction (D-16) — a structural guarantee,
-// not a convention to remember.
+// NOTE: this port surface deliberately has no function/tool-calling fields of any kind. The
+// triage call has zero autonomous-action capability by construction (D-16) — a structural
+// guarantee, not a convention to remember.
 import type { ZodType } from "zod/v4";
 
 export type LlmProviderName = "openai" | "anthropic" | "ollama";
