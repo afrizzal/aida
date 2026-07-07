@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: planning
-last_updated: "2026-07-07T00:00:00.000Z"
+status: executing
+last_updated: "2026-07-07T05:48:34.997Z"
 last_activity: 2026-07-07
 progress:
   total_phases: 7
   completed_phases: 3
-  total_plans: 26
-  completed_plans: 26
-  percent: 100
+  total_plans: 32
+  completed_plans: 27
+  percent: 84
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -26,12 +26,12 @@ progress:
 
 ## Current Position
 
-Phase: 4
-Plan: Not started
-Status: Phase 3 (Email Channel) formally CLOSED — UAT 12/12 pass (2 issues found+fixed in-session), UI-review 23/24 (3 priority fixes shipped), human sign-off recorded (commits 8ebfd98/dac8994/8558d1e/a892311/d49adb5). Phase 4 (AI Foundation) context gathered via /gsd:discuss-phase — see 04-CONTEXT.md. Ready for /gsd:plan-phase 4.
-Last activity: 2026-07-07
+Phase: 04 (ai-foundation) — EXECUTING
+Plan: 2 of 6
+Status: Ready to execute
+Last activity: 2026-07-07 -- 04-01 (AI foundation data layer) complete
 
-Progress: [██████████] 100% (26/26 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03)
+Progress: [████████░░] 84% (27/32 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 1/6 phase 04)
 
 ## Accumulated Context
 
@@ -130,6 +130,10 @@ Progress: [██████████] 100% (26/26 plans complete — 8/8 ph
 - (03-04) `createTicket()`'s `CreateTicketResult` now includes `messageId` (the initial Message row's id) so callers that need to attach files to that first message (email ingest) don't need a second lookup; `CreateTicketInput` gained `bodyHtml?`/`emailMessageId?`/`emailInReplyTo?`/`emailReferences?`, all optional and backward-compatible with every existing caller (New Ticket flow, public web intake).
 - (03-04) AIDA-09 is STILL intentionally NOT marked complete in REQUIREMENTS.md — inbound (03-04) and outbound (03-05) are both now code-complete and integration-tested, but 03-06 (Settings Email tab: IMAP/SMTP/from-address config + Test Connection + the health line this plan writes) is the last remaining plan before an operator can actually configure and validate the channel end-to-end.
 - (03-06) Settings → Email tab shipped: `src/app/(app)/settings/email/{actions,page,email-channel-toggle,email-health-line,email-settings-form,test-connection-button}.tsx` + `settings-nav.tsx` Email entry. Four `requireOrgAdmin()`-gated Server Actions (save/toggle/test-imap/test-smtp); `testImapConnection`/`testSmtpConnection` both apply a 10s timeout (`createImapClient`/`createSmtpTransport`'s `timeoutMs` option) and fall back to the stored decrypted password via `getEmailSettings(db)` when the submitted form field is blank — the form's password inputs always start empty (plan 02's "blank = keep existing" contract, never round-tripping a decrypted secret to the client). Authorization is admin-gated ACTIONS only, no page-level guard — confirmed the 03-UI-SPEC Assumption 1 reading, matching the SLA/Tags/Custom-Fields precedent exactly. `pnpm exec tsc --noEmit` and `biome check src/app/(app)/settings/email` both clean. Commits: `3724e7e`, `d4ab3dc`, `97f6c7a`. SUMMARY: `.planning/phases/03-email-channel/03-06-SUMMARY.md`. **AIDA-09 is now fully code-complete end-to-end (inbound poll/ingest + outbound send + credential encryption + this configuration UI) — marked Validated in PROJECT.md.** Phase 3 (email-channel) is now 6/6 plans complete, all 4 waves done; ROADMAP.md's Phase 3 checkbox is checked. Still pending: phase-level verify-work/UI-review/human sign-off (LOOP-ENGINEERING.md loop) before Phase 3 is formally closed out like Phase 2 was.
+- (04-01) `openai@6.45.0`/`@anthropic-ai/sdk@0.110.0`/`ollama@0.6.3` installed (exact 04-RESEARCH.md versions, no fallback needed). `AuditEvent` (new, org-scoped) deliberately has NO Prisma relation/FK to `Ticket`/`Message` — `ticketId`/`messageId` are plain nullable strings, a self-contained historical copy that survives source-ticket deletion (D-17); only the `organization` relation exists (workspace deletion cascades the audit trail). Append-only enforced via a hand-written, role-independent `BEFORE UPDATE OR DELETE ... RAISE EXCEPTION` Postgres trigger (`aida_audit_event_immutable`) appended to the SAME migration that creates the table — deliberately not a `REVOKE` (role-scoped, breaks if an operator renames `POSTGRES_USER`). `Ticket` gained nullable `triageCategory`/`triageSentiment`/`triageLanguage`/`triageStatus` columns (priority reuses the existing `TicketPriority` enum, no new enum). `scopedDb` `DOMAIN_MODELS` now includes `AuditEvent`.
+- (04-01) Pitfall 3 (spurious `searchVector` DROP statements from the Prisma diff engine) recurred for a THIRD time (after 03-01 and 03-04) on any migration touching `Ticket`/`Message` — this is now a confirmed standing pattern, not a one-off: always hand-review `migration.sql` for `DROP COLUMN "searchVector"`/`DROP INDEX ..._searchVector_idx` before committing any future migration that touches either table.
+- (04-01) AIDA-14/AIDA-19 intentionally NOT marked complete in REQUIREMENTS.md — 04-01 ships only the schema/DB foundation (Ticket triage columns, `AuditEvent` model + trigger); the actual triage engine (`lib/triage`), the `lib/llm` provider port, and the `recordAuditEvent()` write path land in 04-02/04-03/04-05. Mirrors the 02-08/03-01 precedent for phase-level requirements split across multiple plans — do not mark either complete until the full flow is wired end-to-end.
+- (04-01) Reconfirmed: `state update-progress`/`add-decision`/`record-metric`/`record-session` gsd-tools CLI commands still don't match this project's STATE.md structure (frontmatter `progress:`/body `Progress:` case-insensitive collision; heading is `### Key Decisions` not `### Decisions`; no `Performance Metrics` table; no standard session fields) — hand-edited the body `Progress:` line, frontmatter `percent`, and this `### Key Decisions` list directly again this session, per the workaround first documented in (02-05).
 
 ### Open Todos
 
@@ -229,7 +233,13 @@ Wave 4 complete. **Phase 3 (email-channel) is now fully executed: 6/6 plans, all
 
 **Phase 4 context gathered (2026-07-07, see `.planning/phases/04-ai-foundation/04-CONTEXT.md`):** Model-agnostic `lib/llm` provider port (OpenAI/Anthropic/Ollama, one active provider globally, curated model dropdown + custom-ID fallback, Ollama via base-URL only); provider keys reuse `secret-box.ts` verbatim via a new `llm/settings.ts` mirroring the email-settings pattern; Test Connection mirrors Settings → Email exactly. Auto-triage runs as an on-demand pg-boss job enqueued after `createTicket()` (+ manual re-run), fixed category enum (Billing/Technical/Account/Feature Request/Other — no overlapping catch-alls), predictions auto-populate real ticket fields (fully advisory/overrideable), retry-then-failure-badge on LLM error. Prompt-injection defense: structured delimiter tags with mandatory tag-breakout escaping (closing-delimiter sequences inside ticket text must be stripped/escaped before wrapping — flagged as the single most safety-critical detail this phase), redaction baked into the `lib/llm` port itself (not per-feature), automated integration test required for the injection defense. New append-only `AuditEvent` model (DB-level trigger/rule enforcement, not just code convention) stores full redacted input+output; ships a minimal "AI Activity" viewer on the ticket page. Existing `aiEnabled` toggle (Phase 1) becomes the kill-switch; its Switch is gated on provider-config-existing but explicitly NOT on last Test-Connection result (stale-test false-guarantee reasoning).
 
-**Next action:** `/gsd:plan-phase 4` (AI Foundation: model-agnostic LLM layer, auto-triage, audit log, untrusted-input safeguards).
+**Phase 4 planned (2026-07-07):** `/gsd:plan-phase 4` produced 6 plans across 5 waves (`.planning/phases/04-ai-foundation/04-01-PLAN.md` .. `04-06-PLAN.md`, `04-RESEARCH.md`).
+
+**Phase 4 execution — 04-01 complete (2026-07-07, Wave 1, no deps):** Installed `openai@6.45.0`/`@anthropic-ai/sdk@0.110.0`/`ollama@0.6.3` (all exact researched versions available, no fallback needed). Added `TriageCategory`/`TriageSentiment`/`TriageStatus`/`AuditActionType` enums + `Ticket.triageCategory`/`triageSentiment`/`triageLanguage`/`triageStatus` (nullable, reuses existing `TicketPriority` for priority — no new priority enum). Added org-scoped `AuditEvent` model — `ticketId`/`messageId` are plain nullable strings with NO FK relation to Ticket/Message (D-17: self-contained copy survives source-ticket deletion); only the `organization` relation exists. Generated migration `20260707053633_ai_foundation` via the established disposable-container procedure; hand-stripped the diff engine's spurious `searchVector` DROP statements (Pitfall 3 recurred a third time — now a standing checklist item for any migration touching Ticket/Message). Appended a role-independent `BEFORE UPDATE OR DELETE ... RAISE EXCEPTION` trigger (`aida_audit_event_immutable`) to the SAME migration file, not a `REVOKE` (POSTGRES_USER is operator-configurable). `scopedDb` `DOMAIN_MODELS` now includes `AuditEvent`. `tests/integration/audit-append-only.test.ts` proves INSERT succeeds, UPDATE/DELETE both reject. Re-verified end-to-end via a fresh disposable container (`migrate deploy`, all 5 migrations, searchVector intact) and via the full integration suite (21/21 across 7 files). `pnpm exec tsc --noEmit` clean. Commits: `d87f477`, `6898166`. SUMMARY: `.planning/phases/04-ai-foundation/04-01-SUMMARY.md`. AIDA-14/AIDA-19 intentionally NOT marked complete yet — this plan is schema/DB foundation only; the actual triage engine, `lib/llm` port, and `recordAuditEvent()` write path land in 04-02/04-03/04-05 (mirrors the 02-08/03-01 split-requirement precedent).
+
+Wave 1 (04-01) complete. Phase 4 is now 1/6 plans complete. Next: 04-02 (`lib/llm` port — redact + encrypted `llm:*` settings + `complete()` + OpenAI/Anthropic/Ollama adapters + probe, Wave 2).
+
+**Next action:** `/gsd:execute-phase 4` continues with 04-02 (`lib/llm` port).
 
 ---
-*Last updated: 2026-07-07 — Phase 3 (email-channel) formally CLOSED (UAT 12/12, UI-review 23/24, human sign-off). Phase 4 (AI Foundation) context gathered via /gsd:discuss-phase; ready for `/gsd:plan-phase 4`.*
+*Last updated: 2026-07-07 — Phase 4 (AI Foundation) execution started: 04-01 (data layer — provider SDKs, Ticket triage columns, append-only AuditEvent model + DB trigger) complete, 1/6 plans.*

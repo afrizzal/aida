@@ -83,8 +83,8 @@
 2. New tickets are auto-triaged (category, priority, sentiment, language) with results attached and overrideable by an agent.
 3. Every AI action is written to an append-only audit log (input ref, output, model).
 4. Ticket text is handled as untrusted: a prompt-injection test case cannot make the AI take actions or reveal system context; obvious secrets are redacted before reaching the LLM/logs; no network egress occurs except to the configured LLM endpoint.
-**Plans:** 6 plans (5 waves)
-- [ ] 04-01-PLAN.md — Provider SDKs + Ticket triage columns + append-only AuditEvent model + DB immutability trigger (Wave 1)
+**Plans:** 1/6 plans executed
+- [x] 04-01-PLAN.md — Provider SDKs + Ticket triage columns + append-only AuditEvent model + DB immutability trigger (Wave 1)
 - [ ] 04-02-PLAN.md — `lib/llm` port: redact + encrypted llm:* settings + complete() + OpenAI/Anthropic/Ollama adapters + probe (Wave 2)
 - [ ] 04-03-PLAN.md — Triage engine: schema + fenced/escaped prompt (D-12) + runTriage + recordAuditEvent + injection test (D-15) (Wave 3)
 - [ ] 04-04-PLAN.md — Settings "AI Features" page: provider/model/key config + Test Connection + toggle gating (D-21) (Wave 3)
