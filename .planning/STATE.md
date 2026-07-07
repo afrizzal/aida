@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-07T05:48:34.997Z"
+last_updated: "2026-07-07T06:19:09.433Z"
 last_activity: 2026-07-07
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 32
-  completed_plans: 27
-  percent: 84
+  completed_plans: 28
+  percent: 88
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 04 (ai-foundation) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
-Last activity: 2026-07-07 -- 04-01 (AI foundation data layer) complete
+Last activity: 2026-07-07 -- 04-02 (model-agnostic LLM provider port) complete
 
-Progress: [████████░░] 84% (27/32 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 1/6 phase 04)
+Progress: [█████████░] 88% (28/32 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 2/6 phase 04)
 
 ## Accumulated Context
 
@@ -134,6 +134,9 @@ Progress: [████████░░] 84% (27/32 plans complete — 8/8 pha
 - (04-01) Pitfall 3 (spurious `searchVector` DROP statements from the Prisma diff engine) recurred for a THIRD time (after 03-01 and 03-04) on any migration touching `Ticket`/`Message` — this is now a confirmed standing pattern, not a one-off: always hand-review `migration.sql` for `DROP COLUMN "searchVector"`/`DROP INDEX ..._searchVector_idx` before committing any future migration that touches either table.
 - (04-01) AIDA-14/AIDA-19 intentionally NOT marked complete in REQUIREMENTS.md — 04-01 ships only the schema/DB foundation (Ticket triage columns, `AuditEvent` model + trigger); the actual triage engine (`lib/triage`), the `lib/llm` provider port, and the `recordAuditEvent()` write path land in 04-02/04-03/04-05. Mirrors the 02-08/03-01 precedent for phase-level requirements split across multiple plans — do not mark either complete until the full flow is wired end-to-end.
 - (04-01) Reconfirmed: `state update-progress`/`add-decision`/`record-metric`/`record-session` gsd-tools CLI commands still don't match this project's STATE.md structure (frontmatter `progress:`/body `Progress:` case-insensitive collision; heading is `### Key Decisions` not `### Decisions`; no `Performance Metrics` table; no standard session fields) — hand-edited the body `Progress:` line, frontmatter `percent`, and this `### Key Decisions` list directly again this session, per the workaround first documented in (02-05).
+- (04-02) `src/lib/llm/complete<T>(db, params)` (`complete.ts`) is now the ONE port entrypoint every AI feature calls through: redacts unconditionally via `redactSecrets()` BEFORE resolving the active provider (D-14 — structurally impossible to skip), then dispatches to `providers/{openai,anthropic,ollama}.ts` and returns `{ output, redactedPrompt, provider, model }`. All three adapters use their SDK's native zod-integrated structured-output helper (`zodResponseFormat`/`zodOutputFormat`/`z.toJSONSchema`) with zero function/tool-calling fields anywhere (D-16, grep-verified including comments). Ollama uses the native `/api/chat` client, NOT the OpenAI-compat `/v1` route (Pitfall 2). `src/lib/llm/settings.ts` mirrors `channels/email/settings.ts` exactly (`llm:provider`/`model`/`apiKeyEnc`/`ollamaBaseUrl` keys, blank-apiKey-keeps-existing). `resolveActiveProvider()` (`active-provider.ts`) returns a `ResolvedProvider` type (`provider` narrowed away from `LlmProviderName | ""`) so `complete.ts` type-checks cleanly. `testProviderConnection()` (`test-connection.ts`) is the 10s-timeout probe for the future Settings UI (D-04).
+- (04-02) `redactSecrets()`'s mandated card-like-number regex (`/\b(?:\d[ -]?){13,19}\b/g`) greedily consumes a trailing space/dash before its word-boundary check when the digit run is immediately followed by a space — any future test/consumer expecting the following whitespace to survive redaction will be surprised; use trailing punctuation (not a bare space) in test fixtures to get deterministic boundaries.
+- (04-02) AIDA-13/AIDA-20 intentionally NOT marked complete in REQUIREMENTS.md — this plan ships the provider-agnostic `lib/llm` port + encrypted settings module + redaction only; provider-selection UI/AI-toggle gating (04-04) and prompt-injection fencing (04-03) still owe the rest of each requirement's acceptance statement. Mirrors the 02-08/03-01/04-01 precedent.
 
 ### Open Todos
 
@@ -239,7 +242,11 @@ Wave 4 complete. **Phase 3 (email-channel) is now fully executed: 6/6 plans, all
 
 Wave 1 (04-01) complete. Phase 4 is now 1/6 plans complete. Next: 04-02 (`lib/llm` port — redact + encrypted `llm:*` settings + `complete()` + OpenAI/Anthropic/Ollama adapters + probe, Wave 2).
 
-**Next action:** `/gsd:execute-phase 4` continues with 04-02 (`lib/llm` port).
+**Phase 4 execution — 04-02 complete (2026-07-07, Wave 2, depends_on 04-01):** Built the model-agnostic `lib/llm` provider port. `src/lib/llm/types.ts` (`LlmProviderName`, `CompleteParams`/`CompleteResult`, curated `MODEL_CATALOG` per provider — zero function/tool-calling fields, D-16) + `redact.ts` (`redactSecrets()` — TDD RED→GREEN, 7/7 unit tests green covering OpenAI/Anthropic key shapes, AWS `AKIA` ids, `Bearer` tokens, card-like sequences, clean-prose idempotency; 47/47 full unit suite green) + `settings.ts` (mirrors `channels/email/settings.ts` exactly: `llm:provider`/`model`/`apiKeyEnc`/`ollamaBaseUrl` Setting keys, `getLlmSettings`/`saveLlmSettings`/`isProviderConfigured`, blank-apiKey-keeps-existing) + `active-provider.ts` (`resolveActiveProvider()` — throws `"No LLM provider configured"` when unconfigured; returns a narrowed `ResolvedProvider` type so `provider` is never the empty string downstream) + `complete.ts` (the ONE port entrypoint — redacts UNCONDITIONALLY before resolving the active provider, dispatches to the matching adapter, returns `{ output, redactedPrompt, provider, model }`) + three adapters `providers/{openai,anthropic,ollama}.ts` (native structured output via `zodResponseFormat`/`zodOutputFormat`/`z.toJSONSchema`, `timeout: 30_000, maxRetries: 0`, Ollama via native `/api/chat` not the OpenAI-compat route) + `test-connection.ts` (`testProviderConnection()` — 10s timeout probe, mirrors `testImapConnection`'s shape). `pnpm test` (47/47), `pnpm exec tsc --noEmit`, and `biome check --write` (import-order/formatting) all clean; grep-confirmed zero `tool_choice`/tool-calling surface anywhere under `src/lib/llm/` including comments. Commits: `284dd2f` (test), `72db370` (feat, Task 1), `4c2779a` (feat, Task 2), `cae010b` (feat, Task 3). SUMMARY: `.planning/phases/04-ai-foundation/04-02-SUMMARY.md`. AIDA-13/AIDA-20 intentionally NOT marked complete yet — provider-selection UI (04-04) and prompt-injection fencing (04-03) still owe the rest of each requirement's acceptance statement (mirrors the 02-08/03-01/04-01 split-requirement precedent).
+
+Wave 2 (04-02) complete. Phase 4 is now 2/6 plans complete. Next: 04-03 (triage engine — schema/prompt/run-triage, prompt-injection fencing + tag-breakout escaping, recordAuditEvent write path).
+
+**Next action:** `/gsd:execute-phase 4` continues with 04-03 (triage engine).
 
 ---
-*Last updated: 2026-07-07 — Phase 4 (AI Foundation) execution started: 04-01 (data layer — provider SDKs, Ticket triage columns, append-only AuditEvent model + DB trigger) complete, 1/6 plans.*
+*Last updated: 2026-07-07 — Phase 4 (AI Foundation) execution continues: 04-02 (model-agnostic `lib/llm` provider port — complete()/settings/redaction/3 adapters/probe) complete, 2/6 plans.*
