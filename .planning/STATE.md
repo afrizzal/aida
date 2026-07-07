@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-07T06:47:15.000Z"
+last_updated: "2026-07-07T07:15:17.308Z"
 last_activity: 2026-07-07
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 32
-  completed_plans: 30
-  percent: 94
+  completed_plans: 31
+  percent: 97
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 04 (ai-foundation) — EXECUTING
-Plan: 4 of 6 (04-03 and 04-04 both complete — Wave 3 parallel plans done; Wave 4 (04-05) next)
+Plan: 6 of 6 (04-05 complete — Wave 4 done; Wave 5 (04-06, final plan) next)
 Status: Ready to execute
-Last activity: 2026-07-07 -- 04-03 (triage engine + prompt-injection defense) complete
+Last activity: 2026-07-07 -- 04-05 (ai-triage runtime wiring) complete
 
-Progress: [█████████░] 94% (30/32 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 4/6 phase 04)
+Progress: [██████████] 97% (31/32 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 5/6 phase 04)
 
 ## Accumulated Context
 
@@ -145,6 +145,10 @@ Progress: [█████████░] 94% (30/32 plans complete — 8/8 pha
 - (04-03) `tests/integration/triage-injection.test.ts` is the automated D-15 proof (ROADMAP Success Criterion 4): mocks `src/lib/llm/providers/openai`'s `completeOpenAi` (below `complete()`, above the SDK) to capture the exact prompt sent to the provider, while `complete()`'s real redaction and `run-triage`'s real prompt-fencing both still execute. A single ticket body carrying an injection instruction + a literal tag-breakout attempt + a fake `sk-proj-...` secret is triaged and asserted clean on all four axes: tag-breakout escaped, secret redacted, priority stays the model's real output (never the attacker-demanded value), exactly one redacted `AuditEvent` row with no leaked secret/system-prompt text.
 - (04-03) [Rule 3 - Blocking] `tests/integration/global-setup.ts` now seeds a random `APP_ENCRYPTION_KEY` into `process.env` when unset — the main vitest process never loads `.env` (only `prisma.config.ts`'s own `dotenv/config` import does, and only inside the `execSync` migrate child process), so this plan's injection test (the first integration test to touch encrypted Settings via `saveLlmSettings`) failed with `"APP_ENCRYPTION_KEY is required"` until this fix. Every future integration test that saves email/llm Settings benefits from this fix for free — no per-test setup needed.
 - (04-03) AIDA-14/AIDA-19/AIDA-20 intentionally NOT marked complete in REQUIREMENTS.md yet — this plan ships the triage engine, injection defense, and the `recordAuditEvent()` write path, but the `ai-triage` pg-boss job wiring (enqueue-after-`createTicket()` hook, worker registration) is 04-05's job. Mirrors the established 02-08/03-01/04-01/04-02 precedent for requirements split across multiple plans.
+- (04-05) `ai-triage` on-demand pg-boss queue registered identically in both `src/lib/worker/index.ts` and `src/lib/queue/boss-client.ts`'s `createBoss()` (retryLimit 2, retryBackoff true, retryDelayMax 300 — byte-identical to `email-outbound-send`'s options so whichever process creates the queue first, the other's `createQueue` call is a no-op). `src/lib/worker/jobs/ai-triage.ts`'s `aiTriageHandler` re-checks the `aiEnabled` Setting before ever calling `runTriage()` — a second kill-switch layer beneath `create-ticket.ts`'s enqueue-time check, closing the race where AI is toggled off between enqueue and job pickup (D-20).
+- (04-05) `createTicket()`'s `db.$transaction(...)` result is now captured into `const result` (previously returned directly) so a post-commit block can run the `aiEnabled` check + `boss.send("ai-triage", ...)` strictly AFTER the Prisma transaction commits (D-07) — the transaction body itself is unchanged. Because this is the single ticket-creation entrypoint, all three call sites (agent "New Ticket", email ingest, public intake) get auto-triage for free, with zero duplication.
+- (04-05) Worker-bundle hard stop re-verified: the Dockerfile's exact esbuild command now bundles `runTriage -> lib/llm -> {openai, @anthropic-ai/sdk, ollama}` into the worker for the first time (6.2MB `dist/worker-verify.mjs`, up from 03-04's pre-`lib/llm` 4.6MB baseline) — succeeded with zero `--external` changes needed for any of the three provider SDKs.
+- (04-05) AIDA-14 intentionally still NOT marked complete in REQUIREMENTS.md — its acceptance statement includes "an agent can override", which is 04-06's job (override Server Actions + ticket-page UI). The full automatic enqueue -> worker -> classify -> write path is otherwise live end-to-end as of this plan. Mirrors the established split-requirement precedent (02-08/03-01/04-01/04-02/04-03/04-04).
 
 ### Open Todos
 
@@ -262,7 +266,11 @@ Phase 4 is now 3/6 plans complete (04-01, 04-02, 04-04 done). 04-03 (triage engi
 
 Wave 3 complete — both 04-03 and 04-04 done. **Phase 4 is now 4/6 plans complete.** Next: Wave 4 (04-05 — `ai-triage` pg-boss job: createTicket enqueue hook, worker registration, manual "Re-run AI triage" action), then Wave 5 (04-06 — triage UI surfacing: ticket-page chips + AI Activity viewer, per 04-CONTEXT.md D-19 and the 04-06 plan added to close checker visibility gaps).
 
-**Next action:** `/gsd:execute-phase 4` continues with 04-05 (Wave 4, depends on 04-03 — now satisfied).
+**Phase 4 execution — 04-05 complete (2026-07-07, Wave 4, depends_on 04-03):** Wired auto-triage into the runtime end-to-end. `src/lib/worker/jobs/ai-triage.ts` (`aiTriageHandler` — kill-switch re-check + `runTriage` dispatch, D-20 defense-in-depth) + `src/lib/worker/index.ts`/`src/lib/queue/boss-client.ts` (both register the `ai-triage` on-demand queue with byte-identical options, `retryLimit: 2, retryBackoff: true, retryDelayMax: 300`, mirroring `email-outbound-send` exactly — no `schedule()`). `src/lib/tickets/create-ticket.ts`: the `$transaction(...)` result is now captured into `const result` so a post-commit block can check the `aiEnabled` Setting and, only when `"true"`, set `triageStatus: "PENDING"` + `boss.send("ai-triage", { ticketId })` — strictly after commit (D-07), single entrypoint covers all 3 ticket-creation call sites for free. `src/app/(app)/tickets/[id]/actions.ts` gained `rerunTriage(ticketId)` mirroring `retryOutboundSend`'s shape (D-06). Worker-bundle hard stop re-verified: the Dockerfile's exact esbuild command now bundles `runTriage -> lib/llm -> {openai, @anthropic-ai/sdk, ollama}` for the first time — succeeded, 6.2MB (up from 03-04's pre-`lib/llm` 4.6MB baseline), zero `--external` changes needed. `pnpm exec tsc --noEmit`, `pnpm run build`, `pnpm test` (54/54), `pnpm test:integration` (22/22, 8 files, via Node 22 + Docker/Testcontainers), and `pnpm exec biome check` all clean. No deviations. Commits: `5c2dc14` (Task 1), `d5d6ef0` (Task 2). SUMMARY: `.planning/phases/04-ai-foundation/04-05-SUMMARY.md`. AIDA-14 still NOT marked Validated — 04-06's override UI is the last piece of its acceptance statement ("an agent can override").
+
+Wave 4 (04-05) complete. **Phase 4 is now 5/6 plans complete.** Next: Wave 5 (04-06, FINAL plan of Phase 4 — triage UI surfacing: ticket-page chips, override dropdowns, AI Activity viewer, Triage-failed badge).
+
+**Next action:** `/gsd:execute-phase 4` continues with 04-06 (Wave 5, final plan, depends on 04-05 — now satisfied).
 
 ---
-*Last updated: 2026-07-07 — Phase 4 (AI Foundation) execution continues: 04-03 (triage engine + D-15 prompt-injection defense) complete, 4/6 plans (Wave 3 fully done — both 04-03 and 04-04 complete).*
+*Last updated: 2026-07-07 — Phase 4 (AI Foundation) execution continues: 04-05 (ai-triage runtime wiring) complete, 5/6 plans (Wave 4 done — only Wave 5/04-06 remains).*
