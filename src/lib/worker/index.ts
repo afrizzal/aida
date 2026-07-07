@@ -1,5 +1,6 @@
 import type { Job } from "pg-boss";
 import { PgBoss } from "pg-boss";
+import { aiTriageHandler } from "./jobs/ai-triage";
 import { emailInboundPollHandler } from "./jobs/email-inbound-poll";
 import { emailOutboundSendHandler } from "./jobs/email-outbound-send";
 import { heartbeatHandler } from "./jobs/heartbeat";
@@ -56,6 +57,18 @@ async function main() {
   });
   await boss.work("email-outbound-send", async ([job]: Job<{ messageId: string }>[]) => {
     await emailOutboundSendHandler(job.data);
+  });
+
+  // AI triage: on-demand queue enqueued by the app after createTicket() commits (and by the
+  // rerunTriage Server Action) — no schedule(). Options mirror boss-client.ts's createQueue
+  // call exactly so this createQueue is a no-op if the app made it first.
+  await boss.createQueue("ai-triage", {
+    retryLimit: 2,
+    retryBackoff: true,
+    retryDelayMax: 300,
+  });
+  await boss.work("ai-triage", async ([job]: Job<{ ticketId: string }>[]) => {
+    await aiTriageHandler(job.data);
   });
 
   console.log("[worker] started");

@@ -25,6 +25,14 @@ async function createBoss(): Promise<PgBoss> {
     retryDelayMax: 300,
   });
 
+  // AI triage: on-demand, enqueued after createTicket() commits (and by rerunTriage). Same
+  // retry shape as email-outbound-send — mirrors src/lib/worker/index.ts's ai-triage createQueue.
+  await boss.createQueue("ai-triage", {
+    retryLimit: 2,
+    retryBackoff: true,
+    retryDelayMax: 300,
+  });
+
   return boss;
 }
 
