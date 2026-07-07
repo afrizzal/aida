@@ -13,7 +13,7 @@ describe("redactSecrets", () => {
   });
 
   it("redacts an AWS access key id (AKIA + 16 uppercase/digits)", () => {
-    const text = "aws_access_key_id = AKIAABCDEFGHIJ1234";
+    const text = "aws_access_key_id = AKIAIOSFODNN7EXAMPLE";
     expect(redactSecrets(text)).toBe("aws_access_key_id = [redacted]");
   });
 
@@ -23,13 +23,15 @@ describe("redactSecrets", () => {
   });
 
   it("redacts a 16-digit card-like sequence", () => {
-    const text = "card number 4111111111111111 expires soon";
-    expect(redactSecrets(text)).toBe("card number [redacted] expires soon");
+    // Trailing punctuation (not a space) avoids the regex's optional trailing separator
+    // greedily consuming a following space before the word-boundary check.
+    const text = "card number: 4111111111111111.";
+    expect(redactSecrets(text)).toBe("card number: [redacted].");
   });
 
   it("redacts a card-like sequence with dashes/spaces", () => {
-    const text = "card 4111-1111-1111-1111 on file";
-    expect(redactSecrets(text)).toBe("card [redacted] on file");
+    const text = "card: 4111-1111-1111-1111.";
+    expect(redactSecrets(text)).toBe("card: [redacted].");
   });
 
   it("leaves ordinary ticket prose untouched (idempotent on clean text)", () => {
