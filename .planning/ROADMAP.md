@@ -9,7 +9,7 @@
 
 - [x] **Phase 1: Foundation** — App scaffold, data model, auth + workspace scoping, one-command self-host shell (completed 2026-06-29)
 - [x] **Phase 2: Core Ticketing** — Shared inbox, ticket lifecycle, contacts, replies/notes, tags, SLA, web intake (completed 2026-07-02)
-- [x] **Phase 3: Email Channel** — Inbound email → ticket threading + outbound SMTP replies (completed 2026-07-06)
+- [x] **Phase 3: Email Channel** — Inbound email → ticket threading + outbound SMTP replies (completed 2026-07-06)
 - [ ] **Phase 4: AI Foundation** — Model-agnostic LLM layer + auto-triage + audit log + untrusted-input safeguards
 - [ ] **Phase 5: RAG & Drafted Replies** — Knowledge base + embeddings + citation-backed drafts behind a human-approval gate
 - [ ] **Phase 6: AIDA Insight** — AI-driven analytics (recurring issues, KB gaps, volume drivers, SLA/CSAT)
@@ -83,7 +83,13 @@
 2. New tickets are auto-triaged (category, priority, sentiment, language) with results attached and overrideable by an agent.
 3. Every AI action is written to an append-only audit log (input ref, output, model).
 4. Ticket text is handled as untrusted: a prompt-injection test case cannot make the AI take actions or reveal system context; obvious secrets are redacted before reaching the LLM/logs; no network egress occurs except to the configured LLM endpoint.
-**Plans:** TBD
+**Plans:** 6 plans (5 waves)
+- [ ] 04-01-PLAN.md — Provider SDKs + Ticket triage columns + append-only AuditEvent model + DB immutability trigger (Wave 1)
+- [ ] 04-02-PLAN.md — `lib/llm` port: redact + encrypted llm:* settings + complete() + OpenAI/Anthropic/Ollama adapters + probe (Wave 2)
+- [ ] 04-03-PLAN.md — Triage engine: schema + fenced/escaped prompt (D-12) + runTriage + recordAuditEvent + injection test (D-15) (Wave 3)
+- [ ] 04-04-PLAN.md — Settings "AI Features" page: provider/model/key config + Test Connection + toggle gating (D-21) (Wave 3)
+- [ ] 04-05-PLAN.md — Runtime wiring: ai-triage pg-boss queue + post-commit enqueue + rerunTriage action (Wave 4)
+- [ ] 04-06-PLAN.md — Triage UI: result chips + edit affordance + AI Activity section + Re-run button + failure badge (Wave 5)
 
 ### Phase 5: RAG & Drafted Replies
 **Timebox:** ~2–2.5 weeks · **Depends on:** Phase 4 (LLM layer) · **Requirements:** AIDA-15, AIDA-16
@@ -137,4 +143,4 @@
 **Coverage: 23/23 MVP requirements mapped. No orphans.** (AIDA-18 deferred to backlog.)
 
 ---
-*Last updated: 2026-07-06 — Phase 3 decomposed into 6 plans (4 waves) via /gsd:plan-phase.*
+*Last updated: 2026-07-07 — Phase 4 planned: 6 plans (5 waves); 04-06 added via /gsd:plan-phase revision to close the triage-UI visibility gap (AIDA-14 override affordance, AIDA-19 AI Activity, D-06 re-run, D-10 failure badge).*
