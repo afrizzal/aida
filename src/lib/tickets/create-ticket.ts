@@ -1,6 +1,7 @@
 import type { MessageDirection, TicketPriority } from "@/generated/prisma/client";
 import { findOrCreateContact } from "@/lib/contacts/find-or-create-contact";
 import { renderMarkdown } from "@/lib/markdown/render";
+import { getBoss } from "@/lib/queue/boss-client";
 import { scopedDb } from "@/lib/scoped-db";
 import { computeDueTimestamps, getSlaTargets } from "@/lib/tickets/sla";
 import { generateStatusToken } from "@/lib/tickets/status-token";
@@ -45,7 +46,7 @@ export async function createTicket(
 ): Promise<CreateTicketResult> {
   const db = scopedDb(orgId);
 
-  return db.$transaction(async (tx) => {
+  const result = await db.$transaction(async (tx) => {
     const contact = await findOrCreateContact(tx, input.contact);
 
     const counter = await (
@@ -115,4 +116,18 @@ export async function createTicket(
       messageId: message.id,
     };
   });
+
+  // Auto-triage (D-06/D-07/D-20). Enqueued AFTER commit — pg-boss send must NEVER live inside
+  // the Prisma transaction; gated on the aiEnabled kill switch. A no-op when AI is off — the
+  // ticket still appears in the inbox regardless (D-10). When this runs inside the worker
+  // (email ingest), getBoss() lazily creates a lightweight app-style pg-boss client used only
+  // for send() — acceptable (send is a DB insert; createQueue is idempotent).
+  const aiSetting = await db.setting.findFirst({ where: { key: "aiEnabled" } });
+  if (aiSetting?.value === "true") {
+    await db.ticket.update({ where: { id: result.id }, data: { triageStatus: "PENDING" } });
+    const boss = await getBoss();
+    await boss.send("ai-triage", { ticketId: result.id });
+  }
+
+  return result;
 }

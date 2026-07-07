@@ -95,6 +95,31 @@ export async function retryOutboundSend(messageId: string): Promise<{ ok: boolea
   return { ok: true };
 }
 
+/**
+ * Manually re-runs AI triage on a ticket (D-06). Sets triageStatus back to PENDING and
+ * re-enqueues the ai-triage job — the worker's aiTriageHandler re-checks the aiEnabled kill
+ * switch before ever calling the LLM, so this is safe to call even if AI has since been
+ * disabled (it will simply no-op in the worker).
+ */
+export async function rerunTriage(ticketId: string): Promise<{ ok: boolean }> {
+  const { db } = await getScopedDb();
+
+  const ticket = await db.ticket.findFirst({ where: { id: ticketId } });
+  if (!ticket) return { ok: false };
+
+  try {
+    await db.ticket.update({ where: { id: ticketId }, data: { triageStatus: "PENDING" } });
+
+    const boss = await getBoss();
+    await boss.send("ai-triage", { ticketId });
+  } catch {
+    return { ok: false };
+  }
+
+  revalidatePath(`/tickets/${ticketId}`);
+  return { ok: true };
+}
+
 /** Assigns (or unassigns, when `assigneeId` is null) a ticket to a workspace member. */
 export async function assignTicket(
   ticketId: string,
