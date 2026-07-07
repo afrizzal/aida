@@ -7,9 +7,11 @@ import { setAiEnabled } from "./actions";
 
 interface AiToggleProps {
   defaultEnabled: boolean;
+  /** True once a provider+model (+credential) is saved. Gates the Switch (D-21). */
+  providerConfigured: boolean;
 }
 
-export function AiToggle({ defaultEnabled }: AiToggleProps) {
+export function AiToggle({ defaultEnabled, providerConfigured }: AiToggleProps) {
   const [enabled, setEnabled] = useState(defaultEnabled);
 
   async function handleChange(next: boolean) {
@@ -28,11 +30,25 @@ export function AiToggle({ defaultEnabled }: AiToggleProps) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-3">
-        <Switch checked={enabled} onCheckedChange={handleChange} aria-label="Enable AI" />
+        <Switch
+          checked={enabled}
+          onCheckedChange={handleChange}
+          disabled={!providerConfigured}
+          aria-label="Enable AI"
+        />
         <span className="text-[14px]">Enable AI</span>
       </div>
+      {/*
+        Gated on provider-config-existing only — deliberately NOT on the last Test Connection
+        result (D-21). A persisted test result goes stale the moment a key is revoked or Ollama
+        goes down; runtime failures during actual triage calls are handled separately via
+        pg-boss retry + a failure badge (D-10). Test Connection stays a manual verification tool,
+        never a toggle prerequisite.
+      */}
       <p className="text-[12px] text-muted-foreground">
-        Allow AIDA to triage tickets and draft replies. Configure your AI provider in a future step.
+        {providerConfigured
+          ? "Allow AIDA to triage tickets and draft replies."
+          : "Configure a provider first."}
       </p>
     </div>
   );
