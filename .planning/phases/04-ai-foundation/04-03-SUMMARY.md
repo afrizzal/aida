@@ -129,7 +129,7 @@ Each task was committed atomically:
 2. **Task 2: Triage zod schema + fenced/escaped prompt (D-11/D-12)** - `64feb35` (test, RED) + `87920ae` (feat, GREEN)
 3. **Task 3: runTriage() with manual-override race guard + D-15 injection integration test** - `a41c68f` (feat, includes the `global-setup.ts` blocking-issue fix)
 
-**Plan metadata:** (this commit) `docs(04-03): complete triage engine + prompt-injection defense plan`
+**Plan metadata + style fix:** `762fdc6` (style: biome format fix for `record-audit-event.ts` missed in Task 1's commit, bundled with SUMMARY.md/STATE.md/ROADMAP.md updates)
 
 ## Files Created/Modified
 
