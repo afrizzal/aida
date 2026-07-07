@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-07T06:19:09.433Z"
+last_updated: "2026-07-07T06:41:00.000Z"
 last_activity: 2026-07-07
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 32
-  completed_plans: 28
-  percent: 88
+  completed_plans: 29
+  percent: 91
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 04 (ai-foundation) — EXECUTING
-Plan: 3 of 6
+Plan: 3 of 6 (04-03 executing concurrently; 04-04 completed out of order — both are Wave 3 parallel plans)
 Status: Ready to execute
-Last activity: 2026-07-07 -- 04-02 (model-agnostic LLM provider port) complete
+Last activity: 2026-07-07 -- 04-04 (Settings AI provider configuration UI) complete
 
-Progress: [█████████░] 88% (28/32 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 2/6 phase 04)
+Progress: [█████████░] 91% (29/32 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 3/6 phase 04)
 
 ## Accumulated Context
 
@@ -137,6 +137,8 @@ Progress: [█████████░] 88% (28/32 plans complete — 8/8 pha
 - (04-02) `src/lib/llm/complete<T>(db, params)` (`complete.ts`) is now the ONE port entrypoint every AI feature calls through: redacts unconditionally via `redactSecrets()` BEFORE resolving the active provider (D-14 — structurally impossible to skip), then dispatches to `providers/{openai,anthropic,ollama}.ts` and returns `{ output, redactedPrompt, provider, model }`. All three adapters use their SDK's native zod-integrated structured-output helper (`zodResponseFormat`/`zodOutputFormat`/`z.toJSONSchema`) with zero function/tool-calling fields anywhere (D-16, grep-verified including comments). Ollama uses the native `/api/chat` client, NOT the OpenAI-compat `/v1` route (Pitfall 2). `src/lib/llm/settings.ts` mirrors `channels/email/settings.ts` exactly (`llm:provider`/`model`/`apiKeyEnc`/`ollamaBaseUrl` keys, blank-apiKey-keeps-existing). `resolveActiveProvider()` (`active-provider.ts`) returns a `ResolvedProvider` type (`provider` narrowed away from `LlmProviderName | ""`) so `complete.ts` type-checks cleanly. `testProviderConnection()` (`test-connection.ts`) is the 10s-timeout probe for the future Settings UI (D-04).
 - (04-02) `redactSecrets()`'s mandated card-like-number regex (`/\b(?:\d[ -]?){13,19}\b/g`) greedily consumes a trailing space/dash before its word-boundary check when the digit run is immediately followed by a space — any future test/consumer expecting the following whitespace to survive redaction will be surprised; use trailing punctuation (not a bare space) in test fixtures to get deterministic boundaries.
 - (04-02) AIDA-13/AIDA-20 intentionally NOT marked complete in REQUIREMENTS.md — this plan ships the provider-agnostic `lib/llm` port + encrypted settings module + redaction only; provider-selection UI/AI-toggle gating (04-04) and prompt-injection fencing (04-03) still owe the rest of each requirement's acceptance statement. Mirrors the 02-08/03-01/04-01 precedent.
+- (04-04) Settings → AI Features page extended in place (no new nav tab): `saveLlmSettings`/`testLlmConnection` Server Actions in `settings/actions.ts` mirror `saveEmailSettings`/`testImapConnection`'s exact security contract (`requireOrgAdmin()` first, stored-key fallback on blank submit, 200-char error slice, key never echoed). New `llm-provider-form.tsx` (provider `Select` + curated model `Select` w/ `Custom…` sentinel + free-text fallback, D-01) + `llm-test-connection-button.tsx` (4-state, `aria-live="polite"`) + `ai-toggle.tsx` gained a `providerConfigured` prop gating the Switch (disabled + "Configure a provider first" hint) — deliberately reads only a server-computed `isProviderConfigured(getLlmSettings(db))` boolean, never any Test Connection result (D-21). First use of shadcn `Select` in this codebase (`pnpm dlx shadcn add select` — `radix-ui` umbrella package was already a dependency, so zero new `package.json` entries). `tsc --noEmit`/`pnpm run build`/`biome check` all clean. Ran in parallel with 04-03 (no shared files: this plan touched only `settings/*` + `components/ui/select.tsx`). AIDA-13/AIDA-12 still not marked Validated — AIDA-20's prompt-injection defense (04-03) and the phase-level close-out review still gate the full Phase 4 requirement set.
+- (04-04) Local environment note: `pnpm lint` fails in this sandbox (`ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL Command "eslint" not found`) — an RTK CLI proxy hook appears to rewrite/intercept the bare `pnpm lint` invocation even though this project's real `"lint"` script is `biome check .`. Workaround: call `pnpm exec biome check <path>` directly. Future sessions hitting the same `pnpm lint` failure should use this workaround rather than assuming Biome itself is broken.
 
 ### Open Todos
 
@@ -246,7 +248,11 @@ Wave 1 (04-01) complete. Phase 4 is now 1/6 plans complete. Next: 04-02 (`lib/ll
 
 Wave 2 (04-02) complete. Phase 4 is now 2/6 plans complete. Next: 04-03 (triage engine — schema/prompt/run-triage, prompt-injection fencing + tag-breakout escaping, recordAuditEvent write path).
 
-**Next action:** `/gsd:execute-phase 4` continues with 04-03 (triage engine).
+**Phase 4 execution — 04-04 complete (2026-07-07, Wave 3, depends_on 04-02, run in parallel with 04-03):** Settings → AI Features page extended in place with provider configuration. `src/app/(app)/settings/actions.ts` gained `saveLlmSettings`/`testLlmConnection` (admin-gated via `requireOrgAdmin()`, mirroring `saveEmailSettings`/`testImapConnection`'s exact contract: stored-key fallback on blank submit, 200-char error slice, key never echoed). New `llm-provider-form.tsx` (provider `Select` + curated model `Select` from `MODEL_CATALOG` w/ `Custom…` sentinel + free-text fallback, D-01; API key field for openai/anthropic only, base-URL field for ollama only, D-03) + `llm-test-connection-button.tsx` (4-state idle/testing/success/failure, `aria-live="polite"`, D-04). `ai-toggle.tsx` gained a `providerConfigured` prop — Switch disabled + "Configure a provider first" hint until a provider is saved, deliberately never reading any Test Connection result (D-21: a persisted test result goes stale the moment a key is revoked or Ollama goes down). `page.tsx` now loads `getLlmSettings`/`isProviderConfigured` alongside the existing `aiEnabled` read, `force-dynamic`. Added shadcn `Select` primitive (`src/components/ui/select.tsx`, first use in this codebase — `radix-ui` umbrella package was already a dependency, zero new `package.json` entries). `tsc --noEmit`, `pnpm run build`, and `biome check` all clean. Commits: `5dbc719` (Task 1), `6b6822f` (Task 2). SUMMARY: `.planning/phases/04-ai-foundation/04-04-SUMMARY.md`. Ran in parallel with 04-03 — no shared files (this plan touched only `settings/*` + `components/ui/select.tsx`; 04-03 touched `lib/audit/*`/`lib/triage/*`). AIDA-13/AIDA-12 still not marked Validated in PROJECT.md/REQUIREMENTS.md — AIDA-20's prompt-injection defense (04-03, concurrently executing) and the phase-level close-out review still gate the full Phase 4 requirement set. One environment-tooling deviation noted (see Key Decisions): `pnpm lint` fails in this sandbox due to an RTK CLI proxy hook rewriting the invocation; `pnpm exec biome check <path>` is the working equivalent for this project's actual Biome-based lint script.
+
+Phase 4 is now 3/6 plans complete (04-01, 04-02, 04-04 done). 04-03 (triage engine) executing concurrently as of this note — once both 04-03 and 04-04 are confirmed complete, Wave 4 (04-05) can begin.
+
+**Next action:** `/gsd:execute-phase 4` continues with 04-03 (triage engine, if not already complete) then 04-05 (Wave 4, depends on both 04-03 and 04-04).
 
 ---
-*Last updated: 2026-07-07 — Phase 4 (AI Foundation) execution continues: 04-02 (model-agnostic `lib/llm` provider port — complete()/settings/redaction/3 adapters/probe) complete, 2/6 plans.*
+*Last updated: 2026-07-07 — Phase 4 (AI Foundation) execution continues: 04-04 (Settings AI provider configuration UI — provider form/Test Connection/AI-toggle D-21 gating) complete, 3/6 plans (04-03 executing concurrently).*
