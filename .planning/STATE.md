@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-last_updated: "2026-07-06T05:00:56.776Z"
-last_activity: 2026-07-06
+status: planning
+last_updated: "2026-07-07T00:00:00.000Z"
+last_activity: 2026-07-07
 progress:
   total_phases: 7
   completed_phases: 3
@@ -28,8 +28,8 @@ progress:
 
 Phase: 4
 Plan: Not started
-Status: Phase 3 (Email Channel) execution complete — 6/6 plans, AIDA-09 validated. Pending phase-level verify-work/UI-review/human sign-off before formal close (LOOP-ENGINEERING.md loop).
-Last activity: 2026-07-06
+Status: Phase 3 (Email Channel) formally CLOSED — UAT 12/12 pass (2 issues found+fixed in-session), UI-review 23/24 (3 priority fixes shipped), human sign-off recorded (commits 8ebfd98/dac8994/8558d1e/a892311/d49adb5). Phase 4 (AI Foundation) context gathered via /gsd:discuss-phase — see 04-CONTEXT.md. Ready for /gsd:plan-phase 4.
+Last activity: 2026-07-07
 
 Progress: [██████████] 100% (26/26 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03)
 
@@ -225,7 +225,11 @@ Wave 3 complete. Phase 3 is now 5/6 plans complete — only 03-06 (Settings Emai
 
 Wave 4 complete. **Phase 3 (email-channel) is now fully executed: 6/6 plans, all 4 waves.** AIDA-09 marked Validated in PROJECT.md (moved from Active to Validated). ROADMAP.md's Phase 3 checkbox is now checked (`roadmap update-plan-progress 3` confirmed `plan_count === summary_count`).
 
-**Next action:** Phase-level verify-work + UI-review (DESIGN-SYSTEM.md §9 design checklist) + human sign-off for Phase 3 (mirrors Phase 2's 2026-07-05 close-out: UAT suite, UI-review pass, priority-fix quick task, then STATE.md/ROADMAP.md updated to reflect the formal close). Once signed off, `/gsd:plan-phase 4` (AI Foundation: model-agnostic LLM layer, auto-triage, audit log, untrusted-input safeguards) is next.
+**Phase 3 formally CLOSED (2026-07-06):** UAT 12/12 pass (`03-UAT.md`; 2 issues found and fixed in-session — worker ESM `createRequire` crash on cold boot, missing `APP_ENCRYPTION_KEY` compose passthrough), UI-review 23/24 (`03-UI-REVIEW.md`; 3 priority fixes shipped — `retryOutboundSend` error handling, Test Connection pre-validation, `aria-live` region), human sign-off recorded. Commits: `d49adb5`, `a892311`, `8558d1e`, `dac8994`, `8ebfd98`.
+
+**Phase 4 context gathered (2026-07-07, see `.planning/phases/04-ai-foundation/04-CONTEXT.md`):** Model-agnostic `lib/llm` provider port (OpenAI/Anthropic/Ollama, one active provider globally, curated model dropdown + custom-ID fallback, Ollama via base-URL only); provider keys reuse `secret-box.ts` verbatim via a new `llm/settings.ts` mirroring the email-settings pattern; Test Connection mirrors Settings → Email exactly. Auto-triage runs as an on-demand pg-boss job enqueued after `createTicket()` (+ manual re-run), fixed category enum (Billing/Technical/Account/Feature Request/Other — no overlapping catch-alls), predictions auto-populate real ticket fields (fully advisory/overrideable), retry-then-failure-badge on LLM error. Prompt-injection defense: structured delimiter tags with mandatory tag-breakout escaping (closing-delimiter sequences inside ticket text must be stripped/escaped before wrapping — flagged as the single most safety-critical detail this phase), redaction baked into the `lib/llm` port itself (not per-feature), automated integration test required for the injection defense. New append-only `AuditEvent` model (DB-level trigger/rule enforcement, not just code convention) stores full redacted input+output; ships a minimal "AI Activity" viewer on the ticket page. Existing `aiEnabled` toggle (Phase 1) becomes the kill-switch; its Switch is gated on provider-config-existing but explicitly NOT on last Test-Connection result (stale-test false-guarantee reasoning).
+
+**Next action:** `/gsd:plan-phase 4` (AI Foundation: model-agnostic LLM layer, auto-triage, audit log, untrusted-input safeguards).
 
 ---
-*Last updated: 2026-07-06 — Phase 3 (email-channel) execution COMPLETE: all 6 plans across 4 waves done (03-01..03-06). AIDA-09 validated. Pending phase-level verify-work/UI-review/human sign-off before formal close-out, then `/gsd:plan-phase 4`.*
+*Last updated: 2026-07-07 — Phase 3 (email-channel) formally CLOSED (UAT 12/12, UI-review 23/24, human sign-off). Phase 4 (AI Foundation) context gathered via /gsd:discuss-phase; ready for `/gsd:plan-phase 4`.*
