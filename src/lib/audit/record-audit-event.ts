@@ -29,17 +29,17 @@ export interface RecordAuditEventParams {
  * injects it at runtime. Never logs `input`/`output` (they may contain ticket content).
  */
 export async function recordAuditEvent(db: AuditDb, params: RecordAuditEventParams): Promise<void> {
-  await (
-    db.auditEvent.create as (a: { data: Record<string, unknown> }) => Promise<{ id: string }>
-  )({
-    data: {
-      actionType: params.actionType,
-      ticketId: params.ticketId ?? null,
-      messageId: params.messageId ?? null,
-      provider: params.provider,
-      model: params.model,
-      input: params.input,
-      output: params.output,
+  await (db.auditEvent.create as (a: { data: Record<string, unknown> }) => Promise<{ id: string }>)(
+    {
+      data: {
+        actionType: params.actionType,
+        ticketId: params.ticketId ?? null,
+        messageId: params.messageId ?? null,
+        provider: params.provider,
+        model: params.model,
+        input: params.input,
+        output: params.output,
+      },
     },
-  });
+  );
 }

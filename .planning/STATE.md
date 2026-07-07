@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-07T06:41:00.000Z"
+last_updated: "2026-07-07T06:47:15.000Z"
 last_activity: 2026-07-07
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 32
-  completed_plans: 29
-  percent: 91
+  completed_plans: 30
+  percent: 94
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 04 (ai-foundation) — EXECUTING
-Plan: 3 of 6 (04-03 executing concurrently; 04-04 completed out of order — both are Wave 3 parallel plans)
+Plan: 4 of 6 (04-03 and 04-04 both complete — Wave 3 parallel plans done; Wave 4 (04-05) next)
 Status: Ready to execute
-Last activity: 2026-07-07 -- 04-04 (Settings AI provider configuration UI) complete
+Last activity: 2026-07-07 -- 04-03 (triage engine + prompt-injection defense) complete
 
-Progress: [█████████░] 91% (29/32 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 3/6 phase 04)
+Progress: [█████████░] 94% (30/32 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 4/6 phase 04)
 
 ## Accumulated Context
 
@@ -139,6 +139,12 @@ Progress: [█████████░] 91% (29/32 plans complete — 8/8 pha
 - (04-02) AIDA-13/AIDA-20 intentionally NOT marked complete in REQUIREMENTS.md — this plan ships the provider-agnostic `lib/llm` port + encrypted settings module + redaction only; provider-selection UI/AI-toggle gating (04-04) and prompt-injection fencing (04-03) still owe the rest of each requirement's acceptance statement. Mirrors the 02-08/03-01/04-01 precedent.
 - (04-04) Settings → AI Features page extended in place (no new nav tab): `saveLlmSettings`/`testLlmConnection` Server Actions in `settings/actions.ts` mirror `saveEmailSettings`/`testImapConnection`'s exact security contract (`requireOrgAdmin()` first, stored-key fallback on blank submit, 200-char error slice, key never echoed). New `llm-provider-form.tsx` (provider `Select` + curated model `Select` w/ `Custom…` sentinel + free-text fallback, D-01) + `llm-test-connection-button.tsx` (4-state, `aria-live="polite"`) + `ai-toggle.tsx` gained a `providerConfigured` prop gating the Switch (disabled + "Configure a provider first" hint) — deliberately reads only a server-computed `isProviderConfigured(getLlmSettings(db))` boolean, never any Test Connection result (D-21). First use of shadcn `Select` in this codebase (`pnpm dlx shadcn add select` — `radix-ui` umbrella package was already a dependency, so zero new `package.json` entries). `tsc --noEmit`/`pnpm run build`/`biome check` all clean. Ran in parallel with 04-03 (no shared files: this plan touched only `settings/*` + `components/ui/select.tsx`). AIDA-13/AIDA-12 still not marked Validated — AIDA-20's prompt-injection defense (04-03) and the phase-level close-out review still gate the full Phase 4 requirement set.
 - (04-04) Local environment note: `pnpm lint` fails in this sandbox (`ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL Command "eslint" not found`) — an RTK CLI proxy hook appears to rewrite/intercept the bare `pnpm lint` invocation even though this project's real `"lint"` script is `biome check .`. Workaround: call `pnpm exec biome check <path>` directly. Future sessions hitting the same `pnpm lint` failure should use this workaround rather than assuming Biome itself is broken.
+- (04-03) `src/lib/triage/prompt.ts`'s `fenceTicketContent()` implements D-12 exactly as researched: `CLOSE_TAG_LOOKALIKE` (`/<\s*\/\s*ticket_content\s*>/gi`) replaces every case/whitespace variant of the closing delimiter with `"[escaped-tag]"` BEFORE the text is wrapped in `<ticket_content>`/`</ticket_content>` — proven at both the unit level (literal + variant close tags) and the integration level (the D-15 test counts literal `</ticket_content>` occurrences in the final prompt and asserts exactly one, the real trailing fence). Documented inline as defense-in-depth — the real structural guarantee against injection->action is D-16 (zero tool-calling surface in `lib/llm`).
+- (04-03) `src/lib/triage/run-triage.ts`'s Pitfall-5 priority-race guard: an optimistic `db.ticket.updateMany({ where: { id, updatedAt: loaded.updatedAt } })` write first (0 rows = an agent edited the ticket during the LLM call), falling back to a category/sentiment/language-ONLY update (priority untouched) when the guard misses. Idempotent on `triageStatus === "COMPLETED"` only (NOT `"FAILED"`, so a retry after a failed attempt still runs); sets `triageStatus: "FAILED"` + rethrows on any error so pg-boss retries (mirrors `email-outbound-send`).
+- (04-03) `src/lib/audit/record-audit-event.ts`'s `recordAuditEvent()` is now the ONE insert-only write path into `AuditEvent` — types `input` as the redacted prompt (D-13) in its own interface doc comment, never raw ticket text; reuses `create-ticket.ts`'s scopedDb `*UncheckedCreateInput` cast pattern.
+- (04-03) `tests/integration/triage-injection.test.ts` is the automated D-15 proof (ROADMAP Success Criterion 4): mocks `src/lib/llm/providers/openai`'s `completeOpenAi` (below `complete()`, above the SDK) to capture the exact prompt sent to the provider, while `complete()`'s real redaction and `run-triage`'s real prompt-fencing both still execute. A single ticket body carrying an injection instruction + a literal tag-breakout attempt + a fake `sk-proj-...` secret is triaged and asserted clean on all four axes: tag-breakout escaped, secret redacted, priority stays the model's real output (never the attacker-demanded value), exactly one redacted `AuditEvent` row with no leaked secret/system-prompt text.
+- (04-03) [Rule 3 - Blocking] `tests/integration/global-setup.ts` now seeds a random `APP_ENCRYPTION_KEY` into `process.env` when unset — the main vitest process never loads `.env` (only `prisma.config.ts`'s own `dotenv/config` import does, and only inside the `execSync` migrate child process), so this plan's injection test (the first integration test to touch encrypted Settings via `saveLlmSettings`) failed with `"APP_ENCRYPTION_KEY is required"` until this fix. Every future integration test that saves email/llm Settings benefits from this fix for free — no per-test setup needed.
+- (04-03) AIDA-14/AIDA-19/AIDA-20 intentionally NOT marked complete in REQUIREMENTS.md yet — this plan ships the triage engine, injection defense, and the `recordAuditEvent()` write path, but the `ai-triage` pg-boss job wiring (enqueue-after-`createTicket()` hook, worker registration) is 04-05's job. Mirrors the established 02-08/03-01/04-01/04-02 precedent for requirements split across multiple plans.
 
 ### Open Todos
 
@@ -252,7 +258,11 @@ Wave 2 (04-02) complete. Phase 4 is now 2/6 plans complete. Next: 04-03 (triage 
 
 Phase 4 is now 3/6 plans complete (04-01, 04-02, 04-04 done). 04-03 (triage engine) executing concurrently as of this note — once both 04-03 and 04-04 are confirmed complete, Wave 4 (04-05) can begin.
 
-**Next action:** `/gsd:execute-phase 4` continues with 04-03 (triage engine, if not already complete) then 04-05 (Wave 4, depends on both 04-03 and 04-04).
+**Phase 4 execution — 04-03 complete (2026-07-07, Wave 3, depends_on 04-01+04-02, run in parallel with 04-04):** Built the triage engine and its prompt-injection defense. `src/lib/audit/record-audit-event.ts` (`recordAuditEvent()` — the one insert-only write path into `AuditEvent`, `input` typed/documented as the redacted prompt, D-13) + `src/lib/triage/schema.ts` (`TriageResultSchema` — 5-value category enum incl. Feature Request, excl. General, D-08) + `src/lib/triage/prompt.ts` (`fenceTicketContent()` — escapes every closing-delimiter lookalike via `CLOSE_TAG_LOOKALIKE` BEFORE wrapping in `<ticket_content>` tags, D-11/D-12; `TRIAGE_SYSTEM_PROMPT`/`buildTriageUserPrompt()`) + `src/lib/triage/run-triage.ts` (`runTriage(ticketId)` — cross-org load via bare `prisma` then `scopedDb`, idempotent on `COMPLETED` only, classifies via `complete()`, writes triage fields + recomputed SLA due timestamps with an `updatedAt`-guarded `updateMany`-then-fallback (Pitfall 5), records a redacted `AuditEvent`, sets `triageStatus: "FAILED"` + rethrows on error for pg-boss retry). `tests/unit/triage-prompt.test.ts` (7/7, TDD RED→GREEN) + `tests/integration/triage-injection.test.ts` (the automated D-15 proof — ROADMAP Success Criterion 4: mocks the openai adapter below `complete()`, proves tag-breakout escaping, secret redaction, zero injected side effect, exactly one redacted AuditEvent row). `pnpm test` (54/54), `pnpm test:integration` (22/22, 8 files), `pnpm exec tsc --noEmit`, and `biome check --write` all clean. One blocking-issue fix: `tests/integration/global-setup.ts` now seeds a random `APP_ENCRYPTION_KEY` for the vitest process when unset (see Key Decisions). Commits: `220a889` (Task 1), `64feb35`+`87920ae` (Task 2, TDD), `a41c68f` (Task 3). SUMMARY: `.planning/phases/04-ai-foundation/04-03-SUMMARY.md`. Ran in parallel with 04-04 — no shared files (this plan touched only `lib/audit/*`/`lib/triage/*`/test files; 04-04 touched `settings/*`/`components/ui/select.tsx`). AIDA-14/AIDA-19/AIDA-20 still not marked Validated — 04-05's `ai-triage` pg-boss job wiring is the last piece before the full flow is end-to-end.
+
+Wave 3 complete — both 04-03 and 04-04 done. **Phase 4 is now 4/6 plans complete.** Next: Wave 4 (04-05 — `ai-triage` pg-boss job: createTicket enqueue hook, worker registration, manual "Re-run AI triage" action), then Wave 5 (04-06 — triage UI surfacing: ticket-page chips + AI Activity viewer, per 04-CONTEXT.md D-19 and the 04-06 plan added to close checker visibility gaps).
+
+**Next action:** `/gsd:execute-phase 4` continues with 04-05 (Wave 4, depends on 04-03 — now satisfied).
 
 ---
-*Last updated: 2026-07-07 — Phase 4 (AI Foundation) execution continues: 04-04 (Settings AI provider configuration UI — provider form/Test Connection/AI-toggle D-21 gating) complete, 3/6 plans (04-03 executing concurrently).*
+*Last updated: 2026-07-07 — Phase 4 (AI Foundation) execution continues: 04-03 (triage engine + D-15 prompt-injection defense) complete, 4/6 plans (Wave 3 fully done — both 04-03 and 04-04 complete).*
