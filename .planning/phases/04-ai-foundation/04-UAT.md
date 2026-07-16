@@ -88,5 +88,24 @@ skipped: 0
   reason: "User-delegated automated E2E found: after a provider switch the modelSelect form value ends up empty (handleProviderChange's setValue is clobbered when the Radix Select item set swaps) — trigger shows 'Select a model' placeholder and Save is blocked by zod validation until the operator manually re-picks a model. Reproduced in both directions (ollama→openai in T10, openai→ollama in T2)."
   severity: major
   test: 2
-  artifacts: []  # Filled by diagnosis
-  missing: []    # Filled by diagnosis
+  root_cause: >-
+    Upstream @radix-ui/react-select@2.3.1 bug (radix-ui/primitives #3135/#3381/#3693): the
+    Select is inside a <form>, so Radix renders SelectBubbleInput — a hidden UNCONTROLLED
+    native <select> whose <option>s (nativeOptionsSet) update one commit AFTER the SelectItem
+    children swap. handleProviderChange's three setValue calls batch into one commit: value
+    becomes catalog[0] while the native select still holds the OLD provider's options. The
+    bubble-input sync effect (index.mjs:1094-1108) assigns select.value="gpt-5.4-mini" against
+    non-matching options → per HTML spec value becomes "" / selectedIndex -1 → it dispatches a
+    change event → onValueChange("") → field.onChange("") overwrites the setValue. Initial
+    mount is safe because usePrevious returns the current value on first render (no sync
+    dispatch) and the native select remounts fresh once options register. Full session:
+    .planning/debug/model-select-clears-on-provider.md
+  fix: >-
+    One line: add key={provider} to the Model <Select> in llm-provider-form.tsx (~line 191) —
+    remounts the Select subtree in the same commit where field.value is already catalog[0],
+    taking the proven-safe initial-mount path. Do NOT key the Provider select (its items are
+    static; keying it would drop focus per change). Regression: revert the explicit-pick
+    workarounds in tests/e2e/phase4-ai.spec.ts T2/T10 to assert auto-reset + save-without-
+    validation-error.
+  artifacts: ["src/app/(app)/settings/llm-provider-form.tsx:191 (Model Select missing key={provider})", "node_modules @radix-ui/react-select dist/index.mjs:1094-1108 (bubble-input sync)"]
+  missing: ["key={provider} on Model Select", "T2/T10 e2e assertions for auto-reset instead of explicit-pick workaround"]
