@@ -83,13 +83,14 @@
 2. New tickets are auto-triaged (category, priority, sentiment, language) with results attached and overrideable by an agent.
 3. Every AI action is written to an append-only audit log (input ref, output, model).
 4. Ticket text is handled as untrusted: a prompt-injection test case cannot make the AI take actions or reveal system context; obvious secrets are redacted before reaching the LLM/logs; no network egress occurs except to the configured LLM endpoint.
-**Plans:** 5/6 plans executed
+**Plans:** 7 plans (6 complete + 1 gap-closure pending)
 - [x] 04-01-PLAN.md — Provider SDKs + Ticket triage columns + append-only AuditEvent model + DB immutability trigger (Wave 1)
 - [x] 04-02-PLAN.md — `lib/llm` port: redact + encrypted llm:* settings + complete() + OpenAI/Anthropic/Ollama adapters + probe (Wave 2)
 - [x] 04-03-PLAN.md — Triage engine: schema + fenced/escaped prompt (D-12) + runTriage + recordAuditEvent + injection test (D-15) (Wave 3)
 - [x] 04-04-PLAN.md — Settings "AI Features" page: provider/model/key config + Test Connection + toggle gating (D-21) (Wave 3)
 - [x] 04-05-PLAN.md — Runtime wiring: ai-triage pg-boss queue + post-commit enqueue + rerunTriage action (Wave 4)
 - [x] 04-06-PLAN.md — Triage UI: result chips + edit affordance + AI Activity section + Re-run button + failure badge (Wave 5)
+- [ ] 04-07-PLAN.md — Gap closure (UAT test 2): key={provider} on Model Select (Radix bubble-input stale-options race) + revert T2/T10 e2e workarounds to assert auto-reset (Wave 6)
 
 ### Phase 5: RAG & Drafted Replies
 **Timebox:** ~2–2.5 weeks · **Depends on:** Phase 4 (LLM layer) · **Requirements:** AIDA-15, AIDA-16
@@ -143,4 +144,4 @@
 **Coverage: 23/23 MVP requirements mapped. No orphans.** (AIDA-18 deferred to backlog.)
 
 ---
-*Last updated: 2026-07-07 — Phase 4 planned: 6 plans (5 waves); 04-06 added via /gsd:plan-phase revision to close the triage-UI visibility gap (AIDA-14 override affordance, AIDA-19 AI Activity, D-06 re-run, D-10 failure badge).*
+*Last updated: 2026-07-16 — Phase 4 gap closure: 04-07 added via /gsd:plan-phase --gaps to close the single surviving UAT gap (test 2: Model select clears on provider switch — upstream Radix SelectBubbleInput race; fix = key={provider} on the Model Select + T2/T10 e2e workaround revert). Prior: 04-06 added via /gsd:plan-phase revision to close the triage-UI visibility gap.*
