@@ -100,7 +100,14 @@
 2. For an open ticket, AIDA produces a drafted reply grounded in retrieved KB/past tickets with **inline citations** to sources.
 3. The draft requires explicit agent approval/edit before sending; nothing is sent to a customer autonomously; the approval and final send are audited.
 4. When retrieval finds nothing relevant, the draft says so rather than hallucinating a source.
-**Plans:** TBD
+**Plans:** 7 plans (3 waves)
+- [ ] 05-01-PLAN.md — RAG data foundation: KbArticle/KbChunk models + vector(768) + KbEmbeddingStatus + widen AuditActionType + scopedDb allowlist (Wave 1)
+- [ ] 05-02-PLAN.md — Embedding port: src/lib/rag settings/embed/providers (OpenAI+Ollama, 768-dim) + Test Connection + unit tests (Wave 1)
+- [ ] 05-03-PLAN.md — KB chunking + createKbArticle + kb-embed-article pg-boss job + queue registration + integration test (Wave 2)
+- [ ] 05-04-PLAN.md — Retrieval (raw-SQL KNN) + grounded draft engine + maxOutputTokens + generateDraftReply + groundedness/injection test (Wave 2)
+- [ ] 05-05-PLAN.md — Settings embedding provider config + Test Connection + Re-embed-all (Wave 3)
+- [ ] 05-06-PLAN.md — KB authoring pages: list/new/edit + embedding status chip + admin-gated actions (Wave 3)
+- [ ] 05-07-PLAN.md — Ticket draft UI: DraftCard + citations + Composer insert + human gate + DRAFT_APPROVED audit (Wave 3)
 
 ### Phase 6: AIDA Insight
 **Timebox:** ~2 weeks · **Depends on:** Phases 2 + 4 (ticket history + AI) · **Requirements:** AIDA-17
@@ -144,4 +151,4 @@
 **Coverage: 23/23 MVP requirements mapped. No orphans.** (AIDA-18 deferred to backlog.)
 
 ---
-*Last updated: 2026-07-16 — Phase 4 gap closure: 04-07 added via /gsd:plan-phase --gaps to close the single surviving UAT gap (test 2: Model select clears on provider switch — upstream Radix SelectBubbleInput race; fix = key={provider} on the Model Select + T2/T10 e2e workaround revert). Prior: 04-06 added via /gsd:plan-phase revision to close the triage-UI visibility gap.*
+*Last updated: 2026-07-18 — Phase 5 (RAG & Drafted Replies) planned via /gsd:plan-phase 5: 7 plans across 3 waves (KB embedding pipeline + retrieval + grounded citation-backed drafts behind a human gate). Retrieval scope = KB-only for v1 (past-tickets deferred to Phase 6). AIDA-15/AIDA-16.*
