@@ -1,12 +1,12 @@
-import { chromium, type FullConfig } from "@playwright/test";
-import { PostgreSqlContainer } from "@testcontainers/postgresql";
-import { PrismaPg } from "@prisma/adapter-pg";
 import { execSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { chromium, type FullConfig } from "@playwright/test";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import pg from "pg";
 import { PrismaClient } from "../../src/generated/prisma/client";
 
@@ -116,6 +116,35 @@ export default async function globalSetup(_config: FullConfig) {
   // never registered).
   try {
     await waitForServer(`${BASE_URL}/api/health`);
+
+    // next dev compiles route files on demand; under load the router can answer a
+    // transient 404 BEFORE a route's first compile finishes (observed twice today:
+    // the auth sign-in POST right below, and the public-attachment route inside
+    // attachments.spec — both 404 in ~200ms with no compile time vs the normal
+    // multi-second first hit). Warm every unauthenticated-reachable API route the
+    // suite touches until it answers something other than the router's HTML 404:
+    // a compiled handler returns 200/405/or a JSON 404 — never a bare HTML 404.
+    // (Authenticated routes can't be warmed here: middleware 401s them before the
+    // route compiles. attachments.spec keeps its own expect.poll for that reason.)
+    const WARM_ROUTES = [
+      "/api/auth/get-session",
+      "/api/public/intake",
+      "/api/public/status/warmup/follow-up",
+      "/api/public/status/warmup/attachments/warmup",
+    ];
+    for (const route of WARM_ROUTES) {
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline) {
+        try {
+          const res = await fetch(`${BASE_URL}${route}`);
+          const contentType = res.headers.get("content-type") ?? "";
+          if (res.status !== 404 || contentType.includes("json")) break;
+        } catch {
+          // server hiccup — keep polling until the deadline
+        }
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+    }
 
     const pool = new pg.Pool({ connectionString: databaseUrl, max: 5 });
     const adapter = new PrismaPg(pool);

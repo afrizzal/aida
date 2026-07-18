@@ -91,10 +91,22 @@ test("authenticated download works; public route only ever serves public-message
   expect(anonRes.status()).toBe(401);
   await anonContext.close();
 
-  const publicTokenRes = await request.get(
-    `/api/public/status/${ticket.statusToken}/attachments/${publicAttachment.id}`,
-  );
-  expect(publicTokenRes.status()).toBe(200);
+  // The first-ever hit to this route in a run compiles it on demand (next dev);
+  // under load the dev router can transiently 404 before that compile finishes
+  // (observed: 404 in ~300ms with no compile time, vs the normal ~2s first-hit
+  // compile). Poll so a settled router serves the request — production uses
+  // `next build`, where routes are precompiled and this race cannot exist.
+  await expect
+    .poll(
+      async () =>
+        (
+          await request.get(
+            `/api/public/status/${ticket.statusToken}/attachments/${publicAttachment.id}`,
+          )
+        ).status(),
+      { timeout: 15_000 },
+    )
+    .toBe(200);
 
   const internalViaPublicRes = await request.get(
     `/api/public/status/${ticket.statusToken}/attachments/${internalAttachment.id}`,
