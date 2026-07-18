@@ -4,8 +4,8 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
-import { baseURL, databaseUrl } from "./support/test-env";
 import { prisma } from "./support/db";
+import { baseURL, databaseUrl } from "./support/test-env";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "../..");
@@ -91,19 +91,15 @@ function readEnvVar(name: string): string {
 function startWorker(): Promise<void> {
   return new Promise((resolve, reject) => {
     const tsxCli = path.join(PROJECT_ROOT, "node_modules", "tsx", "dist", "cli.mjs");
-    worker = spawn(
-      process.execPath,
-      [tsxCli, path.join("src", "lib", "worker", "index.ts")],
-      {
-        cwd: PROJECT_ROOT,
-        env: {
-          ...process.env,
-          DATABASE_URL: databaseUrl,
-          APP_ENCRYPTION_KEY: readEnvVar("APP_ENCRYPTION_KEY"),
-        },
-        stdio: "pipe",
+    worker = spawn(process.execPath, [tsxCli, path.join("src", "lib", "worker", "index.ts")], {
+      cwd: PROJECT_ROOT,
+      env: {
+        ...process.env,
+        DATABASE_URL: databaseUrl,
+        APP_ENCRYPTION_KEY: readEnvVar("APP_ENCRYPTION_KEY"),
       },
-    );
+      stdio: "pipe",
+    });
     const timer = setTimeout(
       () => reject(new Error(`worker did not start; log so far:\n${workerLog}`)),
       120_000,
@@ -162,9 +158,7 @@ test("T1 cold start: migrations applied, health live, worker registered ai-triag
 
   expect(workerLog).toContain("[worker] started");
 
-  const queues = await prisma.$queryRawUnsafe<{ name: string }[]>(
-    "SELECT name FROM pgboss.queue",
-  );
+  const queues = await prisma.$queryRawUnsafe<{ name: string }[]>("SELECT name FROM pgboss.queue");
   expect(queues.map((q) => q.name)).toContain("ai-triage");
 });
 
@@ -206,29 +200,31 @@ test("T2 provider form: dropdowns, provider-specific fields, reset-on-switch, sa
   await page.getByRole("option", { name: "Custom…" }).click();
   await expect(page.getByLabel("Custom model ID")).toBeVisible();
 
-  // Switching provider swaps the catalog + provider-specific fields.
-  // KNOWN ISSUE (UAT test 2, minor): the form STATE resets to the new provider's first
-  // catalog entry, but the Radix Select trigger keeps showing the "Select a model"
-  // placeholder because the new catalog's items were never registered while closed.
-  // We drive it like a real operator instead: open the dropdown and pick the model.
+  // Switching provider swaps the catalog + provider-specific fields, and auto-resets
+  // the model to the new catalog's first entry (04-04 D-01; gap fix 04-07 keys the
+  // Model Select by provider to dodge the Radix SelectBubbleInput stale-options race).
   await providerSelect.click();
   await page.getByRole("option", { name: "Ollama" }).click();
   await expect(page.getByLabel("Custom model ID")).toHaveCount(0);
   await expect(page.getByLabel("API key")).toHaveCount(0);
   await expect(page.getByLabel("Base URL")).toBeVisible();
 
-  // Model dropdown now lists the Ollama catalog (proves the per-provider catalog swap)
+  // Auto-reset: trigger shows MODEL_CATALOG.ollama[0], never the placeholder.
+  await expect(modelSelect).toContainText("llama3.1");
+  await expect(modelSelect).not.toHaveAttribute("data-placeholder", /.*/);
+
+  // Model dropdown lists the Ollama catalog (per-provider swap) — close WITHOUT picking.
   await modelSelect.click();
   for (const m of ["llama3.1", "qwen2.5", "mistral"]) {
     await expect(page.getByRole("option", { name: m })).toBeVisible();
   }
-  await page.getByRole("option", { name: "llama3.1" }).click();
-  await expect(modelSelect).toContainText("llama3.1");
+  await page.keyboard.press("Escape");
 
   // Save Ollama pointed at the stub
   await page.getByLabel("Base URL").fill(stub.url);
   await page.getByRole("button", { name: "Save AI provider" }).click();
   await expect(page.getByText("AI provider settings saved.")).toBeVisible();
+  await expect(page.getByText("Select a model")).toHaveCount(0);
 
   // Persisted server-side
   await expect
@@ -297,7 +293,9 @@ test("T5 creating a ticket auto-triages it: chips + AI priority + SLA recompute"
   await dialog.getByLabel("Contact email").fill(`phase4-triage-${ts}@example.com`);
   await dialog
     .getByLabel("Message")
-    .fill("The app crashes every time I open the dashboard. Please help, this is really frustrating.");
+    .fill(
+      "The app crashes every time I open the dashboard. Please help, this is really frustrating.",
+    );
   await dialog.getByRole("button", { name: "New Ticket" }).click();
 
   await page.waitForURL(/\/tickets\/[a-z0-9]+/);
@@ -372,9 +370,7 @@ test("T6 overrides: category/sentiment dropdowns + language popover, SLA untouch
 // ---------------------------------------------------------------------------
 // UAT Test 7 — Re-run control: failure badge + successful re-run
 // ---------------------------------------------------------------------------
-test("T7 re-run triage: failure shows Triage failed + Re-run; retry succeeds", async ({
-  page,
-}) => {
+test("T7 re-run triage: failure shows Triage failed + Re-run; retry succeeds", async ({ page }) => {
   test.setTimeout(180_000);
   expect(triagedTicketId).not.toBe("");
 
@@ -504,13 +500,14 @@ test("T10 blank API key on re-save keeps the stored encrypted key; key never ech
 
   await page.getByLabel("Provider").click();
   await page.getByRole("option", { name: "OpenAI" }).click();
-  // KNOWN ISSUE (UAT test 2, major): the provider switch leaves modelSelect empty and Save
-  // would be blocked by validation — pick the model explicitly like a real operator must.
-  await page.getByLabel("Model").click();
-  await page.getByRole("option", { name: "gpt-5.4-mini" }).click();
+  // Provider switch auto-resets the model to MODEL_CATALOG.openai[0] — Save must
+  // work with no manual re-pick (gap fix 04-07).
+  await expect(page.getByLabel("Model")).toContainText("gpt-5.4-mini");
+  await expect(page.getByLabel("Model")).not.toHaveAttribute("data-placeholder", /.*/);
   await page.getByLabel("API key").fill(`sk-test-e2e-phase4-${ts}`);
   await page.getByRole("button", { name: "Save AI provider" }).click();
   await expect(page.getByText("AI provider settings saved.").first()).toBeVisible();
+  await expect(page.getByText("Select a model")).toHaveCount(0);
 
   let blob1 = "";
   await expect
