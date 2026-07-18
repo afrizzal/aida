@@ -114,4 +114,4 @@ Launch beachhead is **customer support**, but the ticketing core is built generi
 This document evolves at phase/milestone transitions (validated → move requirements; new ones → Active; decisions → table). v1 = Minimum Lovable Helpdesk; post-v1 candidates: KB autogen (AIDA-18), live chat, more channels, hosted offering.
 
 ---
-*Last updated: 2026-07-07 — Phase 4 (ai-foundation) complete and verified (6/6 plans, 5/5 waves, VERIFICATION.md passed): AIDA-13, AIDA-14, AIDA-19, and AIDA-20 all validated. Non-blocking human verification items (dark-mode visual pass, live-provider smoke test, network-egress capture) remain open per 04-VERIFICATION.md.*
+*Last updated: 2026-07-18 — Phase 4 (ai-foundation) fully closed out (7/7 plans, 6/6 waves): 04-07 gap closure fixed the sole UAT gap (test 2, provider-switch model reset) — 04-UAT.md is now 10/10 pass, AIDA-13/AIDA-14/AIDA-19/AIDA-20 all validated end-to-end. Non-blocking human verification items (dark-mode visual pass, live-provider smoke test, network-egress capture) remain open per 04-VERIFICATION.md.*
