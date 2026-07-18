@@ -10,7 +10,7 @@
 - [x] **Phase 1: Foundation** — App scaffold, data model, auth + workspace scoping, one-command self-host shell (completed 2026-06-29)
 - [x] **Phase 2: Core Ticketing** — Shared inbox, ticket lifecycle, contacts, replies/notes, tags, SLA, web intake (completed 2026-07-02)
 - [x] **Phase 3: Email Channel** — Inbound email → ticket threading + outbound SMTP replies (completed 2026-07-06)
-- [ ] **Phase 4: AI Foundation** — Model-agnostic LLM layer + auto-triage + audit log + untrusted-input safeguards
+- [x] **Phase 4: AI Foundation** — Model-agnostic LLM layer + auto-triage + audit log + untrusted-input safeguards (completed 2026-07-18)
 - [ ] **Phase 5: RAG & Drafted Replies** — Knowledge base + embeddings + citation-backed drafts behind a human-approval gate
 - [ ] **Phase 6: AIDA Insight** — AI-driven analytics (recurring issues, KB gaps, volume drivers, SLA/CSAT)
 - [ ] **Phase 7: Launch Readiness** — Demo data, docs site, star-ready README, backups, security pass, public launch
@@ -83,14 +83,14 @@
 2. New tickets are auto-triaged (category, priority, sentiment, language) with results attached and overrideable by an agent.
 3. Every AI action is written to an append-only audit log (input ref, output, model).
 4. Ticket text is handled as untrusted: a prompt-injection test case cannot make the AI take actions or reveal system context; obvious secrets are redacted before reaching the LLM/logs; no network egress occurs except to the configured LLM endpoint.
-**Plans:** 7 plans (6 complete + 1 gap-closure pending)
+**Plans:** 7/7 plans complete
 - [x] 04-01-PLAN.md — Provider SDKs + Ticket triage columns + append-only AuditEvent model + DB immutability trigger (Wave 1)
 - [x] 04-02-PLAN.md — `lib/llm` port: redact + encrypted llm:* settings + complete() + OpenAI/Anthropic/Ollama adapters + probe (Wave 2)
 - [x] 04-03-PLAN.md — Triage engine: schema + fenced/escaped prompt (D-12) + runTriage + recordAuditEvent + injection test (D-15) (Wave 3)
 - [x] 04-04-PLAN.md — Settings "AI Features" page: provider/model/key config + Test Connection + toggle gating (D-21) (Wave 3)
 - [x] 04-05-PLAN.md — Runtime wiring: ai-triage pg-boss queue + post-commit enqueue + rerunTriage action (Wave 4)
 - [x] 04-06-PLAN.md — Triage UI: result chips + edit affordance + AI Activity section + Re-run button + failure badge (Wave 5)
-- [ ] 04-07-PLAN.md — Gap closure (UAT test 2): key={provider} on Model Select (Radix bubble-input stale-options race) + revert T2/T10 e2e workarounds to assert auto-reset (Wave 6)
+- [x] 04-07-PLAN.md — Gap closure (UAT test 2): key={provider} on Model Select (Radix bubble-input stale-options race) + revert T2/T10 e2e workarounds to assert auto-reset (Wave 6)
 
 ### Phase 5: RAG & Drafted Replies
 **Timebox:** ~2–2.5 weeks · **Depends on:** Phase 4 (LLM layer) · **Requirements:** AIDA-15, AIDA-16

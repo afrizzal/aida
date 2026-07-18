@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: verifying
-last_updated: "2026-07-07T07:57:50.252Z"
-last_activity: 2026-07-07
+last_updated: "2026-07-18T10:08:34.854Z"
+last_activity: 2026-07-18 -- 04-07 gap-closure plan complete (Model Select provider-switch fix)
 progress:
   total_phases: 7
   completed_phases: 4
-  total_plans: 32
-  completed_plans: 32
+  total_plans: 33
+  completed_plans: 33
   percent: 100
 ---
 
@@ -28,10 +28,10 @@ progress:
 
 Phase: 5
 Plan: Not started
-Status: Phase complete — ready for verification (verify-work + UI-review + human sign-off pending, mirrors Phase 2/3 close-out)
-Last activity: 2026-07-07
+Status: Phase 4 complete — UAT gap closed via 04-07 (7/7 plans, 6/6 waves) — ready for close-out (verify-work + UI-review + human sign-off pending, mirrors Phase 2/3 close-out)
+Last activity: 2026-07-18 -- 04-07 gap-closure plan complete
 
-Progress: [██████████] 100% (32/32 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 6/6 phase 04)
+Progress: [██████████] 100% (33/33 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04)
 
 ## Accumulated Context
 
@@ -150,12 +150,13 @@ Progress: [██████████] 100% (32/32 plans complete — 8/8 ph
 - (04-05) Worker-bundle hard stop re-verified: the Dockerfile's exact esbuild command now bundles `runTriage -> lib/llm -> {openai, @anthropic-ai/sdk, ollama}` into the worker for the first time (6.2MB `dist/worker-verify.mjs`, up from 03-04's pre-`lib/llm` 4.6MB baseline) — succeeded with zero `--external` changes needed for any of the three provider SDKs.
 - (04-05) AIDA-14 intentionally still NOT marked complete in REQUIREMENTS.md — its acceptance statement includes "an agent can override", which is 04-06's job (override Server Actions + ticket-page UI). The full automatic enqueue -> worker -> classify -> write path is otherwise live end-to-end as of this plan. Mirrors the established split-requirement precedent (02-08/03-01/04-01/04-02/04-03/04-04).
 - (04-06) Triage/audit backend (04-01…04-05) is now fully wired into the ticket-detail UI: `setTriageCategory`/`setTriageSentiment`/`setTriageLanguage` override Server Actions (plain field writes, no SLA recompute — only `changePriority` touches SLA); `TriageCategoryChip`/`TriageSentimentChip` presentational Badges + `TriageStatusChip` (Triaging…/Triage failed+Re-run/Re-run AI triage, calling 04-05's `rerunTriage`) mirroring `PriorityChip`/`DeliveryFailedChip`'s exact shapes; a read-only `AiActivitySection` (native `<details>`, no client JS) lists `AuditEvent` triage runs (provider/model/time/parsed result) below the thread, deliberately never rendering `AuditEvent.input` (D-13). Every triage UI piece is gated on `!== null`/`.length === 0` so a never-triaged ticket (AI off) shows zero triage chrome. **AIDA-14 and AIDA-19 are now both fully code-complete end-to-end and marked Validated in PROJECT.md / REQUIREMENTS.md.** Phase 4 (ai-foundation) is now 6/6 plans complete across all 5 waves.
+- (04-07, gap closure) Phase 4 UAT (2026-07-16, `04-UAT.md`) found one gap: switching LLM provider in Settings → AI Features left the Model select EMPTY (trigger showed the "Select a model" placeholder, Save blocked by zod validation) instead of auto-resetting to the new provider's first catalog entry per 04-04's D-01. Root cause fully diagnosed in `.planning/debug/model-select-clears-on-provider.md`: an upstream `@radix-ui/react-select@2.3.1` bug (SelectBubbleInput, radix-ui/primitives #3135/#3381/#3693) — the hidden native `<select>` form-bridge syncs the new controlled value against the OLD provider's still-registered `<option>`s (they update one commit later), so `select.value` becomes `""` per HTML spec and a dispatched change event clobbers `field.onChange` with `""`. Fix (`llm-provider-form.tsx`): `key={provider}` on the Model `<Select>` — remounts the whole Select subtree in the same commit `handleProviderChange` sets the new value, taking Radix's own proven-safe initial-mount path (no stale options exist to race against). `tests/e2e/phase4-ai.spec.ts` T2/T10's explicit-model-pick workarounds reverted to assert the auto-reset directly in both switch directions (`toContainText` catalog[0], no `data-placeholder`, `"Select a model"` renders zero times after Save) — the regression is now locked in by E2E, not worked around. Full spec verified green 11/11 (a first run showed T7/T8 failing — unrelated timing flake in the Re-run-triage recovery test, confirmed by an immediate clean re-run at 11/11 matching `04-UAT.md`'s prior recorded T7/T8 `pass` results). Both touched files (`llm-provider-form.tsx`, `phase4-ai.spec.ts`) also carried pre-existing biome format/import-order drift unrelated to this plan's diff — fixed via `biome check --write` (mechanical only, zero logic change) since the plan's own verify gate requires biome-clean on these exact files. **Phase 4 (ai-foundation) is now 7/7 plans complete across all 6 waves — the last recorded UAT gap is closed; `04-UAT.md` test 2 is ready for re-verification at phase close-out.**
 
 ### Open Todos
 
 - Phase 2 CLOSED (2026-07-05): verify-work 30/30 (`02-UAT.md`), ui-review 21/24 (`02-UI-REVIEW.md`, DESIGN-SYSTEM.md §9 design-check), 3 priority UI fixes shipped (quick-260705-kg0), human sign-off recorded.
 - Phase 3 (email-channel) EXECUTION COMPLETE (2026-07-06): all 6 plans across 4 waves done (see 03-CONTEXT.md/03-RESEARCH.md/03-UI-SPEC.md); AIDA-09 validated in PROJECT.md. Next: phase-level verify-work + UI-review (DESIGN-SYSTEM.md §9) + human sign-off (mirrors Phase 2's close-out) before Phase 3 is formally CLOSED and `/gsd:plan-phase 4` starts.
-- Phase 4 (ai-foundation) EXECUTION COMPLETE (2026-07-07): all 6 plans across 5 waves done (see 04-CONTEXT.md/04-RESEARCH.md); AIDA-14 and AIDA-19 validated in PROJECT.md this plan. AIDA-13/AIDA-20's full acceptance (provider-agnostic UI + injection defense were shipped in 04-03/04-04, but final validation is deferred to the phase-level close-out review, per 04-04's note) remains a close-out task, not an 04-06 scope item. Next: phase-level verify-work + UI-review (DESIGN-SYSTEM.md §9) + human sign-off (mirrors Phase 2/3's close-out) before Phase 4 is formally CLOSED and `/gsd:plan-phase 5` starts.
+- Phase 4 (ai-foundation) EXECUTION COMPLETE (2026-07-18): all 7 plans across 6 waves done (see 04-CONTEXT.md/04-RESEARCH.md; 04-07 was a gap-closure plan added after 04-UAT.md found the provider-switch Model-select bug). AIDA-13, AIDA-14, AIDA-19, AIDA-20 all validated in PROJECT.md. Next: phase-level verify-work (re-verify 04-UAT.md test 2) + UI-review (DESIGN-SYSTEM.md §9) + human sign-off (mirrors Phase 2/3's close-out) before Phase 4 is formally CLOSED and `/gsd:plan-phase 5` starts.
 - Rename `src/middleware.ts` → `proxy.ts` (Next 16 deprecation warning; non-blocking, surfaced during UAT).
 - Disk hygiene: stale agent worktree dirs under `.claude/worktrees` (~11GB; 13 unregistered incl. the partially-deleted `agent-a52414ce120c5b506` remnant — its work IS merged (a887ce6) and branch/metadata already pruned — plus 3 still-registered worktrees) — delete after checking registered ones for uncommitted agent work (now dockerignored so builds are safe either way).
 - Consolidation follow-up: dedup 02-07's inline SLA/chip literals against 02-03/02-06 (see Key Decisions above) — still pending; low-priority, does not block Phase 2 sign-off, revisit at Phase 2 close-out or defer to a later phase.
@@ -274,5 +275,11 @@ Wave 4 (04-05) complete. **Phase 4 is now 5/6 plans complete.** Next: Wave 5 (04
 
 **Next action:** `/gsd:execute-phase 4` continues with 04-06 (Wave 5, final plan, depends on 04-05 — now satisfied).
 
+**Phase 4 execution — 04-06 complete (2026-07-07, Wave 5, FINAL plan of the original 6-plan Phase 4 scope):** triage/audit backend surfaced in the ticket-detail UI (see Key Decisions above). Phase 4 was 6/6 plans complete. UAT (2026-07-16, `04-UAT.md`, automated E2E via Playwright) then found one gap — test 2, severity major: switching LLM provider left the Model select empty, blocking Save. Root cause diagnosed (2026-07-16, `.planning/debug/model-select-clears-on-provider.md`, diagnose-only session) as an upstream `@radix-ui/react-select` SelectBubbleInput stale-options race. A gap-closure plan 04-07 was added (Wave 6).
+
+**Phase 4 execution — 04-07 complete (2026-07-18, Wave 6, FINAL plan, gap closure, depends_on 04-04+04-06):** Applied the diagnosed one-line fix (`key={provider}` on the Model `<Select>`, `llm-provider-form.tsx`) and reverted the T2/T10 explicit-model-pick E2E workarounds to assert the provider-switch auto-reset directly in both directions — see Key Decisions above for full detail. `pnpm exec tsc --noEmit` and `biome check` clean on both touched files; full `tests/e2e/phase4-ai.spec.ts` verified green 11/11 (Volta Node 22.23.1 + Docker Testcontainers Postgres + real pg-boss worker + Ollama-protocol stub). Commits: `edcb651` (Task 1), `4106f42` (Task 2). SUMMARY: `.planning/phases/04-ai-foundation/04-07-SUMMARY.md`. **Phase 4 (ai-foundation) is now fully executed: 7/7 plans, all 6 waves — ROADMAP.md's Phase 4 checkbox is now checked.**
+
+**Next action:** Phase 4 close-out — re-verify `04-UAT.md` test 2 (should now pass), run UI-review (DESIGN-SYSTEM.md §9), record human sign-off (mirrors Phase 2/3's close-out) — then `/gsd:plan-phase 5` (RAG & Drafted Replies, AIDA-15/AIDA-16).
+
 ---
-*Last updated: 2026-07-07 — Phase 4 (AI Foundation) execution continues: 04-05 (ai-triage runtime wiring) complete, 5/6 plans (Wave 4 done — only Wave 5/04-06 remains).*
+*Last updated: 2026-07-18 — Phase 4 (AI Foundation) fully executed: 04-07 gap-closure plan complete (Model Select provider-switch fix), 7/7 plans, all 6 waves done. Ready for phase-level close-out (verify-work + UI-review + human sign-off) before Phase 5 planning starts.*
