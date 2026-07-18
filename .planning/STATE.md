@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: verifying
-last_updated: "2026-07-18T10:08:34.854Z"
-last_activity: 2026-07-18 -- 04-07 gap-closure plan complete (Model Select provider-switch fix)
+last_updated: "2026-07-18T13:15:00Z"
+last_activity: 2026-07-18 -- Phase 4 formally CLOSED (verify-work + design-check + sign-off; E2E harness hardened)
 progress:
   total_phases: 7
   completed_phases: 4
@@ -28,8 +28,8 @@ progress:
 
 Phase: 5
 Plan: Not started
-Status: Phase 4 complete — UAT gap closed via 04-07 (7/7 plans, 6/6 waves) — ready for close-out (verify-work + UI-review + human sign-off pending, mirrors Phase 2/3 close-out)
-Last activity: 2026-07-18 -- 04-07 gap-closure plan complete
+Status: Phase 4 CLOSED (2026-07-18) — verify-work green (typecheck, unit 54/54, integration 22/22, full E2E 43 passed + 1 documented isolation-skip, phase4-ai 11/11), design-check §9 pass, sign-off recorded per maintainer directive — next `/gsd:plan-phase 5`
+Last activity: 2026-07-18 -- Phase 4 formal close-out + E2E harness hardening (next-dev compile-race fix)
 
 Progress: [██████████] 100% (33/33 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04)
 
@@ -156,7 +156,8 @@ Progress: [██████████] 100% (33/33 plans complete — 8/8 ph
 
 - Phase 2 CLOSED (2026-07-05): verify-work 30/30 (`02-UAT.md`), ui-review 21/24 (`02-UI-REVIEW.md`, DESIGN-SYSTEM.md §9 design-check), 3 priority UI fixes shipped (quick-260705-kg0), human sign-off recorded.
 - Phase 3 (email-channel) EXECUTION COMPLETE (2026-07-06): all 6 plans across 4 waves done (see 03-CONTEXT.md/03-RESEARCH.md/03-UI-SPEC.md); AIDA-09 validated in PROJECT.md. Next: phase-level verify-work + UI-review (DESIGN-SYSTEM.md §9) + human sign-off (mirrors Phase 2's close-out) before Phase 3 is formally CLOSED and `/gsd:plan-phase 4` starts.
-- Phase 4 (ai-foundation) EXECUTION COMPLETE (2026-07-18): all 7 plans across 6 waves done (see 04-CONTEXT.md/04-RESEARCH.md; 04-07 was a gap-closure plan added after 04-UAT.md found the provider-switch Model-select bug). AIDA-13, AIDA-14, AIDA-19, AIDA-20 all validated in PROJECT.md. Next: phase-level verify-work (re-verify 04-UAT.md test 2) + UI-review (DESIGN-SYSTEM.md §9) + human sign-off (mirrors Phase 2/3's close-out) before Phase 4 is formally CLOSED and `/gsd:plan-phase 5` starts.
+- Phase 4 (ai-foundation) CLOSED (2026-07-18): 7/7 plans, 6/6 waves; AIDA-13/14/19/20 validated. Independent close-out verification (delegated to Claude): `tsc --noEmit` clean, unit 54/54, integration 22/22 (all 5 migrations from scratch), full E2E 43 passed + 1 documented isolation-only skip, uat-gaps isolated 9/9, phase4-ai 11/11; design-check §9 pass (token-only, `text-[Npx]`, `key={provider}` at llm-provider-form.tsx:203, AI Activity never renders `AuditEvent.input`); sign-off recorded per maintainer directive (conditional on green verification — met). Optional scored `/gsd:ui-review` (like 02/03's 21/24 & 23/24) not run — available on request.
+- SlaDueChip `title` hydration mismatch on non-en-US machines: server `toLocaleString()` uses Node ICU default (en-US) while the client uses the OS locale (seen id-ID) — console-noise only, no functional impact. Fix by passing an explicit locale (or `suppressHydrationWarning` on the title span). Found during Phase 4 close-out E2E; applies to any Client Component calling `toLocaleString()` without an explicit locale.
 - Rename `src/middleware.ts` → `proxy.ts` (Next 16 deprecation warning; non-blocking, surfaced during UAT).
 - Disk hygiene: stale agent worktree dirs under `.claude/worktrees` (~11GB; 13 unregistered incl. the partially-deleted `agent-a52414ce120c5b506` remnant — its work IS merged (a887ce6) and branch/metadata already pruned — plus 3 still-registered worktrees) — delete after checking registered ones for uncommitted agent work (now dockerignored so builds are safe either way).
 - Consolidation follow-up: dedup 02-07's inline SLA/chip literals against 02-03/02-06 (see Key Decisions above) — still pending; low-priority, does not block Phase 2 sign-off, revisit at Phase 2 close-out or defer to a later phase.
@@ -279,7 +280,9 @@ Wave 4 (04-05) complete. **Phase 4 is now 5/6 plans complete.** Next: Wave 5 (04
 
 **Phase 4 execution — 04-07 complete (2026-07-18, Wave 6, FINAL plan, gap closure, depends_on 04-04+04-06):** Applied the diagnosed one-line fix (`key={provider}` on the Model `<Select>`, `llm-provider-form.tsx`) and reverted the T2/T10 explicit-model-pick E2E workarounds to assert the provider-switch auto-reset directly in both directions — see Key Decisions above for full detail. `pnpm exec tsc --noEmit` and `biome check` clean on both touched files; full `tests/e2e/phase4-ai.spec.ts` verified green 11/11 (Volta Node 22.23.1 + Docker Testcontainers Postgres + real pg-boss worker + Ollama-protocol stub). Commits: `edcb651` (Task 1), `4106f42` (Task 2). SUMMARY: `.planning/phases/04-ai-foundation/04-07-SUMMARY.md`. **Phase 4 (ai-foundation) is now fully executed: 7/7 plans, all 6 waves — ROADMAP.md's Phase 4 checkbox is now checked.**
 
-**Next action:** Phase 4 close-out — re-verify `04-UAT.md` test 2 (should now pass), run UI-review (DESIGN-SYSTEM.md §9), record human sign-off (mirrors Phase 2/3's close-out) — then `/gsd:plan-phase 5` (RAG & Drafted Replies, AIDA-15/AIDA-16).
+**Phase 4 formally CLOSED (2026-07-18):** Independent close-out verification delegated to Claude: typecheck clean, unit 54/54, integration 22/22, full E2E suite 43 passed + 1 documented isolation-only skip (phase4-ai spec 11/11 within it, re-confirming 04-UAT.md test 2's fix), uat-gaps isolated 9/9, design-check §9 pass. Three E2E-harness issues found and fixed in-session (product code untouched): (1) `attachments.spec.ts` public-attachment 404 root-caused to a `next dev` on-demand route-compile race — the dev router transiently 404s a route's first-ever hit under load (~300ms response with no compile time vs the normal ~2s first-hit compile; also hit the auth sign-in route once in globalSetup); fixed via route warm-up in `global-setup.ts` (poll unauthenticated-reachable API routes until a non-router-404 answer) + `expect.poll` in the spec (prod unaffected — `next build` precompiles). (2) `uat-gaps.spec.ts` empty-inbox test now self-skips outside isolation per its documented fresh-workspace contract (was a hard fail in combined runs). (3) uat-gaps tag-count assertion row-scoped with `.last()` (strict-mode ambiguity both when other specs leave zero-count tags AND when the single-row container's textContent equals the row's). New finding logged to Open Todos: SlaDueChip locale hydration mismatch. Sign-off recorded per maintainer directive 2026-07-18 (conditional on green verification — condition met).
+
+**Next action:** `/gsd:plan-phase 5` (RAG & Drafted Replies, AIDA-15/AIDA-16).
 
 ---
-*Last updated: 2026-07-18 — Phase 4 (AI Foundation) fully executed: 04-07 gap-closure plan complete (Model Select provider-switch fix), 7/7 plans, all 6 waves done. Ready for phase-level close-out (verify-work + UI-review + human sign-off) before Phase 5 planning starts.*
+*Last updated: 2026-07-18 — Phase 4 (AI Foundation) formally CLOSED: verify-work + design-check + sign-off complete, E2E harness hardened against the next-dev compile race. Next: Phase 5 planning.*

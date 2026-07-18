@@ -3,7 +3,7 @@ status: complete
 phase: 04-ai-foundation
 source: [04-01-SUMMARY.md, 04-02-SUMMARY.md, 04-03-SUMMARY.md, 04-04-SUMMARY.md, 04-05-SUMMARY.md, 04-06-SUMMARY.md]
 started: 2026-07-16T09:33:10Z
-updated: 2026-07-18T10:08:34Z
+updated: 2026-07-18T13:15:00Z
 mode: automated-e2e  # user delegated testing to Claude — executed via tests/e2e/phase4-ai.spec.ts
 ---
 
@@ -19,6 +19,12 @@ plus a real pg-boss worker (tsx) and a local Ollama-protocol stub HTTP server
 (`/api/tags`, `/api/chat`) — the full triage pipeline runs end-to-end with only the
 model process faked. Final run: 10 passed / 1 known-issue workaround (test 2) across
 runs 3+5.
+
+Close-out re-verification (2026-07-18, independent run at phase close): phase4-ai spec
+11/11 green inside a full-suite run (43 passed + 1 documented isolation-only skip),
+plus unit 54/54 and integration 22/22 — test 2's 04-07 fix re-confirmed. One harness
+flake found & fixed during this pass (next-dev on-demand route-compile race → transient
+404 on a route's first hit; warm-up added to global-setup.ts) — product code unaffected.
 
 ## Tests
 
