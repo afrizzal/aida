@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: verifying
-last_updated: "2026-07-18T13:15:00Z"
-last_activity: 2026-07-18 -- Phase 4 formally CLOSED (verify-work + design-check + sign-off; E2E harness hardened)
+last_updated: "2026-07-18T15:30:00Z"
+last_activity: 2026-07-18 -- Phase 5 planned (7 plans, 3 waves) -- ready for /gsd:execute-phase 5
 progress:
   total_phases: 7
   completed_phases: 4
@@ -27,9 +27,9 @@ progress:
 ## Current Position
 
 Phase: 5
-Plan: Not started
-Status: Phase 4 CLOSED (2026-07-18) — verify-work green (typecheck, unit 54/54, integration 22/22, full E2E 43 passed + 1 documented isolation-skip, phase4-ai 11/11), design-check §9 pass, sign-off recorded per maintainer directive — next `/gsd:plan-phase 5`
-Last activity: 2026-07-18 -- Phase 4 formal close-out + E2E harness hardening (next-dev compile-race fix)
+Plan: 7 plans created (05-01 … 05-07, 3 waves) — not yet executed
+Status: Phase 5 PLANNED (2026-07-18) — research done (05-RESEARCH.md), 7 plans across 3 waves, plan-checker pass (0 blockers; 2 warnings fixed via targeted revision), AIDA-15/16 coverage verified — next `/gsd:execute-phase 5`
+Last activity: 2026-07-18 -- Phase 5 planning complete (research → plan → verify → revise)
 
 Progress: [██████████] 100% (33/33 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04)
 
@@ -282,7 +282,9 @@ Wave 4 (04-05) complete. **Phase 4 is now 5/6 plans complete.** Next: Wave 5 (04
 
 **Phase 4 formally CLOSED (2026-07-18):** Independent close-out verification delegated to Claude: typecheck clean, unit 54/54, integration 22/22, full E2E suite 43 passed + 1 documented isolation-only skip (phase4-ai spec 11/11 within it, re-confirming 04-UAT.md test 2's fix), uat-gaps isolated 9/9, design-check §9 pass. Three E2E-harness issues found and fixed in-session (product code untouched): (1) `attachments.spec.ts` public-attachment 404 root-caused to a `next dev` on-demand route-compile race — the dev router transiently 404s a route's first-ever hit under load (~300ms response with no compile time vs the normal ~2s first-hit compile; also hit the auth sign-in route once in globalSetup); fixed via route warm-up in `global-setup.ts` (poll unauthenticated-reachable API routes until a non-router-404 answer) + `expect.poll` in the spec (prod unaffected — `next build` precompiles). (2) `uat-gaps.spec.ts` empty-inbox test now self-skips outside isolation per its documented fresh-workspace contract (was a hard fail in combined runs). (3) uat-gaps tag-count assertion row-scoped with `.last()` (strict-mode ambiguity both when other specs leave zero-count tags AND when the single-row container's textContent equals the row's). New finding logged to Open Todos: SlaDueChip locale hydration mismatch. Sign-off recorded per maintainer directive 2026-07-18 (conditional on green verification — condition met).
 
-**Next action:** `/gsd:plan-phase 5` (RAG & Drafted Replies, AIDA-15/AIDA-16).
+**Phase 5 planned (2026-07-18):** `/gsd:plan-phase 5` produced 7 plans across 3 waves (`.planning/phases/05-rag-drafted-replies/05-01-PLAN.md` … `05-07-PLAN.md`, plus `05-RESEARCH.md`). No CONTEXT.md — maintainer delegated design discretion; 8 locked decisions adopted from research recommendations (recorded in each plan): KB-only retrieval v1 (past-tickets → Phase 6), on-demand draft button only, fixed `vector(768)` across providers (OpenAI `dimensions: 768` truncation / Ollama nomic-embed-text native), NO ANN index in v1 (brute-force KNN via `$queryRaw` with explicit orgId — dodges the Pitfall-3 index-drop class), separate embedding provider for Anthropic-chat orgs (Anthropic has no embeddings API — verified against installed SDK), absolute human gate through the EXISTING messages POST route with DRAFT_GENERATED/DRAFT_APPROVED audit events, code-level no-hallucination gate (LLM call skipped on empty retrieval), token-only UI under the existing Knowledge Base sidebar stub. Wave structure: W1 = 05-01 (schema: KbArticle/KbChunk/vector(768)/AuditActionType widen) + 05-02 (embedding port `lib/rag`); W2 = 05-03 (chunker + createKbArticle + kb-embed-article pg-boss job) + 05-04 (KNN retrieval + grounded draft engine + maxOutputTokens threading + injection-fenced prompt + integration tests); W3 = 05-05 (Settings embedding config) + 05-06 (KB authoring pages) + 05-07 (DraftCard + citations + Composer insert + DRAFT_APPROVED audit). Plan-checker: 0 blockers, all 14 checked dimensions pass; 2 warnings + 1 info fixed via targeted revision (atomic `tx.$executeRaw` chunk swap in 05-03; Case B zero-result audit assertion in 05-04). Zero new npm dependencies. Commits: `22e9c8b` (research), `8f4ac31` (plans + ROADMAP), `971c30f` (revisions).
+
+**Next action:** `/gsd:execute-phase 5` (after `/clear` for a fresh context window).
 
 ---
 *Last updated: 2026-07-18 — Phase 4 (AI Foundation) formally CLOSED: verify-work + design-check + sign-off complete, E2E harness hardened against the next-dev compile race. Next: Phase 5 planning.*
