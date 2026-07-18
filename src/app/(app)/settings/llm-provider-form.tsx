@@ -6,7 +6,14 @@ import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod/v4";
 import { Button } from "@/components/ui/button";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -69,7 +76,9 @@ function resolveInitialModelSelect(
 
 /** Resolves the form's split modelSelect/customModel fields back into a single model string. */
 function resolveModel(values: Pick<FormValues, "modelSelect" | "customModel">): string {
-  return values.modelSelect === CUSTOM_MODEL_VALUE ? (values.customModel ?? "").trim() : values.modelSelect;
+  return values.modelSelect === CUSTOM_MODEL_VALUE
+    ? (values.customModel ?? "").trim()
+    : values.modelSelect;
 }
 
 /**
@@ -163,7 +172,10 @@ export function LlmProviderForm({ initial }: LlmProviderFormProps) {
               <FormLabel className="text-[13px] font-normal text-muted-foreground">
                 Provider
               </FormLabel>
-              <Select value={field.value} onValueChange={(v) => handleProviderChange(v as ProviderName)}>
+              <Select
+                value={field.value}
+                onValueChange={(v) => handleProviderChange(v as ProviderName)}
+              >
                 <FormControl>
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Select a provider" />
@@ -188,7 +200,7 @@ export function LlmProviderForm({ initial }: LlmProviderFormProps) {
           render={({ field }) => (
             <FormItem>
               <FormLabel className="text-[13px] font-normal text-muted-foreground">Model</FormLabel>
-              <Select value={field.value} onValueChange={field.onChange}>
+              <Select key={provider} value={field.value} onValueChange={field.onChange}>
                 <FormControl>
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Select a model" />
