@@ -1,8 +1,9 @@
 ---
-status: diagnosed
+status: resolved
 trigger: "Model select resets to placeholder/empty string when Provider select changes programmatically (setValue + catalog swap) in llm-provider-form.tsx; zod min(1) fails at submit. Diagnose only, do not fix."
 created: 2026-07-16T00:00:00Z
-updated: 2026-07-16T00:00:00Z
+updated: 2026-07-18T10:08:34Z
+resolved_by: "04-07 (commits edcb651, 4106f42) — key={provider} added to the Model <Select>; tests/e2e/phase4-ai.spec.ts T2/T10 assert auto-reset directly, full spec green 11/11"
 ---
 
 ## Current Focus

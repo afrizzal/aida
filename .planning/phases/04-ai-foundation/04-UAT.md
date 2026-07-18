@@ -3,7 +3,7 @@ status: complete
 phase: 04-ai-foundation
 source: [04-01-SUMMARY.md, 04-02-SUMMARY.md, 04-03-SUMMARY.md, 04-04-SUMMARY.md, 04-05-SUMMARY.md, 04-06-SUMMARY.md]
 started: 2026-07-16T09:33:10Z
-updated: 2026-07-16T11:15:00Z
+updated: 2026-07-18T10:08:34Z
 mode: automated-e2e  # user delegated testing to Claude — executed via tests/e2e/phase4-ai.spec.ts
 ---
 
@@ -29,9 +29,8 @@ evidence: "Playwright globalSetup: fresh Testcontainers pgvector:pg16 + `migrate
 
 ### 2. Configure LLM Provider in Settings
 expected: Settings → AI Features shows a provider dropdown (OpenAI / Anthropic / Ollama) and a model dropdown populated per provider, plus a "Custom…" option revealing a free-text model field. OpenAI/Anthropic show a password-type API key field; Ollama shows a base URL field instead. Switching provider resets the model to the new provider's first catalog entry. Save persists the settings.
-result: issue
-reported: "Automated E2E (Playwright): switching provider does NOT reset the model to the new provider's first catalog entry — the Model select ends up EMPTY. handleProviderChange calls form.setValue('modelSelect', catalog[0]) but the value is cleared again when the Radix Select's item set swaps; the trigger shows the 'Select a model' placeholder and a subsequent Save is blocked by zod validation ([invalid] combobox + 'Select a model' error, no save toast) until the operator manually re-picks a model. Contradicts 04-04's documented key-decision ('Provider changes reset the model selection to the new provider's first catalog entry'). Everything else in this test passes (three providers listed, per-provider catalog + Custom… free-text, provider-specific credential fields, save + reload round-trip when a model is explicitly picked)."
-severity: major
+result: pass
+evidence: "Gap closed by 04-07 (key={provider} on the Model <Select>, llm-provider-form.tsx:203) — remounts the Select subtree in the same commit handleProviderChange sets the new catalog's first entry, eliminating the Radix SelectBubbleInput stale-options race. Re-verified via tests/e2e/phase4-ai.spec.ts T2/T10 asserting the auto-reset directly (trigger toContainText catalog[0], no data-placeholder, zero 'Select a model' renders after Save) in both switch directions — full spec green 11/11. Commits: edcb651, 4106f42."
 
 ### 3. Test Connection Button
 expected: With a provider configured, clicking Test Connection shows a "testing" state, then either a success or a failure message (failure shows a short error, never the API key). The result is announced politely (no page reload).
@@ -76,15 +75,15 @@ evidence: "E2E: saved OpenAI + fake key → llm:apiKeyEnc blob stored; reload sh
 ## Summary
 
 total: 10
-passed: 9
-issues: 1
+passed: 10
+issues: 0
 pending: 0
 skipped: 0
 
 ## Gaps
 
 - truth: "Switching provider resets the model dropdown to the new provider's first catalog entry, and Save works immediately after a provider switch"
-  status: failed
+  status: resolved
   reason: "User-delegated automated E2E found: after a provider switch the modelSelect form value ends up empty (handleProviderChange's setValue is clobbered when the Radix Select item set swaps) — trigger shows 'Select a model' placeholder and Save is blocked by zod validation until the operator manually re-picks a model. Reproduced in both directions (ollama→openai in T10, openai→ollama in T2)."
   severity: major
   test: 2
@@ -99,7 +98,7 @@ skipped: 0
     change event → onValueChange("") → field.onChange("") overwrites the setValue. Initial
     mount is safe because usePrevious returns the current value on first render (no sync
     dispatch) and the native select remounts fresh once options register. Full session:
-    .planning/debug/model-select-clears-on-provider.md
+    .planning/debug/resolved/model-select-clears-on-provider.md
   fix: >-
     One line: add key={provider} to the Model <Select> in llm-provider-form.tsx (~line 191) —
     remounts the Select subtree in the same commit where field.value is already catalog[0],
@@ -108,4 +107,5 @@ skipped: 0
     workarounds in tests/e2e/phase4-ai.spec.ts T2/T10 to assert auto-reset + save-without-
     validation-error.
   artifacts: ["src/app/(app)/settings/llm-provider-form.tsx:191 (Model Select missing key={provider})", "node_modules @radix-ui/react-select dist/index.mjs:1094-1108 (bubble-input sync)"]
-  missing: ["key={provider} on Model Select", "T2/T10 e2e assertions for auto-reset instead of explicit-pick workaround"]
+  missing: []
+  resolved_by: "04-07 (commits edcb651, 4106f42) — key={provider} added at llm-provider-form.tsx:203; T2/T10 e2e workarounds reverted to assert auto-reset directly; full spec green 11/11"
