@@ -104,7 +104,7 @@
 - [x] 05-01-PLAN.md — RAG data foundation: KbArticle/KbChunk models + vector(768) + KbEmbeddingStatus + widen AuditActionType + scopedDb allowlist (Wave 1)
 - [x] 05-02-PLAN.md — Embedding port: src/lib/rag settings/embed/providers (OpenAI+Ollama, 768-dim) + Test Connection + unit tests (Wave 1)
 - [ ] 05-03-PLAN.md — KB chunking + createKbArticle + kb-embed-article pg-boss job + queue registration + integration test (Wave 2)
-- [ ] 05-04-PLAN.md — Retrieval (raw-SQL KNN) + grounded draft engine + maxOutputTokens + generateDraftReply + groundedness/injection test (Wave 2)
+- [x] 05-04-PLAN.md — Retrieval (raw-SQL KNN) + grounded draft engine + maxOutputTokens + generateDraftReply + groundedness/injection test (Wave 2)
 - [ ] 05-05-PLAN.md — Settings embedding provider config + Test Connection + Re-embed-all (Wave 3)
 - [ ] 05-06-PLAN.md — KB authoring pages: list/new/edit + embedding status chip + admin-gated actions (Wave 3)
 - [ ] 05-07-PLAN.md — Ticket draft UI: DraftCard + citations + Composer insert + human gate + DRAFT_APPROVED audit (Wave 3)
