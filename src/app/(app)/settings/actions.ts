@@ -2,11 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { requireOrgAdmin } from "@/lib/authz";
-import {
-  getLlmSettings,
-  saveLlmSettings as persistLlmSettings,
-} from "@/lib/llm/settings";
+import { enqueueReembed } from "@/lib/kb/create-article";
+import { getLlmSettings, saveLlmSettings as persistLlmSettings } from "@/lib/llm/settings";
 import { testProviderConnection } from "@/lib/llm/test-connection";
+import { testEmbeddingConnection as probeEmbeddingConnection } from "@/lib/rag/embed-test-connection";
+import {
+  getEmbeddingSettings,
+  saveEmbeddingSettings as persistEmbeddingSettings,
+} from "@/lib/rag/settings";
 import { getScopedDb } from "@/lib/session";
 
 /**
@@ -94,4 +97,87 @@ export async function testLlmConnection(
   } catch (e) {
     return { ok: false, error: String((e as Error).message).slice(0, 200) };
   }
+}
+
+/** Mirrors the embedding provider form fields (settings/embedding-provider-form.tsx). */
+export interface EmbeddingSettingsInput {
+  provider: "openai" | "ollama";
+  model: string;
+  /** Empty/undefined = keep the existing stored key (never round-trips plaintext to the UI). */
+  apiKey?: string;
+  ollamaBaseUrl?: string;
+}
+
+/**
+ * Persists the embedding provider/model/key/base-URL config — an INDEPENDENT capability from the
+ * chat provider (Decision 5: an Anthropic-for-chat org has no embeddings API, so RAG requires its
+ * own OpenAI/Ollama config here). Admin-gated, mirrors saveLlmSettings' exact security contract.
+ * Blank apiKey is forwarded as-is — lib/rag/settings.ts treats an empty/undefined key as "keep
+ * existing stored value".
+ */
+export async function saveEmbeddingSettings(
+  input: EmbeddingSettingsInput,
+): Promise<{ ok: boolean }> {
+  await requireOrgAdmin();
+  const { db, orgId } = await getScopedDb();
+
+  try {
+    await persistEmbeddingSettings(db, orgId, {
+      provider: input.provider,
+      model: input.model,
+      apiKey: input.apiKey,
+      ollamaBaseUrl: input.ollamaBaseUrl,
+    });
+    revalidatePath("/settings");
+    return { ok: true };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
+ * Real embedding-provider connectivity probe, mirroring testLlmConnection's exact contract: falls
+ * back to the stored decrypted key when the submitted form field is blank, never echoes the key
+ * in the returned error, and slices the error to 200 chars. Surfaces a clear failure for a
+ * not-pulled Ollama embedding model or a bad key (Pitfall 8).
+ */
+export async function testEmbeddingConnection(
+  input: EmbeddingSettingsInput,
+): Promise<{ ok: boolean; error?: string }> {
+  await requireOrgAdmin();
+  const { db } = await getScopedDb();
+
+  const apiKey = input.apiKey || (await getEmbeddingSettings(db)).apiKey;
+
+  try {
+    await probeEmbeddingConnection({
+      provider: input.provider,
+      model: input.model,
+      apiKey,
+      ollamaBaseUrl: input.ollamaBaseUrl ?? "",
+    });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String((e as Error).message).slice(0, 200) };
+  }
+}
+
+/**
+ * Re-enqueues embedding for EVERY KB article in the org — used after changing the embedding
+ * provider/model, since vectors from different models are not comparable (Pitfall 5: a partial
+ * re-embed would leave the KB with mixed, non-comparable vector spaces). Admin-gated.
+ */
+export async function reembedAllKb(): Promise<{ ok: boolean; count: number }> {
+  await requireOrgAdmin();
+  const { db, orgId } = await getScopedDb();
+
+  const articles = await db.kbArticle.findMany({ select: { id: true } });
+  for (const article of articles) {
+    await enqueueReembed(orgId, article.id);
+  }
+
+  revalidatePath("/settings");
+  revalidatePath("/kb");
+
+  return { ok: true, count: articles.length };
 }
