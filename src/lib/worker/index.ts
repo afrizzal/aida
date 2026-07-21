@@ -4,6 +4,7 @@ import { aiTriageHandler } from "./jobs/ai-triage";
 import { emailInboundPollHandler } from "./jobs/email-inbound-poll";
 import { emailOutboundSendHandler } from "./jobs/email-outbound-send";
 import { heartbeatHandler } from "./jobs/heartbeat";
+import { kbEmbedArticleHandler } from "./jobs/kb-embed-article";
 import { rateLimitCleanupHandler } from "./jobs/rate-limit-cleanup";
 import { slaFlagHandler } from "./jobs/sla-flag";
 
@@ -69,6 +70,19 @@ async function main() {
   });
   await boss.work("ai-triage", async ([job]: Job<{ ticketId: string }>[]) => {
     await aiTriageHandler(job.data);
+  });
+
+  // KB article embedding: on-demand queue enqueued by the app after createKbArticle()/
+  // updateKbArticle() commit (and by a future re-embed-all admin action) — no schedule().
+  // Options mirror boss-client.ts's createQueue call exactly so this createQueue is a no-op if
+  // the app made it first.
+  await boss.createQueue("kb-embed-article", {
+    retryLimit: 2,
+    retryBackoff: true,
+    retryDelayMax: 300,
+  });
+  await boss.work("kb-embed-article", async ([job]: Job<{ articleId: string }>[]) => {
+    await kbEmbedArticleHandler(job.data);
   });
 
   console.log("[worker] started");
