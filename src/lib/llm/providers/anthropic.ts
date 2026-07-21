@@ -12,6 +12,8 @@ export interface CompleteAnthropicParams<T> {
   system: string;
   prompt: string;
   schema: ZodType<T>;
+  /** Optional output-token cap; defaults to 1024 (backward-compat with triage callers). */
+  maxOutputTokens?: number;
 }
 
 export async function completeAnthropic<T>(params: CompleteAnthropicParams<T>): Promise<T> {
@@ -19,7 +21,7 @@ export async function completeAnthropic<T>(params: CompleteAnthropicParams<T>): 
   const client = new Anthropic({ apiKey: params.apiKey, timeout: 30_000, maxRetries: 0 });
   const message = await client.messages.parse({
     model: params.model,
-    max_tokens: 1024,
+    max_tokens: params.maxOutputTokens ?? 1024,
     system: params.system,
     messages: [{ role: "user", content: params.prompt }],
     output_config: { format: zodOutputFormat(params.schema) },
