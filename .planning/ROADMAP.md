@@ -100,8 +100,8 @@
 2. For an open ticket, AIDA produces a drafted reply grounded in retrieved KB/past tickets with **inline citations** to sources.
 3. The draft requires explicit agent approval/edit before sending; nothing is sent to a customer autonomously; the approval and final send are audited.
 4. When retrieval finds nothing relevant, the draft says so rather than hallucinating a source.
-**Plans:** 7 plans (3 waves)
-- [ ] 05-01-PLAN.md — RAG data foundation: KbArticle/KbChunk models + vector(768) + KbEmbeddingStatus + widen AuditActionType + scopedDb allowlist (Wave 1)
+**Plans:** 1/7 plans executed
+- [x] 05-01-PLAN.md — RAG data foundation: KbArticle/KbChunk models + vector(768) + KbEmbeddingStatus + widen AuditActionType + scopedDb allowlist (Wave 1)
 - [ ] 05-02-PLAN.md — Embedding port: src/lib/rag settings/embed/providers (OpenAI+Ollama, 768-dim) + Test Connection + unit tests (Wave 1)
 - [ ] 05-03-PLAN.md — KB chunking + createKbArticle + kb-embed-article pg-boss job + queue registration + integration test (Wave 2)
 - [ ] 05-04-PLAN.md — Retrieval (raw-SQL KNN) + grounded draft engine + maxOutputTokens + generateDraftReply + groundedness/injection test (Wave 2)

@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-last_updated: "2026-07-18T15:30:00Z"
-last_activity: 2026-07-18 -- Phase 5 planned (7 plans, 3 waves) -- ready for /gsd:execute-phase 5
+status: executing
+last_updated: "2026-07-21T15:48:47.512Z"
+last_activity: 2026-07-21 -- Phase 5 execution: 05-01 (schema foundation) complete
 progress:
   total_phases: 7
   completed_phases: 4
-  total_plans: 33
-  completed_plans: 33
-  percent: 100
+  total_plans: 40
+  completed_plans: 34
+  percent: 85
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 5
-Plan: 7 plans created (05-01 … 05-07, 3 waves) — not yet executed
-Status: Phase 5 PLANNED (2026-07-18) — research done (05-RESEARCH.md), 7 plans across 3 waves, plan-checker pass (0 blockers; 2 warnings fixed via targeted revision), AIDA-15/16 coverage verified — next `/gsd:execute-phase 5`
-Last activity: 2026-07-18 -- Phase 5 planning complete (research → plan → verify → revise)
+Plan: 05-01 complete (schema foundation); 6 plans remaining (05-02 … 05-07, 3 waves)
+Status: Phase 5 EXECUTING (2026-07-21) — 05-01 done (KbArticle/KbChunk/vector(768)/AuditActionType widen + scopedDb/recordAuditEvent), next Wave 1 plan is 05-02 (embedding port), Wave 2 (05-03/05-04) still depends on both
+Last activity: 2026-07-21 -- 05-01 executed (parallel executor agent)
 
-Progress: [██████████] 100% (33/33 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04)
+Progress: [█████████░] 85% (34/40 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 1/7 phase 05)
 
 ## Accumulated Context
 
@@ -147,6 +147,9 @@ Progress: [██████████] 100% (33/33 plans complete — 8/8 ph
 - (04-03) AIDA-14/AIDA-19/AIDA-20 intentionally NOT marked complete in REQUIREMENTS.md yet — this plan ships the triage engine, injection defense, and the `recordAuditEvent()` write path, but the `ai-triage` pg-boss job wiring (enqueue-after-`createTicket()` hook, worker registration) is 04-05's job. Mirrors the established 02-08/03-01/04-01/04-02 precedent for requirements split across multiple plans.
 - (04-05) `ai-triage` on-demand pg-boss queue registered identically in both `src/lib/worker/index.ts` and `src/lib/queue/boss-client.ts`'s `createBoss()` (retryLimit 2, retryBackoff true, retryDelayMax 300 — byte-identical to `email-outbound-send`'s options so whichever process creates the queue first, the other's `createQueue` call is a no-op). `src/lib/worker/jobs/ai-triage.ts`'s `aiTriageHandler` re-checks the `aiEnabled` Setting before ever calling `runTriage()` — a second kill-switch layer beneath `create-ticket.ts`'s enqueue-time check, closing the race where AI is toggled off between enqueue and job pickup (D-20).
 - (04-05) `createTicket()`'s `db.$transaction(...)` result is now captured into `const result` (previously returned directly) so a post-commit block can run the `aiEnabled` check + `boss.send("ai-triage", ...)` strictly AFTER the Prisma transaction commits (D-07) — the transaction body itself is unchanged. Because this is the single ticket-creation entrypoint, all three call sites (agent "New Ticket", email ingest, public intake) get auto-triage for free, with zero duplication.
+- (05-01) `KbArticle`/`KbChunk` models added (org-scoped, `KbEmbeddingStatus` enum); `KbChunk.embedding` is `Unsupported("vector(768)")` — Prisma-invisible, all vector I/O is raw SQL with an explicit `organizationId` filter (mirrors `searchTickets`). `AuditActionType` widened to include `DRAFT_GENERATED`/`DRAFT_APPROVED`; `recordAuditEvent()`'s `actionType` union widened to match. No pgvector index (hnsw/ivfflat) added — v1 is brute-force KNN by design (05-RESEARCH.md Pitfall 2/Decision 4); a `-- NOTE:` comment in the migration documents the future re-index procedure and standing hand-review requirement.
+- (05-01) Adding `KbChunk` (an `Unsupported`-field model) to the schema changed Prisma's generated `$allModels` query-extension type: `create`/`upsert` are dropped from the per-model operation union it exposes, which broke `scopedDb`'s old one-handler-per-operation-name object literal (`TS2353`). Fixed by refactoring `scopedDb` to a single `$allOperations` hook that switches on the `operation` string instead of using operation names as object literal keys — same runtime organizationId-injection behavior, now type-stable against any future model with an `Unsupported` field. Any future scopedDb edit should extend the `$allOperations` switch, not reintroduce per-operation-name handlers.
+- (05-01) Migration `20260721154325_rag_kb` generated via the established disposable-container procedure (Docker Desktop was not running at session start — started manually, verified `docker info` before proceeding); hand-review again found the Pitfall-3 spurious `searchVector` DROP pair on `Message`/`Ticket` (5th confirmed recurrence across Phases 2-3-4-5) and removed it — re-verified via `psql \d` that both tsvector columns/GIN indexes survive.
 - (04-05) Worker-bundle hard stop re-verified: the Dockerfile's exact esbuild command now bundles `runTriage -> lib/llm -> {openai, @anthropic-ai/sdk, ollama}` into the worker for the first time (6.2MB `dist/worker-verify.mjs`, up from 03-04's pre-`lib/llm` 4.6MB baseline) — succeeded with zero `--external` changes needed for any of the three provider SDKs.
 - (04-05) AIDA-14 intentionally still NOT marked complete in REQUIREMENTS.md — its acceptance statement includes "an agent can override", which is 04-06's job (override Server Actions + ticket-page UI). The full automatic enqueue -> worker -> classify -> write path is otherwise live end-to-end as of this plan. Mirrors the established split-requirement precedent (02-08/03-01/04-01/04-02/04-03/04-04).
 - (04-06) Triage/audit backend (04-01…04-05) is now fully wired into the ticket-detail UI: `setTriageCategory`/`setTriageSentiment`/`setTriageLanguage` override Server Actions (plain field writes, no SLA recompute — only `changePriority` touches SLA); `TriageCategoryChip`/`TriageSentimentChip` presentational Badges + `TriageStatusChip` (Triaging…/Triage failed+Re-run/Re-run AI triage, calling 04-05's `rerunTriage`) mirroring `PriorityChip`/`DeliveryFailedChip`'s exact shapes; a read-only `AiActivitySection` (native `<details>`, no client JS) lists `AuditEvent` triage runs (provider/model/time/parsed result) below the thread, deliberately never rendering `AuditEvent.input` (D-13). Every triage UI piece is gated on `!== null`/`.length === 0` so a never-triaged ticket (AI off) shows zero triage chrome. **AIDA-14 and AIDA-19 are now both fully code-complete end-to-end and marked Validated in PROJECT.md / REQUIREMENTS.md.** Phase 4 (ai-foundation) is now 6/6 plans complete across all 5 waves.
@@ -284,7 +287,11 @@ Wave 4 (04-05) complete. **Phase 4 is now 5/6 plans complete.** Next: Wave 5 (04
 
 **Phase 5 planned (2026-07-18):** `/gsd:plan-phase 5` produced 7 plans across 3 waves (`.planning/phases/05-rag-drafted-replies/05-01-PLAN.md` … `05-07-PLAN.md`, plus `05-RESEARCH.md`). No CONTEXT.md — maintainer delegated design discretion; 8 locked decisions adopted from research recommendations (recorded in each plan): KB-only retrieval v1 (past-tickets → Phase 6), on-demand draft button only, fixed `vector(768)` across providers (OpenAI `dimensions: 768` truncation / Ollama nomic-embed-text native), NO ANN index in v1 (brute-force KNN via `$queryRaw` with explicit orgId — dodges the Pitfall-3 index-drop class), separate embedding provider for Anthropic-chat orgs (Anthropic has no embeddings API — verified against installed SDK), absolute human gate through the EXISTING messages POST route with DRAFT_GENERATED/DRAFT_APPROVED audit events, code-level no-hallucination gate (LLM call skipped on empty retrieval), token-only UI under the existing Knowledge Base sidebar stub. Wave structure: W1 = 05-01 (schema: KbArticle/KbChunk/vector(768)/AuditActionType widen) + 05-02 (embedding port `lib/rag`); W2 = 05-03 (chunker + createKbArticle + kb-embed-article pg-boss job) + 05-04 (KNN retrieval + grounded draft engine + maxOutputTokens threading + injection-fenced prompt + integration tests); W3 = 05-05 (Settings embedding config) + 05-06 (KB authoring pages) + 05-07 (DraftCard + citations + Composer insert + DRAFT_APPROVED audit). Plan-checker: 0 blockers, all 14 checked dimensions pass; 2 warnings + 1 info fixed via targeted revision (atomic `tx.$executeRaw` chunk swap in 05-03; Case B zero-result audit assertion in 05-04). Zero new npm dependencies. Commits: `22e9c8b` (research), `8f4ac31` (plans + ROADMAP), `971c30f` (revisions).
 
-**Next action:** `/gsd:execute-phase 5` (after `/clear` for a fresh context window).
+**Phase 5 execution — 05-01 complete (2026-07-21, Wave 1, no deps):** Schema/type foundation for RAG: `KbArticle`/`KbChunk` models (`KbEmbeddingStatus` enum, `KbChunk.embedding Unsupported("vector(768)")`), `AuditActionType` widened (`DRAFT_GENERATED`/`DRAFT_APPROVED`), `scopedDb` `DOMAIN_MODELS` extended, `recordAuditEvent()` actionType union widened. Migration `20260721154325_rag_kb` hand-reviewed (Pitfall 3 searchVector-DROP recurrence removed, no vector index per Decision 4) and verified against a fresh disposable `pgvector/pgvector:pg16` container. One type-level deviation: `scopedDb`'s per-operation `$allModels` hooks refactored to a single `$allOperations` hook (KbChunk's Unsupported field broke the old per-operation-name object literal typecheck) — see Key Decisions. `pnpm exec tsc --noEmit` and `biome check` both clean. Commits: `b713c76` (Task 1), `9557136` (Task 2). SUMMARY: `.planning/phases/05-rag-drafted-replies/05-01-SUMMARY.md`.
+
+Phase 5 is now 1/7 plans complete. Next: 05-02 (embedding port, `lib/rag`, remaining Wave 1 plan), then Wave 2 (05-03/05-04, both depend on 05-01+05-02).
+
+**Next action:** `/gsd:execute-phase 5` continues with 05-02 (and any other unstarted Wave 1/2/3 plans per their `depends_on`).
 
 ---
-*Last updated: 2026-07-18 — Phase 4 (AI Foundation) formally CLOSED: verify-work + design-check + sign-off complete, E2E harness hardened against the next-dev compile race. Next: Phase 5 planning.*
+*Last updated: 2026-07-21 — Phase 5 (rag-drafted-replies) executing: 05-01 (schema foundation) complete, 1/7 plans done.*
