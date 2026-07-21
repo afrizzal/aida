@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-21T22:59:20Z"
-last_activity: 2026-07-21 -- Wave 2 complete (05-03, 05-04 executed in parallel, merged to master)
+last_updated: "2026-07-22T06:35:00+07:00"
+last_activity: 2026-07-22 -- Wave 3 plan 05-05 complete (Settings embedding provider)
 progress:
   total_phases: 7
   completed_phases: 4
   total_plans: 40
-  completed_plans: 37
-  percent: 93
+  completed_plans: 38
+  percent: 95
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 5
-Plan: Wave 1 (05-01, 05-02) + Wave 2 (05-03, 05-04) complete; 3 plans remaining (05-05 … 05-07, wave 3)
-Status: Phase 5 EXECUTING (2026-07-21) — Wave 2 done (05-03: KB chunker + createKbArticle write path + kb-embed-article worker job; 05-04: retrieval + grounded-drafting core — retrieveRelevantChunks, generateDraftReply, groundedness gate, generalized fenceContent, maxOutputTokens LLM-port plumbing). Wave 3 next: 05-05 (Settings embedding provider), 05-06 (KB authoring UI), 05-07 (ticket draft UI + human gate)
-Last activity: 2026-07-21 -- Wave 2 (05-03, 05-04) executed in parallel (isolated worktrees), merged to master
+Plan: Wave 1 (05-01, 05-02) + Wave 2 (05-03, 05-04) complete; 05-05 complete (Wave 3, parallel); 05-06/05-07 in flight (wave 3)
+Status: Phase 5 EXECUTING (2026-07-22) — Wave 3 plan 05-05 done (Settings -> AI Features "Embedding Provider" card: openai/ollama provider+model+credential independent of chat, Test Connection, "Re-embed all KB articles" action wired to enqueueReembed). 05-06 (KB authoring UI) and 05-07 (ticket draft UI + human gate) executing in parallel worktrees.
+Last activity: 2026-07-22 -- 05-05 (Settings embedding provider) executed in an isolated worktree (parallel with 05-06/05-07)
 
-Progress: [█████████░] 93% (37/40 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 4/7 phase 05)
+Progress: [█████████░] 95% (38/40 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 5/7 phase 05)
 
 ## Accumulated Context
 
@@ -162,6 +162,7 @@ Progress: [█████████░] 93% (37/40 plans complete — 8/8 pha
 - (05-03) `src/lib/rag/chunk-markdown.ts`'s `chunkMarkdown()` ships the Pattern-3 heading chunker exactly as researched: walks `remark-parse`'s AST, slices the ORIGINAL markdown string at each H1/H2 `position.start.offset`/`end.offset` (never re-serializes), sub-splits any section over `CHUNK_CHAR_BUDGET = 1800` chars on blank-line boundaries while preserving `headingPath`. Added `@types/mdast` as an explicit devDependency — Pitfall 6 recurred a 5th time (bare `mdast` is a transitive-only type package under pnpm's strict linking, unresolvable for a direct `import type ... from "mdast"` without this, mirroring the `@types/hast`/`@types/html-to-text` precedent).
 - (05-03) `src/lib/kb/create-article.ts` (`createKbArticle`/`updateKbArticle`/`enqueueReembed`) is now the ONE KB write path (mirrors `createTicket`'s discipline) — renders `bodyHtml` via the existing `renderMarkdown()` authority, sets `embeddingStatus: "PENDING"`, and enqueues `kb-embed-article` strictly post-commit (never inside a transaction). `uniqueSlug()` uses a `findFirst`-then-`-2`/`-3`-suffix loop (scopedDb auto-scopes to `organizationId`), consistent with the project's established compound-unique-key pattern rather than a unique-constraint-violation retry.
 - (05-03) `src/lib/worker/jobs/kb-embed-article.ts`'s `kbEmbedArticleHandler` gates on `isEmbeddingConfigured(db)` ONLY — deliberately NOT the `aiEnabled` chat kill switch, since embedding is an independent capability from chat completion (per 05-02's Decision 5). Chunk swap is atomic: ONE `db.$transaction(async (tx) => {...})` where BOTH `tx.kbChunk.deleteMany` and every per-chunk `tx.$executeRaw ...::vector` INSERT run on the same `tx` connection (never `db`/bare `prisma` for these two steps) — a half-applied swap would otherwise leave stale-or-duplicate chunks. `KbChunk` row ids are app-generated via `randomBytes(16).toString("hex")` before the raw INSERT (mirrors the Attachment-id precedent) since raw SQL bypasses Prisma's client-side `@default(cuid())`. Proven end-to-end (`tests/integration/kb-embed.test.ts`, mocked OpenAI embed SDK boundary): 768-dim vectors, correct `organizationId` per row, and re-embed idempotency (old chunks deleted before new ones are inserted — no duplication on a second run). Commits: `176b9e3`, `9b72ee1`, `271ec0c`. SUMMARY: `.planning/phases/05-rag-drafted-replies/05-03-SUMMARY.md`. This plan's assigned worktree was found branched off BEFORE the 05-01/05-02 wave-1 merge landed on master — fast-forward merged (`git merge --ff-only master`, clean ancestor, zero risk) before any execution began, mirroring 03-05's stale-worktree precedent. AIDA-15 still NOT marked complete — 05-04 (retrieval/draft engine) and the KB authoring/settings UI (05-05/05-06) still owe the rest of the requirement's acceptance statement.
+- (05-05) Settings → AI Features gained a SECOND, fully independent provider card: `embedding-provider-form.tsx` (openai/ollama only, no anthropic — mirrors `llm-provider-form.tsx` exactly including the `key={provider}` 04-07 stale-options fix) + `embedding-test-connection-button.tsx` (4-state, real embed() probe) + `reembed-all-button.tsx`. Three new admin-gated Server Actions in `settings/actions.ts` (`saveEmbeddingSettings`/`testEmbeddingConnection`/`reembedAllKb`) mirror `saveLlmSettings`/`testLlmConnection`'s exact security contract (`requireOrgAdmin()` first, stored-key fallback, 200-char error slice). `reembedAllKb()` re-enqueues EVERY KB article unconditionally via 05-03's `enqueueReembed` (cross-model vectors are non-comparable, Pitfall 5) — `page.tsx` only renders the re-embed button once `isEmbeddingConfigured(db)` is true (avoids a guaranteed no-op before a provider is configured; the button's own component still independently disables at `articleCount === 0`). This plan's assigned worktree was ALSO found one wave behind master (missing all of 05-01…05-04) — fast-forward merged + fresh `pnpm install`/`prisma generate` bootstrap before any task work, same recurring stale-parallel-worktree pattern (03-05/05-04/05-03). Confirmed (6th recurrence) the CRLF-vs-LF `core.autocrlf=true` formatter drift first documented at 02-05/02-08 — fixed via `biome check --write` scoped ONLY to this plan's own touched files (mechanical, zero logic change), logged the repo-wide drift on untouched sibling files to `.planning/phases/05-rag-drafted-replies/deferred-items.md`. `tsc --noEmit`/`pnpm run build`/scoped `biome check` all clean. Commits: `ea3f6e0`, `28f248d`. SUMMARY: `.planning/phases/05-rag-drafted-replies/05-05-SUMMARY.md`. AIDA-15 still NOT marked complete — 05-06 (KB authoring UI) is the last plan needed before the full author/import → chunk → embed → retrieve → draft flow is operator-usable end-to-end.
 
 ### Open Todos
 
