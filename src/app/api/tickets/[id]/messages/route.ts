@@ -2,7 +2,9 @@ import { fileTypeFromBuffer } from "file-type";
 import { NextResponse } from "next/server";
 import { ALLOWED_MIME, MAX_BYTES } from "@/lib/attachments/constants";
 import { buildStorageKey, localFileStorage } from "@/lib/attachments/local-file-storage";
+import { recordAuditEvent } from "@/lib/audit/record-audit-event";
 import { getEmailSettings } from "@/lib/channels/email/settings";
+import { resolveActiveProvider } from "@/lib/llm/active-provider";
 import { renderMarkdown } from "@/lib/markdown/render";
 import { getBoss } from "@/lib/queue/boss-client";
 import { getScopedDb } from "@/lib/session";
@@ -38,6 +40,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   const mode = form.get("mode") === "internal" ? "internal" : "public";
   const body = (form.get("body") as string | null) ?? "";
+  const fromDraft = form.get("fromDraft") === "true";
   const files = form.getAll("file").filter((f): f is File => f instanceof File && f.size > 0);
 
   if (!body.trim() && files.length === 0) {
@@ -121,6 +124,36 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (shouldQueue) {
     const boss = await getBoss();
     await boss.send("email-outbound-send", { messageId });
+  }
+
+  // AIDA-16 human-approval-gate closure: only a draft-originated PUBLIC send records the
+  // approval audit (internal notes and manually-typed replies never set fromDraft, so their
+  // behavior is byte-identical to before this plan). Best-effort and non-blocking -- an audit
+  // failure must never prevent the send response from reaching the agent.
+  if (fromDraft && mode === "public") {
+    try {
+      let provider = "";
+      let model = "";
+      try {
+        const active = await resolveActiveProvider(db);
+        provider = active.provider;
+        model = active.model;
+      } catch {
+        // Provider config gone/never configured -- still record the approval, just without
+        // a resolved provider/model.
+      }
+      await recordAuditEvent(db, {
+        actionType: "DRAFT_APPROVED",
+        ticketId,
+        messageId,
+        provider,
+        model,
+        input: "draft approved and sent by agent", // fixed non-sensitive marker -- never customer/ticket text
+        output: JSON.stringify({ approved: true, messageId }),
+      });
+    } catch {
+      // Never block the send response on an audit-write failure.
+    }
   }
 
   return NextResponse.json({ ok: true });

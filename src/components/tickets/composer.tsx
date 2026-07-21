@@ -2,7 +2,7 @@
 
 import { Lock, Paperclip } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { type ChangeEvent, useRef, useState } from "react";
+import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AttachmentChip, formatBytes } from "@/components/tickets/attachment-chip";
 import { type ComposerMode, ComposerToggle } from "@/components/tickets/composer-toggle";
@@ -13,18 +13,38 @@ import { cn } from "@/lib/utils";
 
 interface ComposerProps {
   ticketId: string;
+  /** Draft markdown to load into the body (AIDA-16 — set by TicketReplyArea's Insert action). */
+  insertedText?: string | null;
+  /** Called once insertedText has been consumed (loaded into body) so the parent can clear it. */
+  onInsertedConsumed?: () => void;
 }
 
-export function Composer({ ticketId }: ComposerProps) {
+export function Composer({ ticketId, insertedText, onInsertedConsumed }: ComposerProps) {
   const router = useRouter();
   const [mode, setMode] = useState<ComposerMode>("public");
   const [body, setBody] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
+  // True only when the current body originated from an inserted AI draft (AIDA-16) — used to
+  // stamp the outgoing send with a `fromDraft` flag so the messages route can record the
+  // DRAFT_APPROVED audit event. Never set for a manually-typed reply.
+  const [fromDraft, setFromDraft] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isInternal = mode === "internal";
+
+  // A draft is always a customer-facing reply — loading one switches mode to "public" (even if
+  // the agent happened to be on the Internal Note toggle) and marks the send as draft-originated.
+  useEffect(() => {
+    if (insertedText != null) {
+      setBody(insertedText);
+      setFromDraft(true);
+      setMode("public");
+      onInsertedConsumed?.();
+    }
+    // biome-ignore lint/correctness/useExhaustiveDependencies: only insertedText should re-trigger this effect; onInsertedConsumed is a one-shot ack callback, not reactive state
+  }, [insertedText]);
 
   // Client-side pre-check only (UX convenience) — the server always re-validates size
   // and does real byte-sniffed MIME detection via `file-type` (never trust this).
@@ -56,6 +76,7 @@ export function Composer({ ticketId }: ComposerProps) {
     const form = new FormData();
     form.set("mode", mode);
     form.set("body", body);
+    if (fromDraft && mode === "public") form.set("fromDraft", "true");
     for (const file of files) form.append("file", file);
 
     try {
@@ -64,6 +85,7 @@ export function Composer({ ticketId }: ComposerProps) {
 
       setBody("");
       setFiles([]);
+      setFromDraft(false);
       router.refresh();
     } catch {
       toast.error(
