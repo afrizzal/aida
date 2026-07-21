@@ -111,6 +111,8 @@ model organization {
   attachments            Attachment[]
   emailIngestFailures    EmailIngestFailure[]
   auditEvents            AuditEvent[]
+  kbArticles  KbArticle[]
+  kbChunks    KbChunk[]
 }
 
 model member {
@@ -235,6 +237,14 @@ enum TriageStatus {
 
 enum AuditActionType {
   TRIAGE
+  DRAFT_GENERATED
+  DRAFT_APPROVED
+}
+
+enum KbEmbeddingStatus {
+  PENDING
+  COMPLETED
+  FAILED
 }
 
 model Ticket {
@@ -450,4 +460,44 @@ model RateLimitHit {
   createdAt DateTime @default(now())
 
   @@index([scope, ipHash, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Domain models (Phase 5 — RAG knowledge base / drafted replies)
+// ---------------------------------------------------------------------------
+
+model KbArticle {
+  id               String            @id @default(cuid())
+  organizationId   String
+  title            String
+  slug             String
+  bodyMarkdown     String
+  bodyHtml         String
+  embeddingStatus  KbEmbeddingStatus @default(PENDING)
+  embeddingModel   String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  organization     organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  chunks           KbChunk[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+}
+
+model KbChunk {
+  id               String       @id @default(cuid())
+  organizationId   String
+  articleId        String
+  position         Int
+  headingPath      String?
+  content          String
+  embeddingModel   String
+  createdAt        DateTime     @default(now())
+  organization     organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  article          KbArticle    @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  embedding Unsupported("vector(768)")
+
+  @@index([organizationId])
+  @@index([articleId])
 }
