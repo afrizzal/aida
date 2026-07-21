@@ -11,6 +11,8 @@ export interface CompleteOpenAiParams<T> {
   prompt: string;
   schema: ZodType<T>;
   schemaName: string;
+  /** Optional output-token cap; applied only when provided (no default cap for OpenAI). */
+  maxOutputTokens?: number;
 }
 
 export async function completeOpenAi<T>(params: CompleteOpenAiParams<T>): Promise<T> {
@@ -23,6 +25,7 @@ export async function completeOpenAi<T>(params: CompleteOpenAiParams<T>): Promis
       { role: "user", content: params.prompt },
     ],
     response_format: zodResponseFormat(params.schema, params.schemaName),
+    ...(params.maxOutputTokens ? { max_completion_tokens: params.maxOutputTokens } : {}),
   });
   const parsed = completion.choices[0]?.message.parsed;
   if (!parsed) throw new Error("openai: structured output parse failed");

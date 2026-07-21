@@ -17,6 +17,8 @@ export interface CompleteOllamaParams<T> {
   system: string;
   prompt: string;
   schema: z.ZodType<T>;
+  /** Optional output-token cap; applied only when provided (no default cap for Ollama). */
+  maxOutputTokens?: number;
 }
 
 export async function completeOllama<T>(params: CompleteOllamaParams<T>): Promise<T> {
@@ -28,7 +30,10 @@ export async function completeOllama<T>(params: CompleteOllamaParams<T>): Promis
       { role: "user", content: params.prompt },
     ],
     format: z.toJSONSchema(params.schema),
-    options: { temperature: 0 }, // lower temperature = more reliable schema compliance
+    options: {
+      temperature: 0, // lower temperature = more reliable schema compliance
+      ...(params.maxOutputTokens ? { num_predict: params.maxOutputTokens } : {}),
+    },
   });
   // Defense-in-depth re-validation — the constrained decoder is vendor-claimed compliant, but we
   // never trust an external process's output without re-validating it against our own schema.

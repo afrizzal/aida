@@ -24,6 +24,7 @@ export async function complete<T>(
     system: params.system,
     prompt: redactedPrompt,
     schema: params.schema,
+    maxOutputTokens: params.maxOutputTokens,
   };
 
   let output: T;

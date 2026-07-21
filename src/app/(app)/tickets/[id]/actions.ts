@@ -9,6 +9,8 @@ import type {
   TriageSentiment,
 } from "@/generated/prisma/client";
 import { getBoss } from "@/lib/queue/boss-client";
+import type { GenerateDraftResult } from "@/lib/rag/generate-draft";
+import { generateDraftReply as runGenerateDraft } from "@/lib/rag/generate-draft";
 import { getScopedDb } from "@/lib/session";
 import { computeDueTimestamps, getSlaTargets } from "@/lib/tickets/sla";
 
@@ -124,6 +126,25 @@ export async function rerunTriage(ticketId: string): Promise<{ ok: boolean }> {
 
   revalidatePath(`/tickets/${ticketId}`);
   return { ok: true };
+}
+
+/**
+ * Generates a grounded, cited draft reply for a ticket (AIDA-16). Any agent may draft — this is
+ * advisory copilot output only, gated by the human-approval send flow (no requireOrgAdmin).
+ * Returns `{ ok: false }` on any error (e.g. no embedding provider configured) rather than
+ * throwing, so the UI can show a soft failure state instead of crashing.
+ */
+export async function generateDraftReply(
+  ticketId: string,
+): Promise<{ ok: boolean; draft?: GenerateDraftResult }> {
+  const { orgId } = await getScopedDb();
+
+  try {
+    const draft = await runGenerateDraft(orgId, ticketId);
+    return { ok: true, draft };
+  } catch {
+    return { ok: false };
+  }
 }
 
 /**

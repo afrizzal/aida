@@ -15,6 +15,12 @@ export interface CompleteParams<T> {
   prompt: string;
   schema: ZodType<T>;
   schemaName: string;
+  /**
+   * Optional output-token cap. Anthropic defaults to 1024 when omitted (backward-compat with
+   * triage callers, which pass nothing); OpenAI/Ollama apply it only when provided. RAG drafts
+   * (Phase 5) pass a higher value to avoid truncating multi-paragraph replies (Pitfall 3).
+   */
+  maxOutputTokens?: number;
 }
 
 export interface CompleteResult<T> {
