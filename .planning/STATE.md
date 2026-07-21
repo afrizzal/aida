@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-21T15:48:47.512Z"
-last_activity: 2026-07-21 -- Phase 5 execution: Wave 1 (05-01, 05-02) complete
+last_updated: "2026-07-21T22:59:20Z"
+last_activity: 2026-07-21 -- Wave 2 (05-03) executed (parallel executor agent; 05-04 in parallel)
 progress:
   total_phases: 7
   completed_phases: 4
   total_plans: 40
-  completed_plans: 35
-  percent: 88
+  completed_plans: 36
+  percent: 90
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 5
-Plan: Wave 1 complete (05-01, 05-02); 5 plans remaining (05-03 … 05-07, waves 2-3)
-Status: Phase 5 EXECUTING (2026-07-21) — Wave 1 done (KbArticle/KbChunk/vector(768) schema + embedding port src/lib/rag), next Wave 2 plans are 05-03 (KB chunking/embed job) + 05-04 (retrieval/draft engine)
-Last activity: 2026-07-21 -- Wave 1 executed (parallel executor agents)
+Plan: Wave 1 complete (05-01, 05-02); 05-03 complete (this plan); 05-04 executing in parallel; 3 plans remaining (05-05 … 05-07, wave 3)
+Status: Phase 5 EXECUTING (2026-07-21) — Wave 2 plan 05-03 (KB chunker + createKbArticle write path + kb-embed-article worker job) complete; 05-04 (retrieval/draft engine) executing concurrently in a sibling worktree
+Last activity: 2026-07-21 -- Wave 2 plan 05-03 executed (parallel executor agent)
 
-Progress: [█████████░] 88% (35/40 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 2/7 phase 05)
+Progress: [█████████░] 90% (36/40 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 3/7 phase 05)
 
 ## Accumulated Context
 
@@ -155,6 +155,9 @@ Progress: [█████████░] 88% (35/40 plans complete — 8/8 pha
 - (04-05) AIDA-14 intentionally still NOT marked complete in REQUIREMENTS.md — its acceptance statement includes "an agent can override", which is 04-06's job (override Server Actions + ticket-page UI). The full automatic enqueue -> worker -> classify -> write path is otherwise live end-to-end as of this plan. Mirrors the established split-requirement precedent (02-08/03-01/04-01/04-02/04-03/04-04).
 - (04-06) Triage/audit backend (04-01…04-05) is now fully wired into the ticket-detail UI: `setTriageCategory`/`setTriageSentiment`/`setTriageLanguage` override Server Actions (plain field writes, no SLA recompute — only `changePriority` touches SLA); `TriageCategoryChip`/`TriageSentimentChip` presentational Badges + `TriageStatusChip` (Triaging…/Triage failed+Re-run/Re-run AI triage, calling 04-05's `rerunTriage`) mirroring `PriorityChip`/`DeliveryFailedChip`'s exact shapes; a read-only `AiActivitySection` (native `<details>`, no client JS) lists `AuditEvent` triage runs (provider/model/time/parsed result) below the thread, deliberately never rendering `AuditEvent.input` (D-13). Every triage UI piece is gated on `!== null`/`.length === 0` so a never-triaged ticket (AI off) shows zero triage chrome. **AIDA-14 and AIDA-19 are now both fully code-complete end-to-end and marked Validated in PROJECT.md / REQUIREMENTS.md.** Phase 4 (ai-foundation) is now 6/6 plans complete across all 5 waves.
 - (04-07, gap closure) Phase 4 UAT (2026-07-16, `04-UAT.md`) found one gap: switching LLM provider in Settings → AI Features left the Model select EMPTY (trigger showed the "Select a model" placeholder, Save blocked by zod validation) instead of auto-resetting to the new provider's first catalog entry per 04-04's D-01. Root cause fully diagnosed in `.planning/debug/model-select-clears-on-provider.md`: an upstream `@radix-ui/react-select@2.3.1` bug (SelectBubbleInput, radix-ui/primitives #3135/#3381/#3693) — the hidden native `<select>` form-bridge syncs the new controlled value against the OLD provider's still-registered `<option>`s (they update one commit later), so `select.value` becomes `""` per HTML spec and a dispatched change event clobbers `field.onChange` with `""`. Fix (`llm-provider-form.tsx`): `key={provider}` on the Model `<Select>` — remounts the whole Select subtree in the same commit `handleProviderChange` sets the new value, taking Radix's own proven-safe initial-mount path (no stale options exist to race against). `tests/e2e/phase4-ai.spec.ts` T2/T10's explicit-model-pick workarounds reverted to assert the auto-reset directly in both switch directions (`toContainText` catalog[0], no `data-placeholder`, `"Select a model"` renders zero times after Save) — the regression is now locked in by E2E, not worked around. Full spec verified green 11/11 (a first run showed T7/T8 failing — unrelated timing flake in the Re-run-triage recovery test, confirmed by an immediate clean re-run at 11/11 matching `04-UAT.md`'s prior recorded T7/T8 `pass` results). Both touched files (`llm-provider-form.tsx`, `phase4-ai.spec.ts`) also carried pre-existing biome format/import-order drift unrelated to this plan's diff — fixed via `biome check --write` (mechanical only, zero logic change) since the plan's own verify gate requires biome-clean on these exact files. **Phase 4 (ai-foundation) is now 7/7 plans complete across all 6 waves — the last recorded UAT gap is closed; `04-UAT.md` test 2 is ready for re-verification at phase close-out.**
+- (05-03) `src/lib/rag/chunk-markdown.ts`'s `chunkMarkdown()` ships the Pattern-3 heading chunker exactly as researched: walks `remark-parse`'s AST, slices the ORIGINAL markdown string at each H1/H2 `position.start.offset`/`end.offset` (never re-serializes), sub-splits any section over `CHUNK_CHAR_BUDGET = 1800` chars on blank-line boundaries while preserving `headingPath`. Added `@types/mdast` as an explicit devDependency — Pitfall 6 recurred a 5th time (bare `mdast` is a transitive-only type package under pnpm's strict linking, unresolvable for a direct `import type ... from "mdast"` without this, mirroring the `@types/hast`/`@types/html-to-text` precedent).
+- (05-03) `src/lib/kb/create-article.ts` (`createKbArticle`/`updateKbArticle`/`enqueueReembed`) is now the ONE KB write path (mirrors `createTicket`'s discipline) — renders `bodyHtml` via the existing `renderMarkdown()` authority, sets `embeddingStatus: "PENDING"`, and enqueues `kb-embed-article` strictly post-commit (never inside a transaction). `uniqueSlug()` uses a `findFirst`-then-`-2`/`-3`-suffix loop (scopedDb auto-scopes to `organizationId`), consistent with the project's established compound-unique-key pattern rather than a unique-constraint-violation retry.
+- (05-03) `src/lib/worker/jobs/kb-embed-article.ts`'s `kbEmbedArticleHandler` gates on `isEmbeddingConfigured(db)` ONLY — deliberately NOT the `aiEnabled` chat kill switch, since embedding is an independent capability from chat completion (per 05-02's Decision 5). Chunk swap is atomic: ONE `db.$transaction(async (tx) => {...})` where BOTH `tx.kbChunk.deleteMany` and every per-chunk `tx.$executeRaw ...::vector` INSERT run on the same `tx` connection (never `db`/bare `prisma` for these two steps) — a half-applied swap would otherwise leave stale-or-duplicate chunks. `KbChunk` row ids are app-generated via `randomBytes(16).toString("hex")` before the raw INSERT (mirrors the Attachment-id precedent) since raw SQL bypasses Prisma's client-side `@default(cuid())`. Proven end-to-end (`tests/integration/kb-embed.test.ts`, mocked OpenAI embed SDK boundary): 768-dim vectors, correct `organizationId` per row, and re-embed idempotency (old chunks deleted before new ones are inserted — no duplication on a second run). Commits: `176b9e3`, `9b72ee1`, `271ec0c`. SUMMARY: `.planning/phases/05-rag-drafted-replies/05-03-SUMMARY.md`. This plan's assigned worktree was found branched off BEFORE the 05-01/05-02 wave-1 merge landed on master — fast-forward merged (`git merge --ff-only master`, clean ancestor, zero risk) before any execution began, mirroring 03-05's stale-worktree precedent. AIDA-15 still NOT marked complete — 05-04 (retrieval/draft engine) and the KB authoring/settings UI (05-05/05-06) still owe the rest of the requirement's acceptance statement.
 
 ### Open Todos
 
@@ -292,7 +295,13 @@ Wave 4 (04-05) complete. **Phase 4 is now 5/6 plans complete.** Next: Wave 5 (04
 
 Phase 5 is now 1/7 plans complete. Next: 05-02 (embedding port, `lib/rag`, remaining Wave 1 plan), then Wave 2 (05-03/05-04, both depend on 05-01+05-02).
 
-**Next action:** `/gsd:execute-phase 5` continues with 05-02 (and any other unstarted Wave 1/2/3 plans per their `depends_on`).
+**Phase 5 execution — 05-02 complete (2026-07-21, Wave 1, depends_on 05-01):** Embedding port `src/lib/rag/` shipped (see Key Decisions above for full detail) — `embed(db, texts)`, independent-but-chat-fallback embedding Settings, `toVectorLiteral`, `testEmbeddingConnection`. Commits: `b0b8ca7`, `b8e6666`. SUMMARY: `.planning/phases/05-rag-drafted-replies/05-02-SUMMARY.md`.
+
+Wave 1 (05-01, 05-02) complete. Phase 5 is now 2/7 plans complete — merged to master (`c9fb39a`). Next: Wave 2 — 05-03 (chunker + createKbArticle + kb-embed-article worker job) and 05-04 (retrieval + draft engine), both run in parallel executor worktrees.
+
+**Phase 5 execution — 05-03 complete (2026-07-21, Wave 2, depends_on 05-01+05-02, run in parallel with 05-04):** Heading-based Markdown chunker + KB write path + embed worker job (see Key Decisions above for full detail) — `chunkMarkdown()` (remark AST position-offset slicing, exact-substring fidelity), `createKbArticle`/`updateKbArticle`/`enqueueReembed` (the ONE KB write path, post-commit enqueue), `kb-embed-article` pg-boss job (batched `embed()` call + atomic `tx.$transaction` chunk swap via raw-SQL `::vector` INSERT, gated on `isEmbeddingConfigured` not `aiEnabled`). Queue registered with identical retry options in both `worker/index.ts` and `queue/boss-client.ts`. `pnpm exec tsc --noEmit`/`biome check` clean; unit 65/65; integration 23/23 (9 files, Testcontainers Postgres + Node 22, includes the new `kb-embed.test.ts` proving 768-dim vectors + re-embed idempotency). Commits: `176b9e3` (Task 1, TDD), `9b72ee1` (Task 2), `271ec0c` (Task 3). SUMMARY: `.planning/phases/05-rag-drafted-replies/05-03-SUMMARY.md`. Ran in parallel with 05-04 (retrieval/draft engine) in a sibling worktree — no shared files. AIDA-15 still NOT marked Validated — 05-04's retrieval + the KB authoring/settings UI (05-05/05-06) still owe the rest of the requirement's acceptance statement.
+
+**Next action:** `/gsd:execute-phase 5` — once 05-04 (parallel sibling plan) also reports complete, Wave 2 is done and Wave 3 (05-05 Settings embedding config, 05-06 KB authoring pages, 05-07 DraftCard/citations/Composer insert) can begin.
 
 ---
-*Last updated: 2026-07-21 — Phase 5 (rag-drafted-replies) executing: 05-01 (schema foundation) complete, 1/7 plans done.*
+*Last updated: 2026-07-21 — Phase 5 (rag-drafted-replies) executing: 05-01/05-02 (Wave 1) complete, 05-03 (Wave 2, this plan) complete — 3/7 plans done. 05-04 executing concurrently in a sibling worktree.*

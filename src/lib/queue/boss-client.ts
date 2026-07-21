@@ -33,6 +33,15 @@ async function createBoss(): Promise<PgBoss> {
     retryDelayMax: 300,
   });
 
+  // KB article embedding: on-demand, enqueued after createKbArticle()/updateKbArticle() commit
+  // (and by a future re-embed-all admin action). Same retry shape as ai-triage/
+  // email-outbound-send — mirrors src/lib/worker/index.ts's kb-embed-article createQueue.
+  await boss.createQueue("kb-embed-article", {
+    retryLimit: 2,
+    retryBackoff: true,
+    retryDelayMax: 300,
+  });
+
   return boss;
 }
 
