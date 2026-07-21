@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 last_updated: "2026-07-21T15:48:47.512Z"
-last_activity: 2026-07-21 -- Phase 5 execution: 05-01 (schema foundation) complete
+last_activity: 2026-07-21 -- Phase 5 execution: Wave 1 (05-01, 05-02) complete
 progress:
   total_phases: 7
   completed_phases: 4
   total_plans: 40
-  completed_plans: 34
-  percent: 85
+  completed_plans: 35
+  percent: 88
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 5
-Plan: 05-01 complete (schema foundation); 6 plans remaining (05-02 … 05-07, 3 waves)
-Status: Phase 5 EXECUTING (2026-07-21) — 05-01 done (KbArticle/KbChunk/vector(768)/AuditActionType widen + scopedDb/recordAuditEvent), next Wave 1 plan is 05-02 (embedding port), Wave 2 (05-03/05-04) still depends on both
-Last activity: 2026-07-21 -- 05-01 executed (parallel executor agent)
+Plan: Wave 1 complete (05-01, 05-02); 5 plans remaining (05-03 … 05-07, waves 2-3)
+Status: Phase 5 EXECUTING (2026-07-21) — Wave 1 done (KbArticle/KbChunk/vector(768) schema + embedding port src/lib/rag), next Wave 2 plans are 05-03 (KB chunking/embed job) + 05-04 (retrieval/draft engine)
+Last activity: 2026-07-21 -- Wave 1 executed (parallel executor agents)
 
-Progress: [█████████░] 85% (34/40 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 1/7 phase 05)
+Progress: [█████████░] 88% (35/40 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 2/7 phase 05)
 
 ## Accumulated Context
 
