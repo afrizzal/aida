@@ -11,7 +11,7 @@ import type { scopedDb } from "../scoped-db";
 export type AuditDb = Pick<ReturnType<typeof scopedDb>, "auditEvent">;
 
 export interface RecordAuditEventParams {
-  actionType: "TRIAGE"; // widen as Phase 5/6 add DRAFT_GENERATED/DRAFT_APPROVED/INSIGHT_RUN
+  actionType: "TRIAGE" | "DRAFT_GENERATED" | "DRAFT_APPROVED"; // INSIGHT_RUN added in Phase 6
   ticketId?: string | null;
   messageId?: string | null;
   provider: string;

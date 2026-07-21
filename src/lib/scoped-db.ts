@@ -5,6 +5,12 @@ import { prisma } from "./db";
 // TicketTag (join table, scoped via parent Ticket nested writes) and RateLimitHit (not tenant-scoped) are
 // intentionally EXCLUDED too — see 02-RESEARCH.md.
 // Append new org-scoped models here as future phases add them.
+//
+// KbChunk.embedding is an `Unsupported("vector(768)")` field, invisible to Prisma's
+// create/update hooks below — scopedDb still auto-injects organizationId correctly into
+// every OTHER field for KbArticle/KbChunk. All vector I/O (insert/read/similarity search)
+// is done via raw SQL with an explicit organizationId filter, mirroring the searchTickets
+// FTS precedent (scopedDb does not intercept $queryRaw).
 export const DOMAIN_MODELS = [
   "Setting",
   "Ticket",
@@ -18,6 +24,8 @@ export const DOMAIN_MODELS = [
   "TicketCounter",
   "EmailIngestFailure",
   "AuditEvent",
+  "KbArticle",
+  "KbChunk",
 ] as const;
 
 const isDomain = (model?: string): boolean =>
@@ -34,73 +42,40 @@ const isDomain = (model?: string): boolean =>
  *
  * @param orgId - Non-empty organization ID string (from session.activeOrganizationId)
  */
+const WHERE_SCOPED_OPERATIONS = new Set([
+  "findMany",
+  "findFirst",
+  "count",
+  "update",
+  "updateMany",
+  "upsert",
+  "delete",
+  "deleteMany",
+]);
+
 export function scopedDb(orgId: string) {
   if (!orgId) throw new Error("scopedDb requires a non-empty organizationId");
 
   return prisma.$extends({
     query: {
       $allModels: {
-        async findMany({ model, args, query }) {
+        // Single $allOperations hook (rather than one handler per operation name) because
+        // KbChunk's Unsupported("vector(768)") field makes Prisma drop `create`/`upsert` from
+        // $allModels' generated per-model operation union — enumerating those operation names
+        // as object literal keys then fails to typecheck. $allOperations sidesteps that; all
+        // vector I/O for KbChunk is raw SQL anyway, so this hook only needs to handle the
+        // organizationId injection for every OTHER field, same as before.
+        // biome-ignore lint/suspicious/noExplicitAny: Prisma's $allOperations args/query types don't narrow to domain model shapes
+        async $allOperations({ model, operation, args, query }: { model?: string; operation: string; args: any; query: (args: any) => Promise<any> }) {
           if (isDomain(model)) {
-            // biome-ignore lint/suspicious/noExplicitAny: $allModels args union doesn't narrow to domain model types
-            (args as any).where = { ...(args as any).where, organizationId: orgId };
-          }
-          return query(args);
-        },
-        async findFirst({ model, args, query }) {
-          if (isDomain(model)) {
-            // biome-ignore lint/suspicious/noExplicitAny: $allModels args union doesn't narrow to domain model types
-            (args as any).where = { ...(args as any).where, organizationId: orgId };
-          }
-          return query(args);
-        },
-        async count({ model, args, query }) {
-          if (isDomain(model)) {
-            // biome-ignore lint/suspicious/noExplicitAny: $allModels args union doesn't narrow to domain model types
-            (args as any).where = { ...(args as any).where, organizationId: orgId };
-          }
-          return query(args);
-        },
-        async create({ model, args, query }) {
-          if (isDomain(model)) {
-            // biome-ignore lint/suspicious/noExplicitAny: $allModels args union doesn't narrow to domain model types
-            (args as any).data = { ...(args as any).data, organizationId: orgId };
-          }
-          return query(args);
-        },
-        async update({ model, args, query }) {
-          if (isDomain(model)) {
-            // biome-ignore lint/suspicious/noExplicitAny: $allModels args union doesn't narrow to domain model types
-            (args as any).where = { ...(args as any).where, organizationId: orgId };
-          }
-          return query(args);
-        },
-        async updateMany({ model, args, query }) {
-          if (isDomain(model)) {
-            // biome-ignore lint/suspicious/noExplicitAny: $allModels args union doesn't narrow to domain model types
-            (args as any).where = { ...(args as any).where, organizationId: orgId };
-          }
-          return query(args);
-        },
-        async upsert({ model, args, query }) {
-          if (isDomain(model)) {
-            // biome-ignore lint/suspicious/noExplicitAny: $allModels args union doesn't narrow to domain model types
-            (args as any).where = { ...(args as any).where, organizationId: orgId };
-            (args as any).create = { ...(args as any).create, organizationId: orgId };
-          }
-          return query(args);
-        },
-        async delete({ model, args, query }) {
-          if (isDomain(model)) {
-            // biome-ignore lint/suspicious/noExplicitAny: $allModels args union doesn't narrow to domain model types
-            (args as any).where = { ...(args as any).where, organizationId: orgId };
-          }
-          return query(args);
-        },
-        async deleteMany({ model, args, query }) {
-          if (isDomain(model)) {
-            // biome-ignore lint/suspicious/noExplicitAny: $allModels args union doesn't narrow to domain model types
-            (args as any).where = { ...(args as any).where, organizationId: orgId };
+            if (operation === "create") {
+              args.data = { ...args.data, organizationId: orgId };
+            } else if (operation === "upsert") {
+              args.where = { ...args.where, organizationId: orgId };
+              args.create = { ...args.create, organizationId: orgId };
+            } else if (WHERE_SCOPED_OPERATIONS.has(operation)) {
+              args.where = { ...args.where, organizationId: orgId };
+            }
           }
           return query(args);
         },
