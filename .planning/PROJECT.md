@@ -41,6 +41,7 @@ Launch beachhead is **customer support**, but the ticketing core is built generi
 - **AIDA-13** Model-agnostic LLM layer (OpenAI/Anthropic/Ollama), AI toggle, encrypted keys — Validated in Phase 4: ai-foundation
 - **AIDA-20** Untrusted-input & PII safeguards (prompt-injection defense, secret redaction, no egress beyond configured LLM) — Validated in Phase 4: ai-foundation
 - **AIDA-16** RAG drafted reply with citations behind a human-approval gate — Validated in Phase 5: rag-drafted-replies (05-04 retrieval/grounded-draft engine + 05-07 draft card/citations/Insert-then-Send gate/DRAFT_APPROVED audit)
+- **AIDA-15** Knowledge base: author/import + chunk + embed (pgvector) — Validated in Phase 5: rag-drafted-replies (05-01 schema + 05-02 embedding port + 05-03 chunker/write-path/embed job + 05-05 embedding provider settings + 05-06 KB authoring UI)
 
 ### Active
 
@@ -50,7 +51,6 @@ Launch beachhead is **customer support**, but the ticketing core is built generi
 - [ ] **AIDA-12** Settings (branding, SLA policies, channels, AI config) — SLA policies/tags/custom-fields shipped in Phase 2; branding/channels/AI config land in Phases 4/7
 
 **AI**
-- [ ] **AIDA-15** Knowledge base: author/import + chunk + embed (pgvector)
 - [ ] **AIDA-17** AIDA Insight: recurring-issue clustering, KB-gap detection, volume drivers, SLA/CSAT insight
 
 **Self-host & DX**
