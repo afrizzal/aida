@@ -1,18 +1,43 @@
 import { Sparkles } from "lucide-react";
+import type { AuditActionType } from "@/generated/prisma/client";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 
 export interface AiActivityEvent {
   id: string;
+  actionType: AuditActionType;
   provider: string;
   model: string;
   createdAt: Date | string;
   output: string;
 }
 
-/** Defensive parse of the AuditEvent's redacted output — never throws on malformed JSON. */
-function formatResult(output: string): string {
+/** Human-readable label per AuditActionType — falls back to "AI" for any future action type. */
+const ACTION_LABELS: Record<AuditActionType, string> = {
+  TRIAGE: "Triage",
+  DRAFT_GENERATED: "Draft generated",
+  DRAFT_APPROVED: "Draft approved",
+};
+
+/**
+ * Defensive parse of the AuditEvent's redacted output — never throws on malformed JSON.
+ * Each actionType has its own output shape (triage's category/priority/sentiment/language vs.
+ * a draft's grounded/citations vs. a plain approval marker), so the actionType selects how to
+ * summarize it.
+ */
+function formatResult(actionType: AuditActionType, output: string): string {
   try {
-    const r = JSON.parse(output) as {
+    const parsed: unknown = JSON.parse(output);
+    if (actionType === "DRAFT_GENERATED") {
+      const r = parsed as { grounded?: boolean; citations?: unknown[] };
+      if (r.grounded === false) return "Not grounded";
+      const count = Array.isArray(r.citations) ? r.citations.length : 0;
+      return `Grounded · ${count} citation${count === 1 ? "" : "s"}`;
+    }
+    if (actionType === "DRAFT_APPROVED") {
+      const r = parsed as { approved?: boolean };
+      return r.approved ? "Approved" : "—";
+    }
+    const r = parsed as {
       category?: string;
       priority?: string;
       sentiment?: string;
@@ -42,12 +67,14 @@ export function AiActivitySection({ events }: { events: AiActivityEvent[] }) {
       <div className="mt-2 space-y-1.5">
         {events.map((event) => (
           <div key={event.id} className="flex flex-wrap items-center gap-1.5">
-            <span className="font-medium text-foreground">Triage</span>
+            <span className="font-medium text-foreground">
+              {ACTION_LABELS[event.actionType] ?? "AI"}
+            </span>
             <span>
               {event.provider} · {event.model}
             </span>
             <span>{formatRelativeTime(event.createdAt)}</span>
-            <span>{formatResult(event.output)}</span>
+            <span>{formatResult(event.actionType, event.output)}</span>
           </div>
         ))}
       </div>

@@ -154,6 +154,7 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
         <AiActivitySection
           events={auditEvents.map((event) => ({
             id: event.id,
+            actionType: event.actionType,
             provider: event.provider,
             model: event.model,
             createdAt: event.createdAt,
