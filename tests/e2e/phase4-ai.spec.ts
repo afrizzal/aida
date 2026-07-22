@@ -181,8 +181,14 @@ test("T2 provider form: dropdowns, provider-specific fields, reset-on-switch, sa
 }) => {
   await page.goto("/settings");
 
+  // 05-05 added a second, independently-configured "Embedding Provider" card to this same page
+  // (Decision 5) that shares the exact same "Provider"/"Model"/"Base URL"/"API key" labels — every
+  // locator below is scoped to the "AI Provider" (chat/completion) card specifically so it never
+  // collides with the Embedding Provider card's identically-labeled fields.
+  const llmCard = page.locator("form").filter({ hasText: "AI Provider" });
+
   // Provider dropdown lists all three providers
-  const providerSelect = page.getByLabel("Provider");
+  const providerSelect = llmCard.getByLabel("Provider");
   await providerSelect.click();
   for (const name of ["OpenAI", "Anthropic", "Ollama"]) {
     await expect(page.getByRole("option", { name })).toBeVisible();
@@ -190,24 +196,24 @@ test("T2 provider form: dropdowns, provider-specific fields, reset-on-switch, sa
   await page.getByRole("option", { name: "OpenAI" }).click();
 
   // OpenAI: curated model catalog + Custom… + API key field, no base URL
-  const modelSelect = page.getByLabel("Model");
+  const modelSelect = llmCard.getByLabel("Model");
   await expect(modelSelect).toContainText("gpt-5.4-mini");
-  await expect(page.getByLabel("API key")).toBeVisible();
-  await expect(page.getByLabel("Base URL")).toHaveCount(0);
+  await expect(llmCard.getByLabel("API key")).toBeVisible();
+  await expect(llmCard.getByLabel("Base URL")).toHaveCount(0);
 
   await modelSelect.click();
   await expect(page.getByRole("option", { name: "gpt-5.5" })).toBeVisible();
   await page.getByRole("option", { name: "Custom…" }).click();
-  await expect(page.getByLabel("Custom model ID")).toBeVisible();
+  await expect(llmCard.getByLabel("Custom model ID")).toBeVisible();
 
   // Switching provider swaps the catalog + provider-specific fields, and auto-resets
   // the model to the new catalog's first entry (04-04 D-01; gap fix 04-07 keys the
   // Model Select by provider to dodge the Radix SelectBubbleInput stale-options race).
   await providerSelect.click();
   await page.getByRole("option", { name: "Ollama" }).click();
-  await expect(page.getByLabel("Custom model ID")).toHaveCount(0);
-  await expect(page.getByLabel("API key")).toHaveCount(0);
-  await expect(page.getByLabel("Base URL")).toBeVisible();
+  await expect(llmCard.getByLabel("Custom model ID")).toHaveCount(0);
+  await expect(llmCard.getByLabel("API key")).toHaveCount(0);
+  await expect(llmCard.getByLabel("Base URL")).toBeVisible();
 
   // Auto-reset: trigger shows MODEL_CATALOG.ollama[0], never the placeholder.
   await expect(modelSelect).toContainText("llama3.1");
@@ -221,8 +227,8 @@ test("T2 provider form: dropdowns, provider-specific fields, reset-on-switch, sa
   await page.keyboard.press("Escape");
 
   // Save Ollama pointed at the stub
-  await page.getByLabel("Base URL").fill(stub.url);
-  await page.getByRole("button", { name: "Save AI provider" }).click();
+  await llmCard.getByLabel("Base URL").fill(stub.url);
+  await llmCard.getByRole("button", { name: "Save AI provider" }).click();
   await expect(page.getByText("AI provider settings saved.")).toBeVisible();
   await expect(page.getByText("Select a model")).toHaveCount(0);
 
@@ -236,9 +242,9 @@ test("T2 provider form: dropdowns, provider-specific fields, reset-on-switch, sa
 
   // Round-trips on reload
   await page.reload();
-  await expect(page.getByLabel("Provider")).toContainText("Ollama");
-  await expect(page.getByLabel("Model")).toContainText("llama3.1");
-  await expect(page.getByLabel("Base URL")).toHaveValue(stub.url);
+  await expect(llmCard.getByLabel("Provider")).toContainText("Ollama");
+  await expect(llmCard.getByLabel("Model")).toContainText("llama3.1");
+  await expect(llmCard.getByLabel("Base URL")).toHaveValue(stub.url);
 });
 
 // ---------------------------------------------------------------------------
@@ -247,13 +253,17 @@ test("T2 provider form: dropdowns, provider-specific fields, reset-on-switch, sa
 test("T3 test connection: success against stub, failure against dead port", async ({ page }) => {
   await page.goto("/settings");
 
-  await page.getByRole("button", { name: "Test connection" }).click();
-  await expect(page.getByText("Connected successfully")).toBeVisible({ timeout: 15_000 });
+  // Scoped to the "AI Provider" (chat/completion) card — the Embedding Provider card (05-05)
+  // has its own identically-labeled "Test connection" button on the same page.
+  const llmCard = page.locator("form").filter({ hasText: "AI Provider" });
+
+  await llmCard.getByRole("button", { name: "Test connection" }).click();
+  await expect(llmCard.getByText("Connected successfully")).toBeVisible({ timeout: 15_000 });
 
   // Point at a dead port — must surface a failure state with a short error
-  await page.getByLabel("Base URL").fill("http://127.0.0.1:1");
-  await page.getByRole("button", { name: "Test connection" }).click();
-  await expect(page.getByText(/Connection failed:/)).toBeVisible({ timeout: 15_000 });
+  await llmCard.getByLabel("Base URL").fill("http://127.0.0.1:1");
+  await llmCard.getByRole("button", { name: "Test connection" }).click();
+  await expect(llmCard.getByText(/Connection failed:/)).toBeVisible({ timeout: 15_000 });
 });
 
 // ---------------------------------------------------------------------------
@@ -498,14 +508,18 @@ test("T10 blank API key on re-save keeps the stored encrypted key; key never ech
 }) => {
   await page.goto("/settings");
 
-  await page.getByLabel("Provider").click();
+  // Scoped to the "AI Provider" (chat/completion) card — the Embedding Provider card (05-05)
+  // has its own identically-labeled "Provider"/"Model"/"API key" fields on the same page.
+  const llmCard = page.locator("form").filter({ hasText: "AI Provider" });
+
+  await llmCard.getByLabel("Provider").click();
   await page.getByRole("option", { name: "OpenAI" }).click();
   // Provider switch auto-resets the model to MODEL_CATALOG.openai[0] — Save must
   // work with no manual re-pick (gap fix 04-07).
-  await expect(page.getByLabel("Model")).toContainText("gpt-5.4-mini");
-  await expect(page.getByLabel("Model")).not.toHaveAttribute("data-placeholder", /.*/);
-  await page.getByLabel("API key").fill(`sk-test-e2e-phase4-${ts}`);
-  await page.getByRole("button", { name: "Save AI provider" }).click();
+  await expect(llmCard.getByLabel("Model")).toContainText("gpt-5.4-mini");
+  await expect(llmCard.getByLabel("Model")).not.toHaveAttribute("data-placeholder", /.*/);
+  await llmCard.getByLabel("API key").fill(`sk-test-e2e-phase4-${ts}`);
+  await llmCard.getByRole("button", { name: "Save AI provider" }).click();
   await expect(page.getByText("AI provider settings saved.").first()).toBeVisible();
   await expect(page.getByText("Select a model")).toHaveCount(0);
 
@@ -520,11 +534,11 @@ test("T10 blank API key on re-save keeps the stored encrypted key; key never ech
 
   // Reload: the stored key is never round-tripped to the client
   await page.reload();
-  await expect(page.getByLabel("Provider")).toContainText("OpenAI");
-  await expect(page.getByLabel("API key")).toHaveValue("");
+  await expect(llmCard.getByLabel("Provider")).toContainText("OpenAI");
+  await expect(llmCard.getByLabel("API key")).toHaveValue("");
 
   // Re-save with the key field left blank — stored encrypted blob must stay identical
-  await page.getByRole("button", { name: "Save AI provider" }).click();
+  await llmCard.getByRole("button", { name: "Save AI provider" }).click();
   await expect(page.getByText("AI provider settings saved.").first()).toBeVisible();
 
   // Deterministic wait: the save round-trip completed (toast), now compare
