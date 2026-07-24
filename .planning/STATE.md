@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: "Phase 6 (aida-insight) EXECUTING — Wave 1 (06-01 data foundation) complete: InsightRun/TicketEmbedding/CsatResponse models + migration, scopedDb/recordAuditEvent widened, src/lib/insight/types.ts contract. Wave 2 (06-02/06-03/06-04/06-05, parallel) next. Phase 5 note: 3 items still pending human UAT (05-HUMAN-UAT.md)."
-last_updated: "2026-07-24T17:26:00.000Z"
-last_activity: 2026-07-24
+status: executing
+last_updated: "2026-07-24T17:48:42.000Z"
+last_activity: 2026-07-25
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 47
-  completed_plans: 41
-  percent: 87
+  completed_plans: 42
+  percent: 89
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 06 (aida-insight) — EXECUTING
-Plan: 1 of 7 complete (06-01 data foundation done; Wave 2 — 06-02 clustering math / 06-03 SQL aggregates / 06-04 KB-gap KNN + LLM prompts / 06-05 CSAT capture — next, all parallel)
-Status: Phase 6 (aida-insight) EXECUTING — Wave 1 (06-01) complete. Next: Wave 2 (06-02/06-03/06-04/06-05).
-Last activity: 2026-07-24 -- 06-01 (data foundation) executed: InsightRun/TicketEmbedding/CsatResponse models + insight_aida migration (searchVector spurious-DROP recurred 6th time, stripped), scopedDb DOMAIN_MODELS + recordAuditEvent widened, src/lib/insight/types.ts contract created.
+Plan: 2 of 7 complete (06-01 data foundation + 06-05 CSAT capture done; Wave 2 — 06-02 clustering math / 06-03 SQL aggregates / 06-04 KB-gap KNN + LLM prompts — remaining, parallel)
+Status: Phase 6 (aida-insight) EXECUTING — Wave 2 plan 06-05 (CSAT capture) complete; 06-02/06-03/06-04 still in flight in parallel worktrees.
+Last activity: 2026-07-25
 
-Progress: [█████████░] 87% (41/47 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 7/7 phase 05 + 1/7 phase 06)
+Progress: [█████████░] 89% (42/47 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 7/7 phase 05 + 2/7 phase 06)
 
 ## Accumulated Context
 
@@ -167,6 +167,7 @@ Progress: [█████████░] 87% (41/47 plans complete — 8/8 pha
 - (05-07) Ticket-page human-approval gate shipped, closing AIDA-16 end-to-end: `DraftCard`/`DraftCitationList` (token-only, grounded branch renders `whitespace-pre-wrap` markdown + `[N]` citations linked to `/kb/{articleId}`; ungrounded branch renders an explicit `--warning`-toned "no relevant sources" note with NO citations, still offering Insert/Discard) + `TicketReplyArea` client coordinator (Generate draft button gated on `db.kbArticle.count({ embeddingStatus: "COMPLETED" }) > 0`, Pitfall 9) + `Composer` gained optional `insertedText`/`onInsertedConsumed` props and a `fromDraft` flag threaded into the POST FormData (existing manual-reply path fully unaffected, both new props optional). Traced the full path manually: Generate (read-only Server Action) -> Insert (local React state only, zero network calls) -> human can edit -> explicit Send click -> the UNCHANGED `POST /api/tickets/[id]/messages` route -> `fromDraft && mode === "public"` records `DRAFT_APPROVED` (best-effort provider/model resolution + non-blocking try/catch around `recordAuditEvent` itself) — no code path sends a draft to a customer without an explicit human Send through the existing route. Internal notes and manually-typed replies never set `fromDraft`, so their behavior (and audit trail) is byte-identical to before this plan. **AIDA-16 is now fully code-complete end-to-end and marked Validated in PROJECT.md** (05-04's retrieval/grounded-draft engine + this plan's UI/gate/audit). This plan's worktree was ALSO found one wave behind master (missing all of 05-01…05-04) — same stale-parallel-worktree pattern as 03-05/05-03/05-04 — fast-forward merged before task work began; additionally this worktree had never been bootstrapped at all (no `node_modules`/`.env`/generated Prisma client) — `cp .env.example .env && pnpm install && pnpm exec prisma generate` per the 02-02 precedent, and verification commands must be run from the actual worktree path, not the shared main checkout (`cd`-ing to the main checkout silently no-ops tsc/build against the wrong tree — caught and corrected mid-session). Commits: `c3c44b8`, `a5ba1b2`, `6571536`. SUMMARY: `.planning/phases/05-rag-drafted-replies/05-07-SUMMARY.md`.
 - Wave 3's 05-05, 05-06, and 05-07 all ran in parallel isolated worktrees (no shared files) and merged to master sequentially, cleanly except for the expected doc-only STATE.md/ROADMAP.md conflicts (each plan marked complete side-by-side, resolved by hand). Phase 5 (rag-drafted-replies) is now 7/7 plans complete across all 3 waves — proceeding to phase-goal verification (gsd-verifier) before formal phase close-out.
 - (06-01) Phase 6 data foundation shipped: `InsightRunStatus` enum + `InsightRun`/`TicketEmbedding`/`CsatResponse` org-scoped models (`TicketEmbedding.embedding` is `Unsupported("vector(768)")`, mirrors `KbChunk`, no pgvector index at v1 scale — brute-force KNN only, avoids prisma/prisma#28414); `AuditActionType` widened with `INSIGHT_CLUSTER_LABELS`/`INSIGHT_SUMMARY`; `scopedDb` `DOMAIN_MODELS` now also includes the three new models (`groupBy`/`aggregate` and all vector raw-SQL still NOT auto-scoped — later plans must filter explicitly); `recordAuditEvent()`'s actionType union widened to match. Migration `20260724171144_insight_aida` generated via the established disposable-pgvector-container procedure; hand-review found the spurious `searchVector` DROP pair on `Message`/`Ticket` recurring for the 6th confirmed time (after 02-01/03-01/04-01/05-01/03-04) — stripped, then re-verified from a fresh container that all 7 migrations apply clean and both tsvector columns/GIN indexes survive. New `src/lib/insight/types.ts` (zero imports) is now the single persisted-shape contract (`InsightRunParams`/`StoredCluster`/`StoredKbGap`/`VolumeDrivers`/`SlaCsatSummary`/`StoredNarrative`/etc.) every Wave-2+ plan must import for `InsightRun`'s five `Json?` columns — never redefine these shapes ad hoc. Widening `AuditActionType` broke the pre-existing `ai-activity-section.tsx`'s exhaustive `ACTION_LABELS: Record<AuditActionType, string>` (Rule 1 fix: added the two new labels). AIDA-17 intentionally NOT marked complete yet — this plan is the DB/type foundation only; clustering/aggregates/KB-gap/orchestrator/UI (06-02…06-07) still owe the rest of the requirement's acceptance statement, mirroring the established split-requirement precedent (02-08/03-01/04-01/05-01 etc.). This plan's assigned worktree was ALSO found one wave behind master (missing all of Phase 6's planning docs) — fast-forward merged before any task work began, the same recurring stale-parallel-worktree pattern documented at 03-05/05-03/05-04/05-05/05-07; the worktree also had zero bootstrap (no `node_modules`/`.env`/generated Prisma client) — `cp .env.example .env && pnpm install && prisma generate` per the 02-02/05-07 precedent. `pnpm exec prisma validate`/`tsc --noEmit`/scoped `biome check` all clean.
+- (06-05) Public CSAT capture shipped: `POST /api/public/status/[token]/csat` mirrors the follow-up route's shape (bare `prisma` token lookup, `company_website` honeypot, new `"status-csat"` rate-limit scope, zod `score` int 1-5 + optional `comment`), gated on `ticket.status ∈ {RESOLVED, CLOSED}` (409 `not_eligible` otherwise), `prisma.csatResponse.upsert` keyed on `{ ticketId }` (one row per ticket, latest wins). `CsatForm` (1-5 `lucide-react` Star rating + optional `Textarea` comment, prefilled from any existing response) renders on `/status/[token]` only inside that same RESOLVED/CLOSED guard, right below the existing follow-up form. `pnpm exec tsc --noEmit`/`pnpm run build`/biome all clean. Commits: `f010929`, `67bc3b5`. SUMMARY: `.planning/phases/06-aida-insight/06-05-SUMMARY.md`. This plan's assigned worktree was ALSO found one wave behind master (missing all of Phase 6's planning docs + 06-01's schema/migration) — fast-forward merged before any task work began (the 8th recurrence of this stale-parallel-worktree class of issue, after 03-05/05-03/05-04/05-05/05-07/06-01); the worktree also had zero bootstrap (no `node_modules`/`.env`/generated Prisma client) — `cp .env.example .env && pnpm install && prisma generate` per the established precedent. AIDA-17 still NOT marked complete — clustering/aggregates/KB-gap/orchestrator/UI (06-02/06-03/06-04/06-06/06-07) still owe the rest of the requirement's acceptance statement.
 
 ### Open Todos
 
