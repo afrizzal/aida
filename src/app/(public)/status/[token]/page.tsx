@@ -5,6 +5,7 @@ import { ThreadMessage } from "@/components/tickets/thread-message";
 import { ThreadSystemEvent } from "@/components/tickets/thread-system-event";
 import { Button } from "@/components/ui/button";
 import { prisma } from "@/lib/db";
+import { CsatForm } from "./csat-form";
 import { FollowUpForm } from "./follow-up-form";
 
 // Always server-render: the thread must reflect the latest PUBLIC messages on every
@@ -27,6 +28,7 @@ export default async function StatusPage({ params }: StatusPageProps) {
     where: { statusToken: token },
     include: {
       contact: true,
+      csatResponse: true,
       messages: {
         where: { visibility: "PUBLIC" },
         include: { attachments: true, authorUser: true, authorContact: true },
@@ -99,6 +101,17 @@ export default async function StatusPage({ params }: StatusPageProps) {
       <div className="mt-6 border-t border-border pt-4">
         <FollowUpForm token={token} />
       </div>
+
+      {(ticket.status === "RESOLVED" || ticket.status === "CLOSED") && (
+        <div className="mt-6 border-t border-border pt-4">
+          <h2 className="mb-2 text-[14px] font-semibold">How did we do?</h2>
+          <CsatForm
+            token={token}
+            existingScore={ticket.csatResponse?.score ?? null}
+            existingComment={ticket.csatResponse?.comment ?? null}
+          />
+        </div>
+      )}
     </PublicPageShell>
   );
 }
