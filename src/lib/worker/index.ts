@@ -4,6 +4,7 @@ import { aiTriageHandler } from "./jobs/ai-triage";
 import { emailInboundPollHandler } from "./jobs/email-inbound-poll";
 import { emailOutboundSendHandler } from "./jobs/email-outbound-send";
 import { heartbeatHandler } from "./jobs/heartbeat";
+import { insightRunHandler } from "./jobs/insight-run";
 import { kbEmbedArticleHandler } from "./jobs/kb-embed-article";
 import { rateLimitCleanupHandler } from "./jobs/rate-limit-cleanup";
 import { slaFlagHandler } from "./jobs/sla-flag";
@@ -83,6 +84,17 @@ async function main() {
   });
   await boss.work("kb-embed-article", async ([job]: Job<{ articleId: string }>[]) => {
     await kbEmbedArticleHandler(job.data);
+  });
+
+  // AIDA Insight run: on-demand queue enqueued by the app's /insights Server Action — no schedule().
+  // Options mirror boss-client.ts's createQueue exactly so this createQueue is a no-op if the app made it first.
+  await boss.createQueue("insight-run", {
+    retryLimit: 2,
+    retryBackoff: true,
+    retryDelayMax: 300,
+  });
+  await boss.work("insight-run", async ([job]: Job<{ insightRunId: string }>[]) => {
+    await insightRunHandler(job.data);
   });
 
   console.log("[worker] started");

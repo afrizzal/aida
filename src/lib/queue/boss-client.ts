@@ -42,6 +42,14 @@ async function createBoss(): Promise<PgBoss> {
     retryDelayMax: 300,
   });
 
+  // AIDA Insight run: on-demand, enqueued by the /insights "Generate insights" Server Action.
+  // Same retry shape as the other on-demand queues — mirrors src/lib/worker/index.ts's insight-run createQueue.
+  await boss.createQueue("insight-run", {
+    retryLimit: 2,
+    retryBackoff: true,
+    retryDelayMax: 300,
+  });
+
   return boss;
 }
 
