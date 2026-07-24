@@ -56,9 +56,7 @@ export default async function InsightsPage({ searchParams }: InsightsPageProps) 
   return (
     <div className="flex flex-col gap-6 px-6 py-6">
       <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-[18px] font-semibold tracking-tight text-foreground">
-          AIDA Insight
-        </h1>
+        <h1 className="text-[18px] font-semibold tracking-tight text-foreground">AIDA Insight</h1>
         <PeriodTabs active={period} />
         <GenerateButton period={period} running={running} />
         <span className="ml-auto text-[13px] text-muted-foreground">
@@ -79,9 +77,7 @@ export default async function InsightsPage({ searchParams }: InsightsPageProps) 
           {/* Prisma type-erases Json columns to JsonValue — cast back to the shared contract
               (src/lib/insight/types.ts, Pitfall 5). Cards themselves handle the null (AI-off)
               and empty-array cases. */}
-          <RecurringIssuesCard
-            clusters={completed.clusters as unknown as StoredCluster[] | null}
-          />
+          <RecurringIssuesCard clusters={completed.clusters as unknown as StoredCluster[] | null} />
           <KbGapsCard gaps={completed.kbGaps as unknown as StoredKbGap[] | null} />
           <VolumeDriversCard data={completed.volumeDrivers as unknown as VolumeDrivers | null} />
           <SlaCsatCard
