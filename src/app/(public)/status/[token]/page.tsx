@@ -43,8 +43,8 @@ export default async function StatusPage({ params }: StatusPageProps) {
         <div className="space-y-4 text-center">
           <h1 className="text-[18px] font-semibold">We couldn't find that ticket</h1>
           <p className="text-[14px] text-muted-foreground">
-            This status link may be invalid or expired. If you need help, please submit a
-            new request.
+            This status link may be invalid or expired. If you need help, please submit a new
+            request.
           </p>
           <Button asChild className="w-full">
             <a href="/request">Submit a new request</a>

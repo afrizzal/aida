@@ -60,7 +60,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
   // explicit organizationId on create (no scopedDb/session on a public route).
   await prisma.csatResponse.upsert({
     where: { ticketId: ticket.id },
-    create: { organizationId: ticket.organizationId, ticketId: ticket.id, score, comment: comment ?? null },
+    create: {
+      organizationId: ticket.organizationId,
+      ticketId: ticket.id,
+      score,
+      comment: comment ?? null,
+    },
     update: { score, comment: comment ?? null },
   });
 
