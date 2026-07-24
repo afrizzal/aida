@@ -26,6 +26,9 @@ export const DOMAIN_MODELS = [
   "AuditEvent",
   "KbArticle",
   "KbChunk",
+  "InsightRun",
+  "TicketEmbedding",
+  "CsatResponse",
 ] as const;
 
 const isDomain = (model?: string): boolean =>
@@ -65,8 +68,19 @@ export function scopedDb(orgId: string) {
         // as object literal keys then fails to typecheck. $allOperations sidesteps that; all
         // vector I/O for KbChunk is raw SQL anyway, so this hook only needs to handle the
         // organizationId injection for every OTHER field, same as before.
-        // biome-ignore lint/suspicious/noExplicitAny: Prisma's $allOperations args/query types don't narrow to domain model shapes
-        async $allOperations({ model, operation, args, query }: { model?: string; operation: string; args: any; query: (args: any) => Promise<any> }) {
+        async $allOperations({
+          model,
+          operation,
+          args,
+          query,
+        }: {
+          model?: string;
+          operation: string;
+          // biome-ignore lint/suspicious/noExplicitAny: Prisma's $allOperations args/query types don't narrow to domain model shapes
+          args: any;
+          // biome-ignore lint/suspicious/noExplicitAny: Prisma's $allOperations args/query types don't narrow to domain model shapes
+          query: (args: any) => Promise<any>;
+        }) {
           if (isDomain(model)) {
             if (operation === "create") {
               args.data = { ...args.data, organizationId: orgId };
