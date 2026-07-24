@@ -113,6 +113,9 @@ model organization {
   auditEvents            AuditEvent[]
   kbArticles  KbArticle[]
   kbChunks    KbChunk[]
+  insightRuns      InsightRun[]
+  ticketEmbeddings TicketEmbedding[]
+  csatResponses    CsatResponse[]
 }
 
 model member {
@@ -239,6 +242,8 @@ enum AuditActionType {
   TRIAGE
   DRAFT_GENERATED
   DRAFT_APPROVED
+  INSIGHT_CLUSTER_LABELS
+  INSIGHT_SUMMARY
 }
 
 enum KbEmbeddingStatus {
@@ -277,6 +282,8 @@ model Ticket {
   messages          Message[]
   tags              TicketTag[]
   customFieldValues CustomFieldValue[]
+  ticketEmbeddings TicketEmbedding[]
+  csatResponse     CsatResponse?
 
   @@unique([organizationId, number])
   @@index([organizationId])
@@ -500,4 +507,70 @@ model KbChunk {
 
   @@index([organizationId])
   @@index([articleId])
+}
+
+// ---------------------------------------------------------------------------
+// Domain models (Phase 6 — AIDA Insight)
+// ---------------------------------------------------------------------------
+
+enum InsightRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+model InsightRun {
+  id             String            @id @default(cuid())
+  organizationId String
+  status         InsightRunStatus  @default(PENDING)
+  periodDays     Int
+  periodStart    DateTime
+  periodEnd      DateTime
+  params         Json
+  clusters       Json?
+  kbGaps         Json?
+  volumeDrivers  Json?
+  slaCsat        Json?
+  narrative      Json?
+  ticketCount    Int?
+  embeddingModel String?
+  provider       String?
+  model          String?
+  error          String?
+  createdAt      DateTime          @default(now())
+  completedAt    DateTime?
+  organization   organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, periodDays, status])
+  @@index([organizationId])
+}
+
+model TicketEmbedding {
+  id             String       @id @default(cuid())
+  organizationId String
+  ticketId       String
+  embeddingModel String
+  createdAt      DateTime     @default(now())
+  organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ticket         Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  embedding Unsupported("vector(768)")
+
+  @@unique([ticketId, embeddingModel])
+  @@index([organizationId])
+}
+
+model CsatResponse {
+  id             String       @id @default(cuid())
+  organizationId String
+  ticketId       String       @unique
+  score          Int
+  comment        String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ticket         Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
 }

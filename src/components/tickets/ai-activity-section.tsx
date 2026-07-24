@@ -16,6 +16,8 @@ const ACTION_LABELS: Record<AuditActionType, string> = {
   TRIAGE: "Triage",
   DRAFT_GENERATED: "Draft generated",
   DRAFT_APPROVED: "Draft approved",
+  INSIGHT_CLUSTER_LABELS: "Insight cluster labels",
+  INSIGHT_SUMMARY: "Insight summary",
 };
 
 /**
