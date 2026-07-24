@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: "Phase 6 (aida-insight) EXECUTING — Wave 1 + Wave 2 + Wave 3 all 6 plans merged to master (06-01 data foundation, 06-02 clustering math, 06-03 SQL aggregates, 06-04 KB-gap + LLM prompts, 06-05 CSAT capture, 06-06 insight-run orchestrator + pg-boss wiring). Next: Wave 4 (06-07 /insights UI). Phase 5 note: 3 items still pending human UAT (05-HUMAN-UAT.md)."
-last_updated: "2026-07-25T01:26:00.000Z"
-last_activity: 2026-07-25
+status: "Phase 6 (aida-insight) EXECUTION COMPLETE — 7/7 plans, 4/4 waves (06-07 /insights UI merged to master). AIDA-17 validated end-to-end. Next: phase-goal verification + human sign-off, then Phase 7 (launch-readiness) planning."
+last_updated: "2026-07-24T18:45:41.468Z"
+last_activity: 2026-07-24
 progress:
   total_phases: 7
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 47
-  completed_plans: 46
-  percent: 98
+  completed_plans: 47
+  percent: 100
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -26,12 +26,12 @@ progress:
 
 ## Current Position
 
-Phase: 06 (aida-insight) — EXECUTING
-Plan: 6 of 7 merged to master (06-01 data foundation, 06-02 clustering math, 06-03 SQL aggregates, 06-04 KB-gap + LLM prompts, 06-05 CSAT capture, 06-06 insight-run orchestrator + pg-boss wiring) — Wave 1, Wave 2, and Wave 3 fully complete
-Status: Phase 6 (aida-insight) EXECUTING — Wave 3 (06-06) merged. Next: Wave 4 (06-07 /insights UI).
-Last activity: 2026-07-25 -- 06-06 (insight-run orchestrator) executed: runInsight() composes clustering/labels/citations + KB-gap + volume-drivers + SLA/CSAT + narrative into one idempotent recompute; insight-run pg-boss job registered in both boss-client.ts and worker/index.ts; end-to-end integration test (reproducibility + AI-off) passing.
+Phase: 06 (aida-insight) — EXECUTION COMPLETE
+Plan: 7 of 7 merged to master (06-01 data foundation, 06-02 clustering math, 06-03 SQL aggregates, 06-04 KB-gap + LLM prompts, 06-05 CSAT capture, 06-06 insight-run orchestrator + pg-boss wiring, 06-07 /insights UI) — Wave 1, Wave 2, Wave 3, and Wave 4 fully complete
+Status: Phase 6 (aida-insight) EXECUTION COMPLETE. Next: phase-goal verification + human sign-off, then Phase 7 (launch-readiness) planning.
+Last activity: 2026-07-24 -- 06-07 (/insights UI) executed: period-tabbed page reads the latest COMPLETED InsightRun and renders 4 design-system cards (Recurring Issues, KB Gaps, Volume Drivers, SLA & CSAT), a guarded "Generate insights" Server Action enqueues the insight-run pg-boss job, and the sidebar gained an Insight nav item. AIDA-17 fully code-complete end-to-end.
 
-Progress: [██████████] 98% (46/47 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 7/7 phase 05 + 6/7 phase 06)
+Progress: [██████████] 100% (47/47 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 7/7 phase 05 + 7/7 phase 06)
 
 ## Accumulated Context
 
@@ -337,5 +337,10 @@ Phase 6 is now 1/7 plans complete. Next: Wave 2 (06-02 clustering math / 06-03 S
 
 Phase 6 is now 2/7 plans complete (06-03 done; 06-02/06-04/06-05 in flight in sibling parallel worktrees — see their own SUMMARYs once merged).
 
+**Phase 6 execution — 06-07 complete (2026-07-24, Wave 4, FINAL plan, depends_on 06-01+06-06):** The `/insights` UI shipped, closing out AIDA-17 end-to-end. `src/app/(app)/insights/actions.ts` (`generateInsightRun` — PENDING/RUNNING duplicate guard, `boss.send("insight-run", { insightRunId })`, no admin gate) + `page.tsx` (`force-dynamic`, period-clamped searchParam, latest/COMPLETED `InsightRun` reads, `EmptyState` halo when no run exists, Json-column casts per Pitfall 5) + `period-tabs.tsx`/`generate-button.tsx` (URL-searchParam pills + `useTransition`/`router.refresh`, no polling infra) + four token-only Server Component cards (`recurring-issues-card.tsx`, `kb-gaps-card.tsx`, `volume-drivers-card.tsx`, `sla-csat-card.tsx` — cited `/tickets/{id}`/`/kb/{id}` links, CSS/Tailwind `<div>` bar rows, no chart library, distinct AI-off-null vs empty-array messaging, SLA/CSAT numbers always sourced from the SQL aggregate never the narrative) + `src/components/sidebar.tsx` (`Lightbulb` "Insight" nav item). One Rule-3 deviation: added the explicit `organizationId` field to `generateInsightRun`'s `create()` call (the 06-RESEARCH.md verbatim snippet omitted it; Prisma's generated `InsightRunCreateInput` requires it at the type level despite scopedDb's runtime injection — matches every other create-call precedent in the codebase). This plan's worktree was ALSO found stale (pre-Phase-6) — fast-forward merged to master before task work began, same as 06-01/06-03/06-06. `pnpm exec tsc --noEmit`, `pnpm run build`, and `pnpm exec biome check` all clean; design-system self-check (§9) confirmed token-only (zero hex/oklch), explicit `text-[Npx]` (zero `text-lg`/`text-xl`), halo empty-state present, zero chart-library imports, `force-dynamic` present. Commits: `7fb00b1` (Task 1), `526d067` (Task 2). SUMMARY: `.planning/phases/06-aida-insight/06-07-SUMMARY.md`. **AIDA-17 now fully code-complete and marked Validated in PROJECT.md.**
+
+Wave 4 (06-07) complete — **Phase 6 (aida-insight) is now 7/7 plans complete across all 4 waves.** AIDA-17 fully code-complete end-to-end. Next: combined-result verification (typecheck/lint/unit/integration on the merged whole) and phase-goal check before formal phase close-out and Phase 7 (launch-readiness) planning.
+
 ---
 *Last updated: 2026-07-22 — Phase 5 (rag-drafted-replies) EXECUTION COMPLETE: all 7 plans across 3 waves done, merged to master. Proceeding to combined-result verification and phase-goal check.*
+*Last updated: 2026-07-24 — Phase 6 (aida-insight) EXECUTION COMPLETE: all 7 plans across 4 waves done, merged to master. AIDA-17 validated end-to-end. Proceeding to combined-result verification and phase-goal check before Phase 7 (launch-readiness) planning.*

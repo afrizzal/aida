@@ -12,7 +12,7 @@
 - [x] **Phase 3: Email Channel** — Inbound email → ticket threading + outbound SMTP replies (completed 2026-07-06)
 - [x] **Phase 4: AI Foundation** — Model-agnostic LLM layer + auto-triage + audit log + untrusted-input safeguards (completed 2026-07-18)
 - [x] **Phase 5: RAG & Drafted Replies** — Knowledge base + embeddings + citation-backed drafts behind a human-approval gate (completed 2026-07-22, 3 items pending human UAT — see 05-HUMAN-UAT.md)
-- [ ] **Phase 6: AIDA Insight** — AI-driven analytics (recurring issues, KB gaps, volume drivers, SLA/CSAT)
+- [x] **Phase 6: AIDA Insight** — AI-driven analytics (recurring issues, KB gaps, volume drivers, SLA/CSAT) (completed 2026-07-24)
 - [ ] **Phase 7: Launch Readiness** — Demo data, docs site, star-ready README, backups, security pass, public launch
 
 ---
@@ -117,14 +117,14 @@
 2. It flags knowledge-base gaps (frequent question themes with no good KB article).
 3. It surfaces top ticket-volume drivers over a period and an SLA/CSAT insight summary.
 4. Outputs cite the underlying tickets/data and are reproducible (not free-floating prose); compute runs as a pg-boss job, not blocking the UI.
-**Plans:** 6/7 plans executed
+**Plans:** 7/7 plans executed
 - [x] 06-01-PLAN.md — Schema foundation: InsightRun/TicketEmbedding/CsatResponse models + InsightRunStatus + widened AuditActionType + scopedDb allowlist + shared insight/types.ts contract (Wave 1)
 - [x] 06-02-PLAN.md — Deterministic leader-clustering math + redact-then-embed excerpts + raw-SQL ticket-embedding cache (Wave 2)
 - [x] 06-03-PLAN.md — SQL aggregates: volume drivers (category/tag/company + previous-period deltas) + SLA/CSAT summary (Wave 2)
 - [x] 06-04-PLAN.md — KB-gap KNN (centroid vs KbChunk) + schema-forced cluster-label & narrative prompt pairs (fenced, no-ID) (Wave 2)
 - [x] 06-05-PLAN.md — CSAT public capture: 1–5 rating + optional comment on the status page + upsert route (Wave 2)
 - [x] 06-06-PLAN.md — insight-run orchestrator + pg-boss job/queue wiring + reproducibility/AI-off integration test (Wave 3)
-- [ ] 06-07-PLAN.md — /insights UI: period tabs + guarded generate button + 4 design-system cards + sidebar nav (Wave 4)
+- [x] 06-07-PLAN.md — /insights UI: period tabs + guarded generate button + 4 design-system cards + sidebar nav (Wave 4)
 
 ### Phase 7: Launch Readiness
 **Timebox:** ~1.5 weeks · **Depends on:** Phases 1–6 · **Requirements:** AIDA-22, AIDA-23, AIDA-24
@@ -159,3 +159,4 @@
 
 ---
 *Last updated: 2026-07-24 — Phase 6 (AIDA Insight) planned via /gsd:plan-phase 6: 7 plans across 4 waves (schema foundation → deterministic clustering + SQL aggregates + KB-gap/prompt pairs + CSAT capture → insight-run orchestrator/job → /insights UI). Formula-level plans (leader-clustering math, pgvector KNN, raw-SQL aggregates, Zod schemas) carried verbatim from 06-RESEARCH.md. AIDA-17; binding AIDA-13/19/20.*
+*Last updated: 2026-07-24 — Phase 6 (AIDA Insight) EXECUTION COMPLETE: all 7 plans across 4 waves done (06-01 schema, 06-02 clustering math, 06-03 SQL aggregates, 06-04 KB-gap + prompts, 06-05 CSAT capture, 06-06 insight-run orchestrator, 06-07 /insights UI). AIDA-17 fully code-complete end-to-end. Phase checkbox checked; combined-suite verification + phase-goal check + human sign-off remain before Phase 7 begins.*

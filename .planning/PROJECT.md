@@ -42,6 +42,7 @@ Launch beachhead is **customer support**, but the ticketing core is built generi
 - **AIDA-20** Untrusted-input & PII safeguards (prompt-injection defense, secret redaction, no egress beyond configured LLM) — Validated in Phase 4: ai-foundation
 - **AIDA-16** RAG drafted reply with citations behind a human-approval gate — Validated in Phase 5: rag-drafted-replies (05-04 retrieval/grounded-draft engine + 05-07 draft card/citations/Insert-then-Send gate/DRAFT_APPROVED audit)
 - **AIDA-15** Knowledge base: author/import + chunk + embed (pgvector) — Validated in Phase 5: rag-drafted-replies (05-01 schema + 05-02 embedding port + 05-03 chunker/write-path/embed job + 05-05 embedding provider settings + 05-06 KB authoring UI)
+- **AIDA-17** AIDA Insight: recurring-issue clustering, KB-gap detection, volume drivers, SLA/CSAT insight — Validated in Phase 6: aida-insight (06-01 schema/types + 06-02 clustering math + 06-03 SQL aggregates + 06-04 KB-gap KNN/prompts + 06-05 CSAT capture + 06-06 insight-run orchestrator/pg-boss job + 06-07 /insights UI: period tabs, guarded generate button, 4 design-system cards, sidebar nav)
 
 ### Active
 
@@ -49,9 +50,6 @@ Launch beachhead is **customer support**, but the ticketing core is built generi
 
 **Auth & multi-tenant**
 - [ ] **AIDA-12** Settings (branding, SLA policies, channels, AI config) — SLA policies/tags/custom-fields shipped in Phase 2; branding/channels/AI config land in Phases 4/7
-
-**AI**
-- [ ] **AIDA-17** AIDA Insight: recurring-issue clustering, KB-gap detection, volume drivers, SLA/CSAT insight
 
 **Self-host & DX**
 - [ ] **AIDA-22** Seed/demo data + demo mode for the README
@@ -116,3 +114,4 @@ This document evolves at phase/milestone transitions (validated → move require
 ---
 *Last updated: 2026-07-18 — Phase 4 (ai-foundation) fully closed out (7/7 plans, 6/6 waves): 04-07 gap closure fixed the sole UAT gap (test 2, provider-switch model reset) — 04-UAT.md is now 10/10 pass, AIDA-13/AIDA-14/AIDA-19/AIDA-20 all validated end-to-end. Non-blocking human verification items (dark-mode visual pass, live-provider smoke test, network-egress capture) remain open per 04-VERIFICATION.md.*
 *Last updated: 2026-07-22 — Phase 5 (rag-drafted-replies) execution complete (7/7 plans, 3/3 waves): KbArticle/KbChunk/vector(768) schema, embedding port, chunker + write path + embed worker job, retrieval + grounded-draft engine, Settings embedding-provider config, KB authoring UI, and the ticket-page draft card + human-approval send gate. AIDA-15 and AIDA-16 both validated end-to-end (05-VERIFICATION.md: 4/4 ROADMAP success criteria confirmed at the source level, including a full data-flow trace of the human-approval gate and an executable-test-backed groundedness gate). Non-blocking human verification items (live browser walkthrough, live embedding Test Connection, DESIGN-SYSTEM §9 visual pass) remain open per 05-HUMAN-UAT.md.*
+*Last updated: 2026-07-24 — Phase 6 (aida-insight) execution complete (7/7 plans, 4/4 waves): InsightRun/TicketEmbedding/CsatResponse schema, deterministic leader-clustering + redact-then-embed excerpts, SQL volume-driver/SLA/CSAT aggregates, KB-gap KNN + schema-forced cluster-label/narrative prompts, public CSAT capture, the insight-run pg-boss orchestrator, and the /insights UI (period tabs, guarded generate button, 4 design-system cards, sidebar nav). AIDA-17 validated end-to-end. Combined-suite verification + phase-goal check + human sign-off remain before Phase 7 (launch-readiness) begins.*
