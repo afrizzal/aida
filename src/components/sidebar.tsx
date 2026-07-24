@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, Inbox, Settings2, Sparkles, Users } from "lucide-react";
+import { BookOpen, Inbox, Lightbulb, Settings2, Sparkles, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -19,6 +19,7 @@ const navItems = [
   { href: "/tickets", label: "Tickets", icon: Inbox },
   { href: "/contacts", label: "Contacts", icon: Users },
   { href: "/kb", label: "Knowledge Base", icon: BookOpen },
+  { href: "/insights", label: "Insight", icon: Lightbulb },
   { href: "/settings", label: "Settings", icon: Settings2 },
 ] as const;
 
