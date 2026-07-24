@@ -117,7 +117,14 @@
 2. It flags knowledge-base gaps (frequent question themes with no good KB article).
 3. It surfaces top ticket-volume drivers over a period and an SLA/CSAT insight summary.
 4. Outputs cite the underlying tickets/data and are reproducible (not free-floating prose); compute runs as a pg-boss job, not blocking the UI.
-**Plans:** TBD
+**Plans:** 7 plans across 4 waves
+- [ ] 06-01-PLAN.md — Schema foundation: InsightRun/TicketEmbedding/CsatResponse models + InsightRunStatus + widened AuditActionType + scopedDb allowlist + shared insight/types.ts contract (Wave 1)
+- [ ] 06-02-PLAN.md — Deterministic leader-clustering math + redact-then-embed excerpts + raw-SQL ticket-embedding cache (Wave 2)
+- [ ] 06-03-PLAN.md — SQL aggregates: volume drivers (category/tag/company + previous-period deltas) + SLA/CSAT summary (Wave 2)
+- [ ] 06-04-PLAN.md — KB-gap KNN (centroid vs KbChunk) + schema-forced cluster-label & narrative prompt pairs (fenced, no-ID) (Wave 2)
+- [ ] 06-05-PLAN.md — CSAT public capture: 1–5 rating + optional comment on the status page + upsert route (Wave 2)
+- [ ] 06-06-PLAN.md — insight-run orchestrator + pg-boss job/queue wiring + reproducibility/AI-off integration test (Wave 3)
+- [ ] 06-07-PLAN.md — /insights UI: period tabs + guarded generate button + 4 design-system cards + sidebar nav (Wave 4)
 
 ### Phase 7: Launch Readiness
 **Timebox:** ~1.5 weeks · **Depends on:** Phases 1–6 · **Requirements:** AIDA-22, AIDA-23, AIDA-24
@@ -151,4 +158,4 @@
 **Coverage: 23/23 MVP requirements mapped. No orphans.** (AIDA-18 deferred to backlog.)
 
 ---
-*Last updated: 2026-07-18 — Phase 5 (RAG & Drafted Replies) planned via /gsd:plan-phase 5: 7 plans across 3 waves (KB embedding pipeline + retrieval + grounded citation-backed drafts behind a human gate). Retrieval scope = KB-only for v1 (past-tickets deferred to Phase 6). AIDA-15/AIDA-16.*
+*Last updated: 2026-07-24 — Phase 6 (AIDA Insight) planned via /gsd:plan-phase 6: 7 plans across 4 waves (schema foundation → deterministic clustering + SQL aggregates + KB-gap/prompt pairs + CSAT capture → insight-run orchestrator/job → /insights UI). Formula-level plans (leader-clustering math, pgvector KNN, raw-SQL aggregates, Zod schemas) carried verbatim from 06-RESEARCH.md. AIDA-17; binding AIDA-13/19/20.*
