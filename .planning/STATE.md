@@ -27,9 +27,9 @@ progress:
 ## Current Position
 
 Phase: 6
-Plan: Not started
-Status: Phase 5 EXECUTION COMPLETE (2026-07-22) — Wave 3 done: 05-05 (Settings -> AI Features "Embedding Provider" card, independent of chat provider, Test Connection, "Re-embed all KB articles"); 05-06 (KB authoring pages: /kb list + /kb/new + /kb/[id], delegating to 05-03's createKbArticle/updateKbArticle); 05-07 (DraftCard + citations + Composer insert + human-approval send gate + DRAFT_APPROVED audit). All three ran in parallel isolated worktrees, merged to master sequentially with doc-only STATE.md/ROADMAP.md conflicts resolved by hand. Next: phase-goal verification (gsd-verifier).
-Last activity: 2026-07-22
+Plan: Planned — 7 plans in 4 waves (06-01 schema foundation → wave 2 parallel: 06-02 clustering math / 06-03 SQL aggregates / 06-04 KB-gap KNN + LLM prompts / 06-05 CSAT capture → 06-06 insight-run orchestrator + pg-boss wiring → 06-07 /insights UI). Plan-checker VERIFICATION PASSED, 0 blockers. Requirements coverage: AIDA-17 in all 7 plans.
+Status: Phase 6 PLANNED (2026-07-24) — 06-CONTEXT.md (user-delegated decisions incl. minimal CSAT capture on public status page), 06-RESEARCH.md (formula-level: deterministic leader clustering, gap threshold, raw-SQL aggregate + redact-before-embed safety findings), 7× 06-NN-PLAN.md committed. Phase 5 note: 3 items still pending human UAT (05-HUMAN-UAT.md). Next: /gsd:execute-phase 6.
+Last activity: 2026-07-24
 
 Progress: [██████████] 100% (40/40 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 7/7 phase 05)
 
