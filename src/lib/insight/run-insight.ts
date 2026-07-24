@@ -10,18 +10,18 @@ import { embeddingModelId, isEmbeddingConfigured, resolveEmbeddingProvider } fro
 import { scopedDb } from "../scoped-db";
 import { leaderCluster } from "./cluster";
 import {
-  CLUSTER_LABEL_SYSTEM_PROMPT,
-  ClusterLabelsResultSchema,
-  type ClusterLabelsResult,
   buildClusterLabelPrompt,
+  CLUSTER_LABEL_SYSTEM_PROMPT,
+  type ClusterLabelsResult,
+  ClusterLabelsResultSchema,
 } from "./cluster-label-prompt";
 import { buildTicketExcerpt } from "./excerpt";
 import { nearestKbChunk, scoreGap } from "./kb-gap";
 import {
-  INSIGHT_NARRATIVE_SYSTEM_PROMPT,
-  InsightNarrativeSchema,
-  type InsightNarrative,
   buildNarrativePrompt,
+  INSIGHT_NARRATIVE_SYSTEM_PROMPT,
+  type InsightNarrative,
+  InsightNarrativeSchema,
 } from "./narrative-prompt";
 import { computeSlaCsat } from "./sla-csat";
 import {
@@ -181,7 +181,12 @@ export async function runInsight(insightRunId: string): Promise<void> {
           coverage = scored.coverage;
           isGap = scored.isGap;
           nearestArticle = nearest
-            ? { articleId: nearest.articleId, title: nearest.title, slug: nearest.slug, score: 1 - nearest.distance }
+            ? {
+                articleId: nearest.articleId,
+                title: nearest.title,
+                slug: nearest.slug,
+                score: 1 - nearest.distance,
+              }
             : null;
         }
         if (isGap) {
