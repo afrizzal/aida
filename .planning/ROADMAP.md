@@ -118,7 +118,7 @@
 3. It surfaces top ticket-volume drivers over a period and an SLA/CSAT insight summary.
 4. Outputs cite the underlying tickets/data and are reproducible (not free-floating prose); compute runs as a pg-boss job, not blocking the UI.
 **Plans:** 7 plans across 4 waves
-- [ ] 06-01-PLAN.md — Schema foundation: InsightRun/TicketEmbedding/CsatResponse models + InsightRunStatus + widened AuditActionType + scopedDb allowlist + shared insight/types.ts contract (Wave 1)
+- [x] 06-01-PLAN.md — Schema foundation: InsightRun/TicketEmbedding/CsatResponse models + InsightRunStatus + widened AuditActionType + scopedDb allowlist + shared insight/types.ts contract (Wave 1)
 - [ ] 06-02-PLAN.md — Deterministic leader-clustering math + redact-then-embed excerpts + raw-SQL ticket-embedding cache (Wave 2)
 - [ ] 06-03-PLAN.md — SQL aggregates: volume drivers (category/tag/company + previous-period deltas) + SLA/CSAT summary (Wave 2)
 - [ ] 06-04-PLAN.md — KB-gap KNN (centroid vs KbChunk) + schema-forced cluster-label & narrative prompt pairs (fenced, no-ID) (Wave 2)
