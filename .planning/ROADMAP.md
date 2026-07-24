@@ -12,7 +12,7 @@
 - [x] **Phase 3: Email Channel** — Inbound email → ticket threading + outbound SMTP replies (completed 2026-07-06)
 - [x] **Phase 4: AI Foundation** — Model-agnostic LLM layer + auto-triage + audit log + untrusted-input safeguards (completed 2026-07-18)
 - [x] **Phase 5: RAG & Drafted Replies** — Knowledge base + embeddings + citation-backed drafts behind a human-approval gate (completed 2026-07-22, 3 items pending human UAT — see 05-HUMAN-UAT.md)
-- [x] **Phase 6: AIDA Insight** — AI-driven analytics (recurring issues, KB gaps, volume drivers, SLA/CSAT) (completed 2026-07-24)
+- [x] **Phase 6: AIDA Insight** — AI-driven analytics (recurring issues, KB gaps, volume drivers, SLA/CSAT) (completed 2026-07-24, 3 items pending human UAT — see 06-HUMAN-UAT.md)
 - [ ] **Phase 7: Launch Readiness** — Demo data, docs site, star-ready README, backups, security pass, public launch
 
 ---
