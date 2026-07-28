@@ -181,7 +181,7 @@ export const DEMO_TICKETS: DemoTicket[] = [
     firstResponseAfterHours: null,
     resolvedAfterHours: null,
     slaState: "on-track",
-    triage: null,
+    triage: { category: "TECHNICAL", sentiment: "NEGATIVE", language: "en", status: "COMPLETED" },
     replies: [],
   },
   {
