@@ -1,0 +1,51 @@
+name: Feature request
+description: Suggest an idea or improvement for AIDA
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem you are trying to solve
+      description: What's missing or awkward today? Who is affected?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What would you like to see happen?
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Ticketing
+        - Email channel
+        - AI / triage
+        - Knowledge base & drafts
+        - AIDA Insight
+        - Settings & admin
+        - Self-host / ops
+        - Docs
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: single-server
+    attributes:
+      label: Single-server acknowledgement
+      description: AIDA is deliberately single-server (Next.js + Postgres/pgvector + pg-boss, one docker compose).
+      options:
+        - label: This proposal does not require a new runtime service (e.g. Redis). If it does, I've explained why it's worth the added operational complexity in "Proposed solution" above.
+          required: true
