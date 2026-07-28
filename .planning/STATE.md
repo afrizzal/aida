@@ -1,10 +1,10 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
+milestone: v1.0.0
 milestone_name: milestone
-status: planning
-last_updated: "2026-07-24T19:09:56.638Z"
-last_activity: 2026-07-24
+status: executing
+last_updated: "2026-07-28T21:56:54.960Z"
+last_activity: 2026-07-28 -- Phase 07 execution started
 progress:
   total_phases: 7
   completed_phases: 6
@@ -26,10 +26,10 @@ progress:
 
 ## Current Position
 
-Phase: 7
-Plan: 12 plans across 6 waves — PLANNED, not started
-Status: Phase 7 (launch-readiness) PLANNED: 07-01..07-12 across 6 waves (W1 hygiene → W2 seed/branding/backup/CI/docs-scaffold → W3 demo-mode/visual-assets → W4 security pass → W5 README/docs-content → W6 launch close-out). Plan-checker PASSED (iteration 2; 07-10 rewaved after 07-09, 07-03 cut to name-only per D-16). Next: /gsd:execute-phase 7. Phase 6 human sign-off items folded into 07-09 (D-10).
-Last activity: 2026-07-28
+Phase: 07 (launch-readiness) — EXECUTING
+Plan: 1 of 12
+Status: Executing Phase 07
+Last activity: 2026-07-28 -- Phase 07 execution started
 
 Progress: [████████░░] 80% (47/59 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 7/7 phase 05 + 7/7 phase 06 + 0/12 phase 07)
 
@@ -178,10 +178,10 @@ Progress: [████████░░] 80% (47/59 plans complete — 8/8 pha
 - Phase 2 CLOSED (2026-07-05): verify-work 30/30 (`02-UAT.md`), ui-review 21/24 (`02-UI-REVIEW.md`, DESIGN-SYSTEM.md §9 design-check), 3 priority UI fixes shipped (quick-260705-kg0), human sign-off recorded.
 - Phase 3 (email-channel) EXECUTION COMPLETE (2026-07-06): all 6 plans across 4 waves done (see 03-CONTEXT.md/03-RESEARCH.md/03-UI-SPEC.md); AIDA-09 validated in PROJECT.md. Next: phase-level verify-work + UI-review (DESIGN-SYSTEM.md §9) + human sign-off (mirrors Phase 2's close-out) before Phase 3 is formally CLOSED and `/gsd:plan-phase 4` starts.
 - Phase 4 (ai-foundation) CLOSED (2026-07-18): 7/7 plans, 6/6 waves; AIDA-13/14/19/20 validated. Independent close-out verification (delegated to Claude): `tsc --noEmit` clean, unit 54/54, integration 22/22 (all 5 migrations from scratch), full E2E 43 passed + 1 documented isolation-only skip, uat-gaps isolated 9/9, phase4-ai 11/11; design-check §9 pass (token-only, `text-[Npx]`, `key={provider}` at llm-provider-form.tsx:203, AI Activity never renders `AuditEvent.input`); sign-off recorded per maintainer directive (conditional on green verification — met). Optional scored `/gsd:ui-review` (like 02/03's 21/24 & 23/24) not run — available on request.
-- SlaDueChip `title` hydration mismatch on non-en-US machines: server `toLocaleString()` uses Node ICU default (en-US) while the client uses the OS locale (seen id-ID) — console-noise only, no functional impact. Fix by passing an explicit locale (or `suppressHydrationWarning` on the title span). Found during Phase 4 close-out E2E; applies to any Client Component calling `toLocaleString()` without an explicit locale.
-- Rename `src/middleware.ts` → `proxy.ts` (Next 16 deprecation warning; non-blocking, surfaced during UAT).
+- ~~SlaDueChip `title` hydration mismatch on non-en-US machines: server `toLocaleString()` uses Node ICU default (en-US) while the client uses the OS locale (seen id-ID) — console-noise only, no functional impact. Fix by passing an explicit locale (or `suppressHydrationWarning` on the title span). Found during Phase 4 close-out E2E; applies to any Client Component calling `toLocaleString()` without an explicit locale.~~ — DONE in 07-01 (explicit en-US locale + dateStyle/timeStyle)
+- ~~Rename `src/middleware.ts` → `proxy.ts` (Next 16 deprecation warning; non-blocking, surfaced during UAT).~~ — DONE in 07-01
 - Disk hygiene: stale agent worktree dirs under `.claude/worktrees` (~11GB; 13 unregistered incl. the partially-deleted `agent-a52414ce120c5b506` remnant — its work IS merged (a887ce6) and branch/metadata already pruned — plus 3 still-registered worktrees) — delete after checking registered ones for uncommitted agent work (now dockerignored so builds are safe either way).
-- Consolidation follow-up: dedup 02-07's inline SLA/chip literals against 02-03/02-06 (see Key Decisions above) — still pending; low-priority, does not block Phase 2 sign-off, revisit at Phase 2 close-out or defer to a later phase.
+- ~~Consolidation follow-up: dedup 02-07's inline SLA/chip literals against 02-03/02-06 (see Key Decisions above) — still pending; low-priority, does not block Phase 2 sign-off, revisit at Phase 2 close-out or defer to a later phase.~~ — DONE (verified 07-01: settings/sla/page.tsx imports DEFAULT_SLA_TARGETS, sla-form.tsx imports PriorityChip, tag-manager.tsx imports TagChip)
 - ~~Phase 3 (email intake): mirror the auto-reopen logic from 02-12's follow-up route when handling inbound email replies to RESOLVED/CLOSED tickets~~ — DONE in 03-04 (`ingestMessage()`'s matched-thread transaction mirrors the follow-up route exactly).
 
 ### Blockers
