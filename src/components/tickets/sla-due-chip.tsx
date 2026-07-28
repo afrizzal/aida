@@ -12,7 +12,12 @@ export function SlaDueChip({
   isAtRisk: boolean;
   isBreached: boolean;
 }) {
-  const fullTimestamp = new Date(dueAt).toLocaleString();
+  // Explicit locale + options: a bare toLocaleString() renders en-US on the server and the
+  // OS locale on the client, which produced a React hydration mismatch on non-en-US machines.
+  const fullTimestamp = new Date(dueAt).toLocaleString("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 
   if (isBreached) {
     return (
