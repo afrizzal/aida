@@ -127,14 +127,27 @@
 - [x] 06-07-PLAN.md — /insights UI: period tabs + guarded generate button + 4 design-system cards + sidebar nav (Wave 4)
 
 ### Phase 7: Launch Readiness
-**Timebox:** ~1.5 weeks · **Depends on:** Phases 1–6 · **Requirements:** AIDA-22, AIDA-23, AIDA-24
+**Timebox:** ~1.5 weeks · **Depends on:** Phases 1–6 · **Requirements:** AIDA-12 (branding remainder), AIDA-22, AIDA-23, AIDA-24
 **Goal:** Make the public repo star-worthy and operable.
 **Success Criteria:**
 1. A seed/demo dataset + demo mode let a newcomer explore a populated helpdesk instantly; screenshots/GIF are captured from it.
 2. README leads with a hero GIF, one-line pitch, quick-start (`docker compose up`), and a comparison table; a docs site covers install, config, and AI/BYO-LLM setup.
 3. Backup/restore (pg_dump) and basic ops docs exist; a security pass confirms encrypted keys, enforced authz, and the AIDA-20 safeguards.
 4. The repo is ready for a Phase-1 (first-100-stars) outreach launch.
-**Plans:** TBD
+**Plans:** 12 plans across 6 waves
+Plans:
+- [ ] 07-01-PLAN.md — Repo hygiene: .gitattributes + LF renormalization, middleware→proxy rename, SlaDueChip locale fix, REQUIREMENTS.md restructure (Wave 1)
+- [ ] 07-02-PLAN.md — Demo dataset: fixtures + seedDemoData + pre-computed AI artifacts + `pnpm db:seed` CLI with guard (Wave 2)
+- [ ] 07-03-PLAN.md — Settings → Branding tab (workspace name + tagline) applied to sidebar, public pages, email from-name — closes AIDA-12 (Wave 2)
+- [ ] 07-04-PLAN.md — backup.sh/restore.sh (DB + uploads volume) + proven round-trip + docs/OPERATIONS.md runbook (Wave 2)
+- [ ] 07-05-PLAN.md — GitHub CI + nightly integration workflow + CONTRIBUTING/CODE_OF_CONDUCT/SECURITY policy + issue & PR templates (Wave 2)
+- [ ] 07-06-PLAN.md — Astro Starlight docs site scaffold in website/ + GitHub Pages workflow + toolchain isolation (Wave 2)
+- [ ] 07-07-PLAN.md — DEMO_MODE boot flag + compose/env plumbing + real cold-boot verification (Wave 3)
+- [ ] 07-08-PLAN.md — Reproducible capture script: 10 screenshots (light+dark) + hero GIF + human sign-off (Wave 3)
+- [ ] 07-09-PLAN.md — Security pass: authz/secrets/isolation/egress/dependency sweeps + 07-SECURITY-PASS.md + Phase 4/5/6 human items (Wave 4)
+- [ ] 07-10-PLAN.md — README rewrite: hero GIF, badges, fixed quick start, demo section, honest comparison table, link/claim sweep (Wave 4)
+- [ ] 07-11-PLAN.md — Docs site content: install, configuration, AI setup per provider, guides, ops, security (Wave 5)
+- [ ] 07-12-PLAN.md — Launch close-out: 8-gate run, CHANGELOG v1.0.0, LAUNCH.md checklist, planning records, human sign-off (Wave 6)
 
 ---
 
@@ -160,3 +173,4 @@
 ---
 *Last updated: 2026-07-24 — Phase 6 (AIDA Insight) planned via /gsd:plan-phase 6: 7 plans across 4 waves (schema foundation → deterministic clustering + SQL aggregates + KB-gap/prompt pairs + CSAT capture → insight-run orchestrator/job → /insights UI). Formula-level plans (leader-clustering math, pgvector KNN, raw-SQL aggregates, Zod schemas) carried verbatim from 06-RESEARCH.md. AIDA-17; binding AIDA-13/19/20.*
 *Last updated: 2026-07-24 — Phase 6 (AIDA Insight) EXECUTION COMPLETE: all 7 plans across 4 waves done (06-01 schema, 06-02 clustering math, 06-03 SQL aggregates, 06-04 KB-gap + prompts, 06-05 CSAT capture, 06-06 insight-run orchestrator, 06-07 /insights UI). AIDA-17 fully code-complete end-to-end. Phase checkbox checked; combined-suite verification + phase-goal check + human sign-off remain before Phase 7 begins.*
+*Last updated: 2026-07-28 — Phase 7 (Launch Readiness) planned via /gsd:plan-phase 7: 12 plans across 6 waves. Wave 1 is the repo-hygiene/LF-renormalization pass ALONE (a repo-wide `git add --renormalize .` cannot run in parallel with any other plan). Wave 2 runs five independent foundations in parallel (demo dataset, branding settings, backup/ops, CI + community files, docs-site scaffold); Wave 3 adds demo mode + visual asset capture; Wave 4 the security pass + README; Wave 5 the docs content; Wave 6 the launch close-out. Requirements: AIDA-22, AIDA-23, AIDA-24 + the AIDA-12 branding remainder (D-16). Logo upload deferred (07-03); tagging, GitHub Pages enablement and outreach are human-only steps captured in LAUNCH.md (D-15).*
