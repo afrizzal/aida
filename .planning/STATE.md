@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-28T22:58:46.640Z"
+last_updated: "2026-07-28T23:13:12.815Z"
 last_activity: 2026-07-28
 progress:
   total_phases: 7
   completed_phases: 6
   total_plans: 59
-  completed_plans: 49
+  completed_plans: 51
   percent: 83
 ---
 
@@ -27,7 +27,7 @@ progress:
 ## Current Position
 
 Phase: 07 (launch-readiness) — EXECUTING
-Plan: 3 of 12
+Plan: 5 of 12
 Status: Ready to execute
 Last activity: 2026-07-28
 
@@ -38,7 +38,7 @@ Progress: [████████░░] 83% (49/59 plans complete — 8/8 pha
 ### Key Decisions
 
 - (07-05) GitHub repo furniture shipped: `.github/workflows/ci.yml` (lint/typecheck/test/build on push+PR, backs the README badge) + `.github/workflows/integration.yml` (Testcontainers suite isolated to nightly cron, never the PR path — a container-start flake must not poison the public badge); `CONTRIBUTING.md` (verified working dev-setup sequence + project conventions + architectural non-negotiables), `CODE_OF_CONDUCT.md` (Contributor Covenant v2.1), `.github/SECURITY.md` (GitHub-standard disclosure policy, cross-linked to — never duplicating — `docs/SECURITY.md`), issue forms + PR template (security reports routed to private advisories, PR checklist mirrors CI). Both CODE_OF_CONDUCT.md and SECURITY.md use the same clearly-marked placeholder maintainer-contact address pending 07-12's launch checklist. Badge URL for 07-10: `https://github.com/afrizzal/aida/actions/workflows/ci.yml/badge.svg`.
-- (07-05) Local pipeline validation: install/db:generate/unit-test/build steps for THIS plan's own files all pass; `pnpm lint`/`typecheck`/`build`'s type-check step fail locally due to the concurrently-landing 07-06 `website/` Astro docs-site scaffold (not yet excluded from the root tsc/biome scan) — re-run all seven `ci.yml` commands from a clean checkout once all wave-2 plans (07-02..07-06) have merged, before trusting the badge.
+- (07-05) Local pipeline validation, re-run after 07-06 landed `chore(07-06): isolate website/ from product typecheck, lint and Docker context`: `pnpm typecheck` and `pnpm build` now pass cleanly (0 exit); `pnpm lint` still fails but only on 6 pre-existing, catalogued lint-debt items from `deferred-items.md` (07-01), none touched by 07-05 — CI's typecheck/test/build gates are fully green, badge will go green once that pre-existing lint debt is separately cleaned up.
 - (07-05) AIDA-23 intentionally left `Pending` in REQUIREMENTS.md despite being declared in 07-05's plan frontmatter — it spans seven phase-7 plans (07-01/05/06/08/10/11/12) and 07-05 (CI + CONTRIBUTING + templates) doesn't ship its substance (README hero GIF, docs site). Mirrors the project's split-requirement precedent (AIDA-05/AIDA-09): mark complete only when the plan that actually finishes README+docs-site lands (likely 07-10).
 - AI-native open-source helpdesk, self-host, bring-your-own / local LLM (OpenAI/Anthropic/Ollama).
 - Customer-support beachhead; generic multi-tenant core (also serves IT/ITSM).

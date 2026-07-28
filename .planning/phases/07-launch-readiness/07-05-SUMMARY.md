@@ -136,7 +136,19 @@ Ran the exact `ci.yml` command sequence locally (`volta run --node 22.23.1` — 
 | 6 | `pnpm test` | 0 | 81/81 unit tests passed (16 files) |
 | 7 | `pnpm build` | **1 (fail)** | Turbopack build compiles the app successfully; the subsequent `tsc` type-check step fails on the same `website/**` Astro module-resolution errors as #5. |
 
-**Assessment:** the three failures (#4, #5, #7) are 100% attributable to the concurrently-executing 07-06 docs-site scaffold (`website/` — an Astro/Starlight workspace not yet excluded from the root `tsc`/`biome` scan) landing in the same wave, not to any file this plan touched. This is exactly the scenario the plan's Task 1 anticipated ("If `pnpm lint` fails on files from a parallel wave-2 plan, note it and re-run after the merge — do not weaken the workflow to make it pass"). **Action for next session/verifier:** once all wave-2 plans (including 07-06) have merged, re-run all seven commands from a clean state to confirm `ci.yml` is fully green before relying on the badge.
+**Assessment:** the three failures (#4, #5, #7) are 100% attributable to the concurrently-executing 07-06 docs-site scaffold (`website/` — an Astro/Starlight workspace not yet excluded from the root `tsc`/`biome` scan) landing in the same wave, not to any file this plan touched. This is exactly the scenario the plan's Task 1 anticipated ("If `pnpm lint` fails on files from a parallel wave-2 plan, note it and re-run after the merge — do not weaken the workflow to make it pass").
+
+### Re-verification after 07-06 landed (same session, post-merge)
+
+07-06 subsequently shipped `chore(07-06): isolate website/ from product typecheck, lint and Docker context` (commit `a2ff3cf`). Re-ran the pipeline once that commit was in the tree:
+
+| # | Command | Exit | Notes |
+|---|---|---|---|
+| 4 | `pnpm lint` | **1 (fail)** | Down from 7 to 6 errors — `website/**` errors gone. Remaining 6 are the pre-existing, file-scoped lint debt already catalogued in `deferred-items.md` (07-01: `composer.tsx`, `input-group.tsx`, `poll-inbox.ts`, `tests/e2e/**`, `tests/integration/**`) — none touched by 07-05. |
+| 5 | `pnpm typecheck` | **0 (pass)** | Clean — `website/` exclusion resolved the `astro:content` module errors. |
+| 7 | `pnpm build` | **0 (pass)** | Turbopack build + full `tsc` type-check both clean; all 27 app routes compiled. |
+
+**Final assessment:** `ci.yml`'s own steps (typecheck, test, build) are fully green post-merge. `pnpm lint` still fails, but only on pre-existing debt cataloged before this plan ran (see `deferred-items.md`) — genuinely out of scope for 07-05 per the SCOPE BOUNDARY rule, and unrelated to CI/CONTRIBUTING/templates work. Whoever picks up that lint debt (07-01's catalogued items) will turn the badge fully green; this plan's own deliverables are verified working end-to-end.
 
 ## Badge URL for 07-10
 
