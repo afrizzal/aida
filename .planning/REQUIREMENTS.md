@@ -21,7 +21,7 @@ Each requirement is a single testable statement. `MVP` = required for the v1 mil
 
 - [x] **AIDA-10** `MVP` — Authentication with at least two roles (admin, agent); admins can invite/manage users; server-side authorization is enforced (not just hidden UI).
 - [x] **AIDA-11** `MVP` — All data is scoped to a workspace/organization id (multi-tenant-ready); queries cannot cross workspaces even if v1 ships a single workspace.
-- [ ] **AIDA-12** `MVP` — A settings area lets an admin configure branding, SLA policies, channels (email/web), and AI provider/keys.
+- [x] **AIDA-12** `MVP` — A settings area lets an admin configure branding, SLA policies, channels (email/web), and AI provider/keys.
 
 ## AI
 
@@ -59,7 +59,7 @@ Each requirement is a single testable statement. `MVP` = required for the v1 mil
 | AIDA-09 | Phase 3 | Complete |
 | AIDA-10 | Phase 1 | Complete |
 | AIDA-11 | Phase 1 | Complete |
-| AIDA-12 | Phase 2,4,7 | Pending |
+| AIDA-12 | Phase 2,4,7 | Complete |
 | AIDA-13 | Phase 4 | Complete |
 | AIDA-14 | Phase 4 | Complete |
 | AIDA-15 | Phase 5 | Complete |

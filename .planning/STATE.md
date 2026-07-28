@@ -9,8 +9,8 @@ progress:
   total_phases: 7
   completed_phases: 6
   total_plans: 59
-  completed_plans: 55
-  percent: 93
+  completed_plans: 52
+  percent: 88
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -29,14 +29,15 @@ progress:
 Phase: 07 (launch-readiness) — EXECUTING
 Plan: 6 of 12
 Status: Ready to execute
-Last activity: 2026-07-28 -- 07-03 (branding settings: branding:workspaceName Setting, Settings > Branding tab, applied to sidebar/public pages/outbound email; AIDA-12 closed) complete
+Last activity: 2026-07-28 -- 07-04 (backup/restore: scripts/backup.sh + scripts/restore.sh proven via a real docker compose round trip, docs/OPERATIONS.md day-two runbook; AIDA-24 closed) complete
 
-Progress: [█████████░] 93% (55/59 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 7/7 phase 05 + 7/7 phase 06 + 7/12 phase 07)
+Progress: [████████░░] 88% (52/59 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 7/7 phase 05 + 7/7 phase 06 + 5/12 phase 07)
 
 ## Accumulated Context
 
 ### Key Decisions
 
+- (07-04) Backup/restore (AIDA-24) shipped: `scripts/backup.sh` (pg_dump -Fc + streamed `uploads_data` volume tar via `docker compose run --no-deps --entrypoint sh app`, timestamped, running-check preflight) + `scripts/restore.sh` (pg_restore --clean --if-exists + uploads restore, stops/starts app+worker, requires explicit confirmation unless `--yes`, health-checks afterward) + `docs/OPERATIONS.md` (backups/restore/restore-to-new-server/upgrading/logs/health/full env reference/troubleshooting). Proven via a real seed -> backup -> destroy -> restore -> assert round trip against a live `docker compose` stack (both a DB row and an uploaded file recovered intact). Found and fixed a real bug live: `pg_restore --clean` always exits 1 against this project's real schema because Postgres rejects dropping a constraint on pg-boss's declaratively-partitioned `pgboss.job_common` table (`cannot drop inherited constraint`) — a known pg_dump/restore limitation with partitioning, not an app bug; `restore.sh` now tolerates that exact message and still aborts on any other pg_restore error. `docs/OPERATIONS.md`'s env table carries a `<!-- 07-07 adds DEMO_MODE here -->` marker for that plan to extend.
 - (07-05) GitHub repo furniture shipped: `.github/workflows/ci.yml` (lint/typecheck/test/build on push+PR, backs the README badge) + `.github/workflows/integration.yml` (Testcontainers suite isolated to nightly cron, never the PR path — a container-start flake must not poison the public badge); `CONTRIBUTING.md` (verified working dev-setup sequence + project conventions + architectural non-negotiables), `CODE_OF_CONDUCT.md` (Contributor Covenant v2.1), `.github/SECURITY.md` (GitHub-standard disclosure policy, cross-linked to — never duplicating — `docs/SECURITY.md`), issue forms + PR template (security reports routed to private advisories, PR checklist mirrors CI). Both CODE_OF_CONDUCT.md and SECURITY.md use the same clearly-marked placeholder maintainer-contact address pending 07-12's launch checklist. Badge URL for 07-10: `https://github.com/afrizzal/aida/actions/workflows/ci.yml/badge.svg`.
 - (07-05) Local pipeline validation, re-run after 07-06 landed `chore(07-06): isolate website/ from product typecheck, lint and Docker context`: `pnpm typecheck` and `pnpm build` now pass cleanly (0 exit); `pnpm lint` still fails but only on 6 pre-existing, catalogued lint-debt items from `deferred-items.md` (07-01), none touched by 07-05 — CI's typecheck/test/build gates are fully green, badge will go green once that pre-existing lint debt is separately cleaned up.
 - (07-06) Docs site (AIDA-23) infra shipped: `website/` is a standalone Astro 7.1.5 + Starlight 0.41.5 project (own `package.json` + `pnpm-lock.yaml`, no root `pnpm-workspace.yaml`, no Astro dep at root) building for the GitHub Pages project subpath (`site: 'https://afrizzal.github.io'`, `base: '/aida'`); `.github/workflows/docs.yml` deploys it via `withastro/action@v6` + `actions/deploy-pages@v5`, path-filtered to `website/**` so product-only commits never republish it. `tsconfig.json` `exclude`, `biome.json` `files.includes` negation, `.dockerignore`, and `.gitignore` all isolate `website/` from the product toolchain and Docker image — proven via clean `tsc --noEmit`/`biome check .`/`pnpm build` runs with zero `website/` paths touched. Starlight 0.41.5 dropped the older `{ label, autogenerate }` sidebar shorthand (now needs a nested `items: [{ autogenerate }]` array) — future docs-site sidebar groups (07-11) must use that nested shape. Two human-only GitHub Pages setup steps deferred to 07-12's launch checklist (`deferred-items.md`).
