@@ -137,7 +137,7 @@
 **Plans:** 5/12 plans executed
 Plans:
 - [x] 07-01-PLAN.md — Repo hygiene: .gitattributes + LF renormalization, middleware→proxy rename, SlaDueChip locale fix, REQUIREMENTS.md restructure (Wave 1)
-- [ ] 07-02-PLAN.md — Demo dataset: fixtures + seedDemoData + pre-computed AI artifacts + `pnpm db:seed` CLI with guard (Wave 2)
+- [x] 07-02-PLAN.md — Demo dataset: fixtures + seedDemoData + pre-computed AI artifacts + `pnpm db:seed` CLI with guard (Wave 2)
 - [x] 07-03-PLAN.md — Settings → Branding tab (workspace display name) applied to sidebar, public pages, email from-name — closes AIDA-12 (Wave 2)
 - [x] 07-04-PLAN.md — backup.sh/restore.sh (DB + uploads volume) + proven round-trip + docs/OPERATIONS.md runbook (Wave 2)
 - [x] 07-05-PLAN.md — GitHub CI + nightly integration workflow + CONTRIBUTING/CODE_OF_CONDUCT/SECURITY policy + issue & PR templates (Wave 2)

@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-28T23:20:00.000Z"
+last_updated: "2026-07-28T23:42:06.814Z"
 last_activity: 2026-07-28
 progress:
   total_phases: 7
   completed_phases: 6
   total_plans: 59
-  completed_plans: 52
+  completed_plans: 53
   percent: 88
 ---
 
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 07 (launch-readiness) — EXECUTING
-Plan: 6 of 12
+Plan: 7 of 12
 Status: Ready to execute
-Last activity: 2026-07-28 -- 07-04 (backup/restore: scripts/backup.sh + scripts/restore.sh proven via a real docker compose round trip, docs/OPERATIONS.md day-two runbook; AIDA-24 closed) complete
+Last activity: 2026-07-28 -- 07-02 (demo dataset: fixtures.ts + seedDemoData + pnpm db:seed CLI with guard, proven end-to-end against a disposable Postgres container) complete
 
-Progress: [████████░░] 88% (52/59 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 7/7 phase 05 + 7/7 phase 06 + 5/12 phase 07)
+Progress: [█████████░] 90% (53/59 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 7/7 phase 05 + 7/7 phase 06 + 6/12 phase 07)
 
 ## Accumulated Context
 
@@ -43,6 +43,7 @@ Progress: [████████░░] 88% (52/59 plans complete — 8/8 pha
 - (07-06) Docs site (AIDA-23) infra shipped: `website/` is a standalone Astro 7.1.5 + Starlight 0.41.5 project (own `package.json` + `pnpm-lock.yaml`, no root `pnpm-workspace.yaml`, no Astro dep at root) building for the GitHub Pages project subpath (`site: 'https://afrizzal.github.io'`, `base: '/aida'`); `.github/workflows/docs.yml` deploys it via `withastro/action@v6` + `actions/deploy-pages@v5`, path-filtered to `website/**` so product-only commits never republish it. `tsconfig.json` `exclude`, `biome.json` `files.includes` negation, `.dockerignore`, and `.gitignore` all isolate `website/` from the product toolchain and Docker image — proven via clean `tsc --noEmit`/`biome check .`/`pnpm build` runs with zero `website/` paths touched. Starlight 0.41.5 dropped the older `{ label, autogenerate }` sidebar shorthand (now needs a nested `items: [{ autogenerate }]` array) — future docs-site sidebar groups (07-11) must use that nested shape. Two human-only GitHub Pages setup steps deferred to 07-12's launch checklist (`deferred-items.md`).
 - (07-05) AIDA-23 intentionally left `Pending` in REQUIREMENTS.md despite being declared in 07-05's plan frontmatter — it spans seven phase-7 plans (07-01/05/06/08/10/11/12) and 07-05 (CI + CONTRIBUTING + templates) doesn't ship its substance (README hero GIF, docs site). Mirrors the project's split-requirement precedent (AIDA-05/AIDA-09): mark complete only when the plan that actually finishes README+docs-site lands (likely 07-10).
 - (07-03) AIDA-12 (Settings: branding, SLA policies, channels, AI provider/keys) fully CLOSED — branding was the last unshipped slice. New `src/lib/branding/settings.ts` (D-16 name-only scope, mirrors the email-channel Setting module shape exactly, worker-bundleable via relative imports) adds the single `branding:workspaceName` key with fallback chain stored-value -> `organization.name` -> `"AIDA"`. Settings > Branding tab (admin-gated `saveBranding` Server Action, `requireOrgAdmin()` first) inserted as the second nav item. The resolved name now drives: the app sidebar brand block (`src/app/(app)/layout.tsx` resolves it server-side, `sidebar.tsx`'s brand span gained `min-w-0 truncate` so a 60-char name can't break the 240px sidebar), both public pages (`/request`, now `async`, and `/status/[token]`, both call sites — resolved via bare `prisma.organization.findFirst()`/`prisma.setting.findFirst()` since these routes have no session), and the outbound email `fromName` in `src/lib/worker/jobs/email-outbound-send.ts`. Logo upload and public tagline both intentionally deferred (D-16's own fallback clause) — logged in `deferred-items.md` under `## From 07-03`.
+- (07-02) Demo dataset (AIDA-22, dataset half) shipped: `src/lib/demo/fixtures.ts` (12 contacts/7 companies, 8 tags, 3 custom fields, 30 tickets, 6 KB articles — pure data, exact status/priority/SLA/assignee/triage/CSAT/age distributions verified by script) + `src/lib/demo/seed-demo-data.ts` (`seedDemoData()` orchestrator reusing `createTicket`/`createKbArticle` as the single write paths, backdates via a follow-up `ticket.update` + `computeDueTimestamps(createdAt, ...)` recomputed from the backdated time, then layers on pre-computed triage/audit/CSAT/Insight artifacts all stamped `provider: "demo"`/`model: "demo-seed"`) + `prisma/seed.ts` (`pnpm db:seed` CLI — headless org/admin/agent bootstrap mirroring `bootstrap.ts`, non-empty-workspace guard that refuses instead of duplicating since `AuditEvent` is append-only). Proven end-to-end against a disposable `pgvector/pgvector:pg16` container: 7 migrations clean, first run seeds exactly 30 tickets/12 contacts/6 KB articles/8 CSAT/3 COMPLETED InsightRuns/37 AuditEvent rows, second run refuses with exit 1, zero broken Insight citations/nearestArticle references. Added `dotenv` as an explicit devDependency (pnpm strict-linking fix, mirrors the 02-02 `hast-util-sanitize` precedent — `prisma.config.ts` is tsconfig-excluded so never surfaced this, but `prisma/seed.ts` is real type-checked). AI-toggle Setting key never written (keeps auto-triage off) and KB `embeddingStatus` stays PENDING (no fake COMPLETED) — the honesty contract 07-07/07-10/07-11 must keep referencing. SUMMARY: `.planning/phases/07-launch-readiness/07-02-SUMMARY.md`.
 - AI-native open-source helpdesk, self-host, bring-your-own / local LLM (OpenAI/Anthropic/Ollama).
 - Customer-support beachhead; generic multi-tenant core (also serves IT/ITSM).
 - Apache-2.0 license.
