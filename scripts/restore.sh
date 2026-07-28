@@ -57,8 +57,27 @@ echo "[restore] Restoring database from $DB_DUMP ..."
 # AuditEvent trigger) before recreating them from the dump — this is why
 # restore works even though the trigger blocks plain DELETE/UPDATE.
 # pg_restore prints benign warnings when restoring into a non-empty database;
-# only a non-zero exit code indicates real failure.
-$COMPOSE exec -T db pg_restore -U "$DB_USER" -d "$DB_NAME" --clean --if-exists --no-owner --no-privileges < "$DB_DUMP"
+# only a non-zero exit code indicates real failure — EXCEPT for one known
+# false alarm: pg-boss's `pgboss.job` table is declaratively partitioned, and
+# `--clean`'s generated `ALTER TABLE ONLY pgboss.job_common DROP CONSTRAINT`
+# is rejected by Postgres ("cannot drop inherited constraint") even though
+# pg_restore continues and the rest of the restore (including this table's
+# data) completes correctly. Treat that specific message as non-fatal; any
+# other pg_restore error still aborts the script.
+set +e
+RESTORE_OUTPUT="$($COMPOSE exec -T db pg_restore -U "$DB_USER" -d "$DB_NAME" --clean --if-exists --no-owner --no-privileges < "$DB_DUMP" 2>&1)"
+RESTORE_EXIT=$?
+set -e
+echo "$RESTORE_OUTPUT"
+if [ "$RESTORE_EXIT" -ne 0 ]; then
+  UNEXPECTED="$(echo "$RESTORE_OUTPUT" | grep -E '^pg_restore: error:' | grep -v 'cannot drop inherited constraint' || true)"
+  if [ -n "$UNEXPECTED" ]; then
+    echo "[restore] ERROR: pg_restore reported unexpected errors:" >&2
+    echo "$UNEXPECTED" >&2
+    exit 1
+  fi
+  echo "[restore] Note: pg_restore exited non-zero on the known-benign pgboss.job_common partition warning; continuing."
+fi
 
 echo "[restore] Restoring uploads from $UPLOADS_TARBALL ..."
 $COMPOSE run --rm -T --no-deps --entrypoint sh app -c 'rm -rf /data/uploads/* /data/uploads/.[!.]* 2>/dev/null; tar xzf - -C /data/uploads' < "$UPLOADS_TARBALL"
