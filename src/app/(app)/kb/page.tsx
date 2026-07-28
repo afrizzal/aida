@@ -19,9 +19,7 @@ export default async function KbPage() {
   return (
     <div className="flex flex-col">
       <div className="flex items-center justify-between px-6 py-4">
-        <h1 className="text-[18px] font-semibold tracking-tight text-foreground">
-          Knowledge Base
-        </h1>
+        <h1 className="text-[18px] font-semibold tracking-tight text-foreground">Knowledge Base</h1>
         <Button asChild size="sm">
           <Link href="/kb/new">
             <Plus className="size-3.5" />

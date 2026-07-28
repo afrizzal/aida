@@ -9,8 +9,16 @@ vi.mock("@/lib/llm/providers/openai", () => ({
     if (p.schemaName === "ClusterLabelsResult") {
       return {
         clusters: [
-          { clusterIndex: 0, label: "Login issues", description: "Users can't log in to their account." },
-          { clusterIndex: 1, label: "Billing questions", description: "Users ask about invoice charges." },
+          {
+            clusterIndex: 0,
+            label: "Login issues",
+            description: "Users can't log in to their account.",
+          },
+          {
+            clusterIndex: 1,
+            label: "Billing questions",
+            description: "Users ask about invoice charges.",
+          },
         ],
       };
     }
@@ -20,7 +28,12 @@ vi.mock("@/lib/llm/providers/openai", () => ({
 
 import { prisma } from "@/lib/db";
 import { runInsight } from "@/lib/insight/run-insight";
-import type { SlaCsatSummary, StoredCluster, StoredKbGap, VolumeDrivers } from "@/lib/insight/types";
+import type {
+  SlaCsatSummary,
+  StoredCluster,
+  StoredKbGap,
+  VolumeDrivers,
+} from "@/lib/insight/types";
 import { saveLlmSettings } from "@/lib/llm/settings";
 import { saveEmbeddingSettings } from "@/lib/rag/settings";
 import { toVectorLiteral } from "@/lib/rag/vector-literal";
@@ -42,7 +55,11 @@ function memberVector(group: "A" | "B", seed: number): number[] {
   });
 }
 
-async function insertTicketEmbedding(orgId: string, ticketId: string, vector: number[]): Promise<void> {
+async function insertTicketEmbedding(
+  orgId: string,
+  ticketId: string,
+  vector: number[],
+): Promise<void> {
   const id = randomBytes(16).toString("hex");
   await prisma.$executeRaw`
     INSERT INTO "TicketEmbedding" ("id", "organizationId", "ticketId", "embeddingModel", "embedding", "createdAt")
@@ -179,7 +196,10 @@ describe("insight-run orchestrator: end-to-end + reproducibility + AI-off (AIDA-
 
     const events = await prisma.auditEvent.findMany({ where: { organizationId: org.id } });
     expect(events.length).toBe(2);
-    expect(events.map((e) => e.actionType).sort()).toEqual(["INSIGHT_CLUSTER_LABELS", "INSIGHT_SUMMARY"]);
+    expect(events.map((e) => e.actionType).sort()).toEqual([
+      "INSIGHT_CLUSTER_LABELS",
+      "INSIGHT_SUMMARY",
+    ]);
     for (const e of events) {
       expect(e.input).not.toContain(FAKE_SECRET);
     }

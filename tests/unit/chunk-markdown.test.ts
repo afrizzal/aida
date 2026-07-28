@@ -3,9 +3,13 @@ import { chunkMarkdown } from "../../src/lib/rag/chunk-markdown";
 
 describe("chunkMarkdown", () => {
   it("splits an article with two H2 sections into >=2 chunks with headingPath set", () => {
-    const markdown = ["## Refunds", "We refund within 30 days.", "", "## Shipping", "Ships in 2 days."].join(
-      "\n",
-    );
+    const markdown = [
+      "## Refunds",
+      "We refund within 30 days.",
+      "",
+      "## Shipping",
+      "Ships in 2 days.",
+    ].join("\n");
 
     const chunks = chunkMarkdown(markdown);
 
@@ -33,9 +37,12 @@ describe("chunkMarkdown", () => {
   });
 
   it("content before the first heading becomes a chunk with headingPath === null", () => {
-    const markdown = ["Intro paragraph with no heading yet.", "", "## First Heading", "Body text."].join(
-      "\n",
-    );
+    const markdown = [
+      "Intro paragraph with no heading yet.",
+      "",
+      "## First Heading",
+      "Body text.",
+    ].join("\n");
 
     const chunks = chunkMarkdown(markdown);
 

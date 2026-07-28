@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { l2Normalize, leaderCluster } from "../../src/lib/insight/cluster";
 import type { ClusterItem } from "../../src/lib/insight/cluster";
+import { l2Normalize, leaderCluster } from "../../src/lib/insight/cluster";
 
 describe("l2Normalize", () => {
   it("normalizes a non-zero vector to unit length", () => {

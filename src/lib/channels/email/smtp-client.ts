@@ -18,10 +18,7 @@ export interface SmtpConnectionConfig {
  * (RESEARCH.md Pitfall 5) — a misconfigured host/port must fail fast with a clear error
  * rather than hang on Node's OS-default socket timeout (often 2+ minutes).
  */
-export function createSmtpTransport(
-  s: SmtpConnectionConfig,
-  opts?: { timeoutMs?: number },
-) {
+export function createSmtpTransport(s: SmtpConnectionConfig, opts?: { timeoutMs?: number }) {
   const timeoutMs = opts?.timeoutMs ?? 10000;
   return nodemailer.createTransport({
     host: s.smtpHost,

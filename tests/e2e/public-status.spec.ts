@@ -72,9 +72,7 @@ test.describe("Public status page", () => {
 
   test("an invalid token shows the dead-end state", async ({ page }) => {
     await page.goto("/status/this-token-does-not-exist");
-    await expect(
-      page.getByRole("heading", { name: "We couldn't find that ticket" }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "We couldn't find that ticket" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Submit a new request" })).toBeVisible();
   });
 });

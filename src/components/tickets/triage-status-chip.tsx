@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { rerunTriage } from "@/app/(app)/tickets/[id]/actions";
-import type { TriageStatus } from "@/generated/prisma/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import type { TriageStatus } from "@/generated/prisma/client";
 
 /**
  * Drives the whole triage-status surface off `ticket.triageStatus` (parent renders this only

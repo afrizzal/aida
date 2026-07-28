@@ -12,8 +12,12 @@ function makeOrgData(name: string, slug: string) {
 describe("AIDA-11: workspace isolation", () => {
   it("scopedDb read isolation: orgA never sees orgB rows and vice-versa", async () => {
     // Seed two organizations
-    const orgA = await prisma.organization.create({ data: makeOrgData("Org Isolation A", "ws-isolation-read-a") });
-    const orgB = await prisma.organization.create({ data: makeOrgData("Org Isolation B", "ws-isolation-read-b") });
+    const orgA = await prisma.organization.create({
+      data: makeOrgData("Org Isolation A", "ws-isolation-read-a"),
+    });
+    const orgB = await prisma.organization.create({
+      data: makeOrgData("Org Isolation B", "ws-isolation-read-b"),
+    });
 
     // Seed a Setting in each org via the bare client (explicit organizationId)
     await prisma.setting.create({
@@ -43,7 +47,9 @@ describe("AIDA-11: workspace isolation", () => {
   });
 
   it("scopedDb create auto-injects organizationId without explicit field", async () => {
-    const org = await prisma.organization.create({ data: makeOrgData("Org Auto Inject", "ws-isolation-auto-inject") });
+    const org = await prisma.organization.create({
+      data: makeOrgData("Org Auto Inject", "ws-isolation-auto-inject"),
+    });
 
     const db = scopedDb(org.id);
 
@@ -51,7 +57,11 @@ describe("AIDA-11: workspace isolation", () => {
     // extension injects it at runtime. This test verifies that injection behavior —
     // organizationId is intentionally omitted so the extension must add it.
     // biome-ignore lint/suspicious/noExplicitAny: intentional omission to test auto-injection
-    const setting = await (db.setting.create as (a: { data: Record<string, unknown> }) => Promise<{ organizationId: string }>)({
+    const setting = await (
+      db.setting.create as (a: {
+        data: Record<string, unknown>;
+      }) => Promise<{ organizationId: string }>
+    )({
       data: { key: "auto-injected", value: "yes" },
     });
 

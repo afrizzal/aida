@@ -5,7 +5,12 @@ import { prisma } from "@/lib/db";
 describe("AuditEvent append-only", () => {
   it("allows INSERT but rejects UPDATE and DELETE at the DB level", async () => {
     const org = await prisma.organization.create({
-      data: { id: randomUUID(), name: "Audit Org", slug: `audit-${randomUUID()}`, createdAt: new Date() },
+      data: {
+        id: randomUUID(),
+        name: "Audit Org",
+        slug: `audit-${randomUUID()}`,
+        createdAt: new Date(),
+      },
     });
     const event = await prisma.auditEvent.create({
       data: {
@@ -23,8 +28,6 @@ describe("AuditEvent append-only", () => {
     await expect(
       prisma.auditEvent.update({ where: { id: event.id }, data: { output: "tampered" } }),
     ).rejects.toThrow();
-    await expect(
-      prisma.auditEvent.delete({ where: { id: event.id } }),
-    ).rejects.toThrow();
+    await expect(prisma.auditEvent.delete({ where: { id: event.id } })).rejects.toThrow();
   });
 });

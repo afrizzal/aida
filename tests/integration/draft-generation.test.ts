@@ -10,9 +10,7 @@ let capturedPrompt = "";
 let seededChunkId = "";
 
 vi.mock("@/lib/rag/providers/openai-embed", () => ({
-  embedOpenAi: vi.fn(async ({ input }: { input: string[] }) =>
-    input.map(() => FIXED_QUERY_VECTOR),
-  ),
+  embedOpenAi: vi.fn(async ({ input }: { input: string[] }) => input.map(() => FIXED_QUERY_VECTOR)),
 }));
 
 vi.mock("@/lib/llm/providers/openai", () => ({

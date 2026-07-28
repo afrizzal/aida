@@ -21,7 +21,11 @@ describe("Wave-0 smoke test: scopedDb organizationId injection inside $transacti
     // create hook fires even inside an interactive $transaction callback.
     const setting = await db.$transaction((tx) =>
       // biome-ignore lint/suspicious/noExplicitAny: intentional omission to test auto-injection inside $transaction
-      (tx.setting.create as (a: { data: Record<string, unknown> }) => Promise<{ organizationId: string }>)({
+      (
+        tx.setting.create as (a: {
+          data: Record<string, unknown>;
+        }) => Promise<{ organizationId: string }>
+      )({
         data: { key: "tx-smoke", value: "1" },
       }),
     );
@@ -40,7 +44,9 @@ describe("Wave-0 smoke test: scopedDb organizationId injection inside $transacti
       // Also proves a Setting create + a TicketCounter upsert can share one interactive
       // transaction (the exact shape create-ticket.ts will use in plan 03).
       await (
-        tx.setting.create as (a: { data: Record<string, unknown> }) => Promise<{ organizationId: string }>
+        tx.setting.create as (a: {
+          data: Record<string, unknown>;
+        }) => Promise<{ organizationId: string }>
       )({
         data: { key: "tx-smoke-2", value: "1" },
       });

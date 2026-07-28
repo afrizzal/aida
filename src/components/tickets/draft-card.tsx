@@ -1,9 +1,9 @@
 "use client";
 
 import { Sparkles } from "lucide-react";
-import type { GenerateDraftResult } from "@/lib/rag/generate-draft";
-import { Button } from "@/components/ui/button";
 import { DraftCitationList } from "@/components/tickets/draft-citation-list";
+import { Button } from "@/components/ui/button";
+import type { GenerateDraftResult } from "@/lib/rag/generate-draft";
 
 interface DraftCardProps {
   draft: GenerateDraftResult;
