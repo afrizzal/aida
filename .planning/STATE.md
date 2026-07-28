@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-28T23:13:12.815Z"
+last_updated: "2026-07-28T23:20:00.000Z"
 last_activity: 2026-07-28
 progress:
   total_phases: 7
   completed_phases: 6
   total_plans: 59
-  completed_plans: 51
-  percent: 83
+  completed_plans: 55
+  percent: 93
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,11 +27,11 @@ progress:
 ## Current Position
 
 Phase: 07 (launch-readiness) — EXECUTING
-Plan: 5 of 12
+Plan: 6 of 12
 Status: Ready to execute
-Last activity: 2026-07-28
+Last activity: 2026-07-28 -- 07-03 (branding settings: branding:workspaceName Setting, Settings > Branding tab, applied to sidebar/public pages/outbound email; AIDA-12 closed) complete
 
-Progress: [████████░░] 83% (49/59 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 7/7 phase 05 + 7/7 phase 06 + 2/12 phase 07)
+Progress: [█████████░] 93% (55/59 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 7/7 phase 05 + 7/7 phase 06 + 7/12 phase 07)
 
 ## Accumulated Context
 
@@ -39,7 +39,9 @@ Progress: [████████░░] 83% (49/59 plans complete — 8/8 pha
 
 - (07-05) GitHub repo furniture shipped: `.github/workflows/ci.yml` (lint/typecheck/test/build on push+PR, backs the README badge) + `.github/workflows/integration.yml` (Testcontainers suite isolated to nightly cron, never the PR path — a container-start flake must not poison the public badge); `CONTRIBUTING.md` (verified working dev-setup sequence + project conventions + architectural non-negotiables), `CODE_OF_CONDUCT.md` (Contributor Covenant v2.1), `.github/SECURITY.md` (GitHub-standard disclosure policy, cross-linked to — never duplicating — `docs/SECURITY.md`), issue forms + PR template (security reports routed to private advisories, PR checklist mirrors CI). Both CODE_OF_CONDUCT.md and SECURITY.md use the same clearly-marked placeholder maintainer-contact address pending 07-12's launch checklist. Badge URL for 07-10: `https://github.com/afrizzal/aida/actions/workflows/ci.yml/badge.svg`.
 - (07-05) Local pipeline validation, re-run after 07-06 landed `chore(07-06): isolate website/ from product typecheck, lint and Docker context`: `pnpm typecheck` and `pnpm build` now pass cleanly (0 exit); `pnpm lint` still fails but only on 6 pre-existing, catalogued lint-debt items from `deferred-items.md` (07-01), none touched by 07-05 — CI's typecheck/test/build gates are fully green, badge will go green once that pre-existing lint debt is separately cleaned up.
+- (07-06) Docs site (AIDA-23) infra shipped: `website/` is a standalone Astro 7.1.5 + Starlight 0.41.5 project (own `package.json` + `pnpm-lock.yaml`, no root `pnpm-workspace.yaml`, no Astro dep at root) building for the GitHub Pages project subpath (`site: 'https://afrizzal.github.io'`, `base: '/aida'`); `.github/workflows/docs.yml` deploys it via `withastro/action@v6` + `actions/deploy-pages@v5`, path-filtered to `website/**` so product-only commits never republish it. `tsconfig.json` `exclude`, `biome.json` `files.includes` negation, `.dockerignore`, and `.gitignore` all isolate `website/` from the product toolchain and Docker image — proven via clean `tsc --noEmit`/`biome check .`/`pnpm build` runs with zero `website/` paths touched. Starlight 0.41.5 dropped the older `{ label, autogenerate }` sidebar shorthand (now needs a nested `items: [{ autogenerate }]` array) — future docs-site sidebar groups (07-11) must use that nested shape. Two human-only GitHub Pages setup steps deferred to 07-12's launch checklist (`deferred-items.md`).
 - (07-05) AIDA-23 intentionally left `Pending` in REQUIREMENTS.md despite being declared in 07-05's plan frontmatter — it spans seven phase-7 plans (07-01/05/06/08/10/11/12) and 07-05 (CI + CONTRIBUTING + templates) doesn't ship its substance (README hero GIF, docs site). Mirrors the project's split-requirement precedent (AIDA-05/AIDA-09): mark complete only when the plan that actually finishes README+docs-site lands (likely 07-10).
+- (07-03) AIDA-12 (Settings: branding, SLA policies, channels, AI provider/keys) fully CLOSED — branding was the last unshipped slice. New `src/lib/branding/settings.ts` (D-16 name-only scope, mirrors the email-channel Setting module shape exactly, worker-bundleable via relative imports) adds the single `branding:workspaceName` key with fallback chain stored-value -> `organization.name` -> `"AIDA"`. Settings > Branding tab (admin-gated `saveBranding` Server Action, `requireOrgAdmin()` first) inserted as the second nav item. The resolved name now drives: the app sidebar brand block (`src/app/(app)/layout.tsx` resolves it server-side, `sidebar.tsx`'s brand span gained `min-w-0 truncate` so a 60-char name can't break the 240px sidebar), both public pages (`/request`, now `async`, and `/status/[token]`, both call sites — resolved via bare `prisma.organization.findFirst()`/`prisma.setting.findFirst()` since these routes have no session), and the outbound email `fromName` in `src/lib/worker/jobs/email-outbound-send.ts`. Logo upload and public tagline both intentionally deferred (D-16's own fallback clause) — logged in `deferred-items.md` under `## From 07-03`.
 - AI-native open-source helpdesk, self-host, bring-your-own / local LLM (OpenAI/Anthropic/Ollama).
 - Customer-support beachhead; generic multi-tenant core (also serves IT/ITSM).
 - Apache-2.0 license.
