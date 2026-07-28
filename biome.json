@@ -20,7 +20,8 @@
       "!**/src/generated",
       "!**/prisma/generated",
       "!.planning",
-      "!.claude/worktrees"
+      "!.claude/worktrees",
+      "!website"
     ]
   }
 }
