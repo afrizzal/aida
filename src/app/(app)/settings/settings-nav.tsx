@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/settings", label: "AI Features" },
+  { href: "/settings/branding", label: "Branding" },
   { href: "/settings/sla", label: "SLA Policies" },
   { href: "/settings/tags", label: "Tags" },
   { href: "/settings/custom-fields", label: "Custom Fields" },
