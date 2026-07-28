@@ -134,9 +134,9 @@
 2. README leads with a hero GIF, one-line pitch, quick-start (`docker compose up`), and a comparison table; a docs site covers install, config, and AI/BYO-LLM setup.
 3. Backup/restore (pg_dump) and basic ops docs exist; a security pass confirms encrypted keys, enforced authz, and the AIDA-20 safeguards.
 4. The repo is ready for a Phase-1 (first-100-stars) outreach launch.
-**Plans:** 12 plans across 6 waves
+**Plans:** 1/12 plans executed
 Plans:
-- [ ] 07-01-PLAN.md — Repo hygiene: .gitattributes + LF renormalization, middleware→proxy rename, SlaDueChip locale fix, REQUIREMENTS.md restructure (Wave 1)
+- [x] 07-01-PLAN.md — Repo hygiene: .gitattributes + LF renormalization, middleware→proxy rename, SlaDueChip locale fix, REQUIREMENTS.md restructure (Wave 1)
 - [ ] 07-02-PLAN.md — Demo dataset: fixtures + seedDemoData + pre-computed AI artifacts + `pnpm db:seed` CLI with guard (Wave 2)
 - [ ] 07-03-PLAN.md — Settings → Branding tab (workspace display name) applied to sidebar, public pages, email from-name — closes AIDA-12 (Wave 2)
 - [ ] 07-04-PLAN.md — backup.sh/restore.sh (DB + uploads volume) + proven round-trip + docs/OPERATIONS.md runbook (Wave 2)
