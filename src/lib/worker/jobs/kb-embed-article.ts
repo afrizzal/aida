@@ -9,7 +9,11 @@ import { randomBytes } from "node:crypto";
 import { prisma } from "../../db";
 import { chunkMarkdown } from "../../rag/chunk-markdown";
 import { embed } from "../../rag/embed";
-import { embeddingModelId, isEmbeddingConfigured, resolveEmbeddingProvider } from "../../rag/settings";
+import {
+  embeddingModelId,
+  isEmbeddingConfigured,
+  resolveEmbeddingProvider,
+} from "../../rag/settings";
 import { toVectorLiteral } from "../../rag/vector-literal";
 import { scopedDb } from "../../scoped-db";
 

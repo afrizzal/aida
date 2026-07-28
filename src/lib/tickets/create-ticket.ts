@@ -91,9 +91,7 @@ export async function createTicket(
     });
 
     const message = await (
-      tx.message.create as (a: {
-        data: Record<string, unknown>;
-      }) => Promise<{ id: string }>
+      tx.message.create as (a: { data: Record<string, unknown> }) => Promise<{ id: string }>
     )({
       data: {
         ticketId: ticket.id,

@@ -4,7 +4,11 @@ import { simpleParser } from "mailparser";
 // live SMTP transport).
 import MailComposer from "nodemailer/lib/mail-composer/index.js";
 import { describe, expect, it } from "vitest";
-import { buildOutboundMessageId, composeMail, wrapEmailSafeHtml } from "../../src/lib/channels/email/compose-outbound";
+import {
+  buildOutboundMessageId,
+  composeMail,
+  wrapEmailSafeHtml,
+} from "../../src/lib/channels/email/compose-outbound";
 
 describe("compose-outbound", () => {
   it("buildOutboundMessageId returns a bracketed id containing the domain", () => {

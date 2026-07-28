@@ -30,9 +30,7 @@ describe("GET /api/health", () => {
   });
 
   it("returns 503 with db:unreachable when DB throws", async () => {
-    vi.mocked(prisma.systemSetting.findUnique).mockRejectedValueOnce(
-      new Error("DB unreachable"),
-    );
+    vi.mocked(prisma.systemSetting.findUnique).mockRejectedValueOnce(new Error("DB unreachable"));
 
     const res = await GET();
     const body = await res.json();

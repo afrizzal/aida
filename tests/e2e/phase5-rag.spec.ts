@@ -84,7 +84,9 @@ function startStub(): Promise<void> {
           // 8), never a generic 500 — so the settings UI's failure branch has real content to
           // surface, not just an opaque status code.
           res.writeHead(404, { "content-type": "application/json" });
-          res.end(JSON.stringify({ error: `model "${EMBED_MODEL}" not found, try pulling it first` }));
+          res.end(
+            JSON.stringify({ error: `model "${EMBED_MODEL}" not found, try pulling it first` }),
+          );
           return;
         }
         let raw = "";
@@ -299,7 +301,9 @@ test("Settings: Embedding Test Connection succeeds against the stub, fails with 
   stub.embedMode = "fail";
   await embedCard.getByRole("button", { name: "Test connection" }).click();
   await expect(
-    embedCard.getByText(`Connection failed: model "${EMBED_MODEL}" not found, try pulling it first`),
+    embedCard.getByText(
+      `Connection failed: model "${EMBED_MODEL}" not found, try pulling it first`,
+    ),
   ).toBeVisible({ timeout: 15_000 });
   stub.embedMode = "ok"; // reset — later tests need real embed() calls to succeed
 });
@@ -430,7 +434,10 @@ test("Grounded draft: cites the KB article, Insert stays editable, Send audits D
   // The actionType values themselves, not just a non-empty section — DRAFT_GENERATED recorded
   // before DRAFT_APPROVED, matching generate-draft.ts's write happening before the send's audit.
   const events = await prisma.auditEvent.findMany({
-    where: { ticketId: groundedTicketId, actionType: { in: ["DRAFT_GENERATED", "DRAFT_APPROVED"] } },
+    where: {
+      ticketId: groundedTicketId,
+      actionType: { in: ["DRAFT_GENERATED", "DRAFT_APPROVED"] },
+    },
     orderBy: { createdAt: "asc" },
   });
   expect(events.map((e) => e.actionType)).toEqual(["DRAFT_GENERATED", "DRAFT_APPROVED"]);

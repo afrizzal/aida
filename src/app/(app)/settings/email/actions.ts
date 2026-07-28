@@ -1,13 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { requireOrgAdmin } from "@/lib/authz";
 import { createImapClient } from "@/lib/channels/email/imap-client";
-import { createSmtpTransport } from "@/lib/channels/email/smtp-client";
 import {
   getEmailSettings,
   saveEmailSettings as persistEmailSettings,
 } from "@/lib/channels/email/settings";
-import { requireOrgAdmin } from "@/lib/authz";
+import { createSmtpTransport } from "@/lib/channels/email/smtp-client";
 import { getScopedDb } from "@/lib/session";
 
 /** Mirrors the Email settings form fields — ports/booleans arrive as form-native strings/booleans. */

@@ -16,7 +16,11 @@ export function collectCandidateMessageIds(
 ): string[] {
   const raw = [
     parsed.inReplyTo,
-    ...(Array.isArray(parsed.references) ? parsed.references : parsed.references ? [parsed.references] : []),
+    ...(Array.isArray(parsed.references)
+      ? parsed.references
+      : parsed.references
+        ? [parsed.references]
+        : []),
   ];
   const seen = new Set<string>();
   const result: string[] = [];

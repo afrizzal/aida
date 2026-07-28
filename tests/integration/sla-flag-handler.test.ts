@@ -10,7 +10,9 @@ function makeOrgData(name: string, slug: string) {
 }
 
 async function seedOrgWithContact(label: string) {
-  const org = await prisma.organization.create({ data: makeOrgData(`Org ${label}`, `sla-flag-${label}`) });
+  const org = await prisma.organization.create({
+    data: makeOrgData(`Org ${label}`, `sla-flag-${label}`),
+  });
   const contact = await prisma.contact.create({
     data: { organizationId: org.id, email: `${label}@sla-flag.test` },
   });

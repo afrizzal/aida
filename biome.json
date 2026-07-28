@@ -19,7 +19,9 @@
       "!**/.next",
       "!**/src/generated",
       "!**/prisma/generated",
-      "!.planning"
+      "!.planning",
+      "!.claude/worktrees",
+      "!website"
     ]
   }
 }

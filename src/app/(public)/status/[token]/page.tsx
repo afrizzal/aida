@@ -4,6 +4,7 @@ import { StatusChip } from "@/components/tickets/status-chip";
 import { ThreadMessage } from "@/components/tickets/thread-message";
 import { ThreadSystemEvent } from "@/components/tickets/thread-system-event";
 import { Button } from "@/components/ui/button";
+import { BRANDING_SETTING_KEYS } from "@/lib/branding/settings";
 import { prisma } from "@/lib/db";
 import { CsatForm } from "./csat-form";
 import { FollowUpForm } from "./follow-up-form";
@@ -19,6 +20,16 @@ interface StatusPageProps {
 
 export default async function StatusPage({ params }: StatusPageProps) {
   const { token } = await params;
+
+  // Unauthenticated route — no session/scopedDb here. Single-org v1 resolution (mirrors the
+  // public intake route's `prisma.organization.findFirst()` precedent).
+  const org = await prisma.organization.findFirst({ select: { id: true, name: true } });
+  const row = org
+    ? await prisma.setting.findFirst({
+        where: { organizationId: org.id, key: BRANDING_SETTING_KEYS.workspaceName },
+      })
+    : null;
+  const brandName = (row?.value ?? "").trim() || org?.name || "AIDA";
 
   // Unauthenticated bearer-token flow — the token IS the authorization, so this uses
   // bare `prisma`, never scopedDb (no session/org context exists here). The
@@ -39,7 +50,7 @@ export default async function StatusPage({ params }: StatusPageProps) {
 
   if (!ticket) {
     return (
-      <PublicPageShell maxWidth={720}>
+      <PublicPageShell maxWidth={720} brandName={brandName}>
         <div className="space-y-4 text-center">
           <h1 className="text-[18px] font-semibold">We couldn't find that ticket</h1>
           <p className="text-[14px] text-muted-foreground">
@@ -55,7 +66,7 @@ export default async function StatusPage({ params }: StatusPageProps) {
   }
 
   return (
-    <PublicPageShell maxWidth={720}>
+    <PublicPageShell maxWidth={720} brandName={brandName}>
       <div className="mb-4 flex items-center justify-between gap-2">
         <h1 className="truncate text-[18px] font-semibold">
           #{ticket.number} {ticket.subject}

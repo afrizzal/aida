@@ -28,7 +28,11 @@ export function EmailChannelToggle({ defaultEnabled }: EmailChannelToggleProps) 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-3">
-        <Switch checked={enabled} onCheckedChange={handleChange} aria-label="Enable email channel" />
+        <Switch
+          checked={enabled}
+          onCheckedChange={handleChange}
+          aria-label="Enable email channel"
+        />
         <span className="text-[14px]">Enable email channel</span>
       </div>
       <p className="text-[12px] text-muted-foreground">

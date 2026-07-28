@@ -1,0 +1,51 @@
+---
+title: AIDA
+description: The open-source, AI-native helpdesk you can self-host.
+template: splash
+hero:
+  tagline: The open-source, AI-native helpdesk you can self-host.
+  actions:
+    - text: Quick start
+      link: /aida/getting-started/quick-start/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/afrizzal/aida
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Why AIDA
+
+Most helpdesk software treats AI as a paywalled add-on with per-resolution fees, while your
+ticket data lives on someone else's servers. AIDA is different: AI is the *core*, not an
+afterthought. Self-host it on your own server, point it at any LLM — including a fully local
+one via Ollama — and keep every ticket on your own infrastructure.
+
+<CardGrid stagger>
+	<Card title="Modern ticketing" icon="document">
+		Shared inbox, ticket lifecycle, contacts, tags, internal notes, assignment, and SLA timers —
+		with web form and email intake.
+	</Card>
+	<Card title="AI auto-triage" icon="magnifier">
+		Every incoming ticket is classified — category, priority, sentiment, language — and routed
+		automatically.
+	</Card>
+	<Card title="RAG drafted replies" icon="pencil">
+		Suggested replies grounded in your knowledge base and past tickets, with citations and a
+		human-approval gate. No silent AI sends.
+	</Card>
+	<Card title="AIDA Insight" icon="analytics">
+		AI-driven analytics: recurring-issue clustering, knowledge-gap detection, ticket-volume
+		drivers, and SLA/CSAT insight.
+	</Card>
+	<Card title="Bring your own LLM" icon="setting">
+		OpenAI, Anthropic, or a local model via Ollama. Your keys, your models, your data — and AI is
+		fully toggleable off.
+	</Card>
+	<Card title="One-command self-host" icon="rocket">
+		`docker compose up` brings up the app, Postgres + pgvector, the queue, and the reverse proxy
+		on a single server.
+	</Card>
+</CardGrid>

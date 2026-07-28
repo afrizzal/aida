@@ -137,9 +137,11 @@ export async function saveEmailSettings(
   const writes: Array<[string, string]> = [];
 
   if (input.enabled !== undefined) writes.push([EMAIL_SETTING_KEYS.enabled, String(input.enabled)]);
-  if (input.fromAddress !== undefined) writes.push([EMAIL_SETTING_KEYS.fromAddress, input.fromAddress]);
+  if (input.fromAddress !== undefined)
+    writes.push([EMAIL_SETTING_KEYS.fromAddress, input.fromAddress]);
   if (input.imapHost !== undefined) writes.push([EMAIL_SETTING_KEYS.imapHost, input.imapHost]);
-  if (input.imapPort !== undefined) writes.push([EMAIL_SETTING_KEYS.imapPort, String(input.imapPort)]);
+  if (input.imapPort !== undefined)
+    writes.push([EMAIL_SETTING_KEYS.imapPort, String(input.imapPort)]);
   if (input.imapSecure !== undefined)
     writes.push([EMAIL_SETTING_KEYS.imapSecure, String(input.imapSecure)]);
   if (input.imapUser !== undefined) writes.push([EMAIL_SETTING_KEYS.imapUser, input.imapUser]);
@@ -147,7 +149,8 @@ export async function saveEmailSettings(
     writes.push([EMAIL_SETTING_KEYS.imapPasswordEnc, encryptSecret(input.imapPassword)]);
   }
   if (input.smtpHost !== undefined) writes.push([EMAIL_SETTING_KEYS.smtpHost, input.smtpHost]);
-  if (input.smtpPort !== undefined) writes.push([EMAIL_SETTING_KEYS.smtpPort, String(input.smtpPort)]);
+  if (input.smtpPort !== undefined)
+    writes.push([EMAIL_SETTING_KEYS.smtpPort, String(input.smtpPort)]);
   if (input.smtpSecure !== undefined)
     writes.push([EMAIL_SETTING_KEYS.smtpSecure, String(input.smtpSecure)]);
   if (input.smtpUser !== undefined) writes.push([EMAIL_SETTING_KEYS.smtpUser, input.smtpUser]);

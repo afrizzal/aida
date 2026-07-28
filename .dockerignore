@@ -15,3 +15,6 @@ tests
 src/generated
 Dockerfile
 docker-compose.yml
+# Docs site (Starlight) — never part of the product image; keeps build context small
+# and prevents docs-only commits from invalidating Docker layer caches.
+website

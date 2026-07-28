@@ -53,3 +53,8 @@ desktop.ini
 
 # Generated code (Prisma client output)
 /src/generated/
+
+# Docs site (Astro/Starlight, website/) — has its own .gitignore for build output too
+website/node_modules
+website/dist
+website/.astro

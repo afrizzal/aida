@@ -7,7 +7,14 @@ import { toast } from "sonner";
 import { z } from "zod/v4";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import type { EmailSettingsInput } from "./actions";
 import { saveEmailSettings } from "./actions";
@@ -263,8 +270,8 @@ export function EmailSettingsForm({ initial, health }: EmailSettingsFormProps) {
                 <Input type="email" {...field} />
               </FormControl>
               <p className="text-[12px] text-muted-foreground">
-                The address customers see and reply to. Must match your SMTP account or an
-                address it&apos;s authorized to send as.
+                The address customers see and reply to. Must match your SMTP account or an address
+                it&apos;s authorized to send as.
               </p>
               <FormMessage />
             </FormItem>
