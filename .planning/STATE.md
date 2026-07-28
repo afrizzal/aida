@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-28T22:37:52.925Z"
+last_updated: "2026-07-28T22:58:46.640Z"
 last_activity: 2026-07-28
 progress:
   total_phases: 7
   completed_phases: 6
   total_plans: 59
-  completed_plans: 48
-  percent: 81
+  completed_plans: 49
+  percent: 83
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,16 +27,19 @@ progress:
 ## Current Position
 
 Phase: 07 (launch-readiness) — EXECUTING
-Plan: 2 of 12
-Status: Ready to execute (07-01 complete)
-Last activity: 2026-07-28 -- 07-01 (repo-hygiene: .gitattributes LF normalization, Next 16 proxy rename, SlaDueChip locale fix, REQUIREMENTS.md restructure) complete
+Plan: 3 of 12
+Status: Ready to execute
+Last activity: 2026-07-28
 
-Progress: [████████░░] 81% (48/59 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 7/7 phase 05 + 7/7 phase 06 + 1/12 phase 07)
+Progress: [████████░░] 83% (49/59 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 7/7 phase 05 + 7/7 phase 06 + 2/12 phase 07)
 
 ## Accumulated Context
 
 ### Key Decisions
 
+- (07-05) GitHub repo furniture shipped: `.github/workflows/ci.yml` (lint/typecheck/test/build on push+PR, backs the README badge) + `.github/workflows/integration.yml` (Testcontainers suite isolated to nightly cron, never the PR path — a container-start flake must not poison the public badge); `CONTRIBUTING.md` (verified working dev-setup sequence + project conventions + architectural non-negotiables), `CODE_OF_CONDUCT.md` (Contributor Covenant v2.1), `.github/SECURITY.md` (GitHub-standard disclosure policy, cross-linked to — never duplicating — `docs/SECURITY.md`), issue forms + PR template (security reports routed to private advisories, PR checklist mirrors CI). Both CODE_OF_CONDUCT.md and SECURITY.md use the same clearly-marked placeholder maintainer-contact address pending 07-12's launch checklist. Badge URL for 07-10: `https://github.com/afrizzal/aida/actions/workflows/ci.yml/badge.svg`.
+- (07-05) Local pipeline validation: install/db:generate/unit-test/build steps for THIS plan's own files all pass; `pnpm lint`/`typecheck`/`build`'s type-check step fail locally due to the concurrently-landing 07-06 `website/` Astro docs-site scaffold (not yet excluded from the root tsc/biome scan) — re-run all seven `ci.yml` commands from a clean checkout once all wave-2 plans (07-02..07-06) have merged, before trusting the badge.
+- (07-05) AIDA-23 intentionally left `Pending` in REQUIREMENTS.md despite being declared in 07-05's plan frontmatter — it spans seven phase-7 plans (07-01/05/06/08/10/11/12) and 07-05 (CI + CONTRIBUTING + templates) doesn't ship its substance (README hero GIF, docs site). Mirrors the project's split-requirement precedent (AIDA-05/AIDA-09): mark complete only when the plan that actually finishes README+docs-site lands (likely 07-10).
 - AI-native open-source helpdesk, self-host, bring-your-own / local LLM (OpenAI/Anthropic/Ollama).
 - Customer-support beachhead; generic multi-tenant core (also serves IT/ITSM).
 - Apache-2.0 license.
