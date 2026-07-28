@@ -1,0 +1,23 @@
+# Normalize every text file to LF in the repo AND in the working tree.
+# Fixes the CRLF drift caused by core.autocrlf=true on Windows checkouts
+# (logged 6x since 02-05); overrides autocrlf without touching git config.
+* text=auto eol=lf
+
+# Shell scripts MUST be LF — CRLF breaks the shebang inside Linux containers.
+*.sh text eol=lf
+Dockerfile text eol=lf
+Caddyfile text eol=lf
+
+# Lockfiles: LF, and never diffed in review noise.
+pnpm-lock.yaml text eol=lf -diff
+
+# Binary assets — never normalize, never diff.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
