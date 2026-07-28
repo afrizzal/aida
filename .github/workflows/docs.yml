@@ -1,0 +1,49 @@
+name: Deploy docs
+
+# One-time human setup this workflow cannot do itself:
+#   1. Repository Settings > Pages > Source = GitHub Actions.
+#   2. Confirm the published URL is https://afrizzal.github.io/aida — it must match
+#      `base: '/aida'` in website/astro.config.mjs, or every asset 404s.
+
+# Only docs changes trigger a deploy — product-only commits should not republish the site.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'website/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+# Required by actions/deploy-pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never run two Pages deploys at once; do not cancel an in-flight deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Build the Starlight site and upload the Pages artifact
+        uses: withastro/action@v6
+        with:
+          path: ./website
+          package-manager: pnpm@latest
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
