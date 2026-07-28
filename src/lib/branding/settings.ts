@@ -1,5 +1,5 @@
 // Typed branding-settings module over the existing key/value `Setting` model (zero schema
-// change). D-16 scope: NAME ONLY — one key, no logo, no tagline, no colour.
+// change). D-16 scope: NAME ONLY — one key, no logo, no subtitle field, no colour.
 //
 // Imported by BOTH the Next.js app (settings actions/page, app layout — via
 // `@/lib/branding/settings`) AND the worker (outbound-send job — via a relative path,

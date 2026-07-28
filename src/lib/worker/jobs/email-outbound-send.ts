@@ -6,6 +6,7 @@
 // Worker-bundleable (esbuild) — every import below is relative to src/lib/worker/jobs/, i.e.
 // TWO levels up to src/lib/ then down, exactly like heartbeat.ts's `import { prisma } from "../../db"`.
 
+import { getBrandingSettings } from "../../branding/settings";
 import { buildOutboundMessageId, composeMail } from "../../channels/email/compose-outbound";
 import { getEmailSettings } from "../../channels/email/settings";
 import { createSmtpTransport } from "../../channels/email/smtp-client";
@@ -47,10 +48,12 @@ export async function emailOutboundSendHandler(data: { messageId: string }): Pro
   const lastInbound = [...priorMessages].reverse().find((m) => m.direction === "INBOUND");
   const inReplyTo = lastInbound?.emailMessageId ?? undefined;
 
+  const branding = await getBrandingSettings(db, message.ticket.organization.name);
+
   const transporter = createSmtpTransport(settings);
   const mail = composeMail({
     fromAddress: settings.fromAddress,
-    fromName: message.ticket.organization.name,
+    fromName: branding.workspaceName,
     to: message.ticket.contact.email,
     subject: `Re: ${message.ticket.subject} [#${message.ticket.number}]`,
     bodyMarkdown: message.bodyMarkdown,

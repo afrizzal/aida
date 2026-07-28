@@ -13,6 +13,7 @@ interface SidebarUser {
 
 interface SidebarProps {
   user: SidebarUser;
+  brandName: string;
 }
 
 const navItems = [
@@ -33,18 +34,18 @@ function getInitials(name: string): string {
     .toUpperCase();
 }
 
-export function Sidebar({ user }: SidebarProps) {
+export function Sidebar({ user, brandName }: SidebarProps) {
   const pathname = usePathname();
 
   return (
     <aside className="flex h-screen w-60 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
       {/* Brand */}
       <div className="flex h-14 items-center gap-2.5 px-4">
-        <div className="flex size-7 items-center justify-center rounded-md bg-sidebar-primary shadow-sm">
+        <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-sidebar-primary shadow-sm">
           <Sparkles className="size-4 text-sidebar-primary-foreground" />
         </div>
-        <span className="text-[15px] font-semibold tracking-tight text-sidebar-foreground">
-          AIDA
+        <span className="min-w-0 truncate text-[15px] font-semibold tracking-tight text-sidebar-foreground">
+          {brandName}
         </span>
       </div>
 

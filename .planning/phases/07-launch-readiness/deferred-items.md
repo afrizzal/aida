@@ -14,3 +14,15 @@ Once the CRLF-vs-LF noise was eliminated (`.gitattributes` + working-tree renorm
 6. **`tests/integration/scoped-tx.test.ts:23` / `tests/integration/workspace-isolation.test.ts:59` stale `suppressions/unused` (`biome-ignore lint/suspicious/noExplicitAny`)** — the ignore comments no longer match what Biome expects to suppress; needs investigation into why (rule config change vs. code drift), not a blind removal.
 
 **Net effect for later Phase 7 plans:** the line-ending/formatting noise that made `biome check .` unusable as a gate (the literal target of 07-01) is fully eliminated — `git status --porcelain` is empty and zero formatting diffs remain. These 14 residual findings are stable, pre-existing, file-scoped lint debt that any future plan touching those exact files will need to address (or explicitly continue to defer) — they do not reintroduce repo-wide noise for untouched files.
+
+## From 07-03 (branding settings)
+
+D-16's fallback clause is explicit — if logo upload is disproportionately heavy, "name-only ships in 7". This plan shipped exactly one field (the workspace display name) and deferred two ideas:
+
+1. **Logo upload.** Deferred per D-16's planner's-call clause. Reason: a new unauthenticated `GET /api/branding/logo` serving route + a `PUBLIC_PREFIXES` entry in `src/proxy.ts` + an admin multipart upload with image byte-sniffing + storage-key lifecycle management + three fallback render sites (sidebar, public request page, public status page) — a plan's worth of work that also widens the public attack surface immediately before this phase's security pass. `src/lib/attachments/local-file-storage.ts` (`buildStorageKey` + `safeKey`) is the intended storage primitive when this is picked up.
+2. **Public tagline.** A short subtitle under the brand mark on the public request/status pages. Considered during planning and cut: D-16's locked fallback is name-only, and a second field is unrequested scope. If it is ever picked up it is a small addition — one more key in `BRANDING_SETTING_KEYS`, one more `Input`, and one optional `<p>` in `PublicPageShell`.
+
+## From 07-06 (docs site)
+
+- Enable GitHub Pages with Source = GitHub Actions (repo Settings > Pages) — one-time, human-only.
+- Verify `https://afrizzal.github.io/aida` renders with working CSS after the first deploy (a mismatch between the Pages URL and `base` shows as an unstyled page).
