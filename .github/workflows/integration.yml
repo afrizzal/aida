@@ -1,0 +1,28 @@
+# Integration tests spin up real Postgres containers via Testcontainers, so they are
+# slow and Docker-dependent. Keeping them off the PR path stops a flaky container start
+# from turning the public CI badge red, while this nightly run still catches regressions.
+# GitHub-hosted `ubuntu-latest` runners provide Docker, so no extra service configuration
+# is needed.
+name: Integration tests
+
+on:
+  schedule:
+    - cron: "0 3 * * *"      # 03:00 UTC nightly
+  workflow_dispatch:
+
+jobs:
+  integration:
+    name: Testcontainers integration suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm db:generate
+      - run: pnpm test:integration
