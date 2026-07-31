@@ -142,7 +142,7 @@ Plans:
 - [x] 07-04-PLAN.md — backup.sh/restore.sh (DB + uploads volume) + proven round-trip + docs/OPERATIONS.md runbook (Wave 2)
 - [x] 07-05-PLAN.md — GitHub CI + nightly integration workflow + CONTRIBUTING/CODE_OF_CONDUCT/SECURITY policy + issue & PR templates (Wave 2)
 - [x] 07-06-PLAN.md — Astro Starlight docs site scaffold in website/ + GitHub Pages workflow + toolchain isolation (Wave 2)
-- [ ] 07-07-PLAN.md — DEMO_MODE boot flag + compose/env plumbing + real cold-boot verification (Wave 3)
+- [x] 07-07-PLAN.md — DEMO_MODE boot flag + compose/env plumbing + real cold-boot verification (Wave 3)
 - [ ] 07-08-PLAN.md — Reproducible capture script: 10 screenshots (light+dark) + hero GIF + human sign-off (Wave 3)
 - [ ] 07-09-PLAN.md — Security pass: authz/secrets/isolation/egress/dependency sweeps + 07-SECURITY-PASS.md + Phase 4/5/6 human items (Wave 4)
 - [ ] 07-10-PLAN.md — README rewrite: hero GIF, badges, fixed quick start, demo section, honest comparison table, link/claim sweep (Wave 5)

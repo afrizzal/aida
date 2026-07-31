@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-29T04:42:27.000Z"
-last_activity: 2026-07-29
+last_updated: "2026-07-31T14:52:46.674Z"
+last_activity: 2026-07-31
 progress:
   total_phases: 7
   completed_phases: 6
   total_plans: 59
-  completed_plans: 53
-  percent: 88
+  completed_plans: 54
+  percent: 92
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,16 +27,17 @@ progress:
 ## Current Position
 
 Phase: 07 (launch-readiness) — EXECUTING
-Plan: 7 of 12 (Wave 3, first plan is 07-07)
-Status: PAUSED after Wave 2 — awaiting user's prompt before starting Wave 3 (07-07, 07-08)
-Last activity: 2026-07-29 -- Wave 2 complete: 07-02 (demo dataset), 07-03 (branding settings), 07-04 (backup/restore), 07-05 (GitHub OSS furniture), 07-06 (docs site infra) — all 5 plans merged to `master` via PR #1 (https://github.com/afrizzal/aida/pull/1)
+Plan: 8 of 12 (Wave 3, next up is 07-08)
+Status: Executing Phase 07 — 07-07 (demo mode boot wiring) complete
+Last activity: 2026-07-31 -- 07-07 complete: DEMO_MODE boot wiring + real cold-boot proof (AIDA-22 fully closed)
 
-Progress: [█████████░] 90% (53/59 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 7/7 phase 05 + 7/7 phase 06 + 6/12 phase 07)
+Progress: [█████████░] 92% (54/59 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 7/7 phase 05 + 7/7 phase 06 + 7/12 phase 07)
 
 ## Accumulated Context
 
 ### Key Decisions
 
+- (07-07) Demo mode (AIDA-22, boot half) shipped — AIDA-22 now fully CLOSED: `src/lib/demo/identities.ts` (`ensureDemoIdentities()`) is the one place demo org+admin+agent are resolved/created, shared by `prisma/seed.ts` (07-02's CLI) and the new boot path so the two entrypoints cannot drift; `src/lib/bootstrap.ts` gained `createFirstOrgAndAdmin()` (extracted from `bootstrapFromEnv` with unchanged external behaviour — org name/slug still hardcoded `"AIDA"`/`"aida"`); `src/lib/demo/bootstrap-demo.ts` (`bootstrapDemoMode()`) is a strict `DEMO_MODE === "true"` gate (first statement), logs the loud "PUBLICLY DOCUMENTED credentials" warning before any seeding, guards on `prisma.ticket.count()` for idempotency, and try/catches its own body so a failed seed can never block server startup; wired into `src/instrumentation.ts` after `bootstrapFromEnv()`. `docker-compose.yml`'s `app` service (only) gets `DEMO_MODE`/`DEMO_ADMIN_EMAIL`/`DEMO_ADMIN_PASSWORD`/`DEMO_AGENT_EMAIL` plus a `start_period: 90s` healthcheck grace window; `.env.example`/`docs/OPERATIONS.md` document all four (blank/off by default). Proven on a REAL cold boot in this worktree's own `aida` compose project: seed completed in 2223ms (30 tickets/12 contacts/6 KB articles/8 CSAT/3 COMPLETED InsightRuns, all counts verified via `psql`), a `docker compose restart app` did not duplicate (`[demo] Demo data already present (30 tickets)`), unsetting the flag on the same volumes produced zero `[demo]` log lines, and the documented demo credentials (`admin@demo.aida.test` / `aida-demo-2026`) authenticated for real via the sign-in API. Pre-existing `src/app/(auth)/setup/actions.ts` interactive wizard keeps its own separate `signUpEmail` call site (user-chosen org name/slug, a different contract from `createFirstOrgAndAdmin`'s hardcoded one) — intentionally out of this plan's scope, not a duplicate of the identity logic this plan consolidated. Local-machine-only build note: this dev machine's Avast Web Shield TLS-intercepts Docker's outbound HTTPS (confirmed via `docker info`'s proxy settings + host `NODE_EXTRA_CA_CERTS`/`SSLKEYLOGFILE` env vars); building required a temporary, fully-reverted `Dockerfile` CA-trust patch (never committed) — the shipped `Dockerfile` is untouched. Also flagged (not fixed, out of scope): `docker-compose.yml`'s `DATABASE_URL` never URL-encodes `POSTGRES_PASSWORD`, so a base64-generated password containing `/`/`@`/`:`/`#` breaks the connection string — worth a 07-09 security-pass note. SUMMARY: `.planning/phases/07-launch-readiness/07-07-SUMMARY.md`.
 - (07-04) Backup/restore (AIDA-24) shipped: `scripts/backup.sh` (pg_dump -Fc + streamed `uploads_data` volume tar via `docker compose run --no-deps --entrypoint sh app`, timestamped, running-check preflight) + `scripts/restore.sh` (pg_restore --clean --if-exists + uploads restore, stops/starts app+worker, requires explicit confirmation unless `--yes`, health-checks afterward) + `docs/OPERATIONS.md` (backups/restore/restore-to-new-server/upgrading/logs/health/full env reference/troubleshooting). Proven via a real seed -> backup -> destroy -> restore -> assert round trip against a live `docker compose` stack (both a DB row and an uploaded file recovered intact). Found and fixed a real bug live: `pg_restore --clean` always exits 1 against this project's real schema because Postgres rejects dropping a constraint on pg-boss's declaratively-partitioned `pgboss.job_common` table (`cannot drop inherited constraint`) — a known pg_dump/restore limitation with partitioning, not an app bug; `restore.sh` now tolerates that exact message and still aborts on any other pg_restore error. `docs/OPERATIONS.md`'s env table carries a `<!-- 07-07 adds DEMO_MODE here -->` marker for that plan to extend.
 - (07-05) GitHub repo furniture shipped: `.github/workflows/ci.yml` (lint/typecheck/test/build on push+PR, backs the README badge) + `.github/workflows/integration.yml` (Testcontainers suite isolated to nightly cron, never the PR path — a container-start flake must not poison the public badge); `CONTRIBUTING.md` (verified working dev-setup sequence + project conventions + architectural non-negotiables), `CODE_OF_CONDUCT.md` (Contributor Covenant v2.1), `.github/SECURITY.md` (GitHub-standard disclosure policy, cross-linked to — never duplicating — `docs/SECURITY.md`), issue forms + PR template (security reports routed to private advisories, PR checklist mirrors CI). Both CODE_OF_CONDUCT.md and SECURITY.md use the same clearly-marked placeholder maintainer-contact address pending 07-12's launch checklist. Badge URL for 07-10: `https://github.com/afrizzal/aida/actions/workflows/ci.yml/badge.svg`.
 - (07-05) Local pipeline validation, re-run after 07-06 landed `chore(07-06): isolate website/ from product typecheck, lint and Docker context`: `pnpm typecheck` and `pnpm build` now pass cleanly (0 exit); `pnpm lint` still fails but only on 6 pre-existing, catalogued lint-debt items from `deferred-items.md` (07-01), none touched by 07-05 — CI's typecheck/test/build gates are fully green, badge will go green once that pre-existing lint debt is separately cleaned up.
