@@ -436,6 +436,7 @@ interface RecordingResult {
   videoPath: string;
   steps: string[];
   durationSeconds: number;
+  preRollSeconds: number;
 }
 
 async function recordGoldenPath(
@@ -455,12 +456,26 @@ async function recordGoldenPath(
     recordVideo: { dir: videoDir, size: { width: 1280, height: 800 } },
   });
   await context.addInitScript(() => window.localStorage.setItem("theme", "light"));
+  // Playwright's recordVideo starts accumulating frames the instant this page is created — its
+  // first ~0.8s of raw footage is Chromium's blank initial paint followed by /tickets's Suspense
+  // loading skeleton while the RSC payload streams in (defect found in maintainer review: the
+  // shipped GIF opened on a blank frame then a loading skeleton). `settle()` below already waits
+  // out exactly that same interval (networkidle + a forced repaint) before doing anything else,
+  // so the wall-clock time from `newPage()` to the end of that first `settle()` IS the true "first
+  // fully-painted /tickets frame" offset. Recording it here and trimming the GIF conversion's
+  // `-ss` seek to it (convertToGif, below) REMOVES the pre-roll from the final asset — it does
+  // not re-render or edit any frame's content, only where the exported clip starts.
+  const pageCreatedAt = Date.now();
   const page = await context.newPage();
   const pause = (ms: number) => page.waitForTimeout(ms);
 
   // Step 1 — shared inbox + a real filter interaction.
   await gotoWarm(page, "/tickets");
   await settle(page);
+  // Small fixed buffer on top of the measured settle time: `-ss` is an INPUT seek (fast,
+  // keyframe-driven) rather than a frame-exact output seek, so a little slack guarantees the
+  // trimmed GIF starts a beat after full paint, never a beat before it.
+  const preRollSeconds = (Date.now() - pageCreatedAt) / 1000 + 0.25;
   await pause(1400);
   await page.getByRole("button", { name: "Unassigned", exact: true }).click();
   // router.push for a query-param-only change is a client-side RSC re-fetch, not a hard
@@ -561,7 +576,7 @@ async function recordGoldenPath(
   if (!videoPath) throw new Error("[capture] Recording produced no video file");
 
   const durationSeconds = (Date.now() - start) / 1000;
-  return { videoPath, steps, durationSeconds };
+  return { videoPath, steps, durationSeconds, preRollSeconds };
 }
 
 function ffmpeg(args: string[]): void {
@@ -574,7 +589,7 @@ interface GifResult {
   settings: string;
 }
 
-async function convertToGif(videoPath: string): Promise<GifResult> {
+async function convertToGif(videoPath: string, preRollSeconds: number): Promise<GifResult> {
   const paletteFile = path.join(path.dirname(videoPath), "palette.png");
   const outFile = path.join(ASSETS_DIR, "aida-demo.gif");
   const attempts = [
@@ -582,14 +597,21 @@ async function convertToGif(videoPath: string): Promise<GifResult> {
     { fps: 10, scale: 880 },
     { fps: 10, scale: 720 },
   ];
+  // Defect found in maintainer review: the GIF opened on a blank frame, then the /tickets
+  // loading skeleton, for roughly its first 0.8s. Fix is a trim, not a content edit — `-ss`
+  // BEFORE `-i` seeks the ffmpeg INPUT past that pre-roll (recordGoldenPath measured the real
+  // settle time above), applied identically to both the palettegen and paletteuse passes so the
+  // exported palette is generated from the same trimmed range as the final GIF.
+  const seekArgs = ["-ss", preRollSeconds.toFixed(2)];
 
   let settings = "";
   let bytes = Number.POSITIVE_INFINITY;
   for (const { fps, scale } of attempts) {
-    settings = `fps=${fps},scale=${scale}:-1:flags=lanczos`;
+    settings = `ss=${preRollSeconds.toFixed(2)},fps=${fps},scale=${scale}:-1:flags=lanczos`;
     log(`Converting recording to GIF at ${settings}...`);
     ffmpeg([
       "-y",
+      ...seekArgs,
       "-i",
       videoPath,
       "-vf",
@@ -598,6 +620,7 @@ async function convertToGif(videoPath: string): Promise<GifResult> {
     ]);
     ffmpeg([
       "-y",
+      ...seekArgs,
       "-i",
       videoPath,
       "-i",
@@ -875,9 +898,12 @@ async function main(): Promise<void> {
       console.log("\n[capture] Golden path steps recorded:");
       for (const step of recording.steps) console.log(`  ${step}`);
       console.log(`[capture] Total recording runtime: ${recording.durationSeconds.toFixed(1)}s`);
+      console.log(
+        `[capture] Pre-roll trim (blank + loading-skeleton frames removed): ${recording.preRollSeconds.toFixed(2)}s`,
+      );
 
       fs.mkdirSync(ASSETS_DIR, { recursive: true });
-      const gif = await convertToGif(recording.videoPath);
+      const gif = await convertToGif(recording.videoPath, recording.preRollSeconds);
       console.log(
         `\n[capture] docs/assets/aida-demo.gif: ${gif.bytes} bytes (settings: ${gif.settings})`,
       );
