@@ -134,7 +134,7 @@
 2. README leads with a hero GIF, one-line pitch, quick-start (`docker compose up`), and a comparison table; a docs site covers install, config, and AI/BYO-LLM setup.
 3. Backup/restore (pg_dump) and basic ops docs exist; a security pass confirms encrypted keys, enforced authz, and the AIDA-20 safeguards.
 4. The repo is ready for a Phase-1 (first-100-stars) outreach launch.
-**Plans:** 6/12 plans executed (Wave 1 + Wave 2 complete, merged via PR #1 — https://github.com/afrizzal/aida/pull/1; paused before Wave 3 pending user go-ahead)
+**Plans:** 8/12 plans executed
 Plans:
 - [x] 07-01-PLAN.md — Repo hygiene: .gitattributes + LF renormalization, middleware→proxy rename, SlaDueChip locale fix, REQUIREMENTS.md restructure (Wave 1)
 - [x] 07-02-PLAN.md — Demo dataset: fixtures + seedDemoData + pre-computed AI artifacts + `pnpm db:seed` CLI with guard (Wave 2)
@@ -143,7 +143,7 @@ Plans:
 - [x] 07-05-PLAN.md — GitHub CI + nightly integration workflow + CONTRIBUTING/CODE_OF_CONDUCT/SECURITY policy + issue & PR templates (Wave 2)
 - [x] 07-06-PLAN.md — Astro Starlight docs site scaffold in website/ + GitHub Pages workflow + toolchain isolation (Wave 2)
 - [x] 07-07-PLAN.md — DEMO_MODE boot flag + compose/env plumbing + real cold-boot verification (Wave 3)
-- [ ] 07-08-PLAN.md — Reproducible capture script: 10 screenshots (light+dark) + hero GIF + human sign-off (Wave 3)
+- [x] 07-08-PLAN.md — Reproducible capture script: 10 screenshots (light+dark) + hero GIF + human sign-off (Wave 3)
 - [ ] 07-09-PLAN.md — Security pass: authz/secrets/isolation/egress/dependency sweeps + 07-SECURITY-PASS.md + Phase 4/5/6 human items (Wave 4)
 - [ ] 07-10-PLAN.md — README rewrite: hero GIF, badges, fixed quick start, demo section, honest comparison table, link/claim sweep (Wave 5)
 - [ ] 07-11-PLAN.md — Docs site content: install, configuration, AI setup per provider, guides, ops, security (Wave 5)
