@@ -118,6 +118,24 @@ async function gotoWarm(page: Page, urlPath: string): Promise<void> {
   throw new Error(`[capture] ${urlPath} kept returning 404 (last status ${lastStatus})`);
 }
 
+// Next.js App Router client-side transitions (router.push for a searchParam-only change, or a
+// Link click to another route) update the URL via the History API without necessarily firing the
+// "load" navigation event Playwright's own page.waitForURL listens for — observed as a genuine,
+// intermittent flake (the same click sometimes resolved instantly, sometimes timed out at 15s on
+// this machine). Polling page.url() directly sidesteps that navigation-event dependency entirely.
+async function pollUrl(
+  page: Page,
+  predicate: (url: string) => boolean,
+  timeoutMs = 15_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate(page.url())) return;
+    await page.waitForTimeout(150);
+  }
+  throw new Error(`[capture] URL never matched within ${timeoutMs}ms (last seen: ${page.url()})`);
+}
+
 async function settle(page: Page): Promise<void> {
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(300);
@@ -268,15 +286,33 @@ const CHAT_MODEL = "llama3.1";
 const EMBED_MODEL = "nomic-embed-text";
 const EMBEDDING_DIMENSIONS = 768;
 
-// Six buckets x 128 dims = 768 (exact). Every bucket keyword is literally present in the real
-// seeded ticket/KB-article text this recording touches — see src/lib/demo/fixtures.ts.
-const TOPIC_BUCKETS: string[][] = [
-  ["password", "reset"],
-  ["invoice", "billing", "seat"],
-  ["slack"],
-  ["csv", "export"],
-  ["two-factor", "2fa", "authenticat"],
-  ["webhook"],
+// Returns true if `a` and `b` both occur, with at least one occurrence of each within
+// `maxDistance` characters of each other. Plain co-occurrence-anywhere-in-the-chunk was NOT
+// precise enough: the "Setting up two-factor authentication" article separately mentions
+// "password" (sign-in step, "After entering your password…") and "reset" (unrelated "Reset 2FA"
+// account-recovery step), hundreds of characters apart — a whole-chunk AND check still
+// false-positived and cited the wrong KB article in the recorded draft. Proximity matching
+// requires the words to actually appear together (as they do in "Resetting your password"'s own
+// title/intro), not just both exist somewhere in a long section.
+function wordsNear(lower: string, a: string, b: string, maxDistance = 80): boolean {
+  const idxA: number[] = [];
+  for (let i = lower.indexOf(a); i !== -1; i = lower.indexOf(a, i + 1)) idxA.push(i);
+  if (idxA.length === 0) return false;
+  for (let j = lower.indexOf(b); j !== -1; j = lower.indexOf(b, j + 1)) {
+    if (idxA.some((i) => Math.abs(i - j) <= maxDistance)) return true;
+  }
+  return false;
+}
+
+// Six buckets x 128 dims = 768 (exact). Every predicate is grounded in real seeded ticket/KB text
+// — see src/lib/demo/fixtures.ts.
+const TOPIC_BUCKETS: ((lower: string) => boolean)[] = [
+  (t) => wordsNear(t, "password", "reset"),
+  (t) => t.includes("invoice") || t.includes("billing") || t.includes("seat"),
+  (t) => t.includes("slack"),
+  (t) => t.includes("csv") || t.includes("export"),
+  (t) => t.includes("two-factor") || t.includes("2fa") || t.includes("authenticat"),
+  (t) => t.includes("webhook"),
 ];
 const BUCKET_DIM = EMBEDDING_DIMENSIONS / TOPIC_BUCKETS.length;
 const BASELINE = 0.01; // keeps every vector non-zero (avoids a cosine-distance NaN on ties)
@@ -285,7 +321,7 @@ function topicEmbedding(text: string): number[] {
   const lower = text.toLowerCase();
   const vec = new Array(EMBEDDING_DIMENSIONS).fill(BASELINE);
   for (let i = 0; i < TOPIC_BUCKETS.length; i++) {
-    if (TOPIC_BUCKETS[i].some((keyword) => lower.includes(keyword))) {
+    if (TOPIC_BUCKETS[i](lower)) {
       for (let d = i * BUCKET_DIM; d < (i + 1) * BUCKET_DIM; d++) vec[d] = 1;
     }
   }
@@ -420,20 +456,41 @@ async function recordGoldenPath(
   // Step 1 — shared inbox + a real filter interaction.
   await gotoWarm(page, "/tickets");
   await settle(page);
+  await pause(1400);
+  await page.getByRole("button", { name: "Unassigned", exact: true }).click();
+  // router.push for a query-param-only change is a client-side RSC re-fetch, not a hard
+  // navigation — poll confirms the param actually landed before proceeding.
+  await pollUrl(page, (url) => url.includes("view=unassigned"));
+  await settle(page);
+  await pause(1400);
+  // Back to the unfiltered view: a fresh navigation rather than clicking "All" again — clicking
+  // "All" right after "Unassigned" was observed to sometimes leave the URL on the stale
+  // `view=unassigned` state (a real client-router race between two rapid pushes), and a full
+  // reload is just as visually convincing for the recording (the list re-populates unfiltered).
+  await gotoWarm(page, "/tickets");
+  await settle(page);
   await pause(900);
-  await page.getByRole("button", { name: "Unassigned" }).click();
-  await pause(1000);
-  await page.getByRole("button", { name: "All" }).click();
-  await pause(800);
   steps.push(
-    "1. Landed on /tickets (shared inbox, 30 tickets, SLA chips + filters); clicked the Unassigned view filter, then back to All",
+    "1. Landed on /tickets (shared inbox, 30 tickets, SLA chips + filters); clicked the Unassigned view filter, then back to the unfiltered list",
   );
 
   // Step 2 — open the ticket (real click on the list row, not a deep link).
-  await page.locator(`a[href="/tickets/${ticketId}"]`).first().click();
-  await page.waitForURL(new RegExp(`/tickets/${ticketId}$`));
+  const ticketRowLink = page.locator(`a[href="/tickets/${ticketId}"]`).first();
+  try {
+    await ticketRowLink.waitFor({ state: "visible", timeout: 20_000 });
+  } catch (err) {
+    const hrefs = await page
+      .locator('aside a[href^="/tickets/"]')
+      .evaluateAll((els) => els.slice(0, 10).map((e) => (e as HTMLAnchorElement).href));
+    throw new Error(
+      `[capture] Target ticket row never became visible on /tickets. Current url: ${page.url()}. First 10 hrefs seen: ${JSON.stringify(hrefs)}. Original: ${(err as Error).message}`,
+    );
+  }
+  await ticketRowLink.scrollIntoViewIfNeeded();
+  await ticketRowLink.click();
+  await pollUrl(page, (url) => url.endsWith(`/tickets/${ticketId}`));
   await settle(page);
-  await pause(1000);
+  await pause(1600);
   steps.push(
     "2. Opened the ticket: status/priority/assignee controls, triage chips (category/sentiment/language), and tags",
   );
@@ -441,20 +498,20 @@ async function recordGoldenPath(
   // Step 3 — scroll the thread (inbound message, public reply, internal note).
   const threadContainer = page.locator("div.flex-1.space-y-4.overflow-y-auto");
   await threadContainer.evaluate((el) => el.scrollTo({ top: 0, behavior: "smooth" }));
-  await pause(700);
+  await pause(900);
   await threadContainer.evaluate((el) =>
     el.scrollTo({ top: el.scrollHeight / 2, behavior: "smooth" }),
   );
-  await pause(700);
+  await pause(900);
   await threadContainer.evaluate((el) => el.scrollTo({ top: el.scrollHeight, behavior: "smooth" }));
-  await pause(700);
+  await pause(900);
   steps.push("3. Scrolled the thread: inbound message, agent public reply, amber internal note");
 
   // Step 4 — reveal the stored AI Activity trail.
   const aiActivitySummary = page.getByText("AI Activity");
   await aiActivitySummary.scrollIntoViewIfNeeded();
   await aiActivitySummary.click();
-  await pause(1200);
+  await pause(1700);
   steps.push(
     "4. Revealed AI Activity: stored Draft generated -> Draft approved sequence with its citation",
   );
@@ -464,9 +521,9 @@ async function recordGoldenPath(
   await generateBtn.scrollIntoViewIfNeeded();
   await generateBtn.click();
   await page.getByText("AI Draft").waitFor({ state: "visible", timeout: 15_000 });
-  await pause(1200);
+  await pause(1600);
   await page.getByRole("button", { name: "Insert into reply" }).click();
-  await pause(900);
+  await pause(1200);
   const [sendRes] = await Promise.all([
     page.waitForResponse(
       (r) =>
@@ -479,16 +536,16 @@ async function recordGoldenPath(
       `[capture] Live draft send failed during recording (status ${sendRes.status()})`,
     );
   }
-  await pause(1200);
+  await pause(1600);
   steps.push(
     "   Generated a LIVE cited draft via a local Ollama-protocol stub, inserted it into the reply, and sent it",
   );
 
   // Step 5 — /insights.
   await page.getByRole("link", { name: "Insight" }).click();
-  await page.waitForURL(/\/insights/);
+  await pollUrl(page, (url) => url.includes("/insights"));
   await settle(page);
-  await pause(1500);
+  await pause(2200);
   steps.push(
     "5. Navigated to /insights: four populated cards (recurring issues, KB gaps, volume drivers, SLA & CSAT)",
   );
@@ -597,8 +654,21 @@ async function main(): Promise<void> {
     } catch {
       // already stopped
     }
-    if (uploadsDir) fs.rmSync(uploadsDir, { recursive: true, force: true });
-    if (videoDir) fs.rmSync(videoDir, { recursive: true, force: true });
+    // maxRetries/retryDelay: closing a browser context that just wrote a .webm can leave the
+    // file briefly locked on Windows (EBUSY) — retry instead of letting cleanup mask whatever
+    // real error the main try block threw (a `finally` throw replaces the original exception).
+    try {
+      if (uploadsDir)
+        fs.rmSync(uploadsDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+    } catch (err) {
+      log(`WARNING: failed to remove uploads temp dir ${uploadsDir}: ${(err as Error).message}`);
+    }
+    try {
+      if (videoDir)
+        fs.rmSync(videoDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+    } catch (err) {
+      log(`WARNING: failed to remove video temp dir ${videoDir}: ${(err as Error).message}`);
+    }
   };
 
   try {
