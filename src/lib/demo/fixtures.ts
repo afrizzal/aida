@@ -174,7 +174,8 @@ export const DEMO_TICKETS: DemoTicket[] = [
     contactEmail: "owen.castillo@northwind-cafe.example",
     priority: "HIGH",
     status: "NEW",
-    ageHours: 5,
+    ageHours: 2, // 07-08 correction: was 5h, past HIGH's 4h first-response target (rendered
+    // "Overdue" though declared on-track). 2h keeps a real 2h margin to the target.
     assignee: null,
     tags: ["integration", "bug"],
     customFields: [{ label: "Escalated to engineering", value: false }],
@@ -209,7 +210,9 @@ export const DEMO_TICKETS: DemoTicket[] = [
     contactEmail: "derek.voss@baxter-logistics.example",
     priority: "HIGH",
     status: "NEW",
-    ageHours: 20,
+    ageHours: 2, // 07-08 correction: was 20h, already past HIGH's 4h first-response target
+    // (rendered "Overdue" though declared at-risk). 2h leaves a real 2h margin — genuinely
+    // getting close to the target, not yet past it.
     assignee: "admin",
     tags: ["integration", "bug"],
     customFields: [
@@ -236,7 +239,11 @@ export const DEMO_TICKETS: DemoTicket[] = [
     customFields: [{ label: "Plan", value: "Free" }],
     firstResponseAfterHours: null,
     resolvedAfterHours: null,
-    slaState: "on-track",
+    // 07-08 correction: declared "on-track" but ageHours(30) already exceeds NORMAL's 8h
+    // first-response target with no response yet — that is a genuine breach, not an on-track
+    // ticket; keeping ageHours unchanged (30, unresponded for over a day) and reclassifying as
+    // breached is more honest than shrinking its age to force it under an 8h window.
+    slaState: "breached",
     triage: { category: "OTHER", sentiment: "NEUTRAL", language: "en", status: "COMPLETED" },
     replies: [
       {
@@ -253,7 +260,8 @@ export const DEMO_TICKETS: DemoTicket[] = [
     contactEmail: "tomas.reyes@marrow-analytics.example",
     priority: "LOW",
     status: "OPEN",
-    ageHours: 48,
+    ageHours: 15, // 07-08 correction: was 48h, past LOW's 24h first-response target (rendered
+    // "Overdue" though declared on-track). 15h leaves a real 9h margin.
     assignee: null,
     tags: ["feature-request"],
     firstResponseAfterHours: null,
@@ -265,7 +273,7 @@ export const DEMO_TICKETS: DemoTicket[] = [
         author: "contact",
         visibility: "PUBLIC",
         body: "Also would love this on the iPad app, not just phone.",
-        offsetHours: 30,
+        offsetHours: 8, // was 30h — must stay < the corrected ageHours (a reply can't postdate "now")
       },
     ],
   },
@@ -281,7 +289,9 @@ export const DEMO_TICKETS: DemoTicket[] = [
     customFields: [{ label: "Plan", value: "Pro" }],
     firstResponseAfterHours: null,
     resolvedAfterHours: null,
-    slaState: "on-track",
+    // 07-08 correction: declared "on-track" but ageHours(72) already exceeds NORMAL's 8h
+    // first-response target with no response yet — genuinely breached; ageHours kept unchanged.
+    slaState: "breached",
     triage: null,
     replies: [
       {
@@ -303,7 +313,9 @@ export const DEMO_TICKETS: DemoTicket[] = [
     tags: ["bug"],
     firstResponseAfterHours: null,
     resolvedAfterHours: null,
-    slaState: "on-track",
+    // 07-08 correction: declared "on-track" but ageHours(100) already exceeds NORMAL's 8h
+    // first-response target with no response yet — genuinely breached; ageHours kept unchanged.
+    slaState: "breached",
     triage: { category: "ACCOUNT", sentiment: "NEGATIVE", language: "en", status: "FAILED" },
     replies: [
       {
@@ -359,7 +371,9 @@ export const DEMO_TICKETS: DemoTicket[] = [
     customFields: [{ label: "Plan", value: "Pro" }],
     firstResponseAfterHours: null,
     resolvedAfterHours: null,
-    slaState: "on-track",
+    // 07-08 correction: declared "on-track" but ageHours(200) already exceeds HIGH's 4h
+    // first-response target with no response yet — genuinely breached; ageHours kept unchanged.
+    slaState: "breached",
     triage: {
       category: "FEATURE_REQUEST",
       sentiment: "NEUTRAL",
@@ -381,7 +395,10 @@ export const DEMO_TICKETS: DemoTicket[] = [
     contactEmail: "sofia.marquez@driftwood-media.example",
     priority: "HIGH",
     status: "OPEN",
-    ageHours: 250,
+    ageHours: 20, // 07-08 correction: was 250h — already responded (firstResponseAfterHours
+    // below), so the active due is the RESOLUTION target (HIGH: 24h from creation), not the
+    // first-response one. 250h was long past even that; 20h leaves a real 4h margin — a
+    // genuine "responded, resolution SLA still at risk" story, not an already-blown one.
     assignee: "admin",
     tags: ["password-reset", "bug"],
     customFields: [{ label: "Account ID", value: "ACC-64410" }],
@@ -410,20 +427,24 @@ export const DEMO_TICKETS: DemoTicket[] = [
     contactEmail: "elias.kroll@driftwood-media.example",
     priority: "NORMAL",
     status: "OPEN",
-    ageHours: 300,
+    // 07-08 correction: was 300h, which also contradicted the ticket's own body text ("After
+    // importing our contact list via CSV yesterday…"). 24h actually matches "yesterday" AND
+    // already exceeds NORMAL's 8h first-response target with no response yet — genuinely
+    // breached (reclassified below), not the on-track ticket it was declared as.
+    ageHours: 24,
     assignee: null,
     tags: ["bug", "data-export"],
     customFields: [{ label: "Escalated to engineering", value: false }],
     firstResponseAfterHours: null,
     resolvedAfterHours: null,
-    slaState: "on-track",
+    slaState: "breached",
     triage: { category: "TECHNICAL", sentiment: "NEGATIVE", language: "en", status: "COMPLETED" },
     replies: [
       {
         author: "contact",
         visibility: "PUBLIC",
         body: "Attaching a screenshot — this happens on every import batch.",
-        offsetHours: 60,
+        offsetHours: 15, // was 60h — must stay < the corrected ageHours
       },
     ],
   },
@@ -433,7 +454,9 @@ export const DEMO_TICKETS: DemoTicket[] = [
     contactEmail: "maya.chen@northwind-cafe.example",
     priority: "LOW",
     status: "OPEN",
-    ageHours: 400,
+    ageHours: 50, // 07-08 correction: was 400h — already responded (below), so the active due
+    // is the RESOLUTION target (LOW: 72h from creation), not the first-response one. 400h was
+    // long past even that; 50h leaves a real 22h margin, a genuine at-risk story.
     assignee: "agent",
     tags: ["feature-request"],
     customFields: [{ label: "Plan", value: "Free" }],
@@ -469,7 +492,9 @@ export const DEMO_TICKETS: DemoTicket[] = [
     contactEmail: "owen.castillo@northwind-cafe.example",
     priority: "NORMAL",
     status: "PENDING",
-    ageHours: 90,
+    ageHours: 30, // 07-08 correction: was 90h — already responded (below), so the active due is
+    // the RESOLUTION target (NORMAL: 48h from creation), not the first-response one. 90h was
+    // already past that; 30h leaves a real 18h margin, a genuine on-track story.
     assignee: "admin",
     tags: ["onboarding"],
     customFields: [{ label: "Account ID", value: "ACC-20044" }],
@@ -498,7 +523,9 @@ export const DEMO_TICKETS: DemoTicket[] = [
     contactEmail: "priya.natarajan@baxter-logistics.example",
     priority: "HIGH",
     status: "PENDING",
-    ageHours: 130,
+    ageHours: 16, // 07-08 correction: was 130h — already responded (below), so the active due
+    // is the RESOLUTION target (HIGH: 24h from creation), not the first-response one. 130h was
+    // already past that; 16h leaves a real 8h margin, a genuine on-track story.
     assignee: "admin",
     tags: ["billing"],
     customFields: [
@@ -569,7 +596,9 @@ export const DEMO_TICKETS: DemoTicket[] = [
     contactEmail: "lena.brandt@solstice-studio.example",
     priority: "HIGH",
     status: "PENDING",
-    ageHours: 260,
+    ageHours: 18, // 07-08 correction: was 260h — already responded (below), so the active due
+    // is the RESOLUTION target (HIGH: 24h from creation), not the first-response one. 260h was
+    // long past that; 18h leaves a real 6h margin, a genuine at-risk story.
     assignee: "admin",
     tags: ["bug"],
     customFields: [{ label: "Escalated to engineering", value: false }],
@@ -588,7 +617,7 @@ export const DEMO_TICKETS: DemoTicket[] = [
         author: "contact",
         visibility: "PUBLIC",
         body: "Sent a screen recording — attached to this thread.",
-        offsetHours: 30,
+        offsetHours: 12, // was 30h — must stay < the corrected ageHours
       },
     ],
   },
@@ -598,7 +627,9 @@ export const DEMO_TICKETS: DemoTicket[] = [
     contactEmail: "tomas.reyes@marrow-analytics.example",
     priority: "LOW",
     status: "PENDING",
-    ageHours: 350,
+    ageHours: 40, // 07-08 correction: was 350h — already responded (below), so the active due
+    // is the RESOLUTION target (LOW: 72h from creation), not the first-response one. 350h was
+    // long past that; 40h leaves a real 32h margin, a genuine on-track story.
     assignee: "agent",
     tags: [],
     firstResponseAfterHours: 5,
