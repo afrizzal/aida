@@ -254,9 +254,14 @@ async function captureScreenshots(
     // enough for a launch screenshot, and every OTHER asset stays at full retina density.
     await writeShot(page, `ticket-detail${suffix}.png`, manifest, true, "css");
 
+    // fullPage:true (07-08 correction round, defect 2) — the Volume Drivers and SLA & CSAT
+    // cards were being clipped mid-content at the fixed 900px viewport boundary. scale:"css"
+    // (1x CSS pixels, not the context's 2x device pixels) for the same reason as
+    // ticket-detail.png above: a fullPage capture of all four populated cards at full retina
+    // density blows through the 500KB budget; still sharp enough for a launch screenshot.
     await gotoWarm(page, "/insights?period=30");
     await settle(page);
-    await writeShot(page, `insights${suffix}.png`, manifest, false);
+    await writeShot(page, `insights${suffix}.png`, manifest, true, "css");
 
     await gotoWarm(page, "/kb");
     await settle(page);
