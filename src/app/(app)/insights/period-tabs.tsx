@@ -34,7 +34,7 @@ export function PeriodTabs({ active }: PeriodTabsProps) {
           className={cn(
             "h-8 rounded-full px-3 text-[13px] font-medium transition-colors",
             active === period
-              ? "bg-sidebar-accent text-primary"
+              ? "bg-sidebar-accent text-primary-emphasis"
               : "text-muted-foreground hover:bg-muted",
           )}
         >

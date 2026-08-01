@@ -31,7 +31,7 @@ export function AssigneeAvatar({
 
   return (
     <Avatar className={size === "sm" ? "size-6" : "size-8"}>
-      <AvatarFallback className="bg-primary/10 text-[12px] font-medium text-primary">
+      <AvatarFallback className="bg-primary/10 text-[12px] font-medium text-primary-emphasis">
         {getInitials(name)}
       </AvatarFallback>
     </Avatar>

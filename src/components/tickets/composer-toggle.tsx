@@ -21,7 +21,9 @@ export function ComposerToggle({ mode, onChange }: ComposerToggleProps) {
         onClick={() => onChange("public")}
         className={cn(
           "h-7 px-3 text-[13px] font-medium",
-          mode === "public" ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted",
+          mode === "public"
+            ? "bg-primary/10 text-primary-emphasis"
+            : "text-muted-foreground hover:bg-muted",
         )}
       >
         Public Reply

@@ -139,7 +139,7 @@ export function FilterChipRow({ tags, customFieldDefinitions }: FilterChipRowPro
               className={cn(
                 "h-8 rounded-full px-3 text-[13px] font-medium",
                 view === v.value
-                  ? "bg-primary/10 text-primary"
+                  ? "bg-primary/10 text-primary-emphasis"
                   : "text-muted-foreground hover:bg-muted",
               )}
             >
@@ -161,7 +161,7 @@ export function FilterChipRow({ tags, customFieldDefinitions }: FilterChipRowPro
             <Button
               variant="outline"
               size="sm"
-              className={cn(activeStatuses.length > 0 && "border-primary/40 text-primary")}
+              className={cn(activeStatuses.length > 0 && "border-primary/40 text-primary-emphasis")}
             >
               <Filter className="size-3.5" />
               Status
@@ -191,7 +191,7 @@ export function FilterChipRow({ tags, customFieldDefinitions }: FilterChipRowPro
             <Button
               variant="outline"
               size="sm"
-              className={cn(activeTagId && "border-primary/40 text-primary")}
+              className={cn(activeTagId && "border-primary/40 text-primary-emphasis")}
             >
               <TagIcon className="size-3.5" />
               {tags.find((t) => t.id === activeTagId)?.name ?? "Tag"}
@@ -229,7 +229,7 @@ export function FilterChipRow({ tags, customFieldDefinitions }: FilterChipRowPro
             <Button
               variant="outline"
               size="sm"
-              className={cn(activeCfDefinition && "border-primary/40 text-primary")}
+              className={cn(activeCfDefinition && "border-primary/40 text-primary-emphasis")}
             >
               <SlidersHorizontal className="size-3.5" />
               {activeCfDefinition ? activeCfDefinition.label : "Custom field"}

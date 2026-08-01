@@ -23,31 +23,35 @@
  * shared org-scoped state it touches (Settings rows, the KB article, the ticket) exactly like
  * honesty-invariants.spec.ts already does for the same reason.
  *
- * KNOWN, HONESTLY-REPORTED, NOT-ALLOWLISTED FAILURES (07-09.1 Task 3 critical constraint: "Never
- * allowlist a violation just to make the suite green... Report honestly if axe finds violations
- * you could not fix"). The first run of this suite found several genuine axe color-contrast
- * violations. Every one traceable to an isolated component bug (wrong/missing Badge `variant`
- * silently inheriting `bg-primary`; the sidebar footer email's `/60`-opacity muted text) was
- * FIXED at its source — see `src/components/tickets/{triage-category-chip,priority-chip,
- * triage-sentiment-chip,ticket-meta-header}.tsx` and `src/components/sidebar.tsx`. What remains
- * and is DELIBERATELY NOT fixed here (see `.planning/phases/07-launch-readiness/
- * deferred-items.md`'s "From 07-09.1" section for the full writeup, reason, and owner) is a
- * systemic gap in the brand/semantic color VALUES themselves, used identically across dozens of
- * components — adjusting `--primary`/`--success` is a maintainer brand decision, not a safe,
- * narrow bug fix:
- *   - `--success` (light mode) as badge text on its own `/10` tint — 3.47:1 (needs 4.5:1),
+ * CONTRAST HISTORY (RESOLVED 2026-08-01). The first run of this suite found several genuine axe
+ * color-contrast violations. Every one traceable to an isolated component bug (wrong/missing Badge
+ * `variant` silently inheriting `bg-primary`; the sidebar footer email's `/60`-opacity muted text)
+ * was FIXED at its source — see `src/components/tickets/{triage-category-chip,priority-chip,
+ * triage-sentiment-chip,ticket-meta-header}.tsx` and `src/components/sidebar.tsx`. What remained
+ * after that (see `.planning/phases/07-launch-readiness/deferred-items.md`'s "From 07-09.1"
+ * section for the full history) was a systemic gap in the brand/semantic color VALUES themselves,
+ * used identically across dozens of components — reported rather than mechanically patched, since
+ * adjusting `--primary`/`--success` was a maintainer brand decision:
+ *   - `--success` (light mode) as badge text on its own `/10` tint — was 3.47:1 (needs 4.5:1),
  *     e.g. KbEmbeddingStatusChip's "Indexed" badge (/kb, /kb/[id], light theme).
- *   - `--primary` (dark mode) used AS TEXT on dark surfaces — 3.86-4.1:1, e.g. the sidebar
+ *   - `--primary` (dark mode) used AS TEXT on dark surfaces — was 3.86-4.1:1, e.g. the sidebar
  *     avatar-initials fallback (every dark-theme page), "AI Draft"/citation links, "All"/"Public
  *     Reply" pills (ticket page, dark theme).
- *   - `--primary` as a solid button/badge background with near-white text — 3.98:1 light /
+ *   - `--primary` as a solid button/badge background with near-white text — was 3.98:1 light /
  *     4.29:1 dark, e.g. every default-variant Button ("Insert into reply", "Create article",
  *     "New article", etc.) and StatusChip's NEW state.
- * As a direct, honest consequence, 7 of this file's 8 tests are expected to remain RED until the
- * maintainer makes that color decision — this is the correct, D-4-compliant outcome, not a bug in
- * this test file. Only "/kb/new (light)" passes today (no KB article/badge on that plain form
- * page, and light mode's default-Button contrast happens not to be exercised there); the dark
- * variant still fails on the sidebar avatar fallback, present on every dark-theme page.
+ * The maintainer's decision (2026-08-01): darken `--success` (light) and `--primary` (dark,
+ * background role only) slightly, and split `--primary` into a background token (`--primary`,
+ * unchanged hue/chroma) and a new text-legible token (`--primary-emphasis` /
+ * `--sidebar-primary-emphasis`) for every TEXT usage — see DESIGN-SYSTEM.md §1/§2. A fourth,
+ * previously-mis-attributed failure (`#716ee4`, light mode, 3.98:1) turned out to be `Button`/
+ * `Badge`'s opacity-based hover state (`hover:bg-primary/80`) captured mid-`:hover`, not `--primary`
+ * itself — fixed via a `color-mix` darken instead of an opacity blend. A fifth, previously-masked
+ * violation (`ai-activity-section.tsx`'s `text-muted-foreground/70` event count, 4.17:1 dark —
+ * unrelated to `--primary`/`--success`, only visible once a ticket has AI-activity events) was
+ * found live while re-verifying this fix and fixed the same way (dropped the `/70`). All 8 tests
+ * in this file are green as a direct result — see `deferred-items.md` for the full before/after
+ * ratio table.
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";

@@ -29,7 +29,9 @@ export function SettingsNav() {
             href={href}
             className={cn(
               "flex h-8 items-center rounded-full px-3 text-[13px] font-medium transition-colors",
-              isActive ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted",
+              isActive
+                ? "bg-primary/10 text-primary-emphasis"
+                : "text-muted-foreground hover:bg-muted",
             )}
           >
             {label}

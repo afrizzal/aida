@@ -82,7 +82,7 @@ export function Sidebar({ user, brandName }: SidebarProps) {
       <div className="border-t border-sidebar-border p-2">
         <div className="flex items-center gap-2.5 rounded-md px-2 py-2 transition-colors hover:bg-sidebar-accent/60">
           <Avatar className="size-8">
-            <AvatarFallback className="bg-sidebar-primary/10 text-[12px] font-medium text-sidebar-primary">
+            <AvatarFallback className="bg-sidebar-primary/10 text-[12px] font-medium text-sidebar-primary-emphasis">
               {getInitials(user.name)}
             </AvatarFallback>
           </Avatar>

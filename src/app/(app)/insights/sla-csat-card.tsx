@@ -87,7 +87,7 @@ export function SlaCsatCard({ data, narrative }: SlaCsatCardProps) {
 
           {narrative && (
             <div className="rounded-lg border border-primary/15 bg-accent/40 p-3">
-              <p className="mb-1 text-[12px] font-medium uppercase tracking-wide text-primary">
+              <p className="mb-1 text-[12px] font-medium uppercase tracking-wide text-primary-emphasis">
                 AI summary
               </p>
               <p className="text-[13px] text-foreground">{narrative.summary}</p>

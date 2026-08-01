@@ -20,7 +20,10 @@ export function DraftCitationList({ citations }: { citations: DraftCitationListI
       {citations.map((citation) => (
         <li key={`${citation.marker}-${citation.articleId}`} className="text-[12px]">
           <span className="text-muted-foreground">[{citation.marker}]</span>{" "}
-          <Link href={`/kb/${citation.articleId}`} className="text-primary hover:underline">
+          <Link
+            href={`/kb/${citation.articleId}`}
+            className="text-primary-emphasis hover:underline"
+          >
             {citation.title}
           </Link>
           {citation.headingPath && (
