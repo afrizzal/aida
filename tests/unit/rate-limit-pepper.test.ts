@@ -20,7 +20,7 @@ describe("checkRateLimit — pepper guard (07-09 GAP 3)", () => {
     }
   });
 
-  it("throws when RATE_LIMIT_PEPPER is the empty string (docker-compose ${VAR:-} default)", async () => {
+  it("throws when RATE_LIMIT_PEPPER is the empty string (docker-compose's blank-var default)", async () => {
     const saved = process.env.RATE_LIMIT_PEPPER;
     process.env.RATE_LIMIT_PEPPER = "";
     try {
