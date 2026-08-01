@@ -134,7 +134,7 @@
 2. README leads with a hero GIF, one-line pitch, quick-start (`docker compose up`), and a comparison table; a docs site covers install, config, and AI/BYO-LLM setup.
 3. Backup/restore (pg_dump) and basic ops docs exist; a security pass confirms encrypted keys, enforced authz, and the AIDA-20 safeguards.
 4. The repo is ready for a Phase-1 (first-100-stars) outreach launch.
-**Plans:** 8/12 plans executed
+**Plans:** 10/13 plans executed
 Plans:
 - [x] 07-01-PLAN.md — Repo hygiene: .gitattributes + LF renormalization, middleware→proxy rename, SlaDueChip locale fix, REQUIREMENTS.md restructure (Wave 1)
 - [x] 07-02-PLAN.md — Demo dataset: fixtures + seedDemoData + pre-computed AI artifacts + `pnpm db:seed` CLI with guard (Wave 2)
@@ -144,7 +144,8 @@ Plans:
 - [x] 07-06-PLAN.md — Astro Starlight docs site scaffold in website/ + GitHub Pages workflow + toolchain isolation (Wave 2)
 - [x] 07-07-PLAN.md — DEMO_MODE boot flag + compose/env plumbing + real cold-boot verification (Wave 3)
 - [x] 07-08-PLAN.md — Reproducible capture script: 10 screenshots (light+dark) + hero GIF + human sign-off (Wave 3)
-- [ ] 07-09-PLAN.md — Security pass: authz/secrets/isolation/egress/dependency sweeps + 07-SECURITY-PASS.md + Phase 4/5/6 human items (Wave 4)
+- [x] 07-09-PLAN.md — Security pass: authz/secrets/isolation/egress/dependency sweeps + 07-SECURITY-PASS.md + Phase 4/5/6 human items (Wave 4)
+- [x] 07-09.1-PLAN.md — Gap closure (not one of the original 12): replaces 07-09's three carried-forward manual verification items with automated egress/honesty/contrast tests (Wave 4)
 - [ ] 07-10-PLAN.md — README rewrite: hero GIF, badges, fixed quick start, demo section, honest comparison table, link/claim sweep (Wave 5)
 - [ ] 07-11-PLAN.md — Docs site content: install, configuration, AI setup per provider, guides, ops, security (Wave 5)
 - [ ] 07-12-PLAN.md — Launch close-out: 8-gate run, CHANGELOG v1.0.0, LAUNCH.md checklist, planning records, human sign-off (Wave 6)
@@ -175,3 +176,4 @@ Plans:
 *Last updated: 2026-07-24 — Phase 6 (AIDA Insight) EXECUTION COMPLETE: all 7 plans across 4 waves done (06-01 schema, 06-02 clustering math, 06-03 SQL aggregates, 06-04 KB-gap + prompts, 06-05 CSAT capture, 06-06 insight-run orchestrator, 06-07 /insights UI). AIDA-17 fully code-complete end-to-end. Phase checkbox checked; combined-suite verification + phase-goal check + human sign-off remain before Phase 7 begins.*
 *Last updated: 2026-07-28 — Phase 7 (Launch Readiness) planned via /gsd:plan-phase 7: 12 plans across 6 waves. Wave 1 is the repo-hygiene/LF-renormalization pass ALONE (a repo-wide `git add --renormalize .` cannot run in parallel with any other plan). Wave 2 runs five independent foundations in parallel (demo dataset, branding settings, backup/ops, CI + community files, docs-site scaffold); Wave 3 adds demo mode + visual asset capture; Wave 4 the security pass alone (it audits every prior plan's output, including demo mode's documented credentials and the backup scripts); Wave 5 the README rewrite + the docs content in parallel; Wave 6 the launch close-out. Requirements: AIDA-22, AIDA-23, AIDA-24 + the AIDA-12 branding remainder (D-16). Branding ships name-only per D-16's fallback clause — logo upload and a public tagline are both logged as deferred ideas (07-03). Tagging, GitHub Pages enablement and outreach are human-only steps captured in LAUNCH.md (D-15).*
 *Last updated: 2026-07-29 — Phase 7 Wave 1 (07-01) and Wave 2 (07-02..07-06) EXECUTION COMPLETE: 6/12 plans done, merged to `master` via PR #1 (https://github.com/afrizzal/aida/pull/1). Execution PAUSED here at the user's request — Wave 3 (07-07 demo mode, 07-08 visual assets) awaits a follow-up prompt before starting.*
+*Last updated: 2026-08-01 — Phase 7 Wave 4 EXECUTION COMPLETE: 07-09 (security pass, 5 fixes + 07-SECURITY-PASS.md) and 07-09.1 (gap closure, not one of the original 12 — replaces 07-09's three carried-forward Phase 4-6 manual verification items with automated egress/honesty/contrast tests) both done. 9/13 plans executed (12 original + the 07-09.1 gap-closure plan). Next: Wave 5 (07-10 README rewrite, 07-11 docs site content).*

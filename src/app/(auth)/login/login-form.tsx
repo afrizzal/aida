@@ -112,7 +112,7 @@ export function LoginForm({ showSetupComplete }: LoginFormProps) {
         />
 
         {form.formState.errors.root && (
-          <p className="text-sm text-destructive">{form.formState.errors.root.message}</p>
+          <p className="text-[14px] text-destructive">{form.formState.errors.root.message}</p>
         )}
 
         <Button type="submit" className="w-full" disabled={isSubmitting}>

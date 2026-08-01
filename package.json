@@ -16,6 +16,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run tests/unit",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:egress": "vitest run --config vitest.egress.config.ts",
     "test:e2e": "playwright test",
     "test:all": "pnpm test && pnpm test:integration",
     "db:migrate": "prisma migrate dev",
@@ -39,7 +40,7 @@
     "imapflow": "1.4.6",
     "lucide-react": "^1.22.0",
     "mailparser": "3.9.14",
-    "next": "16.2.9",
+    "next": "16.2.11",
     "next-themes": "0.4.6",
     "nodemailer": "9.0.3",
     "ollama": "0.6.3",
@@ -79,6 +80,7 @@
     }
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@better-auth/cli": "1.4.21",
     "@biomejs/biome": "2.5.1",
     "@playwright/test": "1.61.1",

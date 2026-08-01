@@ -3,12 +3,12 @@ status: partial
 phase: 06-aida-insight
 source: [06-VERIFICATION.md]
 started: 2026-07-25T02:10:00Z
-updated: 2026-07-25T03:05:00Z
+updated: 2026-08-01T00:00:00Z
 ---
 
 ## Current Test
 
-[awaiting human testing — items 1 & 2 now have automated E2E equivalents; item 3 still needs a human/real-LLM pass]
+[awaiting human testing — items 1 & 2 have automated E2E equivalents; item 3's objective half (numbers/citations cannot be model-driven) is now closed by tests/e2e/honesty-invariants.spec.ts (07-09.1); its subjective half (cluster-label/KB-gap-match semantic quality) remains a genuinely open, non-blocking backlog item — see the Disposition note under item 3]
 
 ## Tests
 
@@ -24,6 +24,8 @@ result: Automated E2E equivalent added — `tests/e2e/phase6-insight.spec.ts`, d
 expected: With a real, configured LLM + embedding provider (not the integration test's canned mock), run "Generate insights" against an organization with genuine ticket history. Cluster labels are semantically meaningful for the actual tickets, KB-gap nearest-article matches look sensible, and the AI narrative reads naturally alongside the SQL numbers it describes (and never contradicts them).
 result: [pending]
 
+**Disposition (07-09.1, SPLIT):** This item bundles an OBJECTIVE claim ("never contradicts the SQL numbers it describes") and two SUBJECTIVE ones ("cluster labels are semantically meaningful", "KB-gap matches look sensible"). The objective half is now closed without a live credential: `tests/e2e/honesty-invariants.spec.ts`, case (a), seeds a known SLA/CSAT dataset, configures the stub to return a narrative asserting deliberately wrong numbers ("0% breach rate, 100 responses"), runs a real Insight run, and asserts `src/app/(app)/insights/sla-csat-card.tsx`'s LOCKED invariant holds — the card still displays the SQL-derived numbers from `src/lib/insight/sla-csat.ts`, never the narrative's claims. This is a stronger proof than a human eyeballing one real run, because it tests the adversarial case a human reviewer would never think to construct. The subjective half — is a given cluster's LABEL actually a good, human-meaningful summary of its tickets, and does a given KB-gap's nearest-article match actually look sensible — is not automatable by construction (there is no SQL ground truth for "is this label good"); it remains genuinely open. **Re-logged as a quality-backlog item, explicitly NOT a release gate**, matching 04-VERIFICATION.md item 3's identical residual (same root cause: judging real-model output quality needs a real model). **Owner:** maintainer (Afrizzal), no target date — do this alongside 04-VERIFICATION.md item 3's live-provider pass in one session (both need the same configured real/local-Ollama credential).
+
 ## Summary
 
 total: 3
@@ -36,4 +38,4 @@ automated_equivalent: 2
 
 ## Gaps
 
-Items 1 and 2 now have CI-safe automated E2E equivalents (`tests/e2e/phase6-insight.spec.ts`, 6/6 green under Node 22.23.1) that drive the real UI against a live Testcontainer — a live human pass is optional (dark-mode/responsive for item 1), not blocking. Item 3 (real-LLM semantic quality of cluster labels / KB-gap matches / narrative) remains genuinely pending — a stubbed or seeded run cannot judge output quality against real ticket content; it needs a human run with a configured LLM + embedding provider.
+Items 1 and 2 now have CI-safe automated E2E equivalents (`tests/e2e/phase6-insight.spec.ts`, 6/6 green under Node 22.23.1) that drive the real UI against a live Testcontainer — a live human pass is optional (dark-mode/responsive for item 1), not blocking. Item 3's objective half (numbers/citations cannot be model-driven) is now closed by `tests/e2e/honesty-invariants.spec.ts` (07-09.1) without a live credential. Item 3's subjective half (real-LLM semantic quality of cluster labels / KB-gap matches / narrative prose) remains genuinely pending, re-logged as a non-blocking quality-backlog item, not a release gate — it needs a human run with a configured real or local-Ollama LLM + embedding provider, and no automated proxy can substitute for a human judging whether generated text reads well.

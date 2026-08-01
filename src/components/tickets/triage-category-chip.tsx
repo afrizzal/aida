@@ -18,9 +18,7 @@ export function TriageCategoryChip({
   className?: string;
 }) {
   return (
-    <Badge
-      className={cn("h-5 px-2 py-0.5 text-[12px] border border-border text-foreground", className)}
-    >
+    <Badge variant="outline" className={cn("h-5 px-2 py-0.5 text-[12px]", className)}>
       {CATEGORY_LABEL[category]}
     </Badge>
   );

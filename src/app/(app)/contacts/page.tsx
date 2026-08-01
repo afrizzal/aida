@@ -64,7 +64,7 @@ export default async function ContactsPage({ searchParams }: ContactsPageProps) 
                 className="flex items-center gap-3 px-6 py-3 transition-colors hover:bg-muted/50"
               >
                 <Avatar>
-                  <AvatarFallback className="bg-primary/10 text-[12px] font-medium text-primary">
+                  <AvatarFallback className="bg-primary/10 text-[12px] font-medium text-primary-emphasis">
                     {getInitials(displayName)}
                   </AvatarFallback>
                 </Avatar>

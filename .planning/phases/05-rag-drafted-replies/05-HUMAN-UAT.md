@@ -1,9 +1,9 @@
 ---
-status: partial
+status: closed
 phase: 05-rag-drafted-replies
 source: [05-VERIFICATION.md]
 started: 2026-07-22T00:00:00Z
-updated: 2026-07-22T00:00:00Z
+updated: 2026-08-01T00:00:00Z
 ---
 
 ## Current Test
@@ -24,16 +24,20 @@ result: Automated E2E equivalent added — `tests/e2e/phase5-rag.spec.ts`, test 
 expected: Visual pass on `/kb`, `/kb/new`, `/kb/[id]`, and the ticket-page draft card — halo+icon-box empty state renders correctly at zero KB articles, chip/card visuals match the token palette in both light/dark, no visual regressions on the ticket reply area.
 result: [pending] — still requires a human visual pass (light/dark contrast, spacing, no regressions). `tests/e2e/phase5-rag.spec.ts` captures reference screenshots under `test-results/phase5-visual/` (gitignored, regenerated per run): `kb-empty-state.png`, `kb-article-view.png`, `ticket-draft-grounded.png`, `ticket-draft-ungrounded.png`. Claude re-ran the 6-test spec in isolation post-build (6/6 passed, independent confirmation, not just trusting the build agent's report) and visually inspected all 4 screenshots directly: empty state renders the halo+icon-box pattern correctly, the grounded draft card shows the `[1]` citation linked to the KB article, the ungrounded card shows a distinct warning-toned "No relevant sources found" box with no citations — all token-consistent at a glance. These are light-mode-only, single-viewport captures — dark mode and responsive breakpoints still need a human look, so this item stays pending rather than passed.
 
+**Disposition (07-09.1, CLOSED — mechanical half; aesthetic half re-logged):** `tests/e2e/a11y-contrast.spec.ts` now asserts zero axe-core `color-contrast` violations, in BOTH light and dark, on exactly the four surfaces this item names (`/kb`, `/kb/new`, `/kb/[id]`, and the ticket page's draft card — captured specifically in its IN-FLIGHT, generated-not-yet-inserted state, which is distinct from and narrower than what any prior screenshot covered). `tests/unit/design-tokens.test.ts` mechanically asserts the companion token rule (no hardcoded `oklch()`/hex color, no Tailwind named text-size class) across every file under `src/components/` and `src/app/`. Between writing these two tests and fixing what they found, this closure round FIXED four real, isolated contrast bugs (a `Badge` silently inheriting `bg-primary` in four components, plus the sidebar footer email's `/60`-opacity muted text) and two real token violations (`text-2xl` on the login/setup page titles, `text-sm` on a login error message) — see `07-09.1-SUMMARY.md` for the full list. **What remains genuinely open, NOT closed by this test, and NOT a release gate:** (a) a systemic gap where `--primary`/`--success` themselves fall short of 4.5:1 in several first-class usages (default buttons, text-on-dark, one badge) — a brand/semantic-color VALUE decision, logged with a reason and an owner in `deferred-items.md`'s "From 07-09.1" section, deliberately left failing rather than allowlisted; (b) pure aesthetic judgement (does the spacing/visual rhythm look right) — D-3 of 07-09.1-PLAN.md is explicit that this is not automatable and not a release gate, so it is re-logged here as ungated feedback, not a blocking pending item.
+**Owner (residual (a)):** maintainer (Afrizzal), no target date.
+**Owner (residual (b)):** maintainer, optional, whenever a visual pass is convenient — not blocking.
+
 ## Summary
 
 total: 3
 passed: 0
 issues: 0
-pending: 1
+pending: 0
 skipped: 0
 blocked: 0
-automated_equivalent: 2
+automated_equivalent: 3
 
 ## Gaps
 
-None new. Item 3 (visual/aesthetic §9 checklist) remains genuinely pending a human pass — automated screenshots narrow the surface area but light/dark contrast and responsive review still need eyes. Items 1 and 2 have CI-safe automated equivalents now (see `tests/e2e/phase5-rag.spec.ts`); a live-credential pass is optional, not blocking.
+None blocking. Item 3 (DESIGN-SYSTEM §9) is now automated for its mechanical half (contrast + token rule, `tests/e2e/a11y-contrast.spec.ts` + `tests/unit/design-tokens.test.ts`) — see the Disposition note above for the two residuals (a genuine brand-color contrast gap, tracked in `deferred-items.md`; and irreducibly subjective aesthetic judgement, never a release gate). Items 1 and 2 have had CI-safe automated equivalents since the original 05-VERIFICATION.md pass (see `tests/e2e/phase5-rag.spec.ts`); a live-credential pass remains optional, not blocking.

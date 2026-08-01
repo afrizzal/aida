@@ -64,7 +64,7 @@ export function AiActivitySection({ events }: { events: AiActivityEvent[] }) {
       <summary className="flex cursor-pointer select-none items-center gap-1.5">
         <Sparkles className="size-3.5" />
         AI Activity
-        <span className="text-muted-foreground/70">({events.length})</span>
+        <span className="text-muted-foreground">({events.length})</span>
       </summary>
       <div className="mt-2 space-y-1.5">
         {events.map((event) => (

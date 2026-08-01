@@ -20,7 +20,7 @@ interface DraftCardProps {
 export function DraftCard({ draft, onInsert, onDiscard }: DraftCardProps) {
   return (
     <div className="rounded-lg border border-primary/15 bg-primary/5 p-3">
-      <div className="flex items-center gap-1.5 text-[13px] font-medium text-primary">
+      <div className="flex items-center gap-1.5 text-[13px] font-medium text-primary-emphasis">
         <Sparkles className="size-3.5" />
         AI Draft
       </div>

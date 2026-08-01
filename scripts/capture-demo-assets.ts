@@ -1,10 +1,11 @@
 // ---------------------------------------------------------------------------
 // scripts/capture-demo-assets.ts — reproducible capture of the AIDA launch
-// visual asset set (07-08, AIDA-22/AIDA-23).
+// visual asset set (07-08, AIDA-22/AIDA-23; extended by 07-09.1 Task 3).
 //
 // Run with tsx (NOT through Playwright's test runner):
-//   pnpm demo:capture                 -> five screenshots x {light,dark} under docs/assets/
-//   pnpm demo:capture -- --record     -> docs/assets/aida-demo.gif (the hero animation)
+//   pnpm demo:capture                 -> seven screenshots x {light,dark} under docs/assets/
+//   pnpm demo:capture -- --record     -> docs/assets/aida-demo.gif (the hero animation) + the
+//                                         two in-flight-draft-card stills (light+dark)
 //   pnpm demo:capture -- --build      -> force a fresh `next build` even if .next/BUILD_ID exists
 //
 // Both modes boot an entirely disposable, seeded, PRODUCTION AIDA instance (a throwaway
@@ -17,6 +18,8 @@
 // application rendering real seeded data. The screenshot mode (no flags) never configures an
 // AI provider — it captures the shipped demo dataset exactly as `pnpm db:seed` produces it
 // (AI off, KB chunks unembedded), matching src/lib/demo/seed-demo-data.ts's honesty contract.
+// This is also why /kb's default-mode screenshots keep showing "Embedding…" (PENDING) status
+// chips: that is the shipped seed's honest state, not a capture defect.
 //
 // The --record mode is the one exception, and it is fully disclosed: to record a LIVE
 // "Generate draft" -> cited DraftCard -> Insert -> Send segment (D-07's ideal golden path), it
@@ -27,6 +30,15 @@
 // script's own throwaway container. Plan 07-10's README caption MUST disclose that the model
 // behind the recorded draft is a local stub, and that AIDA works with OpenAI, Anthropic, or a
 // real local Ollama model — see the 07-08-SUMMARY.md caption-obligation note.
+//
+// 07-09.1 Task 3 addition: `/kb/new` and `/kb/[id]` are added to the DEFAULT (no-flag) screenshot
+// mode — neither needs an AI provider, so they carry no honesty exception. The in-flight
+// (generated, not-yet-inserted) draft card CANNOT be captured in default mode: TicketReplyArea's
+// "Generate draft" button is disabled whenever draftableKbCount is 0, and the shipped seed
+// deliberately leaves every KB article unembedded — reaching that state requires the same
+// disclosed local-stub exception --record mode already uses, so its two stills
+// (ticket-draft-inflight[.png|-dark.png]) are captured inside --record mode, right after the six
+// KB articles are embedded and before the golden-path video recording begins.
 // ---------------------------------------------------------------------------
 import "dotenv/config";
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
@@ -218,6 +230,7 @@ async function captureScreenshots(
   browser: Browser,
   storageState: StorageState,
   ticketId: string,
+  articleId: string,
 ): Promise<void> {
   fs.mkdirSync(ASSETS_DIR, { recursive: true });
   const manifest: ManifestEntry[] = [];
@@ -266,6 +279,16 @@ async function captureScreenshots(
     await gotoWarm(page, "/kb");
     await settle(page);
     await writeShot(page, `knowledge-base${suffix}.png`, manifest, false);
+
+    // 07-09.1 Task 3 (05-HUMAN-UAT.md item 3's two remaining named surfaces) — neither needs an
+    // AI provider, so both stay inside the default (no-flag), AI-off screenshot mode.
+    await gotoWarm(page, "/kb/new");
+    await settle(page);
+    await writeShot(page, `kb-new${suffix}.png`, manifest, false);
+
+    await gotoWarm(page, `/kb/${articleId}`);
+    await settle(page);
+    await writeShot(page, `kb-article${suffix}.png`, manifest, false);
 
     await gotoWarm(page, "/settings");
     await settle(page);
@@ -430,6 +453,52 @@ async function configureOllamaStubProvider(
   for (const [key, value] of settings) {
     await prisma.setting.create({ data: { organizationId: orgId, key, value } });
   }
+}
+
+// ---------------------------------------------------------------------------
+// 07-09.1 Task 3 — in-flight draft-card stills (light + dark). Only reachable inside --record
+// mode: TicketReplyArea's "Generate draft" button is disabled until draftableKbCount > 0, and the
+// default screenshot mode's whole honesty contract is that the shipped seed's KB articles stay
+// unembedded. This runs AFTER the six seeded KB articles are embedded (main()'s --record branch)
+// and BEFORE recordGoldenPath()'s video — clicking "Generate draft" here only adds one more
+// DRAFT_GENERATED audit-trail row (harmless, additive) and never touches the recording's own,
+// separately-generated draft.
+// ---------------------------------------------------------------------------
+async function captureDraftCardStills(
+  browser: Browser,
+  storageState: StorageState,
+  ticketId: string,
+): Promise<void> {
+  const manifest: ManifestEntry[] = [];
+
+  for (const theme of ["light", "dark"] as const) {
+    log(`Capturing in-flight draft-card screenshot (${theme})...`);
+    const suffix = theme === "dark" ? "-dark" : "";
+
+    const context = await browser.newContext({
+      baseURL: BASE_URL,
+      storageState,
+      viewport: { width: 1440, height: 900 },
+      deviceScaleFactor: 2,
+      colorScheme: theme,
+    });
+    await context.addInitScript((t) => window.localStorage.setItem("theme", t), theme);
+    const page = await context.newPage();
+
+    await gotoWarm(page, `/tickets/${ticketId}`);
+    await settle(page);
+    await page.getByRole("button", { name: "Generate draft" }).click();
+    await page.getByText("AI Draft").waitFor({ state: "visible", timeout: 15_000 });
+    await settle(page);
+
+    // fullPage + scale:"css" — same rationale as ticket-detail.png: a busy page at full retina
+    // density blows through the 500KB budget; still sharp enough for a launch/docs screenshot.
+    await writeShot(page, `ticket-draft-inflight${suffix}.png`, manifest, true, "css");
+
+    await context.close();
+  }
+
+  validateManifest(manifest);
 }
 
 interface RecordingResult {
@@ -753,6 +822,11 @@ async function main(): Promise<void> {
     const ticket = await prisma.ticket.findFirstOrThrow({
       where: { organizationId: org.id, subject: { contains: TICKET_SUBJECT_MATCH } },
     });
+    // Fetched mode-agnostically (both branches need it): the default screenshot mode's new
+    // /kb/[id] capture, and --record mode's KB-embedding step, both key off this same article.
+    const kbArticle = await prisma.kbArticle.findFirstOrThrow({
+      where: { organizationId: org.id, title: KB_ARTICLE_TITLE },
+    });
 
     // --- Build once (skip on rerun unless --build is passed, no prior build exists, or the
     // cached build was inlined for a different BASE_URL). NEXT_PUBLIC_APP_URL is a client-bundle
@@ -865,7 +939,7 @@ async function main(): Promise<void> {
     await loginPage.close();
 
     if (!RECORD) {
-      await captureScreenshots(browser, storageState, ticket.id);
+      await captureScreenshots(browser, storageState, ticket.id, kbArticle.id);
     } else {
       videoDir = fs.mkdtempSync(path.join(os.tmpdir(), "aida-capture-video-"));
 
@@ -893,6 +967,11 @@ async function main(): Promise<void> {
         );
       }
       log(`All ${reChecked.length} KB articles embedded (embeddingStatus: COMPLETED).`);
+
+      // 07-09.1 Task 3 — the in-flight draft-card stills, right after embedding and before the
+      // golden-path video (see the header comment + captureDraftCardStills' own doc comment).
+      fs.mkdirSync(ASSETS_DIR, { recursive: true });
+      await captureDraftCardStills(browser, storageState, ticket.id);
 
       const recording = await recordGoldenPath(browser, storageState, videoDir, ticket.id);
       console.log("\n[capture] Golden path steps recorded:");

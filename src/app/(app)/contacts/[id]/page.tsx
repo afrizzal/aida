@@ -53,7 +53,7 @@ export default async function ContactDetailPage({ params }: ContactDetailPagePro
       <Card className="p-6">
         <div className="flex items-start gap-4">
           <Avatar size="lg">
-            <AvatarFallback className="bg-primary/10 text-[14px] font-medium text-primary">
+            <AvatarFallback className="bg-primary/10 text-[14px] font-medium text-primary-emphasis">
               {getInitials(displayName)}
             </AvatarFallback>
           </Avatar>

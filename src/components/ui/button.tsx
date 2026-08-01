@@ -9,7 +9,14 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/80",
+        // Hover darkens via color-mix (not opacity): an opacity-based hover (bg-primary/80)
+        // blends toward whatever sits behind the button, which LIGHTENS the effective color in
+        // light mode (near-white page bg) and drops contrast with the near-white
+        // text-primary-foreground below WCAG AA (axe-confirmed 3.98:1 — 07-09 contrast fix).
+        // Mixing toward black is theme-invariant: it always darkens, so contrast against
+        // primary-foreground only improves on hover, in both themes.
+        default:
+          "bg-primary text-primary-foreground hover:bg-[color-mix(in_oklch,var(--primary),black_15%)]",
         outline:
           "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         secondary:
@@ -18,7 +25,10 @@ const buttonVariants = cva(
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
         destructive:
           "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
-        link: "text-primary underline-offset-4 hover:underline",
+        // text-primary-emphasis (not text-primary): plain link text on the page's neutral
+        // background, not a primary-tinted surface — needs the lighter, text-legible variant in
+        // dark mode (07-09 contrast fix, case 2).
+        link: "text-primary-emphasis underline-offset-4 hover:underline",
       },
       size: {
         default:

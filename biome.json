@@ -22,7 +22,8 @@
       "!.planning",
       "!.claude/worktrees",
       "!website",
-      "!**/test-results"
+      "!**/test-results",
+      "!**/.auth"
     ]
   }
 }

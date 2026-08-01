@@ -172,18 +172,21 @@ export default async function globalSetup(_config: FullConfig) {
 
     const org = await prisma.organization.findFirstOrThrow();
 
-    const signUpRes = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-      method: "POST",
-      headers: { "content-type": "application/json", origin: BASE_URL },
-      body: JSON.stringify({ name: MEMBER_NAME, email: MEMBER_EMAIL, password: MEMBER_PASSWORD }),
+    // FIX 1b (07-09): POST /api/auth/sign-up/email is now blocked at the proxy for anonymous
+    // callers (src/proxy.ts, GAP 1) so this can no longer go over HTTP. Create the second
+    // (member) user the same in-process way src/lib/demo/identities.ts's ensureDemoIdentities
+    // already does: auth.api.signUpEmail() directly, then a direct prisma.member.create().
+    // src/lib/auth.ts's `auth` object reads its DB connection from src/lib/db.ts, which reads
+    // process.env.DATABASE_URL at import time — set it (plus the same BETTER_AUTH_SECRET the
+    // spawned server uses) on this process before the dynamic import below.
+    process.env.DATABASE_URL = databaseUrl;
+    process.env.BETTER_AUTH_SECRET = serverEnv.BETTER_AUTH_SECRET;
+    const { auth } = await import("../../src/lib/auth");
+
+    const memberSignUp = await auth.api.signUpEmail({
+      body: { name: MEMBER_NAME, email: MEMBER_EMAIL, password: MEMBER_PASSWORD },
     });
-    if (!signUpRes.ok) {
-      throw new Error(
-        `Failed to sign up e2e member user: ${signUpRes.status} ${await signUpRes.text()}`,
-      );
-    }
-    const signUpBody = (await signUpRes.json()) as { user?: { id?: string } };
-    const memberUserId = signUpBody.user?.id;
+    const memberUserId = memberSignUp?.user?.id;
     if (!memberUserId) throw new Error("Sign-up response missing user id for e2e member");
 
     await prisma.member.create({

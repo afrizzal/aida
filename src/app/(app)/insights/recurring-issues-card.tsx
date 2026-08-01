@@ -40,7 +40,7 @@ export function RecurringIssuesCard({ clusters }: RecurringIssuesCardProps) {
                   <Link
                     key={citation.ticketId}
                     href={`/tickets/${citation.ticketId}`}
-                    className="max-w-[220px] truncate text-[12px] text-primary hover:underline"
+                    className="max-w-[220px] truncate text-[12px] text-primary-emphasis hover:underline"
                   >
                     #{citation.number} {citation.subject}
                   </Link>

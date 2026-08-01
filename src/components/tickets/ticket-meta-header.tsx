@@ -351,7 +351,10 @@ export function TicketMetaHeader({
           <Popover open={languagePopoverOpen} onOpenChange={setLanguagePopoverOpen}>
             <PopoverTrigger asChild>
               <button type="button" aria-label="Change language">
-                <Badge className="h-5 px-2 py-0.5 text-[12px] border border-border text-muted-foreground">
+                <Badge
+                  variant="outline"
+                  className="h-5 px-2 py-0.5 text-[12px] text-muted-foreground"
+                >
                   {ticket.triageLanguage.toUpperCase()}
                 </Badge>
               </button>

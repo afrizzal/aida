@@ -82,7 +82,7 @@ export function Sidebar({ user, brandName }: SidebarProps) {
       <div className="border-t border-sidebar-border p-2">
         <div className="flex items-center gap-2.5 rounded-md px-2 py-2 transition-colors hover:bg-sidebar-accent/60">
           <Avatar className="size-8">
-            <AvatarFallback className="bg-sidebar-primary/10 text-[12px] font-medium text-sidebar-primary">
+            <AvatarFallback className="bg-sidebar-primary/10 text-[12px] font-medium text-sidebar-primary-emphasis">
               {getInitials(user.name)}
             </AvatarFallback>
           </Avatar>
@@ -90,7 +90,12 @@ export function Sidebar({ user, brandName }: SidebarProps) {
             <p className="truncate text-[13px] font-medium leading-tight text-sidebar-foreground">
               {user.name}
             </p>
-            <p className="truncate text-[12px] leading-tight text-sidebar-foreground/60">
+            {/* /70 (not /60): axe-core color-contrast found /60 rendered ~3.76:1 against the
+                sidebar background, short of WCAG AA's 4.5:1 for normal text (07-09.1 Task 3).
+                /70 matches the opacity already used for inactive nav-item text one section up
+                (and DESIGN-SYSTEM.md §4.1's documented inactive-nav-item value) and verified
+                >=4.5:1 empirically. */}
+            <p className="truncate text-[12px] leading-tight text-sidebar-foreground/70">
               {user.email}
             </p>
           </div>

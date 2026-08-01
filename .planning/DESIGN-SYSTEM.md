@@ -6,9 +6,14 @@
 
 ## 1. Brand Identity
 
-**Brand color:** Indigo-violet — `oklch(0.515 0.215 277)` (light) / `oklch(0.585 0.215 278)` (dark)  
+**Brand color:** Indigo-violet — `oklch(0.515 0.215 277)` (light) / `oklch(0.54 0.215 278)` (dark)  
 **Hue family:** 277–280 (indigo). Semua warna brand, sidebar, dan chart berada dalam family yang sama.  
 **Surface tint:** Faint cool tint (bukan pure gray `chroma=0`). Setiap surface memiliki sedikit `chroma > 0` pada hue 279–280.
+
+**Two lightness tiers, same hue/chroma (WCAG AA fix, 07-launch-readiness):** `--primary` alone cannot satisfy WCAG AA 4.5:1 in every role at once — dark mode's single value was simultaneously too light to serve as a solid CTA background (with near-white `--primary-foreground` text, 4.29:1) and too dark to serve as TEXT rendered directly on a dark surface (3.86–4.10:1). Rather than compromise on a middle value that would fail both, the token was split into two roles at the SAME hue/chroma (brand identity locked, only lightness moves):
+- **`--primary`** — for BACKGROUNDS (buttons, filled badges, `StatusChip`'s `NEW` state, rings, borders, chart-1). Dark mode darkened `0.585` → `0.54` so it clears 4.5:1 against `--primary-foreground` at full opacity.
+- **`--primary-emphasis`** (new) — for TEXT/icons rendering the primary color directly on a neutral or tinted dark surface (`text-primary` used to be this; now use `text-primary-emphasis` instead of `text-primary` whenever primary color is the TEXT, not the background). Light mode value is identical to `--primary` (already passed as text, unchanged). Dark mode is lightened to `0.72` so it clears 4.5:1 against `--background`/`--card`/`--sidebar`/`--sidebar-accent`. Mirrored as `--sidebar-primary-emphasis` for the sidebar-namespaced avatar-initials-fallback case (§4.1), keeping the "sidebar always uses `sidebar-*` tokens" rule intact.
+- **Rule of thumb:** background under near-white text → `--primary`/`--sidebar-primary`. Primary-colored text/icon/link on any other surface → `--primary-emphasis`/`--sidebar-primary-emphasis`.
 
 ---
 
@@ -20,12 +25,14 @@ Token sudah live di `src/app/globals.css`. Ini adalah kontrak — jangan hardcod
 | Token | Value | Digunakan untuk |
 |-------|-------|-----------------|
 | `--primary` | `oklch(0.515 0.215 277)` | CTA buttons, active indicators, focus rings |
+| `--primary-emphasis` | `oklch(0.515 0.215 277)` (= `--primary`) | Primary-colored TEXT/icon/link on a neutral or tinted surface (already passed at 4.5:1+ in light mode, so identical to `--primary` here — see §1) |
 | `--background` | `oklch(0.994 0.0015 280)` | Page background (faint tint, bukan pure white) |
 | `--foreground` | `oklch(0.21 0.02 279)` | Primary text |
 | `--muted` | `oklch(0.968 0.004 280)` | Secondary backgrounds |
 | `--muted-foreground` | `oklch(0.53 0.02 279)` | Captions, hints, metadata |
 | `--accent` | `oklch(0.95 0.025 278)` | Hover backgrounds (bukan active) |
 | `--accent-foreground` | `oklch(0.40 0.13 277)` | Text di atas accent bg |
+| `--success` | `oklch(0.49 0.14 155)` | Success text/badges (darkened from `0.58` — 07-launch-readiness WCAG AA fix, see below) |
 | `--border` | `oklch(0.918 0.006 280)` | Default borders |
 | `--ring` | `= --primary` | Focus ring |
 | `--sidebar` | `oklch(0.972 0.007 280)` | Sidebar background |
@@ -34,6 +41,22 @@ Token sudah live di `src/app/globals.css`. Ini adalah kontrak — jangan hardcod
 
 ### Dark mode (`.dark`)
 Semua nilai dark ada di `globals.css`. Jangan duplikat — gunakan token yang sama.
+
+| Token | Value | Digunakan untuk |
+|-------|-------|-----------------|
+| `--primary` | `oklch(0.54 0.215 278)` | CTA buttons, filled badges, rings — background use only (§1) |
+| `--primary-emphasis` | `oklch(0.72 0.215 278)` | Primary-colored TEXT/icon/link on a dark surface — text use only (§1) |
+| `--success` | `oklch(0.72 0.15 155)` | Unchanged — dark mode's success already passed 4.5:1 as text |
+
+### Contrast fix note (07-launch-readiness)
+
+`tests/e2e/a11y-contrast.spec.ts` (axe-core, WCAG AA) found 4 root-cause contrast failures in the original token values. All 4 are now fixed at the TOKEN level (no component hand-tunes a color):
+1. **`--success` (light) as badge/status text on its own `/10` tint** — 3.47:1 → darkened `0.58` → `0.49` (same hue/chroma), now ≥4.9:1 against every surface it renders on.
+2. **`--primary` (dark) used as TEXT on dark surfaces** — 3.86–4.10:1 → moved to the new `--primary-emphasis` token (`0.72` lightness), now ≥5.2:1 against `--background`/`--card`/`--sidebar`/`--sidebar-accent`.
+3. **`--primary` as a solid button/badge BACKGROUND with `--primary-foreground` text** — 4.29:1 (dark, full opacity) → darkened `0.585` → `0.54`, now ~5.2:1.
+4. **A lighter violet (`#716ee4`) as a background in light mode** — this was `Button`'s default variant `hover:bg-primary/80`: an OPACITY-based hover blends toward whatever sits behind the button, which LIGHTENS the effective color in light mode (near-white page bg) and dropped contrast to 3.98:1. Fixed by changing the hover mechanism to a `color-mix` DARKEN (`hover:bg-[color-mix(in_oklch,var(--primary),black_15%)]`) in both `button.tsx` and `badge.tsx` — this always darkens regardless of theme/backdrop, so hover only improves contrast now.
+
+**Do not reintroduce `text-primary`/`text-sidebar-primary` for TEXT on a dark or tinted surface** — use `text-primary-emphasis`/`text-sidebar-primary-emphasis` instead (see §1's rule of thumb). `text-primary` remains correct when paired with `bg-primary`+`text-primary-foreground` (i.e., primary as the background).
 
 ---
 

@@ -44,7 +44,7 @@ export function KbGapsCard({ gaps }: KbGapsCardProps) {
                   Nearest article:{" "}
                   <Link
                     href={`/kb/${gap.nearestArticle.articleId}`}
-                    className="text-primary hover:underline"
+                    className="text-primary-emphasis hover:underline"
                   >
                     {gap.nearestArticle.title}
                   </Link>{" "}
@@ -57,7 +57,7 @@ export function KbGapsCard({ gaps }: KbGapsCardProps) {
                   <Link
                     key={citation.ticketId}
                     href={`/tickets/${citation.ticketId}`}
-                    className="max-w-[220px] truncate text-[12px] text-primary hover:underline"
+                    className="max-w-[220px] truncate text-[12px] text-primary-emphasis hover:underline"
                   >
                     #{citation.number} {citation.subject}
                   </Link>

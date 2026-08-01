@@ -19,6 +19,7 @@ import { getScopedDb } from "@/lib/session";
  * domain model operations, so the Setting is always tenant-scoped. (D-15, D-18)
  */
 export async function setAiEnabled(enabled: boolean): Promise<{ ok: boolean }> {
+  await requireOrgAdmin();
   const { db, orgId } = await getScopedDb();
 
   const existing = await db.setting.findFirst({ where: { key: "aiEnabled" } });
