@@ -27,6 +27,12 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-aida}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-aida}
+      # Prisma's CLI phones home to checkpoint.prisma.io for an update-check ping on every
+      # `migrate deploy` unless disabled — found via 07-09.1's egress-isolation test (the DNS
+      # capture recorded this real, if silently-failing, third-party attempt). Disabling it
+      # keeps the "no third-party egress" claim (CLAUDE.md) literally true, not just true by
+      # virtue of the ping being blocked at the network layer.
+      CHECKPOINT_DISABLE: "1"
     restart: "no"
 
   # ── Next.js app (node server.js — standalone output) ─────────────────────

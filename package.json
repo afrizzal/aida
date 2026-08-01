@@ -16,6 +16,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run tests/unit",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:egress": "vitest run --config vitest.egress.config.ts",
     "test:e2e": "playwright test",
     "test:all": "pnpm test && pnpm test:integration",
     "db:migrate": "prisma migrate dev",

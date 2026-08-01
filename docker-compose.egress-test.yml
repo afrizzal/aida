@@ -1,0 +1,188 @@
+# Egress-isolation proof (07-09.1 Task 1 / AIDA-20). Boots the REAL production image
+# (same Dockerfile as docker-compose.yml) plus stub LLM/SMTP fixtures on a Docker network
+# declared `internal: true` — Docker adds NO default route out of this network at all, so
+# nothing attached to it can reach the public internet, full stop (verified empirically:
+# published ports don't even work inbound on such a network either, hence `runner` below —
+# there is no host-reachable HTTP surface here on purpose).
+#
+# D-1 (07-09.1-PLAN.md, LOCKED): egress is proven by DENIAL (every flow still succeeds with
+# no route out), not by observation. `dns-logger` adds the observation half — every service's
+# `dns:` override forwards non-container-name lookups to it, so an ATTEMPTED external lookup
+# is logged even though it can never actually succeed. Without this override, Docker's embedded
+# resolver simply times out forwarding such queries on an internal network (EAI_AGAIN) — no
+# signal at all; the negative control in egress-isolation.test.ts proves this file's
+# `dns-logger` sidecar is what turns "attempted" into "observed".
+#
+# This suite is intentionally excluded from the default `pnpm test:integration` / PR path (it
+# builds and boots a full multi-container stack) — run it explicitly via `pnpm test:egress`.
+networks:
+  egress_internal:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.90.0.0/24
+
+services:
+  # Logging DNS resolver — every other service's `dns:` points here. Fixed IP required: compose
+  # services' `dns:` entries must be literal IP addresses (resolv.conf syntax), not hostnames.
+  dns-logger:
+    build: ./tests/integration/egress-fixtures/dns-logger
+    networks:
+      egress_internal:
+        ipv4_address: 10.90.0.2
+    volumes:
+      - ./tests/integration/egress-fixtures/.dns-log:/var/log
+    restart: unless-stopped
+
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: aida
+      POSTGRES_PASSWORD: egress-test-password
+      POSTGRES_DB: aida
+    dns: [10.90.0.2]
+    networks:
+      egress_internal:
+        ipv4_address: 10.90.0.10
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aida"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
+  stub-llm:
+    build: ./tests/integration/egress-fixtures/stub-llm
+    dns: [10.90.0.2]
+    networks:
+      egress_internal:
+        ipv4_address: 10.90.0.11
+
+  # Auth-disabled GreenMail SMTP fixture (same image already used in this project's manual
+  # Phase 3 UAT session — .planning/phases/03-email-channel/03-UAT.md). Only SMTP is needed here
+  # (outbound send is the flow under test; inbound IMAP polling is not).
+  stub-smtp:
+    image: greenmail/standalone:latest
+    environment:
+      GREENMAIL_OPTS: "-Dgreenmail.setup.test.smtp -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.auth.disabled -Dgreenmail.verbose"
+    dns: [10.90.0.2]
+    networks:
+      egress_internal:
+        ipv4_address: 10.90.0.12
+
+  migrate:
+    build:
+      context: .
+      target: builder
+    command: ["pnpm", "prisma", "migrate", "deploy"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://aida:egress-test-password@db:5432/aida
+      # Genuine finding from this test's own DNS capture: Prisma's CLI pings checkpoint.prisma.io
+      # on every `migrate deploy` unless disabled — see docker-compose.yml's matching fix.
+      CHECKPOINT_DISABLE: "1"
+    dns: [10.90.0.2]
+    networks:
+      egress_internal:
+        ipv4_address: 10.90.0.13
+    restart: "no"
+
+  # The real app image — same Dockerfile/build as docker-compose.yml. No `ports:` (published
+  # ports don't work on an `internal: true` network anyway — see header comment); this container
+  # existing and reaching a HEALTHY state proves the production server itself boots fully cut off
+  # from the internet. Flows are driven from `runner` (see egress-isolation.test.ts), not through
+  # this container's own HTTP surface — an honestly-documented simplification recorded in the
+  # SUMMARY (Server Actions' wire protocol isn't practical to replicate from a plain script; the
+  # underlying calls to stub-llm/stub-smtp are identical either way, and `runner` is exactly as
+  # cut off from the internet as this container is).
+  app:
+    build: .
+    command: ["node", "server.js"]
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://aida:egress-test-password@db:5432/aida
+      BETTER_AUTH_SECRET: egress-test-better-auth-secret-32-bytes-min
+      BETTER_AUTH_URL: http://app:3000
+      NEXT_PUBLIC_APP_URL: http://app:3000
+      HOSTNAME: "0.0.0.0"
+      UPLOADS_DIR: /data/uploads
+      RATE_LIMIT_PEPPER: egress-test-pepper
+      APP_ENCRYPTION_KEY: QSISaCLOEBgxX0yBtkwIvFzcSXJIzb491wuVtK5Ik7g=
+    dns: [10.90.0.2]
+    networks:
+      egress_internal:
+        ipv4_address: 10.90.0.14
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+  worker:
+    build: .
+    command: ["node", "dist/worker.mjs"]
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://aida:egress-test-password@db:5432/aida
+      APP_ENCRYPTION_KEY: QSISaCLOEBgxX0yBtkwIvFzcSXJIzb491wuVtK5Ik7g=
+    dns: [10.90.0.2]
+    networks:
+      egress_internal:
+        ipv4_address: 10.90.0.15
+
+  # Drives the five flows (tests/integration/egress-fixtures/probe.ts) via `docker compose run`
+  # from the host-side vitest test — see that test file's header for why (`docker compose exec`/
+  # `run` talk to the Docker daemon's control plane, not the container network, so they work
+  # fine even though this whole network has no route out and no published ports). Reuses the
+  # `builder` stage (full source + node_modules + tsx), never the slim runtime `app`/`worker`
+  # image, since the probe imports project lib modules directly by path.
+  runner:
+    build:
+      context: .
+      target: builder
+    command: ["sleep", "infinity"]
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://aida:egress-test-password@db:5432/aida
+      APP_ENCRYPTION_KEY: QSISaCLOEBgxX0yBtkwIvFzcSXJIzb491wuVtK5Ik7g=
+      STUB_LLM_URL: http://stub-llm:11434
+      STUB_SMTP_HOST: stub-smtp
+      STUB_SMTP_PORT: "3025"
+    # .dockerignore excludes `tests/` entirely from the build context (correct for the real
+    # app/worker images — test code has no business in a shipped production image). Bind-mount
+    # JUST the probe script back in at runtime instead of loosening .dockerignore, which would
+    # widen scope to every image built from this Dockerfile.
+    volumes:
+      - ./tests/integration/egress-fixtures:/app/tests/integration/egress-fixtures:ro
+    dns: [10.90.0.2]
+    networks:
+      egress_internal:
+        ipv4_address: 10.90.0.16
+
+  # Negative-control helper — attempts one deliberate lookup of a known-external host, on demand,
+  # via `docker compose run --rm negative-control`. A separate tiny service (rather than reusing
+  # `runner`) keeps the control's own network identity easy to grep out of dns-logger's log.
+  negative-control:
+    image: node:22-alpine
+    entrypoint: ["node", "-e"]
+    command:
+      - "require('dns').promises.lookup('canary.aida-egress-negative-control.invalid').then(()=>process.exit(0)).catch(()=>process.exit(0))"
+    dns: [10.90.0.2]
+    networks:
+      egress_internal:
+        ipv4_address: 10.90.0.17
+    profiles: ["control"] # never started by a plain `docker compose up`
