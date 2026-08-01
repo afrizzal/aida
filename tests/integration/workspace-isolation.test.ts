@@ -56,7 +56,6 @@ describe("AIDA-11: workspace isolation", () => {
     // Setting.organizationId is required by the Prisma schema, but scopedDb's create
     // extension injects it at runtime. This test verifies that injection behavior —
     // organizationId is intentionally omitted so the extension must add it.
-    // biome-ignore lint/suspicious/noExplicitAny: intentional omission to test auto-injection
     const setting = await (
       db.setting.create as (a: {
         data: Record<string, unknown>;

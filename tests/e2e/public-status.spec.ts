@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTicket, orgId, prisma } from "./support/db";
-import { expect, test } from "./support/fixtures";
+import { expect, requireBrowser, test } from "./support/fixtures";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADMIN_STORAGE = path.resolve(__dirname, ".auth/admin.json");
@@ -59,7 +59,7 @@ test.describe("Public status page", () => {
       timeout: 15_000,
     });
 
-    const agentPage = await context.browser()!.newPage({ storageState: ADMIN_STORAGE });
+    const agentPage = await requireBrowser(context).newPage({ storageState: ADMIN_STORAGE });
     await agentPage.goto(`/tickets/${ticket.id}`);
     await expect(
       agentPage.getByRole("button", { name: "Change status" }).getByText("Open", { exact: true }),

@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 
 function InputGroup({ className, ...props }: React.ComponentProps<"div">) {
   return (
+    // biome-ignore lint/a11y/useSemanticElements: <fieldset> carries default browser chrome (border/padding/min-width) that would require an `all: unset` reset on every consumer of this widely-reused shared primitive; role="group" on a div is a valid ARIA grouping pattern for a non-form-fieldset container.
     <div
       data-slot="input-group"
       role="group"
@@ -46,6 +47,8 @@ function InputGroupAddon({
   ...props
 }: React.ComponentProps<"div"> & VariantProps<typeof inputGroupAddonVariants>) {
   return (
+    // biome-ignore lint/a11y/useSemanticElements: same fieldset-layout-regression risk as InputGroup above — this shared primitive intentionally uses role="group" on a div, not a <fieldset>.
+    // biome-ignore lint/a11y/useKeyWithClickEvents: onClick here is a pointer-only convenience that focuses the adjacent input when clicking empty padding around it (like a native <label>) — this div is never itself an interactive control or a tab stop, and its actual interactive children (Input, Button) remain independently keyboard-focusable via Tab. Adding a keyboard handler would require giving this non-actionable div a tabIndex, creating a meaningless extra tab stop — a net accessibility regression, not an improvement.
     <div
       role="group"
       data-slot="input-group-addon"

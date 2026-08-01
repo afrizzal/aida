@@ -21,7 +21,8 @@
       "!**/prisma/generated",
       "!.planning",
       "!.claude/worktrees",
-      "!website"
+      "!website",
+      "!**/test-results"
     ]
   }
 }

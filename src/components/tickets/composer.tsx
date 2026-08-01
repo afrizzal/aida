@@ -36,6 +36,7 @@ export function Composer({ ticketId, insertedText, onInsertedConsumed }: Compose
 
   // A draft is always a customer-facing reply — loading one switches mode to "public" (even if
   // the agent happened to be on the Internal Note toggle) and marks the send as draft-originated.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only insertedText should re-trigger this effect; onInsertedConsumed is a one-shot ack callback intentionally excluded, not reactive state (05-07 AI draft-insertion human-approval gate — do not add it to the deps array)
   useEffect(() => {
     if (insertedText != null) {
       setBody(insertedText);
@@ -43,7 +44,6 @@ export function Composer({ ticketId, insertedText, onInsertedConsumed }: Compose
       setMode("public");
       onInsertedConsumed?.();
     }
-    // biome-ignore lint/correctness/useExhaustiveDependencies: only insertedText should re-trigger this effect; onInsertedConsumed is a one-shot ack callback, not reactive state
   }, [insertedText]);
 
   // Client-side pre-check only (UX convenience) — the server always re-validates size

@@ -20,7 +20,6 @@ describe("Wave-0 smoke test: scopedDb organizationId injection inside $transacti
     // organizationId is intentionally omitted from `data` — this asserts the scopedDb
     // create hook fires even inside an interactive $transaction callback.
     const setting = await db.$transaction((tx) =>
-      // biome-ignore lint/suspicious/noExplicitAny: intentional omission to test auto-injection inside $transaction
       (
         tx.setting.create as (a: {
           data: Record<string, unknown>;
