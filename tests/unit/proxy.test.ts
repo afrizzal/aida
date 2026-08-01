@@ -44,4 +44,20 @@ describe("proxy — AIDA-10 auth gate", () => {
     expect(response.status).not.toBe(307);
     expect(response.status).not.toBe(302);
   });
+
+  it("F (07-09 GAP 1 fix): blocks anonymous self-registration with 403 JSON", async () => {
+    const request = new NextRequest("http://localhost/api/auth/sign-up/email");
+    const response = proxy(request);
+    expect(response.status).toBe(403);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toMatch(/self-registration is disabled/i);
+  });
+
+  it("G (07-09 GAP 1 fix): other /api/auth/* routes still pass through unaffected", async () => {
+    const request = new NextRequest("http://localhost/api/auth/sign-in/email");
+    const response = proxy(request);
+    expect(response.status).not.toBe(403);
+    expect(response.status).not.toBe(307);
+    expect(response.status).not.toBe(302);
+  });
 });
