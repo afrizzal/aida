@@ -4,7 +4,7 @@ Out-of-scope discoveries logged during plan execution. Not fixed per SCOPE BOUND
 
 ## From 07-01 (repo-hygiene pass — .gitattributes/LF renormalization) — RESOLVED by 07-09
 
-All 6 items below were fixed by 07-09's FIX 5 (`fc45522`): `biome check .` now exits 0. Kept here for history rather than deleted — see `.planning/phases/07-launch-readiness/07-SECURITY-PASS.md` "Fixed in phase" for the per-item disposition (fixed vs. justified suppression) and reasoning.
+All 6 items below were fixed by 07-09's FIX 5 (`321ce89` + `a07118b` — one commit originally, split by the PR #3 rebase; see the commit-hash note at the top of `07-SECURITY-PASS.md`): `biome check .` now exits 0. Kept here for history rather than deleted — see `.planning/phases/07-launch-readiness/07-SECURITY-PASS.md` "Fixed in phase" for the per-item disposition (fixed vs. justified suppression) and reasoning.
 
 
 Once the CRLF-vs-LF noise was eliminated (`.gitattributes` + working-tree renormalization) and Biome's own SAFE mechanical fixes (`biome check --write .`: formatting + import order, 35 files, zero logic change) were applied, `biome check .` surfaced 14 PRE-EXISTING lint-rule findings that were previously masked by the sheer volume of CRLF diagnostics. None are in files this plan's tasks touch (`.gitattributes`; `src/proxy.ts`/`src/middleware.ts`/`tests/unit/proxy.test.ts`/`tests/unit/middleware.test.ts`/`src/components/tickets/sla-due-chip.tsx`/`src/lib/worker/index.ts`). Left unfixed — several touch behavior-sensitive code (the AI draft-insertion human-approval gate, a shared UI primitive) where a blind mechanical fix risks a real behavior change, which is out of scope for a line-ending hygiene plan:

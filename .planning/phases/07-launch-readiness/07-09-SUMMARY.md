@@ -31,6 +31,8 @@ completed: 2026-08-01
 
 # 07-09 — Pre-launch security pass
 
+> **Commit hashes updated 2026-08-01** after this branch was rebased onto master for PR #3 (merge commit `b0c96f8`). Every hash below resolves on `master`; the pre-rebase originals do not exist in the published repo. Rewrites were verified content-identical via `git patch-id --stable`, except FIX 5, which the rebase split into `321ce89` + `a07118b` — see the commit-hash note at the top of `07-SECURITY-PASS.md`.
+
 ## Method
 
 Eight sweeps run as **26 parallel agents**, with every claimed finding handed to an independent agent whose sole job was to *refute* it (defaulting to refuted when uncertain), plus a completeness critic hunting for surfaces no sweep named.
@@ -53,11 +55,11 @@ The completeness critic turned out to be the highest-value component — it foun
 
 | Sev | Finding | Commit |
 |---|---|---|
-| **HIGH** | Anonymous `POST /api/auth/sign-up/email` was open on every deployment. One request before the operator finished `/setup` made the attacker the sole user; all four first-run gates key on `prisma.user.count()`, so `/setup` redirected to `/login` forever and recovery required a manual `DELETE FROM "user"`. | `5a259d2` |
-| MEDIUM | `setAiEnabled` lacked `requireOrgAdmin()` — any authenticated member could flip the org-wide AI kill switch, including re-enabling AI after an admin disabled it. | `9cf38f4` |
-| MEDIUM | `RATE_LIMIT_PEPPER` was effectively absent: `??` does not replace an empty string and compose injects `${RATE_LIMIT_PEPPER:-}`, so `ipHash` was an unsalted SHA-256 of a raw IP — reversible over the IPv4 space in minutes, **falsifying `docs/SECURITY.md`'s privacy claim**. | `4904bdb` |
-| MEDIUM | `next@16.2.9` carried 9 advisories, all cleared by a patch bump. | `85b867b` |
-| — | 5 pre-existing Biome lint errors that made CI fail at its first step, so `typecheck`/`test`/`build` had **never once run on the runner** despite the badge shipping since 07-05. | `fc45522` |
+| **HIGH** | Anonymous `POST /api/auth/sign-up/email` was open on every deployment. One request before the operator finished `/setup` made the attacker the sole user; all four first-run gates key on `prisma.user.count()`, so `/setup` redirected to `/login` forever and recovery required a manual `DELETE FROM "user"`. | `22148f1` |
+| MEDIUM | `setAiEnabled` lacked `requireOrgAdmin()` — any authenticated member could flip the org-wide AI kill switch, including re-enabling AI after an admin disabled it. | `ab90bc3` |
+| MEDIUM | `RATE_LIMIT_PEPPER` was effectively absent: `??` does not replace an empty string and compose injects `${RATE_LIMIT_PEPPER:-}`, so `ipHash` was an unsalted SHA-256 of a raw IP — reversible over the IPv4 space in minutes, **falsifying `docs/SECURITY.md`'s privacy claim**. | `62ca86e` |
+| MEDIUM | `next@16.2.9` carried 9 advisories, all cleared by a patch bump. | `a87bdde` |
+| — | 5 pre-existing Biome lint errors that made CI fail at its first step, so `typecheck`/`test`/`build` had **never once run on the runner** despite the badge shipping since 07-05. | `321ce89` + `a07118b` |
 
 ### Correction made during execution
 
