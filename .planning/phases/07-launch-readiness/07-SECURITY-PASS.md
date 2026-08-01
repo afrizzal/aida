@@ -2,7 +2,9 @@
 
 ## Scope and method
 
-**Audited:** the whole `src/`, `prisma/`, `scripts/`, and `.github/` surface at commit `89d4600` (branch `phase-07-wave-4-launch-readiness`), plus the five fix commits this same plan layered on top of that commit (`5a259d2`, `9cf38f4`, `4904bdb`, `85b867b`, `fc45522`).
+**Audited:** the whole `src/`, `prisma/`, `scripts/`, and `.github/` surface at commit `89d4600` (branch `phase-07-wave-4-launch-readiness`), plus the five fix commits this same plan layered on top of that commit (`22148f1`, `ab90bc3`, `62ca86e`, `a87bdde`, and the lint fix now split across `321ce89` + `a07118b` — see the commit-hash note below).
+
+> **Commit-hash note (added 2026-08-01, after PR #3).** The hashes in this report were rewritten once, when branch `phase-07-wave-4-launch-readiness` was rebased onto master ahead of PR #3 (merge commit `b0c96f8`). Every hash cited here resolves on `master`; the originals no longer exist anywhere in the published repo. All rewritten pairs were verified content-identical by `git patch-id --stable`, with one deliberate exception: FIX 5, originally one commit (`fc45522`), turned out to duplicate a lint fix master had already received independently as `321ce89`. The rebase therefore deduplicated it — the 9 shared files landed via `321ce89`, and only the one non-overlapping hunk (`tests/unit/rate-limit-pepper.test.ts`) remains as `a07118b`. The *content* of FIX 5 is fully on master; it is simply spread across two commits rather than one.
 
 **Not audited:** third-party SDK internals (verified only via static call-site/source analysis, not a live network capture — see Human verification items #1), and the operator's own hosting infrastructure (reverse proxy other than the shipped Caddyfile, host OS hardening, cloud network config).
 
@@ -29,19 +31,19 @@ This report and the five FIX commits were produced by an execution agent applyin
 | # | D-10 checklist item | Result | Evidence |
 |---|---|---|---|
 | 1 | Provider/email keys encrypted at rest | **PASS** | Evidence → Sweep 3(a): all 4 credential-bearing `Setting` keys (`email:imapPasswordEnc`, `email:smtpPasswordEnc`, `llm:apiKeyEnc`, `llm:embeddingApiKeyEnc`) write only via `encryptSecret()` and read only via `decryptSecret()`; one AES-256-GCM primitive (`secret-box.ts`); no plaintext round-trip to the client (E2E-asserted) |
-| 2 | Server-side authorization on every mutating Server Action and route | **PASS (post-fix)** | Evidence → Sweep 1: 34/35 Server Actions correctly gated; the 1 exception (`setAiEnabled`) fixed in `9cf38f4`. Sweep 2: 8/8 route files, zero routes missing an authorization mechanism, zero guarded routes reachable without a session. Critic GAP 1 (self-registration bypassing every first-run gate) fixed in `5a259d2` |
+| 2 | Server-side authorization on every mutating Server Action and route | **PASS (post-fix)** | Evidence → Sweep 1: 34/35 Server Actions correctly gated; the 1 exception (`setAiEnabled`) fixed in `ab90bc3`. Sweep 2: 8/8 route files, zero routes missing an authorization mechanism, zero guarded routes reachable without a session. Critic GAP 1 (self-registration bypassing every first-run gate) fixed in `22148f1` |
 | 3 | AIDA-20 safeguards (injection fence, redaction, append-only audit, no third-party egress) | **PASS** | Evidence → Sweep 8: 107/107 tests green including all four named AIDA-20 proofs (`triage-injection`, `audit-append-only`, `draft-generation` Cases A+B, `llm-redact` 7/7). Sweep 3(c): all 11 `recordAuditEvent` call sites trace to redacted or fixed-marker input, none raw. Sweep 5: zero hardcoded third-party call sites in application code (residual: SDK-internal telemetry cannot be proven by static analysis — Human verification item #1) |
-| 4 | Public-surface abuse controls (honeypot, rate limit, validation, upload sniffing) | **PASS (post-fix; 1 residual documented)** | Evidence → Sweep 2: all 3 body-accepting public routes carry honeypot + `checkRateLimit` + zod + (where applicable) byte-sniffed MIME/size caps; 4 LOW hygiene gaps recorded, not fixed (out of approved scope). GAP 3 (rate-limit pepper effectively empty, falsifying the "raw IPs never persisted" claim) fixed in `4904bdb`. GAP 4 (XFF leftmost-token spoofability) verified **not exploitable under the shipped Caddyfile topology** but documented as a residual fragility — Known issues |
-| 5 | Dependency audit | **PASS (post-fix; 1 known issue remains)** | Evidence → Sweep 7: 39 advisories total, 10 reachable in the shipped app/worker image (9 × `next@16.2.9`, 1 × `sharp@0.34.5`). The 9 `next` advisories fixed in `85b867b` (patch bump, no breaking change). `sharp` left as a known issue per explicit maintainer instruction — not a plain patch, pinned by `next`'s own dependency range |
+| 4 | Public-surface abuse controls (honeypot, rate limit, validation, upload sniffing) | **PASS (post-fix; 1 residual documented)** | Evidence → Sweep 2: all 3 body-accepting public routes carry honeypot + `checkRateLimit` + zod + (where applicable) byte-sniffed MIME/size caps; 4 LOW hygiene gaps recorded, not fixed (out of approved scope). GAP 3 (rate-limit pepper effectively empty, falsifying the "raw IPs never persisted" claim) fixed in `62ca86e`. GAP 4 (XFF leftmost-token spoofability) verified **not exploitable under the shipped Caddyfile topology** but documented as a residual fragility — Known issues |
+| 5 | Dependency audit | **PASS (post-fix; 1 known issue remains)** | Evidence → Sweep 7: 39 advisories total, 10 reachable in the shipped app/worker image (9 × `next@16.2.9`, 1 × `sharp@0.34.5`). The 9 `next` advisories fixed in `a87bdde` (patch bump, no breaking change). `sharp` left as a known issue per explicit maintainer instruction — not a plain patch, pinned by `next`'s own dependency range |
 
 ## Findings
 
 | ID | Severity | Area | Description | Disposition |
 |---|---|---|---|---|
-| F-01 | HIGH | Account provisioning / authz | Critic GAP 1 — `POST /api/auth/sign-up/email` was reachable by any anonymous caller; because every first-run gate keys on the same `prisma.user.count()`, one anonymous request permanently locks `/setup` behind `/login` with no in-product recovery | **FIXED** — `5a259d2` |
-| F-02 | MEDIUM | Server Action authorization | Sweep 1 (S1-01) / Sweep 6 (finding 3) — `setAiEnabled` was the only mutating Settings Server Action with no `requireOrgAdmin()` gate; any authenticated non-admin member could flip the org-wide AI kill switch | **FIXED** — `9cf38f4` |
-| F-03 | MEDIUM | Rate-limit / privacy claim | Critic GAP 3 — `RATE_LIMIT_PEPPER ?? "aida-default-pepper"` did not fall back on the empty string `docker-compose.yml` actually injects, so `ipHash` was an unsalted `sha256(ip)` reversible over the IPv4 space in minutes; falsified `docs/SECURITY.md`'s "raw IPs are never persisted" claim | **FIXED** — `4904bdb` |
-| F-04 | MEDIUM | Dependency audit (production) | Sweep 7 — `next@16.2.9` carried 9 reachable advisories (4 high, 5 moderate) in the shipped app/worker image, including a middleware/proxy-bypass advisory against `src/proxy.ts`'s exact mechanism (precondition — single-locale i18n config — not met here) | **FIXED** — `85b867b` |
+| F-01 | HIGH | Account provisioning / authz | Critic GAP 1 — `POST /api/auth/sign-up/email` was reachable by any anonymous caller; because every first-run gate keys on the same `prisma.user.count()`, one anonymous request permanently locks `/setup` behind `/login` with no in-product recovery | **FIXED** — `22148f1` |
+| F-02 | MEDIUM | Server Action authorization | Sweep 1 (S1-01) / Sweep 6 (finding 3) — `setAiEnabled` was the only mutating Settings Server Action with no `requireOrgAdmin()` gate; any authenticated non-admin member could flip the org-wide AI kill switch | **FIXED** — `ab90bc3` |
+| F-03 | MEDIUM | Rate-limit / privacy claim | Critic GAP 3 — `RATE_LIMIT_PEPPER ?? "aida-default-pepper"` did not fall back on the empty string `docker-compose.yml` actually injects, so `ipHash` was an unsalted `sha256(ip)` reversible over the IPv4 space in minutes; falsified `docs/SECURITY.md`'s "raw IPs are never persisted" claim | **FIXED** — `62ca86e` |
+| F-04 | MEDIUM | Dependency audit (production) | Sweep 7 — `next@16.2.9` carried 9 reachable advisories (4 high, 5 moderate) in the shipped app/worker image, including a middleware/proxy-bypass advisory against `src/proxy.ts`'s exact mechanism (precondition — single-locale i18n config — not met here) | **FIXED** — `a87bdde` |
 | F-05 | HIGH | Dependency audit (production) | Sweep 7 — `sharp@0.34.5` carries GHSA-f88m-g3jw-g9cj (4 inherited libvips CVEs), reachable via the unauthenticated `/_next/image` endpoint; fix requires `>=0.35.0`, a 0.x-minor pinned by `next`'s own optional-dependency range, not a plain patch | **Known issue** — not fixed, per explicit maintainer instruction |
 | F-06 | MEDIUM | Container hardening | Critic GAP 2 — no `USER` line in the Dockerfile's runner stage; `app`/`worker`/`migrate` all run as uid 0 | **Known issue** — not fixed, per explicit maintainer instruction |
 | F-07 | LOW | Rate-limit robustness | Critic GAP 4 — all three public routes key `checkRateLimit` off the leftmost `X-Forwarded-For` token (attacker-controlled in general); verified **not exploitable** under the shipped Caddyfile (no `trusted_proxies` configured → Caddy overwrites XFF with the real peer IP), but becomes fully bypassable the moment an operator fronts AIDA with another CDN/proxy or exposes `app:3000` directly | **Known issue** — documentation/hardening item |
@@ -61,11 +63,11 @@ Two informational sweep items are intentionally **not** in the table above becau
 
 | Fix | Commit | One-line diff |
 |---|---|---|
-| FIX 1 + 1b — block anonymous self-registration (GAP 1) | `5a259d2` | `src/proxy.ts`: added a `BLOCKED_PUBLIC_ROUTES` check (403 JSON) for `/api/auth/sign-up*`, evaluated *before* `PUBLIC_PREFIXES`; `tests/e2e/global-setup.ts`: converted the member-user creation from an HTTP `fetch("/api/auth/sign-up/email")` to the in-process `auth.api.signUpEmail()` + `prisma.member.create()` pattern already used by `src/lib/demo/identities.ts` |
-| FIX 2 — gate `setAiEnabled` | `9cf38f4` | `src/app/(app)/settings/actions.ts`: added `await requireOrgAdmin();` as the first statement of `setAiEnabled`, matching its 5 siblings in the same file |
-| FIX 3 — mandatory rate-limit pepper (GAP 3) | `4904bdb` | `src/lib/rate-limit/check-rate-limit.ts`: `??` → `||`, plus a lazy `getPepper()` guard (mirroring `secret-box.ts`'s `getKey()`) that throws a descriptive error if the pepper is empty at hash time, instead of silently falling back to an unsalted/public-constant hash |
-| FIX 4 — `next` 16.2.9 → 16.2.11 | `85b867b` | `package.json` + `pnpm-lock.yaml`: patch bump within the same minor line, clearing 9 of the 10 reachable dependency advisories with no breaking change |
-| FIX 5 — clear the 5 pre-existing Biome lint errors | `fc45522` | `poll-inbox.ts` optional chain (with an `\|\| undefined` type-compat fix biome's own suggestion didn't type-check); `composer.tsx` suppression relocated to actually attach to the flagged node (behaviour unchanged); `input-group.tsx` 2 justified a11y suppressions; `support/fixtures.ts` mechanical `void`→`undefined`/`{}`→named-param fixes plus a new `requireBrowser()` helper; 3 e2e specs' `!` non-null assertions replaced with explicit throws; 2 stale `noExplicitAny` suppressions removed; `biome.json` now excludes the gitignored `test-results/` artifact directory |
+| FIX 1 + 1b — block anonymous self-registration (GAP 1) | `22148f1` | `src/proxy.ts`: added a `BLOCKED_PUBLIC_ROUTES` check (403 JSON) for `/api/auth/sign-up*`, evaluated *before* `PUBLIC_PREFIXES`; `tests/e2e/global-setup.ts`: converted the member-user creation from an HTTP `fetch("/api/auth/sign-up/email")` to the in-process `auth.api.signUpEmail()` + `prisma.member.create()` pattern already used by `src/lib/demo/identities.ts` |
+| FIX 2 — gate `setAiEnabled` | `ab90bc3` | `src/app/(app)/settings/actions.ts`: added `await requireOrgAdmin();` as the first statement of `setAiEnabled`, matching its 5 siblings in the same file |
+| FIX 3 — mandatory rate-limit pepper (GAP 3) | `62ca86e` | `src/lib/rate-limit/check-rate-limit.ts`: `??` → `||`, plus a lazy `getPepper()` guard (mirroring `secret-box.ts`'s `getKey()`) that throws a descriptive error if the pepper is empty at hash time, instead of silently falling back to an unsalted/public-constant hash |
+| FIX 4 — `next` 16.2.9 → 16.2.11 | `a87bdde` | `package.json` + `pnpm-lock.yaml`: patch bump within the same minor line, clearing 9 of the 10 reachable dependency advisories with no breaking change |
+| FIX 5 — clear the 5 pre-existing Biome lint errors | `321ce89` + `a07118b` (split on rebase — see the commit-hash note above) | `poll-inbox.ts` optional chain (with an `\|\| undefined` type-compat fix biome's own suggestion didn't type-check); `composer.tsx` suppression relocated to actually attach to the flagged node (behaviour unchanged); `input-group.tsx` 2 justified a11y suppressions; `support/fixtures.ts` mechanical `void`→`undefined`/`{}`→named-param fixes plus a new `requireBrowser()` helper; 3 e2e specs' `!` non-null assertions replaced with explicit throws; 2 stale `noExplicitAny` suppressions removed; `biome.json` now excludes the gitignored `test-results/` artifact directory |
 
 ## Known issues (accepted for v1)
 
@@ -338,7 +340,7 @@ Gate primitives confirmed (`src/lib/session.ts`): `requireSession()` `redirect("
 | `src/app/(app)/insights/actions.ts` | `generateInsightRun` | `getScopedDb()` — stmt 1 | PASS (agent-allowed by design, documented lines 3-5) |
 | `src/app/(app)/kb/actions.ts` | `createKbArticleAction` | `requireOrgAdmin()` — stmt 1 | PASS |
 | `src/app/(app)/kb/actions.ts` | `updateKbArticleAction` | `requireOrgAdmin()` — stmt 1 | PASS |
-| `src/app/(app)/settings/actions.ts` | `setAiEnabled` | **`getScopedDb()` only — no `requireOrgAdmin()` anywhere in the body** | **FINDING (S1-01) — now FIXED (`9cf38f4`)** |
+| `src/app/(app)/settings/actions.ts` | `setAiEnabled` | **`getScopedDb()` only — no `requireOrgAdmin()` anywhere in the body** | **FINDING (S1-01) — now FIXED (`ab90bc3`)** |
 | `src/app/(app)/settings/actions.ts` | `saveLlmSettings` | `requireOrgAdmin()` — stmt 1 | PASS |
 | `src/app/(app)/settings/actions.ts` | `testLlmConnection` | `requireOrgAdmin()` — stmt 1 | PASS |
 | `src/app/(app)/settings/actions.ts` | `saveEmbeddingSettings` | `requireOrgAdmin()` — stmt 1 | PASS |
@@ -379,7 +381,7 @@ Gate primitives confirmed (`src/lib/session.ts`): `requireSession()` `redirect("
 Impact: the `aiEnabled` key is the AI kill switch read by `src/lib/worker/jobs/ai-triage.ts:21`, `src/lib/tickets/create-ticket.ts:123`, and `src/lib/insight/run-insight.ts:77`. A non-admin can therefore (a) disable AI workspace-wide (feature DoS), or (b) **re-enable AI after an admin deliberately turned it off**, resuming outbound ticket-content flow to the configured LLM provider against admin policy — directly contrary to CLAUDE.md's "AI must be fully toggleable off" and privacy-first non-negotiables.
 Caveat for calibration: requires an authenticated in-tenant account; there is no cross-tenant or unauthenticated exposure, and no data is read out by the action itself.
 Root cause: `setAiEnabled` was written in Phase 01-06 (`.planning/phases/01-foundation/01-06-SUMMARY.md:27` — "getScopedDb → findFirst + conditional create/update") *before* `requireOrgAdmin()` existed (introduced in 02-07, `.planning/phases/02-core-ticketing/02-07-PLAN.md:107`), and was never retrofitted when the five sibling actions in the same file were gated. `grep -rn "setAiEnabled" src/ tests/ e2e/` finds no test asserting an admin gate.
-**Fix applied (`9cf38f4`):** inserted `await requireOrgAdmin();` as line 22, before `getScopedDb()` — a one-line change matching the other 20 gated actions.
+**Fix applied (`ab90bc3`):** inserted `await requireOrgAdmin();` as line 22, before `getScopedDb()` — a one-line change matching the other 20 gated actions.
 
 **S1-02 (LOW) — `addTag`'s gate is the third statement, not the first.**
 `src/app/(app)/tickets/[id]/actions.ts:215-219`. `const trimmed = name.trim();` and `if (!trimmed) return { ok: false };` run before `await getScopedDb()`. Both are pure, side-effect-free input validation on a caller-supplied string: no DB access, no queue send, no filesystem or network I/O, and the early return leaks nothing an unauthenticated caller does not already know. **No exploitable impact** — recorded only because the sweep requires confirming the gate is *genuinely first*, and this is the single place in the codebase where it is not. Every other action in the file opens with `getScopedDb()`. Not fixed in this phase (out of approved scope; LOW/no impact).
@@ -387,7 +389,7 @@ Root cause: `setAiEnabled` was written in Phase 01-06 (`.planning/phases/01-foun
 **S1-03 (LOW / informational) — `completeSetup` has no session gate, by design.**
 `src/app/(auth)/setup/actions.ts:28-72`. This is the first-run bootstrap that creates the first user and organization, so it cannot require a session. Its real server-side control is the race guard at lines 39-40 (`prisma.user.count() > 0` → bail) which runs **before every mutation** (`auth.api.signUpEmail`, `auth.api.createOrganization`, `systemSetting.upsert`), with zod validation ahead of it. `/setup` is in `PUBLIC_PREFIXES` (`src/proxy.ts:4-10`) as expected, and `src/app/(auth)/setup/page.tsx:10-11` redirects to `/login` once `userCount > 0` as defence-in-depth. Correct pattern; recorded for completeness, not as a defect. (Residual, non-blocking: the guard is a check-then-act, so two concurrent first-run requests could in principle race — the practical outcome is a failed second `signUpEmail`/`createOrganization` on the unique email/slug constraints, and the window exists only before any user exists.)
 
-**VERDICT: FINDING** — 34 of 35 exported Server Actions carry a correct, genuinely-first authorization gate; `setAiEnabled` (`src/app/(app)/settings/actions.ts:21`) broke the documented invariant "`requireOrgAdmin()` must be the FIRST statement of every mutating Settings Server Action" and let any authenticated non-admin member toggle the org-wide AI kill switch — **fixed in `9cf38f4`**.
+**VERDICT: FINDING** — 34 of 35 exported Server Actions carry a correct, genuinely-first authorization gate; `setAiEnabled` (`src/app/(app)/settings/actions.ts:21`) broke the documented invariant "`requireOrgAdmin()` must be the FIRST statement of every mutating Settings Server Action" and let any authenticated non-admin member toggle the org-wide AI kill switch — **fixed in `ab90bc3`**.
 
 
 ### Sweep 2 — Route handler authorization coverage
@@ -514,7 +516,7 @@ src/app/api/public/status/[token]/follow-up/route.ts:1,69
 src/app/api/tickets/[id]/messages/route.ts:1,63
 ```
 
-All three POST routes with a request body carry honeypot + rate limit + zod. All three file-accepting routes byte-sniff. `src/lib/rate-limit/check-rate-limit.ts` confirms the pepper invariant — `sha256(ip + RATE_LIMIT_PEPPER)` is stored, never the raw IP; defaults are `max = 5` per `windowMs = 60*60*1000`, and all three call sites pass no `opts`, so every public POST is 5 requests/hour/IP-hash. (See Critic GAP 3 below: at the time of this sweep, the pepper itself could silently be empty — fixed in `4904bdb`.)
+All three POST routes with a request body carry honeypot + rate limit + zod. All three file-accepting routes byte-sniff. `src/lib/rate-limit/check-rate-limit.ts` confirms the pepper invariant — `sha256(ip + RATE_LIMIT_PEPPER)` is stored, never the raw IP; defaults are `max = 5` per `windowMs = 60*60*1000`, and all three call sites pass no `opts`, so every public POST is 5 requests/hour/IP-hash. (See Critic GAP 3 below: at the time of this sweep, the pepper itself could silently be empty — fixed in `62ca86e`.)
 
 **5. Size / MIME caps**
 
@@ -824,7 +826,7 @@ Scope note (not a defect): `redactSecrets` (`src/lib/llm/redact.ts:8-14`) is a f
 | 46 | `DEMO_ADMIN_PASSWORD=aida-demo-2026` | Intentionally-published demo credential (see note) |
 | 47 | `DEMO_AGENT_EMAIL=agent@demo.aida.test` | Fictional `.test` address |
 | 51 | `UPLOADS_DIR=/data/uploads` | Non-secret |
-| 54 | `RATE_LIMIT_PEPPER=replace-me-with-a-random-pepper` | Placeholder (fixed in `4904bdb` to be enforced as mandatory at hash time, not just documented) |
+| 54 | `RATE_LIMIT_PEPPER=replace-me-with-a-random-pepper` | Placeholder (fixed in `62ca86e` to be enforced as mandatory at hash time, not just documented) |
 | 59 | `APP_ENCRYPTION_KEY=replace-me-with-a-random-32-byte-base64-key` | Placeholder |
 
 **No live/real secret is present.** The two non-placeholder credential-shaped values are both by design and documented:
@@ -846,7 +848,7 @@ Mitigations on the record: default value is the publicly documented `aida-demo-2
 #### Non-finding observations (recorded, no action required for this sweep)
 
 1. `src/app/(app)/settings/actions.ts:98,161` and `src/app/(app)/settings/email/actions.ts:102,133` return `String((e as Error).message).slice(0, 200)` from Test-Connection. AIDA never interpolates the key into that string; the only residual is that an upstream SDK 401 message can embed a *provider-masked* key fragment, shown to the org admin who supplied the key. Same shape at `src/lib/worker/jobs/insight-run.ts:25` (`error: String(err)` into `InsightRun.error`) and `src/lib/channels/email/poll-inbox.ts:54,83` (`String(err).slice(0,500)` into `EmailIngestFailure.lastError` / `email:lastPollError`).
-2. `src/lib/rate-limit/check-rate-limit.ts:4` (at the time of this sweep) fell back to the literal pepper `"aida-default-pepper"` when `RATE_LIMIT_PEPPER` was unset. Confirmed for this sweep: only `sha256(ip + PEPPER)` is persisted (`:7-9,25`), the raw IP is never stored or logged, and the pepper itself is never logged. The weak-default aspect belonged to the rate-limiting sweep — see Critic GAP 3, **fixed in `4904bdb`**.
+2. `src/lib/rate-limit/check-rate-limit.ts:4` (at the time of this sweep) fell back to the literal pepper `"aida-default-pepper"` when `RATE_LIMIT_PEPPER` was unset. Confirmed for this sweep: only `sha256(ip + PEPPER)` is persisted (`:7-9,25`), the raw IP is never stored or logged, and the pepper itself is never logged. The weak-default aspect belonged to the rate-limiting sweep — see Critic GAP 3, **fixed in `62ca86e`**.
 3. `docker-compose.yml:64,98` pass `APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}` to app and worker; `src/lib/crypto/secret-box.ts:13-23` throws a descriptive error (never a silent no-encryption fallback) when it is missing or not exactly 32 bytes after base64-decode.
 
 ---
@@ -1260,7 +1262,7 @@ settings/email/actions.ts:78 testImapConnection     -> :81 requireOrgAdmin()
 settings/email/actions.ts:110 testSmtpConnection    -> :113 requireOrgAdmin()
 ```
 
-15 of 16 gate correctly; `setAiEnabled` does not — see **Finding 3** (out of this sweep's scope, Phase 4 surface, reported because it was found here). **Fixed in `9cf38f4`** — see Sweep 1 / Fixed in phase.
+15 of 16 gate correctly; `setAiEnabled` does not — see **Finding 3** (out of this sweep's scope, Phase 4 surface, reported because it was found here). **Fixed in `ab90bc3`** — see Sweep 1 / Fixed in phase.
 
 ---
 
@@ -1471,20 +1473,20 @@ Neither entrypoint is `DEMO_MODE`-gated (`package.json:24 "db:seed": "tsx prisma
 | 6.6 | `.github/workflows/*.yml` no `secrets.` echo, no committed credentials | **PASS** | `grep -rn "secrets\." .github/` → EXIT=1; secret-pattern scan → EXIT=1 |
 | 6.7 | `identities.ts` cannot run outside demo/seed paths | **FINDING** | 2 callers only, but `prisma/seed.ts:31` runs it before the `:37` guard |
 | — | *(bonus)* `prisma/seed.ts` password echo vs. "NEVER logs the password" invariant | **FINDING (LOW)** | `prisma/seed.ts:59-60` |
-| — | *(bonus, out of scope)* `setAiEnabled` missing `requireOrgAdmin()` | **FINDING (MEDIUM) — FIXED (`9cf38f4`)** | `settings/actions.ts:21-22` |
+| — | *(bonus, out of scope)* `setAiEnabled` missing `requireOrgAdmin()` | **FINDING (MEDIUM) — FIXED (`ab90bc3`)** | `settings/actions.ts:21-22` |
 
 #### Findings
 
 1. **MEDIUM — `prisma/seed.ts:31`: demo agent with published credentials is created in a real org before the refusal guard fires.** Running `pnpm db:seed` against a populated (production) instance attaches to the existing `Organization`, creates `agent@demo.aida.test` with password `aida-demo-2026` via `auth.api.signUpEmail`, and inserts a `Member` row with `role: "member"` — *then* counts tickets and prints `[seed] Refusing to seed: ...` and `exit 1`. The operator sees a refusal and reasonably concludes nothing was written, while a login-capable account with publicly documented credentials now holds member-level access to real ticket and contact data. The `DEMO_MODE` boot path orders these correctly; the CLI path does not, contradicting the "so the two paths cannot drift" contract in both file headers. Suggested fix: move the ticket-count guard ahead of `ensureDemoIdentities()` (resolving `orgId` via `prisma.organization.findFirst()` first), matching `bootstrap-demo.ts:22-28`. **Not fixed in this phase (out of approved scope) — recorded as F-10.**
 2. **LOW — `prisma/seed.ts:59`: the effective password is echoed to stdout.** `ADMIN_PASSWORD` is `process.env.DEMO_ADMIN_PASSWORD || DEMO_PASSWORD_DEFAULT`, so an operator-supplied non-default password is written verbatim to the terminal and any captured log. This breaks the invariant asserted twice in-tree — `src/lib/bootstrap.ts:10` "NEVER logs the password" and `src/lib/demo/identities.ts:28` "Never logs the password" — and diverges from `bootstrap-demo.ts:39-42`, which prints only the email plus a pointer to the env var. **Not fixed in this phase (out of approved scope) — recorded as F-09 (duplicate discovery with Sweep 3).**
-3. **MEDIUM (outside Sweep 6's scope — Phase 4 surface, reported because it surfaced while enumerating Settings actions) — `src/app/(app)/settings/actions.ts:22`: `setAiEnabled` has no `requireOrgAdmin()`.** Its first statement is `await getScopedDb()`, which enforces only `requireSession()`. Any authenticated non-admin member can toggle the org-wide `aiEnabled` Setting on or off. Every one of its five siblings in the same file, and all ten mutating actions under `settings/{branding,custom-fields,tags,sla,email}`, gate correctly — this one action is the sole exception, and it violates the stated invariant that `requireOrgAdmin()` be the first statement of every mutating Settings Server Action. **Fixed in `9cf38f4`** (duplicate discovery with Sweep 1 S1-01 — recorded once as F-02).
+3. **MEDIUM (outside Sweep 6's scope — Phase 4 surface, reported because it surfaced while enumerating Settings actions) — `src/app/(app)/settings/actions.ts:22`: `setAiEnabled` has no `requireOrgAdmin()`.** Its first statement is `await getScopedDb()`, which enforces only `requireSession()`. Any authenticated non-admin member can toggle the org-wide `aiEnabled` Setting on or off. Every one of its five siblings in the same file, and all ten mutating actions under `settings/{branding,custom-fields,tags,sla,email}`, gate correctly — this one action is the sole exception, and it violates the stated invariant that `requireOrgAdmin()` be the first statement of every mutating Settings Server Action. **Fixed in `ab90bc3`** (duplicate discovery with Sweep 1 S1-01 — recorded once as F-02).
 
 **VERDICT: FINDING** — six of the seven assigned checks pass cleanly (6.1, 6.2a-c, 6.3, 6.4a-b, 6.5, 6.6). Check 6.7 fails: `ensureDemoIdentities()` is correctly confined to two callers, but `prisma/seed.ts` invokes it ahead of the non-empty-workspace guard, so an accidental `pnpm db:seed` against a live instance plants a member account with publicly documented credentials in a real organization while reporting that it refused to seed. Two additional findings (one LOW in-scope, one MEDIUM out-of-scope) are recorded above; the out-of-scope MEDIUM (`setAiEnabled`) is fixed, the other two are known issues.
 
 
 ### Sweep 7 — Dependency audit
 
-**Scope:** every advisory returned by `pnpm audit --audit-level=moderate`, each classified as production vs devDependency and reachable vs unreachable from the shipped Docker image, plus upgrade class (trivial patch/minor vs major bump). Read-only — no upgrade was applied, no file was modified, **at sweep time** (this plan subsequently applied the `next` bump as FIX 4 — `85b867b`).
+**Scope:** every advisory returned by `pnpm audit --audit-level=moderate`, each classified as production vs devDependency and reachable vs unreachable from the shipped Docker image, plus upgrade class (trivial patch/minor vs major bump). Read-only — no upgrade was applied, no file was modified, **at sweep time** (this plan subsequently applied the `next` bump as FIX 4 — `a87bdde`).
 
 **Environment:** `pnpm 10.34.4`, `node v22.23.1`, branch `phase-07-wave-4-launch-readiness`, HEAD `89d4600`.
 
@@ -1649,15 +1651,15 @@ All 37 unique advisories (36 at moderate+, plus the suppressed low). "In runner 
 | 18 | high | lodash 4.17.21 | GHSA-r5fr-rjxr-66jc | **dev** — `@better-auth/cli>@mrleebo/prisma-ast>chevrotain` | No | Minor → ≥4.18.0 (4.18.1 already resolves elsewhere in the tree) |
 | 19 | mod | lodash 4.17.21 | GHSA-f23m-r3pf-42rh | **dev** — same path | No | Minor → ≥4.18.0 |
 | 20 | mod | lodash 4.17.21 | GHSA-xxjr-mmjv-4gpg | **dev** — same path | No | Trivial patch → ≥4.17.23 |
-| 21 | high | **next 16.2.9** | GHSA-6gpp-xcg3-4w24 (proxy bypass) | **prod** — direct | **YES** | **Trivial patch → 16.2.11 — FIXED (`85b867b`)** |
-| 22 | high | **next 16.2.9** | GHSA-m99w-x7hq-7vfj (Server Actions DoS) | **prod** — direct | **YES** | **Trivial patch → 16.2.11 — FIXED (`85b867b`)** |
-| 23 | high | **next 16.2.9** | GHSA-89xv-2m56-2m9x (SSRF, custom servers) | **prod** — direct | **YES** | **Trivial patch → 16.2.11 — FIXED (`85b867b`)** |
-| 24 | high | **next 16.2.9** | GHSA-p9j2-gv94-2wf4 (SSRF via rewrites) | **prod** — direct | **YES** | **Trivial patch → 16.2.11 — FIXED (`85b867b`)** |
-| 25 | mod | **next 16.2.9** | GHSA-68g3-v927-f742 (cache confusion) | **prod** — direct | **YES** | **Trivial patch → 16.2.11 — FIXED (`85b867b`)** |
-| 26 | mod | **next 16.2.9** | GHSA-4633-3j49-mh5q (cache confusion, bad UTF-8) | **prod** — direct | **YES** | **Trivial patch → 16.2.11 — FIXED (`85b867b`)** |
-| 27 | mod | **next 16.2.9** | GHSA-4c39-4ccg-62r3 (unbounded Edge payload) | **prod** — direct | **YES** | **Trivial patch → 16.2.11 — FIXED (`85b867b`)** |
-| 28 | mod | **next 16.2.9** | GHSA-q8wf-6r8g-63ch (image-opt SVG DoS) | **prod** — direct | **YES** | **Trivial patch → 16.2.11 — FIXED (`85b867b`)** |
-| 29 | mod | **next 16.2.9** | GHSA-955p-x3mx-jcvp (Server Function disclosure) | **prod** — direct | **YES** | **Trivial patch → 16.2.11 — FIXED (`85b867b`)** |
+| 21 | high | **next 16.2.9** | GHSA-6gpp-xcg3-4w24 (proxy bypass) | **prod** — direct | **YES** | **Trivial patch → 16.2.11 — FIXED (`a87bdde`)** |
+| 22 | high | **next 16.2.9** | GHSA-m99w-x7hq-7vfj (Server Actions DoS) | **prod** — direct | **YES** | **Trivial patch → 16.2.11 — FIXED (`a87bdde`)** |
+| 23 | high | **next 16.2.9** | GHSA-89xv-2m56-2m9x (SSRF, custom servers) | **prod** — direct | **YES** | **Trivial patch → 16.2.11 — FIXED (`a87bdde`)** |
+| 24 | high | **next 16.2.9** | GHSA-p9j2-gv94-2wf4 (SSRF via rewrites) | **prod** — direct | **YES** | **Trivial patch → 16.2.11 — FIXED (`a87bdde`)** |
+| 25 | mod | **next 16.2.9** | GHSA-68g3-v927-f742 (cache confusion) | **prod** — direct | **YES** | **Trivial patch → 16.2.11 — FIXED (`a87bdde`)** |
+| 26 | mod | **next 16.2.9** | GHSA-4633-3j49-mh5q (cache confusion, bad UTF-8) | **prod** — direct | **YES** | **Trivial patch → 16.2.11 — FIXED (`a87bdde`)** |
+| 27 | mod | **next 16.2.9** | GHSA-4c39-4ccg-62r3 (unbounded Edge payload) | **prod** — direct | **YES** | **Trivial patch → 16.2.11 — FIXED (`a87bdde`)** |
+| 28 | mod | **next 16.2.9** | GHSA-q8wf-6r8g-63ch (image-opt SVG DoS) | **prod** — direct | **YES** | **Trivial patch → 16.2.11 — FIXED (`a87bdde`)** |
+| 29 | mod | **next 16.2.9** | GHSA-955p-x3mx-jcvp (Server Function disclosure) | **prod** — direct | **YES** | **Trivial patch → 16.2.11 — FIXED (`a87bdde`)** |
 | 30 | high | postcss 8.4.31 | GHSA-6g55-p6wh-862q | **prod** — `next>postcss` | No (build-time only) | Trivial minor → ≥8.5.18 (pinned by next; override) |
 | 31 | high | postcss 8.4.31 / 8.5.15 / 8.5.16 (3 paths) | GHSA-r28c-9q8g-f849 | **prod** `next>postcss`; **dev** `@tailwindcss/postcss>postcss`; **dev** direct `postcss` | No (build-time only) | Trivial patch → ≥8.5.18 |
 | 32 | mod | postcss 8.4.31 | GHSA-qx2v-qp2m-jg93 | **prod** — `next>postcss` | No (build-time only) | Trivial minor → ≥8.5.10 |
@@ -1667,21 +1669,21 @@ All 37 unique advisories (36 at moderate+, plus the suppressed low). "In runner 
 | 36 | mod | protobufjs 7.6.4 | GHSA-j3f2-48v5-ccww | **dev** — `testcontainers>dockerode` | No | Trivial patch → ≥7.6.5 |
 | 37 | mod | valibot 1.2.0 | GHSA-5qjj-4xww-7phc | **prod** — `prisma>@prisma/dev` | No | Trivial minor → ≥1.4.2 (override) |
 
-**Totals:** 37 advisories. **10 reachable** in the shipped app/worker image (9 × `next`, 1 × `sharp`); **27 unreachable**. By declared class: 16 dev-only paths, 21 production paths. By upgrade class: **35 trivial patch/minor**, **1 requiring a major bump** (#35, `@hono/node-server` → 2.0.5, upstream-blocked), **1 a 0.x minor that is effectively breaking** (#33, `sharp` 0.34 → 0.35, pinned by next). **9 of the 10 reachable advisories were fixed in this phase (`85b867b`); the 10th (`sharp`) was not, per explicit maintainer instruction — see Known issues F-05.** None of the 27 unreachable advisories were in the maintainer's approved-fixes list.
+**Totals:** 37 advisories. **10 reachable** in the shipped app/worker image (9 × `next`, 1 × `sharp`); **27 unreachable**. By declared class: 16 dev-only paths, 21 production paths. By upgrade class: **35 trivial patch/minor**, **1 requiring a major bump** (#35, `@hono/node-server` → 2.0.5, upstream-blocked), **1 a 0.x minor that is effectively breaking** (#33, `sharp` 0.34 → 0.35, pinned by next). **9 of the 10 reachable advisories were fixed in this phase (`a87bdde`); the 10th (`sharp`) was not, per explicit maintainer instruction — see Known issues F-05.** None of the 27 unreachable advisories were in the maintainer's approved-fixes list.
 
 #### 5. Notable observations
 
 1. **The direct production `better-auth@1.6.22` is already clean.** All 10 better-auth advisories hit a *second, nested* copy at `1.4.21` pulled in by the `@better-auth/cli` devDependency. Advisory #8 (`GHSA-qq9h-g4jm-xgf3`, patched `>=1.6.22`) is satisfied by exactly the pinned version — the prod dep sits precisely on the fix line, so any future pin below 1.6.22 silently reintroduces it.
 2. **The audit table under-reports production exposure.** `pnpm audit` prints one representative path per advisory. `pnpm why` shows `drizzle-orm`, `fast-uri`, and `@hono/node-server` each *also* reach the root through **production** declarations (`better-auth > @better-auth/drizzle-adapter`, `shadcn > @modelcontextprotocol/sdk`) that the table never displays. Reading the table alone would have mislabelled three advisories as dev-only.
 3. **`shadcn@4.12.0` is declared in `dependencies`, not `devDependencies`** (`package.json:60`). It is a scaffolding CLI, never imported by `src/` (verified: 0 import sites), yet it drags `ts-morph`, `@modelcontextprotocol/sdk`, and `@dotenvx/dotenvx` into the production graph and owns 4 advisory paths.
-4. **The `next` patch is the whole story.** A single `16.2.9 → 16.2.11` bump clears 9 of the 10 reachable advisories — 4 high, 5 moderate — with no breaking change. **This is exactly what FIX 4 (`85b867b`) did.**
+4. **The `next` patch is the whole story.** A single `16.2.9 → 16.2.11` bump clears 9 of the 10 reachable advisories — 4 high, 5 moderate — with no breaking change. **This is exactly what FIX 4 (`a87bdde`) did.**
 5. **Exploitability nuance on the two reachable packages** (stated so the report is not read as more alarming than the evidence supports):
-   - `GHSA-6gpp-xcg3-4w24` (proxy bypass) targets the exact mechanism this repo relies on for auth — `src/proxy.ts` is the sole gate — but its stated precondition is an App Router app **with a single-locale i18n config**. `next.config.ts` declares **no `i18n` block at all** (grep over `*.ts|*.mjs|*.json|*.js`: 0 config hits). The version was in range; the documented precondition was not met. Fixed anyway (`85b867b`).
+   - `GHSA-6gpp-xcg3-4w24` (proxy bypass) targets the exact mechanism this repo relies on for auth — `src/proxy.ts` is the sole gate — but its stated precondition is an App Router app **with a single-locale i18n config**. `next.config.ts` declares **no `i18n` block at all** (grep over `*.ts|*.mjs|*.json|*.js`: 0 config hits). The version was in range; the documented precondition was not met. Fixed anyway (`a87bdde`).
    - `sharp` and `GHSA-q8wf-6r8g-63ch` are both driven through `/_next/image`, which `src/proxy.ts:29` explicitly **excludes from the matcher** — it is unauthenticated. Mitigating: no `images.remotePatterns` is configured (remote URLs are rejected by default) and `dangerouslyAllowSVG` defaults to `false`, so an attacker cannot supply arbitrary image bytes; only files already in `public/` can be optimized. Present and exposed, but not attacker-fed.
 
 ---
 
-**VERDICT: FINDING** — `pnpm audit --audit-level=moderate` exited 1 with 39 vulnerabilities (1 critical / 24 high / 13 moderate / 1 low) at sweep time. The critical and 8 of the highs are dev-only and unreachable from the app and worker containers. However, **10 advisories — 4 high and 5 moderate in `next@16.2.9`, plus 1 high in `sharp@0.34.5` — were verifiably present in the shipped runtime image**, including a middleware/proxy-bypass advisory against the exact component (`src/proxy.ts`) that is this application's only authentication gate. **9 of the 10 were fixed in this phase by the `next@16.2.11` patch bump (`85b867b`); the 10th (`sharp`) is a known issue (F-05), not fixed, per explicit maintainer instruction.**
+**VERDICT: FINDING** — `pnpm audit --audit-level=moderate` exited 1 with 39 vulnerabilities (1 critical / 24 high / 13 moderate / 1 low) at sweep time. The critical and 8 of the highs are dev-only and unreachable from the app and worker containers. However, **10 advisories — 4 high and 5 moderate in `next@16.2.9`, plus 1 high in `sharp@0.34.5` — were verifiably present in the shipped runtime image**, including a middleware/proxy-bypass advisory against the exact component (`src/proxy.ts`) that is this application's only authentication gate. **9 of the 10 were fixed in this phase by the `next@16.2.11` patch bump (`a87bdde`); the 10th (`sharp`) is a known issue (F-05), not fixed, per explicit maintainer instruction.**
 
 
 ### Sweep 8 — Safeguard tests re-run
@@ -1885,7 +1887,7 @@ Scope: I treated the eight sweeps' verdicts as given and hunted only for **surfa
 
 ---
 
-## GAP 1 — [HIGH] Unauthenticated self-registration is open on every deployment; one anonymous request permanently bricks first-run setup — **FIXED (`5a259d2`)**
+## GAP 1 — [HIGH] Unauthenticated self-registration is open on every deployment; one anonymous request permanently bricks first-run setup — **FIXED (`22148f1`)**
 
 No sweep audited **account provisioning** as an attack surface. Sweep 1 examined `completeSetup` and even analysed its check-then-act race guard, but only asked "can this action be abused?" — never "can the first user be created by a *different* route?"
 
@@ -1923,7 +1925,7 @@ Honest scoping, verified rather than assumed:
 
 Fix considered and rejected: `emailAndPassword: { enabled: true, disableSignUp: true }` — the executing plan verified this would also break the three server-side callers that go through the same handler (`src/app/(auth)/setup/actions.ts:45`, `src/lib/bootstrap.ts:19`, `src/lib/demo/identities.ts:79`).
 
-**Fix actually applied (`5a259d2`):** block the HTTP route in `src/proxy.ts` with a `BLOCKED_PUBLIC_ROUTES` check matching the `/api/auth/sign-up` prefix, evaluated *before* the `PUBLIC_PREFIXES` allow-list so `/api/auth`'s own public-prefix match cannot short-circuit past it. `auth.api.signUpEmail()` is an in-process call that never traverses the proxy, so all three legitimate bootstrap paths keep working — verified live end-to-end (`tests/e2e/authz.spec.ts`, 2/2 passing) after also converting the e2e test suite's own second-user creation (`tests/e2e/global-setup.ts`) off the now-blocked HTTP route and onto the same in-process pattern.
+**Fix actually applied (`22148f1`):** block the HTTP route in `src/proxy.ts` with a `BLOCKED_PUBLIC_ROUTES` check matching the `/api/auth/sign-up` prefix, evaluated *before* the `PUBLIC_PREFIXES` allow-list so `/api/auth`'s own public-prefix match cannot short-circuit past it. `auth.api.signUpEmail()` is an in-process call that never traverses the proxy, so all three legitimate bootstrap paths keep working — verified live end-to-end (`tests/e2e/authz.spec.ts`, 2/2 passing) after also converting the e2e test suite's own second-user creation (`tests/e2e/global-setup.ts`) off the now-blocked HTTP route and onto the same in-process pattern.
 
 ---
 
@@ -1942,7 +1944,7 @@ Secrets-in-build-args, checked and **clean**: `Dockerfile:19` passes only a plac
 
 ---
 
-## GAP 3 — [MEDIUM] The rate-limit pepper is empty in the shipped Compose path — `ipHash` is an unsalted SHA-256 of a raw IP — **FIXED (`4904bdb`)**
+## GAP 3 — [MEDIUM] The rate-limit pepper is empty in the shipped Compose path — `ipHash` is an unsalted SHA-256 of a raw IP — **FIXED (`62ca86e`)**
 
 This directly falsifies an invariant the audit was handed ("Rate-limit hits store `sha256(ip + RATE_LIMIT_PEPPER)`; raw IPs are never persisted"). Sweep 2 checked *whether* `checkRateLimit` is called; Sweep 3 checked secrets in logs. Nobody checked the pepper itself.
 
@@ -1965,7 +1967,7 @@ identical?        : true
 
 Either way `RateLimitHit.ipHash` (`prisma/schema.prisma:466`) was a reversible encoding of a visitor IP: the IPv4 preimage space is 2³² and unsalted SHA-256 inverts in minutes on commodity GPU. For a product whose `docs/SECURITY.md` leads with "privacy-first", a DB dump of `RateLimitHit` was a de-facto raw visitor-IP log. There was no boot-time guard requiring the pepper (unlike `getKey()` in `src/lib/crypto/secret-box.ts:15-16`, which throws when `APP_ENCRYPTION_KEY` is absent — the correct precedent, already in this codebase).
 
-**Fix applied (`4904bdb`):** `||` instead of `??`, plus a lazy `getPepper()` guard (mirroring `secret-box.ts`) that throws a descriptive error if the pepper is empty at hash time, so a build or a test that never calls `checkRateLimit` is unaffected but any real invocation without a real pepper now fails loudly instead of silently degrading to an unsalted or public-constant hash.
+**Fix applied (`62ca86e`):** `||` instead of `??`, plus a lazy `getPepper()` guard (mirroring `secret-box.ts`) that throws a descriptive error if the pepper is empty at hash time, so a build or a test that never calls `checkRateLimit` is unaffected but any real invocation without a real pepper now fails loudly instead of silently degrading to an unsalted or public-constant hash.
 
 ---
 
@@ -2018,7 +2020,7 @@ These I checked specifically because the brief flagged them; each is correctly i
 
 Launch-blocking recommendation: **GAP 1** (open self-registration → unrecoverable first-run lockout on the default install path, fixed by one option) and **GAP 3** (the pepper invariant this audit was handed is false in the shipped Compose path). **GAP 2** should ship-block for a container product on principle — a `USER` line is a two-line diff. **GAP 4** and **GAP 5** are documentation/hardening items, not blockers, and the critic explicitly downgraded GAP 4 after upstream docs refuted its initial HIGH grading.
 
-**Disposition applied by this plan:** GAP 1 and GAP 3 fixed (`5a259d2`, `4904bdb`). GAP 2 left as a known issue per explicit maintainer instruction (do not add a Dockerfile `USER` line in this plan). GAP 4 and GAP 5 left as known issues (not in the maintainer's approved-fixes list).
+**Disposition applied by this plan:** GAP 1 and GAP 3 fixed (`22148f1`, `62ca86e`). GAP 2 left as a known issue per explicit maintainer instruction (do not add a Dockerfile `USER` line in this plan). GAP 4 and GAP 5 left as known issues (not in the maintainer's approved-fixes list).
 
 
 

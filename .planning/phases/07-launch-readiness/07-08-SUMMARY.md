@@ -12,10 +12,10 @@ requires:
     provides: "src/lib/demo/identities.ts (ensureDemoIdentities) + DEMO_ADMIN_EMAIL/DEMO_ADMIN_PASSWORD env contract that prisma/seed.ts now uses instead of ADMIN_EMAIL/ADMIN_PASSWORD"
 provides:
   - "scripts/capture-demo-assets.ts + `pnpm demo:capture` / `pnpm demo:capture -- --record`: a reproducible, disposable-Testcontainer capture pipeline against the REAL production build"
-  - "docs/assets/: ten retina screenshots (5 pages x light/dark) + docs/assets/aida-demo.gif (20.25s hero animation, post-second-correction) — CORRECTED TWICE: 61e4d00 fixed two maintainer-flagged defects (insights clipping + a re-capture after the SLA chip display fix), and this round (432d41f/1e7efef/6ab9240) fixed the dataset's SLA-timestamp/intent mismatch and the GIF's blank+skeleton pre-roll (see 'Correction Round 2' section)"
+  - "docs/assets/: ten retina screenshots (5 pages x light/dark) + docs/assets/aida-demo.gif (20.25s hero animation, post-second-correction) — CORRECTED TWICE: ad002b9 fixed two maintainer-flagged defects (insights clipping + a re-capture after the SLA chip display fix), and this round (96f10ad/5b2d276/6748105) fixed the dataset's SLA-timestamp/intent mismatch and the GIF's blank+skeleton pre-roll (see 'Correction Round 2' section)"
   - "src/lib/demo/fixtures.ts's ageHours/slaState/reply-offset values are now internally consistent with SLA due-timestamp math (DEFAULT_SLA_TARGETS) — every ticket's rendered SlaDueChip agrees with its declared on-track/at-risk/breached intent, verified by a throwaway tsx script mirroring getActiveDue()/SlaDueChip exactly"
   - "fix(tickets): TicketListRow shrink-0 — a real pre-existing layout bug (rows could visually shrink below content height and bleed into the next row) discovered and fixed via this capture"
-  - "fix(tickets): SlaDueChip renders Overdue for past-due tickets instead of a signed negative countdown — a real pre-existing display bug discovered via maintainer review of this capture's assets, fixed at commit 80aee33"
+  - "fix(tickets): SlaDueChip renders Overdue for past-due tickets instead of a signed negative countdown — a real pre-existing display bug discovered via maintainer review of this capture's assets, fixed at commit 8b3f6be"
 affects: [07-10-readme]
 
 # Tech tracking
@@ -51,9 +51,9 @@ key-decisions:
   - "The ticket used for inbox.png/ticket-detail.png AND the GIF is #11 'Cannot reset password – reset email never arrives' (Sofia Marquez): OPEN, at-risk SLA, exactly two tags (password-reset, bug), and the seed's own DRAFT_GENERATED->DRAFT_APPROVED trail — the single richest ticket in the 07-02 dataset."
   - "GIF variant A (live stub draft) shipped, not variant B — see 'Caption obligation for 07-10' below. Chosen because the underlying pieces (Ollama-protocol stub, kbEmbedArticleHandler direct-call, retrieval/groundedness/citation pipeline) were all already proven by tests/e2e/phase5-rag.spec.ts, and it exercises the genuine RAG code path rather than only replaying stored data."
   - "The step-1 'and back' filter interaction uses a fresh full navigation back to /tickets rather than clicking the 'All' pill a second time: clicking 'All' immediately after 'Unassigned' was observed to sometimes leave the URL on the stale `view=unassigned` state (Next.js router-push race), and a full reload is equally convincing on video."
-  - "CORRECTION ROUND: `SlaDueChip` fixed to render red 'Overdue' when `isBreached || isPastDue` (a locally-computed `dueAt < now`) instead of only `isBreached` — the demo dataset's `sla-flag` worker job only sets `isBreached`/`isAtRisk` on its recurring run, so seeded tickets with old `dueAt` values were rendering a signed negative countdown ('Due in -22h') in production, not just in the capture. This was a real, previously-shipped display bug, found via the maintainer's asset review, not a capture-only artifact. Fixed in `80aee33`, prior to this correction round; this round's job was purely to re-capture so every asset reflects it."
+  - "CORRECTION ROUND: `SlaDueChip` fixed to render red 'Overdue' when `isBreached || isPastDue` (a locally-computed `dueAt < now`) instead of only `isBreached` — the demo dataset's `sla-flag` worker job only sets `isBreached`/`isAtRisk` on its recurring run, so seeded tickets with old `dueAt` values were rendering a signed negative countdown ('Due in -22h') in production, not just in the capture. This was a real, previously-shipped display bug, found via the maintainer's asset review, not a capture-only artifact. Fixed in `8b3f6be`, prior to this correction round; this round's job was purely to re-capture so every asset reflects it."
   - "CORRECTION ROUND: `insights.png`/`insights-dark.png` switched to `fullPage:true, scale:\"css\"` (identical pattern to `ticket-detail.png`) after the maintainer flagged the Volume Drivers and SLA & CSAT cards as clipped at the fixed 900px viewport. Using CSS-pixel scale instead of the context's 2x device pixels kept the fullPage capture well under the 500KB ceiling (221,983 / 227,309 bytes) despite the taller page — no cropping, no capture-only CSS."
-  - "CORRECTION ROUND 2 (defect A): `fixtures.ts`'s `ageHours` values (and the `firstResponseAfterHours`/reply `offsetHours` that interact with them) disagreed with each ticket's declared `slaState` once the chip's display was made honest (80aee33) — 14 of 18 non-resolved tickets rendered 'Overdue' despite being declared on-track or at-risk. Fixed by tuning `ageHours` per ticket against its priority's SLA target (`DEFAULT_SLA_TARGETS`) and the actual due timestamp the UI renders (`getActiveDue()`: first-response due until responded, then resolution due) — reclassifying a handful of very-old, never-responded tickets (T5/T7/T8/T10/T12, using this SUMMARY's T-numbering = fixture array position) from on-track to breached instead of forcing them under an SLA window that didn't fit; this is more honest than an artificial age shrink and the plan explicitly permits adjusting the declared `slaState` distribution. T12's age was also brought in line with its own body text (\"...CSV list yesterday...\"), a byproduct data-quality fix."
+  - "CORRECTION ROUND 2 (defect A): `fixtures.ts`'s `ageHours` values (and the `firstResponseAfterHours`/reply `offsetHours` that interact with them) disagreed with each ticket's declared `slaState` once the chip's display was made honest (8b3f6be) — 14 of 18 non-resolved tickets rendered 'Overdue' despite being declared on-track or at-risk. Fixed by tuning `ageHours` per ticket against its priority's SLA target (`DEFAULT_SLA_TARGETS`) and the actual due timestamp the UI renders (`getActiveDue()`: first-response due until responded, then resolution due) — reclassifying a handful of very-old, never-responded tickets (T5/T7/T8/T10/T12, using this SUMMARY's T-numbering = fixture array position) from on-track to breached instead of forcing them under an SLA window that didn't fit; this is more honest than an artificial age shrink and the plan explicitly permits adjusting the declared `slaState` distribution. T12's age was also brought in line with its own body text (\"...CSV list yesterday...\"), a byproduct data-quality fix."
   - "CORRECTION ROUND 2 (defect B): the hero GIF opened on a blank frame then the `/tickets` loading skeleton for ~0.8s (fps=12) because Playwright's `recordVideo` starts accumulating frames the instant the recorded page is created, before the first `/tickets` navigation settles. Fixed by measuring the real wall-clock time from page creation to the end of the first `settle()` call (the same interval that produces the blank+skeleton frames) and passing it to the ffmpeg conversion as an `-ss` input-seek offset (plus a small buffer), applied identically to both the palettegen and paletteuse passes — a trim, not a re-render of any frame's content."
 
 requirements-completed: []  # AIDA-22 already fully closed by 07-07; AIDA-23 spans multiple plans and is intentionally left Pending until 07-10 lands (STATE.md precedent). Task 3 approved 2026-08-01 ("Approved all") — see the Task 3 section.
@@ -67,11 +67,13 @@ completed: 2026-08-01 (all 3 tasks; Task 3 human-verify approved after two corre
 
 **A reproducible `pnpm demo:capture` script boots a disposable, seeded, PRODUCTION AIDA instance and captures ten retina screenshots (light+dark) plus a ~20s hero GIF with a live cited-draft segment against a local Ollama-protocol stub — in the process found and fixed a real pre-existing ticket-list layout bug and a real SLA-chip display bug, then went through TWO maintainer-driven correction rounds: the first fixed a clipped insights screenshot, the second reconciled the demo dataset's SLA timestamps with its declared on-track/at-risk/breached intent and trimmed the GIF's blank+loading-skeleton pre-roll.**
 
+> **Commit hashes corrected 2026-08-01.** Five hashes in this document (`80aee33`, `61e4d00`, `432d41f`, `1e7efef`, `6ab9240`) had been orphaned by the earlier Wave 3 rebase and resolved nowhere in the published repo — a pre-existing breakage, found while auditing the same class of problem after PR #3. They now read `8b3f6be`, `ad002b9`, `96f10ad`, `5b2d276`, `6748105` respectively; each pair was verified content-identical via `git patch-id --stable`.
+
 ## Performance
 
-- **Duration:** Not precisely tracked for Tasks 1-2 (session ran long due to live debugging — see Issues Encountered). Task 1 committed 2026-07-31 22:57:48+07:00, Task 2 committed 2026-07-31 23:27:05+07:00. Defect-1 product fix committed as `80aee33` (SLA chip display fix). Correction round 1 (defect-2 fullPage fix + full re-capture + frame-by-frame review) completed in a single follow-up session, committed as `61e4d00`. Correction round 2 (SLA data reconciliation + GIF pre-roll trim + full re-capture + rigorous frame-by-frame re-verification) committed as `432d41f` / `1e7efef` / `6ab9240`.
-- **Tasks:** 3 of 3 complete. Task 3 was a blocking human-verify checkpoint — never auto-completed; approved by the maintainer on 2026-08-01 ("Approved all"). Three correction commits/rounds (`80aee33`, `61e4d00`, then `432d41f`/`1e7efef`/`6ab9240`) landed between Task 2 and that approval, addressing defects the maintainer found across two rounds of reviewing the capture before signing off.
-- **Files modified:** 14 (Task 1) + 2 (Task 2) + 1 (`80aee33`) + 10 (`61e4d00`, correction round 1 — 1 script file + 9 regenerated assets) + 1 (`432d41f`, `src/lib/demo/fixtures.ts`) + 1 (`1e7efef`, `scripts/capture-demo-assets.ts`) + 10 (`6ab9240`, correction round 2 re-capture — 9 regenerated PNGs + the GIF, plus `deferred-items.md`; `settings-ai(.png/-dark.png)` remained byte-identical across BOTH correction rounds and were never re-committed) = 39 total touches across seven commits
+- **Duration:** Not precisely tracked for Tasks 1-2 (session ran long due to live debugging — see Issues Encountered). Task 1 committed 2026-07-31 22:57:48+07:00, Task 2 committed 2026-07-31 23:27:05+07:00. Defect-1 product fix committed as `8b3f6be` (SLA chip display fix). Correction round 1 (defect-2 fullPage fix + full re-capture + frame-by-frame review) completed in a single follow-up session, committed as `ad002b9`. Correction round 2 (SLA data reconciliation + GIF pre-roll trim + full re-capture + rigorous frame-by-frame re-verification) committed as `96f10ad` / `5b2d276` / `6748105`.
+- **Tasks:** 3 of 3 complete. Task 3 was a blocking human-verify checkpoint — never auto-completed; approved by the maintainer on 2026-08-01 ("Approved all"). Three correction commits/rounds (`8b3f6be`, `ad002b9`, then `96f10ad`/`5b2d276`/`6748105`) landed between Task 2 and that approval, addressing defects the maintainer found across two rounds of reviewing the capture before signing off.
+- **Files modified:** 14 (Task 1) + 2 (Task 2) + 1 (`8b3f6be`) + 10 (`ad002b9`, correction round 1 — 1 script file + 9 regenerated assets) + 1 (`96f10ad`, `src/lib/demo/fixtures.ts`) + 1 (`5b2d276`, `scripts/capture-demo-assets.ts`) + 10 (`6748105`, correction round 2 re-capture — 9 regenerated PNGs + the GIF, plus `deferred-items.md`; `settings-ai(.png/-dark.png)` remained byte-identical across BOTH correction rounds and were never re-committed) = 39 total touches across seven commits
 
 ## Accomplishments
 
@@ -85,11 +87,11 @@ completed: 2026-08-01 (all 3 tasks; Task 3 human-verify approved after two corre
 
 1. **Task 1: Capture script + the five screenshots in light and dark** - `c64ead3` (feat)
 2. **Task 2: Golden-path recording and hero GIF** - `b306245` (feat)
-3. **Product fix found via asset review: `SlaDueChip` Overdue-vs-negative-countdown** - `80aee33` (fix)
-4. **Correction round 1: `fullPage` insights fix + full re-capture of all ten PNGs and the GIF** - `61e4d00` (fix)
-5. **Correction round 2: reconcile demo dataset SLA timestamps with declared slaState** - `432d41f` (fix)
-6. **Correction round 2: trim the hero GIF's blank + loading-skeleton pre-roll** - `1e7efef` (fix)
-7. **Correction round 2: re-capture launch assets against reconciled SLA data + trimmed GIF** - `6ab9240` (fix)
+3. **Product fix found via asset review: `SlaDueChip` Overdue-vs-negative-countdown** - `8b3f6be` (fix)
+4. **Correction round 1: `fullPage` insights fix + full re-capture of all ten PNGs and the GIF** - `ad002b9` (fix)
+5. **Correction round 2: reconcile demo dataset SLA timestamps with declared slaState** - `96f10ad` (fix)
+6. **Correction round 2: trim the hero GIF's blank + loading-skeleton pre-roll** - `5b2d276` (fix)
+7. **Correction round 2: re-capture launch assets against reconciled SLA data + trimmed GIF** - `6748105` (fix)
 
 ## Files Created/Modified
 
@@ -101,7 +103,7 @@ completed: 2026-08-01 (all 3 tasks; Task 3 human-verify approved after two corre
 - `.planning/phases/07-launch-readiness/deferred-items.md` — correction round 2: logged one new out-of-scope finding (see Correction Round 2 section)
 - `docs/assets/inbox.png`, `inbox-dark.png`, `ticket-detail.png`, `ticket-detail-dark.png`, `insights.png`, `insights-dark.png`, `knowledge-base.png`, `knowledge-base-dark.png`, `settings-ai.png`, `settings-ai-dark.png`, `aida-demo.gif`
 
-## Asset Manifest (exact byte sizes, current on disk — POST-CORRECTION-ROUND-2, as of commit `6ab9240`)
+## Asset Manifest (exact byte sizes, current on disk — POST-CORRECTION-ROUND-2, as of commit `6748105`)
 
 | Asset | Bytes (round 1) | Bytes (round 2, current) | Budget | Status |
 |---|---:|---:|---|---|
@@ -136,7 +138,7 @@ completed: 2026-08-01 (all 3 tasks; Task 3 human-verify approved after two corre
 4. Revealed AI Activity: the stored `Draft generated` → `Draft approved` sequence with its citation. Then (4b) clicked "Generate draft" for real, waited for the DraftCard with a **correct** citation to "Resetting your password", clicked "Insert into reply", then "Send Reply" (asserted the POST response was 200).
 5. Navigated to `/insights` (real sidebar Link click): the four populated cards (recurring issues, KB gaps, volume drivers, SLA & CSAT).
 
-**Total runtime (original round):** 24.1 seconds. **Total runtime (correction round 1, `61e4d00`):** 26.4 seconds. **Total runtime (correction round 2, `6ab9240`, post pre-roll trim):** 20.25 seconds (recorded raw runtime 23.3s, minus the measured 2.13s pre-roll trim) — all within the plan's 20-35s target; the recording-length differences across rounds are normal run-to-run timing noise in the same recorded steps (plus, in round 2, the deliberate pre-roll trim), not a choreography change.
+**Total runtime (original round):** 24.1 seconds. **Total runtime (correction round 1, `ad002b9`):** 26.4 seconds. **Total runtime (correction round 2, `6748105`, post pre-roll trim):** 20.25 seconds (recorded raw runtime 23.3s, minus the measured 2.13s pre-roll trim) — all within the plan's 20-35s target; the recording-length differences across rounds are normal run-to-run timing noise in the same recorded steps (plus, in round 2, the deliberate pre-roll trim), not a choreography change.
 
 **Recording mechanics:** `browser.newContext({ viewport: {width:1280,height:800}, deviceScaleFactor: 1, recordVideo: { dir: <tmp>, size: {width:1280,height:800} } })`, forced `theme=light` via an init script.
 
@@ -167,7 +169,7 @@ Tasks 1 and 2 were originally committed (`c64ead3`, `b306245`) and this SUMMARY 
 
 Four inbox rows in the first capture read `Due in -1h` / `Due in -22h` / `Due in -1d` / `Due in -3d`. Root cause: `formatDueDuration` (`src/lib/tickets/format-duration.ts`) returns a **signed** value, and `SlaDueChip`'s on-track branch printed it unconditionally. `isBreached`/`isAtRisk` are set only by the recurring sla-flag worker job (decision 02-05) — between its runs, a ticket can be genuinely past its due time with both flags still `false`. That means this was a **production-visible defect**: any real deployment with a ticket whose due time has passed but the flag-refresh job hasn't run yet would show the same negative countdown to a real agent.
 
-Fixed in `80aee33` (committed before this correction round began, NOT part of this round's work, and NOT re-touched or reverted by it): `src/components/tickets/sla-due-chip.tsx` now renders the red "Overdue" badge when `isBreached || isPastDue`, where `isPastDue = new Date(dueAt).getTime() < Date.now()`. DB flags still drive filtering/reporting — this only corrects the chip's *display*. `tsc --noEmit` and biome were clean on that fix; `tests/e2e/sla.spec.ts` was unaffected (it asserts against a freshly created future-due ticket, never a stale one).
+Fixed in `8b3f6be` (committed before this correction round began, NOT part of this round's work, and NOT re-touched or reverted by it): `src/components/tickets/sla-due-chip.tsx` now renders the red "Overdue" badge when `isBreached || isPastDue`, where `isPastDue = new Date(dueAt).getTime() < Date.now()`. DB flags still drive filtering/reporting — this only corrects the chip's *display*. `tsc --noEmit` and biome were clean on that fix; `tests/e2e/sla.spec.ts` was unaffected (it asserts against a freshly created future-due ticket, never a stale one).
 
 This round's job re: defect 1 was purely to **re-capture every asset** so the fix is visible everywhere a due-date chip appears — confirmed via personal frame-by-frame / image-by-image review (see per-image observations below and the GIF verification note above): no `Due in -` text survives in any of the ten PNGs or any sampled GIF frame.
 
@@ -196,11 +198,11 @@ Running `pnpm demo:capture` from a Bash tool background shell resolved a standal
 
 ## Correction Round 2 (defects found in the maintainer's review of the first-corrected capture)
 
-Commits `61e4d00` (correction round 1) closed two defects, but before Task 3 could run, the maintainer found two more issues in that (still uncommitted-to-Task-3) asset set: the demo dataset's SLA data disagreed with its own declared intent (a direct consequence of the `80aee33` chip-honesty fix exposing stale fixture timestamps), and the hero GIF opened on a blank frame then a loading skeleton. This section documents that second correction round.
+Commits `ad002b9` (correction round 1) closed two defects, but before Task 3 could run, the maintainer found two more issues in that (still uncommitted-to-Task-3) asset set: the demo dataset's SLA data disagreed with its own declared intent (a direct consequence of the `8b3f6be` chip-honesty fix exposing stale fixture timestamps), and the hero GIF opened on a blank frame then a loading skeleton. This section documents that second correction round.
 
-### Defect A — SLA timestamps disagreed with declared `slaState` (dataset bug, not a display bug — `80aee33` is correct and was not touched)
+### Defect A — SLA timestamps disagreed with declared `slaState` (dataset bug, not a display bug — `8b3f6be` is correct and was not touched)
 
-**Root cause (confirmed, matching the diagnosis handed to this round):** `src/lib/demo/fixtures.ts` gives each ticket BOTH a declared `slaState` ("on-track"/"at-risk"/"breached") AND an `ageHours`, set independently by hand during 07-02. `seed-demo-data.ts` derives `createdAt = now - ageHours*HOUR`, and computes `firstResponseDueAt`/`resolutionDueAt` from `computeDueTimestamps(createdAt, targets)` — i.e. purely from `ageHours` and the priority's SLA target — while `isBreached`/`isAtRisk` are set directly from the declared `slaState`. Once `SlaDueChip` was fixed (`80aee33`) to trust the clock (`isBreached || isPastDue`) rather than only the `isBreached` flag, any ticket whose `ageHours` already exceeded its priority's relevant SLA target rendered "Overdue" regardless of what it was declared as. 14 of 18 non-resolved tickets were affected.
+**Root cause (confirmed, matching the diagnosis handed to this round):** `src/lib/demo/fixtures.ts` gives each ticket BOTH a declared `slaState` ("on-track"/"at-risk"/"breached") AND an `ageHours`, set independently by hand during 07-02. `seed-demo-data.ts` derives `createdAt = now - ageHours*HOUR`, and computes `firstResponseDueAt`/`resolutionDueAt` from `computeDueTimestamps(createdAt, targets)` — i.e. purely from `ageHours` and the priority's SLA target — while `isBreached`/`isAtRisk` are set directly from the declared `slaState`. Once `SlaDueChip` was fixed (`8b3f6be`) to trust the clock (`isBreached || isPastDue`) rather than only the `isBreached` flag, any ticket whose `ageHours` already exceeded its priority's relevant SLA target rendered "Overdue" regardless of what it was declared as. 14 of 18 non-resolved tickets were affected.
 
 **Which due timestamp the UI actually renders (confirmed by reading the code, not re-derived from scratch):** both `ticket-list-row.tsx`'s and `ticket-meta-header.tsx`'s identical `getActiveDue()` helper returns `firstResponseDueAt` while `firstRespondedAt` is still null, else `resolutionDueAt` while `resolvedAt` is still null, else `null` (no chip at all — this is why all 12 RESOLVED/CLOSED tickets never show an SLA chip, regardless of their `ageHours`). For tickets that already carry a `firstResponseAfterHours` (i.e. an agent/admin already replied), the RESOLUTION target (24h-72h) governs, not the much smaller first-response target (1h-24h) — several of the 14 mismatches were tickets whose fixture already had a real reply, so the fix path for those was "shrink `ageHours` under the resolution target," not the first-response one.
 
@@ -261,7 +263,7 @@ While doing the rigorous frame-by-frame GIF check above, found that ticket #11's
 - **Fix:** `SlaDueChip` now renders "Overdue" when `isBreached || isPastDue` (a locally-computed `dueAt < now`); DB flags still drive filtering/reporting
 - **Files modified:** `src/components/tickets/sla-due-chip.tsx`
 - **Verification:** `tsc --noEmit` and biome clean; `tests/e2e/sla.spec.ts` unaffected (asserts against a future-due ticket); full asset re-capture in this round confirms no `Due in -` text survives in any PNG or GIF frame
-- **Committed in:** `80aee33` (prior to this correction round; not re-touched by it)
+- **Committed in:** `8b3f6be` (prior to this correction round; not re-touched by it)
 
 **3. [Rule 1 - Bug fix applied by this executor] `insights.png`/`insights-dark.png` viewport-clipped Volume Drivers and SLA & CSAT cards**
 - **Found during:** maintainer review, delegated to this executor as "defect 2" to fix
@@ -269,7 +271,7 @@ While doing the rigorous frame-by-frame GIF check above, found that ticket #11's
 - **Fix:** switched to `fullPage:true, scale:"css"` (identical pattern to `ticket-detail.png`) — full cards render, PNG stays under the 500KB ceiling
 - **Files modified:** `scripts/capture-demo-assets.ts`; regenerated `docs/assets/insights.png`, `insights-dark.png` (and, as a side effect of the required full re-capture, all other screenshots + the GIF)
 - **Verification:** read both corrected images in full; confirmed all four cards (Recurring Issues, KB Gaps, Volume Drivers, SLA & CSAT) render completely with no clipping
-- **Committed in:** `61e4d00`
+- **Committed in:** `ad002b9`
 
 **4. [Rule 1 - Bug, correction round 2] Demo dataset's `ageHours`/`slaState` fixture values disagreed with the SLA due-timestamp math, once the chip started trusting the clock**
 - **Found during:** maintainer review, delegated to this executor as "defect A" to fix
@@ -277,7 +279,7 @@ While doing the rigorous frame-by-frame GIF check above, found that ticket #11's
 - **Fix:** tuned `ageHours` (and the interacting reply `offsetHours`/`firstResponseAfterHours`) for 9 tickets to genuinely fit their declared on-track/at-risk intent with a real margin; reclassified 5 tickets (T5/T7/T8/T10/T12) from on-track to breached rather than forcing an artificial age shrink, since they were genuinely, honestly past due
 - **Files modified:** `src/lib/demo/fixtures.ts`
 - **Verification:** throwaway tsx script mirroring `getActiveDue()`/`SlaDueChip` exactly — 0/30 mismatches (was 14/30); every 07-02 invariant re-checked and unchanged (status/priority/assignee distributions, 26/1/3 triage split, 80 total messages, 0 reply-timing problems); real `pnpm db:seed` run against a disposable container confirmed the exact same counts; all three Insight period tabs confirmed populated
-- **Committed in:** `432d41f`
+- **Committed in:** `96f10ad`
 
 **5. [Rule 1 - Bug, correction round 2] Hero GIF opened on a blank frame then the `/tickets` loading skeleton**
 - **Found during:** maintainer review, delegated to this executor as "defect B" to fix
@@ -285,7 +287,7 @@ While doing the rigorous frame-by-frame GIF check above, found that ticket #11's
 - **Fix:** measure the real elapsed time from page creation to the end of the first `settle()` call, pass it to `convertToGif` as an ffmpeg `-ss` input-seek offset (plus a 0.25s buffer) applied identically to both the palettegen and paletteuse passes — a trim, not a re-render
 - **Files modified:** `scripts/capture-demo-assets.ts`
 - **Verification:** fully sequentially decoded all 243 frames of the resulting GIF (not a `select`-filtered extraction, to rule out a GIF disposal-compositing artifact) and confirmed frame 1 is the fully-painted `/tickets` inbox; sampled across the full 20.25s timeline with no skeleton/blank/error frame found anywhere
-- **Committed in:** `1e7efef` (script fix), `6ab9240` (re-capture)
+- **Committed in:** `5b2d276` (script fix), `6748105` (re-capture)
 
 **Total deviations:** 5 (1 auto-fixed by the original Task 1 execution; 1 fixed by the maintainer/a prior session between Task 2 and Task 3; 1 fixed in correction round 1; 2 fixed in this correction round 2)
 **Impact on plan:** Two real, previously-undiscovered product/tooling issues (the ticket-list shrink bug, and the SLA chip's signed-countdown display bug) surfaced specifically because this plan's asset-capture and review process exercises real seeded data and demands personal visual inspection — exactly what the plan's honesty constraint is designed to catch. Both are fixed at the source, not worked around in the capture script. The insights clipping (round 1) and the SLA-data/GIF-pre-roll defects (round 2) were capture-script/fixture-data issues, not product bugs, and are now fixed at their respective sources. One new out-of-scope finding (ticket #11's SLA chip briefly not visible early in the GIF at the 1280px recording viewport) was found during round 2's rigorous frame-by-frame verification and logged to `deferred-items.md` rather than fixed, per the SCOPE BOUNDARY rule (not caused by either of this round's changes).
@@ -315,7 +317,7 @@ None — this plan's tooling requires no external service configuration. `ffmpeg
 
 **Verdict (verbatim): "Approved all".**
 
-Presented to the maintainer against the twice-corrected asset set (commits `80aee33`, `61e4d00`, `432d41f`, `1e7efef`, `6ab9240`), together with the full manifest, per-image observations, and both honestly-disclosed imperfections below. The maintainer approved the complete set — including, explicitly, the two flagged items, neither of which they asked to change.
+Presented to the maintainer against the twice-corrected asset set (commits `8b3f6be`, `ad002b9`, `96f10ad`, `5b2d276`, `6748105`), together with the full manifest, per-image observations, and both honestly-disclosed imperfections below. The maintainer approved the complete set — including, explicitly, the two flagged items, neither of which they asked to change.
 
 **Lead screenshot: not named in the reply.** The verdict was a blanket approval rather than a selection. **Default for Plan 07-10: `docs/assets/inbox.png`**, on the rationale presented at sign-off — the shared inbox is the product's core surface, it now shows a believable SLA mix (`Due in 2h` / `At risk` / `Due in 6h` / `Overdue` / `Due in 9h` / `Due in 8h`) rather than a wall of red, and it carries the two-pane reading view in the same frame. 07-10 may substitute `insights.png` (leads with the AI differentiator) or `ticket-detail.png` (leads with human-in-the-loop AI) without re-opening this checkpoint — this is a copywriting choice, not an asset-quality one.
 
