@@ -161,8 +161,22 @@ Every variable in `.env.example`, and nothing else. `Required` means the app wil
 | `UPLOADS_DIR` | Yes | `/data/uploads` | Filesystem path for stored attachments. In Docker this is the `uploads_data` volume mount — do not change it unless you also change the volume mount in `docker-compose.yml`. |
 | `RATE_LIMIT_PEPPER` | Yes | — | Salts the per-IP hash used by the public-intake rate limiter (raw IPs are never stored). Generate with `openssl rand -base64 32`. |
 | `APP_ENCRYPTION_KEY` | Yes (once credentials saved) | — | AES-256-GCM key encrypting IMAP/SMTP (and LLM) secrets at rest. The app boots without it, but saving any credential in Settings requires it. Generate with `openssl rand -base64 32`. **Must be preserved across restores/migrations** — losing or changing this key makes every previously stored credential permanently undecryptable. |
+| `DEMO_MODE` | No | *(blank)* | When exactly `true` **and** the database has zero tickets, the app auto-creates a demo org/admin/agent and loads the fictional demo dataset at boot. **Never enable this on an internet-facing instance** — the credentials below are documented publicly (README, this file). Leave blank for a normal install. |
+| `DEMO_ADMIN_EMAIL` | No | `admin@demo.aida.test` | Email for the auto-created demo admin account. Only takes effect when `DEMO_MODE=true`. |
+| `DEMO_ADMIN_PASSWORD` | No | `aida-demo-2026` | Password for the auto-created demo admin (and demo agent) account. Only takes effect when `DEMO_MODE=true`. |
+| `DEMO_AGENT_EMAIL` | No | `agent@demo.aida.test` | Email for the auto-created demo agent account ("Sam Rivera"). Only takes effect when `DEMO_MODE=true`. |
 
-<!-- 07-07 adds DEMO_MODE here -->
+### Demo mode
+
+Demo mode (AIDA-22) turns a fresh `docker compose up` into an instantly explorable, fully populated helpdesk — no shell, no `pnpm db:seed` command, just one environment variable.
+
+**Turning it on:** set `DEMO_MODE=true` in `.env` (optionally override `DEMO_ADMIN_EMAIL` / `DEMO_ADMIN_PASSWORD` / `DEMO_AGENT_EMAIL`) before the **first** `docker compose up` against a fresh database. On boot, `instrumentation.register()` logs a loud `[demo] DEMO MODE IS ACTIVE...` warning, then — only if the workspace has zero tickets — creates the demo org, a demo admin, a demo agent, and seeds ~30 tickets, contacts, KB articles, CSAT responses, and three completed AIDA Insight runs.
+
+**It only fires once, on an empty database.** If the workspace already has tickets (a real install, or a demo that already seeded), `DEMO_MODE=true` is a safe no-op — the boot log shows `[demo] Demo data already present (N tickets) — skipping seed.` instead of seeding again.
+
+**Resetting a demo instance:** `docker compose down -v` (this **deletes all data**, including the uploads volume) then `docker compose up` again with `DEMO_MODE=true` still set — seeding starts fresh against the new, empty database.
+
+**The seeded AI results are stored data, not live model output.** Every seeded triage tag, drafted-reply audit row, and Insight run is stamped `provider: "demo"` / `model: "demo-seed"` — the UI renders it exactly like a real AI result would, but it was written directly by the seed script so every AI surface looks populated even with **zero LLM configured**. Turning on a real provider in Settings → AI does not touch this seeded data; it only affects new, live AI actions (Generate draft, Generate insights, Re-run triage) from that point forward.
 
 ## Troubleshooting
 

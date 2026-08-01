@@ -54,7 +54,14 @@ export function TicketListRow({
     <Link
       href={`/tickets/${ticket.id}`}
       className={cn(
-        "block min-h-[80px] border-b border-border/70 px-4 py-3",
+        // shrink-0 is required: this row is a flex item inside TicketListPanel's flex-column
+        // <aside overflow-y-auto>. Without it, when the panel's cumulative row content exceeds
+        // its available height, flexbox's default shrink behavior can compress a row below its
+        // own content height (min-h-[80px] alone does not protect a flex item from shrinking) —
+        // the wrapped second line of chips then overflows past the row's box and visually bleeds
+        // into the next row. Reproduced for real with 07-02's demo dataset (a 5-chip ticket
+        // wraps to 2 lines) — this is a genuine pre-existing layout bug, not a data-specific one.
+        "block min-h-[80px] shrink-0 border-b border-border/70 px-4 py-3",
         selected ? "border-l-2 border-l-primary bg-accent" : "hover:bg-muted/50",
       )}
     >

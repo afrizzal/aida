@@ -48,6 +48,13 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       ADMIN_NAME: ${ADMIN_NAME:-}
+      # Demo mode (AIDA-22): when DEMO_MODE=true AND the database has no tickets, the app
+      # auto-creates a demo org/admin/agent and loads the fictional demo dataset at boot.
+      # NEVER enable this on an internet-facing instance — the credentials are documented publicly.
+      DEMO_MODE: ${DEMO_MODE:-}
+      DEMO_ADMIN_EMAIL: ${DEMO_ADMIN_EMAIL:-}
+      DEMO_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:-}
+      DEMO_AGENT_EMAIL: ${DEMO_AGENT_EMAIL:-}
       HOSTNAME: "0.0.0.0"
       DB_POOL_MAX: "10"
       UPLOADS_DIR: /data/uploads
@@ -64,6 +71,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      # Boot-time demo seeding (DEMO_MODE=true) runs inside instrumentation.register()
+      # before the server accepts connections, so the container needs a grace window
+      # before health probes count against it.
+      start_period: 90s
     restart: unless-stopped
     deploy:
       resources:

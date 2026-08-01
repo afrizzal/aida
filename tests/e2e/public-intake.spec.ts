@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test } from "./support/fixtures";
+import { expect, requireBrowser, test } from "./support/fixtures";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SAMPLE_ATTACHMENT = path.resolve(__dirname, "fixtures/sample.png");
@@ -17,7 +17,7 @@ test.describe("Public intake", () => {
 
     // The request form is public — use a separate unauthenticated context for the submission
     // so the admin storageState on `page` doesn't leak a session cookie into the public flow.
-    const publicPage = await context.browser()!.newPage();
+    const publicPage = await requireBrowser(context).newPage();
     await publicPage.goto("/request");
     await publicPage.getByLabel("Name").fill("Ada Requester");
     await publicPage.getByLabel("Email").fill(email);
@@ -43,7 +43,8 @@ test.describe("Public intake", () => {
     // navigate directly instead, since this scenario is about the ticket's content, not the
     // search-box click interaction.
     const ticketHref = await ticketLink.getAttribute("href");
-    await page.goto(ticketHref!);
+    if (!ticketHref) throw new Error("ticket link is missing an href attribute");
+    await page.goto(ticketHref);
 
     await expect(page.getByText("I need help with my account, please assist.")).toBeVisible({
       timeout: 15_000,
@@ -55,7 +56,7 @@ test.describe("Public intake", () => {
     const subject = `E2E honeypot ${Date.now()}`;
     const email = `honeypot-${Date.now()}@example.com`;
 
-    const publicPage = await context.browser()!.newPage();
+    const publicPage = await requireBrowser(context).newPage();
     await publicPage.goto("/request");
     await publicPage.getByLabel("Name").fill("Bot Requester");
     await publicPage.getByLabel("Email").fill(email);

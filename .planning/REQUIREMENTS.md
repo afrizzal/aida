@@ -40,7 +40,7 @@ Each requirement is a single testable statement. `MVP` = required for the v1 mil
 ## Self-host & DX
 
 - [x] **AIDA-21** `MVP` — `docker compose up` starts the full stack (Next.js app + PostgreSQL/pgvector + pg-boss worker) on one host; a documented `.env.example` and a healthcheck are provided.
-- [ ] **AIDA-22** `MVP` — A seed/demo dataset (and a demo mode) lets a newcomer explore a populated helpdesk immediately for screenshots/trial.
+- [x] **AIDA-22** `MVP` — A seed/demo dataset (and a demo mode) lets a newcomer explore a populated helpdesk immediately for screenshots/trial.
 - [ ] **AIDA-23** `MVP` — The repo ships a star-ready README (hero GIF/screenshot, one-line pitch, quick-start, comparison) and a docs site covering install, configuration, and AI setup.
 - [x] **AIDA-24** `MVP` — Backup/restore guidance for a single server (pg_dump) and basic ops docs (upgrade, logs, env) are provided.
 
@@ -69,7 +69,7 @@ Each requirement is a single testable statement. `MVP` = required for the v1 mil
 | AIDA-19 | Phase 4 | Complete |
 | AIDA-20 | Phase 4 | Complete |
 | AIDA-21 | Phase 1 | Complete |
-| AIDA-22 | Phase 7 | Pending |
+| AIDA-22 | Phase 7 | Complete |
 | AIDA-23 | Phase 7 | Pending |
 | AIDA-24 | Phase 7 | Complete |
 

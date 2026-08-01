@@ -31,8 +31,12 @@ export async function pollInbox(): Promise<void> {
         const uids = (await client.search({ seen: false }, { uid: true })) || [];
 
         for (const uid of uids) {
-          const msg = await client.fetchOne(uid, { source: true, uid: true }, { uid: true });
-          if (!msg || !msg.source) continue;
+          // `|| undefined` turns imapflow's `false` "not found" sentinel into `undefined` so
+          // TypeScript can narrow via optional chaining below (fetchOne's return type is
+          // `FetchMessageObject | false`, and `false` has no `.source` property to narrow past).
+          const msg =
+            (await client.fetchOne(uid, { source: true, uid: true }, { uid: true })) || undefined;
+          if (!msg?.source) continue;
 
           // Derived ONCE, deterministically, per physical email — this same value is
           // used for the dedupe check inside ingestMessage AND the poison-guard lookup

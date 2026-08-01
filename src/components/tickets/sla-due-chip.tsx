@@ -19,7 +19,14 @@ export function SlaDueChip({
     timeStyle: "short",
   });
 
-  if (isBreached) {
+  // Elapsed time is authoritative for DISPLAY. `isBreached`/`isAtRisk` are set only by the
+  // recurring sla-flag worker job (02-05), so between runs a ticket can be genuinely past its
+  // due time with both flags still false. Without this check the on-track branch below renders
+  // `formatDueDuration`'s signed output as "Due in -22h". The DB flags still drive filtering
+  // and reporting — this only makes the chip agree with the clock.
+  const isPastDue = new Date(dueAt).getTime() < Date.now();
+
+  if (isBreached || isPastDue) {
     return (
       <Badge
         title={fullTimestamp}
