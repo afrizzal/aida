@@ -1,12 +1,12 @@
 import { type ChildProcess, execSync, spawn } from "node:child_process";
 import fs from "node:fs";
-import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
 import { NO_RELEVANT_CONTENT_MESSAGE } from "../../src/lib/rag/draft-prompt";
 import { EMBEDDING_DIMENSIONS } from "../../src/lib/rag/types";
 import { createTicket, orgId, prisma } from "./support/db";
+import { CHAT_MODEL, createLlmStub, EMBED_MODEL } from "./support/llm-stub";
 import { databaseUrl } from "./support/test-env";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -21,8 +21,6 @@ const ts = Date.now();
 // substring (not real semantic similarity) to deterministically control which pgvector cosine
 // distances land inside/outside generate-draft.ts's MAX_COSINE_DISTANCE gate, with zero flake.
 const MARKER = `aida-e2e-kb-marker-${ts}`;
-const CHAT_MODEL = "llama3.1"; // MODEL_CATALOG.ollama[0]
-const EMBED_MODEL = "nomic-embed-text"; // EMBEDDING_MODEL_CATALOG.ollama[0]
 
 // ---------------------------------------------------------------------------
 // Deterministic embedding vectors — two mutually orthogonal patterns (disjoint halves of the
@@ -44,92 +42,13 @@ interface StubDraftResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Ollama stub — extends phase4-ai.spec.ts's stub pattern with the embedding endpoint
-// (`/api/embed`, the real Ollama `client.embed()` route — verified against
-// node_modules/ollama's dist/browser.mjs) alongside the existing `/api/chat` completion route.
-// One server answers both the chat provider AND the embedding provider (mirrors how a single
-// real Ollama instance serves both in production).
+// Ollama stub — extracted to ./support/llm-stub.ts (07-09.1 Task 2) so every e2e spec that needs
+// a fake LLM/embedding provider shares one implementation. `chatResponse` here plays the exact
+// role the original inline stub's `draftResponse` field did (this spec always configures a
+// DraftResult-shaped value); `embedFn` reproduces the original MARKER-keyed vector routing.
 // ---------------------------------------------------------------------------
-const stub = {
-  server: null as http.Server | null,
-  url: "",
-  chatCalls: 0,
-  embedMode: "ok" as "ok" | "fail",
-  draftResponse: {
-    grounded: false,
-    draftMarkdown: "stub default — no test configured a draftResponse yet",
-    citations: [],
-  } as StubDraftResponse,
-};
-
-function startStub(): Promise<void> {
-  return new Promise((resolve) => {
-    stub.server = http.createServer((req, res) => {
-      if (req.method === "GET" && req.url?.startsWith("/api/tags")) {
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(
-          JSON.stringify({
-            models: [
-              { name: CHAT_MODEL, model: CHAT_MODEL },
-              { name: EMBED_MODEL, model: EMBED_MODEL },
-            ],
-          }),
-        );
-        return;
-      }
-
-      if (req.method === "POST" && req.url?.startsWith("/api/embed")) {
-        if (stub.embedMode === "fail") {
-          // Mirrors a real Ollama "model not pulled" error — a clear, specific message (Pitfall
-          // 8), never a generic 500 — so the settings UI's failure branch has real content to
-          // surface, not just an opaque status code.
-          res.writeHead(404, { "content-type": "application/json" });
-          res.end(
-            JSON.stringify({ error: `model "${EMBED_MODEL}" not found, try pulling it first` }),
-          );
-          return;
-        }
-        let raw = "";
-        req.on("data", (chunk: Buffer) => {
-          raw += chunk.toString();
-        });
-        req.on("end", () => {
-          const body = JSON.parse(raw) as { model: string; input: string[] };
-          const embeddings = body.input.map((text) =>
-            text.includes(MARKER) ? CANONICAL_VECTOR : UNRELATED_VECTOR,
-          );
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ model: EMBED_MODEL, embeddings }));
-        });
-        return;
-      }
-
-      if (req.method === "POST" && req.url?.startsWith("/api/chat")) {
-        stub.chatCalls += 1;
-        req.on("data", () => {});
-        req.on("end", () => {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(
-            JSON.stringify({
-              model: CHAT_MODEL,
-              created_at: new Date().toISOString(),
-              message: { role: "assistant", content: JSON.stringify(stub.draftResponse) },
-              done: true,
-            }),
-          );
-        });
-        return;
-      }
-
-      res.writeHead(404).end();
-    });
-    stub.server.listen(0, "127.0.0.1", () => {
-      const addr = stub.server?.address();
-      if (addr && typeof addr === "object") stub.url = `http://127.0.0.1:${addr.port}`;
-      resolve();
-    });
-  });
-}
+const stub = createLlmStub();
+stub.embedFn = (text) => (text.includes(MARKER) ? CANONICAL_VECTOR : UNRELATED_VECTOR);
 
 // ---------------------------------------------------------------------------
 // Worker process — owns the kb-embed-article queue (mirrors phase4-ai.spec.ts's startWorker
@@ -202,7 +121,7 @@ async function gotoWarm(page: Page, urlPath: string): Promise<void> {
 test.beforeAll(async () => {
   test.setTimeout(180_000); // worker cold start (tsx + pg-boss schema install) can be slow
   fs.mkdirSync(VISUAL_DIR, { recursive: true });
-  await startStub();
+  await stub.start();
   await startWorker();
 });
 
@@ -214,7 +133,7 @@ test.afterAll(async () => {
       // already gone
     }
   }
-  stub.server?.close();
+  stub.stop();
 });
 
 // ---------------------------------------------------------------------------
@@ -386,11 +305,11 @@ test("Grounded draft: cites the KB article, Insert stays editable, Send audits D
   const chunk = await prisma.kbChunk.findFirstOrThrow({ where: { articleId } });
   const draftMarkdown =
     'Thanks for reaching out! To fix VPN connectivity, open Settings, go to Network, and click "Reset VPN Profile" [1]. Let us know if that resolves it.';
-  stub.draftResponse = {
+  stub.chatResponse = {
     grounded: true,
     draftMarkdown,
     citations: [{ marker: "1", chunkId: chunk.id }],
-  };
+  } satisfies StubDraftResponse;
 
   await page.goto(`/tickets/${groundedTicketId}`);
   await page.getByRole("button", { name: "Generate draft" }).click();
