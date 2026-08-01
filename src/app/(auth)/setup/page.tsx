@@ -13,7 +13,7 @@ export default async function SetupPage() {
   return (
     <Card className="w-full max-w-[400px] border-border/70 shadow-xl shadow-primary/5">
       <CardHeader>
-        <CardTitle className="text-2xl font-semibold">Set up AIDA</CardTitle>
+        <CardTitle className="text-[18px] font-semibold tracking-tight">Set up AIDA</CardTitle>
         <CardDescription>
           Create your workspace to get started. You can invite team members after setup.
         </CardDescription>
