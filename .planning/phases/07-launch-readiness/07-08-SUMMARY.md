@@ -336,5 +336,20 @@ Task 3 is resolved; this plan is complete. Wave 3 (07-07 + 07-08) is done.
 - AIDA-23 remains intentionally `Pending` in REQUIREMENTS.md — it spans seven Phase-7 plans and 07-10 is the plan that finishes its substance (README + docs site). This mirrors the AIDA-05/AIDA-09 split-requirement precedent.
 
 ---
+
+## Addendum (2026-08-01): assets re-captured for the WCAG AA contrast fix
+
+`tests/e2e/a11y-contrast.spec.ts` (added in 07-09.1) found 5 genuine color-contrast bugs across `--primary`/`--success`/`--muted-foreground` (full writeup and before/after ratios in `deferred-items.md`'s "From 07-09.1" entry and `07-09.1-SUMMARY.md`'s addendum). Fixing them shifted several token lightness values and a hover mechanism — a real, if subtle, visual change to badges, buttons, and some text colors in both themes.
+
+**Every asset in this plan's manifest was re-captured** against the corrected tokens: all 10 original screenshots (`inbox`, `ticket-detail`, `insights`, `knowledge-base`, `settings-ai` × light/dark), the hero GIF, and the two 07-09.1-added surfaces (`kb-new`, `kb-article` × light/dark) plus the in-flight draft-card stills. All were re-run through `pnpm demo:capture` and `pnpm demo:capture -- --record` against a live Testcontainer + the real production build, then read and visually reviewed image-by-image (not just size-diffed):
+
+- Content, copy, layout, and the demo dataset's SLA mix are **byte-for-byte unchanged in substance** — same tickets, same believable Due-in/At-risk/Overdue spread, same golden-path steps, same 21% CSAT/38% breach-rate numbers this plan's Task 3 sign-off already reviewed.
+- Only colors shifted, and only where the contrast fix required it: badges/buttons render with very slightly different indigo/violet and green tones (imperceptible at a glance, confirmed by direct comparison), and previously low-contrast text (the dark-theme "AI Draft" label, KB citation links, sidebar avatar initials, the AI Activity event count) is now more legible than before — a visual improvement, not a regression.
+- The hero GIF's first frame is still a fully-painted inbox (verified by extracting frame 0 with ffmpeg) — no blank frame, no loading skeleton, matching this plan's own GIF-reject criteria from the Correction Round 2 section above. Total recording runtime 24.4s, pre-roll trim 2.05s — consistent with the already-approved timing.
+- `/insights` is still full-page and complete in both themes (no clipping — the defect this plan's Correction Round 1 originally fixed).
+
+**The maintainer's Task 3 approval above stands on content.** Nothing about the approved dataset, golden path, or page composition changed — only the token-level color correction from 07-09.1's follow-up. No new sign-off round is needed for this plan's own scope; this addendum exists so the asset provenance stays honest (these exact PNG/GIF bytes are the corrected-color set, not the ones originally approved).
+
+---
 *Phase: 07-launch-readiness*
 *Completed: 2026-08-01 — all 3 tasks, Task 3 approved by the maintainer*
