@@ -5,7 +5,8 @@
 ### The open-source, AI-native helpdesk you can self-host.
 
 Bring your own LLM — OpenAI, Anthropic, or a local model via Ollama.
-Your tickets never leave your server. No per-resolution fees.
+Your tickets stay on your server — the only egress is to the LLM, SMTP, or IMAP endpoints you
+configure yourself. No per-resolution fees from AIDA.
 
 [![CI](https://github.com/afrizzal/aida/actions/workflows/ci.yml/badge.svg)](https://github.com/afrizzal/aida/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
@@ -26,7 +27,7 @@ reproducible capture — in real use, AIDA talks to OpenAI, Anthropic, or a real
 
 Most helpdesk software treats AI as a paywalled add-on with per-resolution fees, while your ticket data lives on someone else's servers.
 
-**AIDA is different:** AI is the *core*, not an afterthought. Self-host it on your own server, point it at any LLM (including a fully local one via Ollama), and keep every ticket on your own infrastructure — no per-resolution fees, no data leaving your control.
+**AIDA is different:** AI is the *core*, not an afterthought. Self-host it on your own server, point it at any LLM (including a fully local one via Ollama), and keep every ticket on your own infrastructure — the only network egress is to the LLM provider and mail server you configure yourself. AIDA charges no per-resolution fees; your own LLM provider may still bill you directly for API usage.
 
 ## Features
 
