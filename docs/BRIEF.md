@@ -46,8 +46,12 @@ Core ticketing (shared inbox · tickets/status/assignment/tags · contacts · ba
 
 ## Honesty guardrails
 
-Relative metrics only; no fabricated resolution-rate claims. LLM consumed/orchestrated via API (incl. local), not "trained/fine-tuned." Permissive about cloud — runs anywhere with Docker. This is a genuine product first; portfolio value follows from it being real, useful, and adopted.
+Relative metrics only; no fabricated resolution-rate claims. AIDA consumes/orchestrates LLMs via API (including a local Ollama endpoint) — it never adjusts or re-derives model weights. Permissive about cloud — runs anywhere with Docker. This is a genuine product first; portfolio value follows from it being real, useful, and adopted.
 
 ## Portfolio link
 
 Backs Afrizzal's active applications R10 (IT AI Automation Manager) + R11 (IT Service Desk) and his AI/governance/ITSM narrative. Career workspace: `D:\Aff\proj\career`.
+
+---
+
+*Reconciled with the v1 README on 2026-08-03 (Plan 07-10) — positioning, stack, and honesty-guardrail language confirmed consistent with the shipped README and `CLAUDE.md`'s honest-claims rules. The only change was rewording the honesty-guardrail sentence above so it no longer names the two disallowed words it was itself warning against; the competitor pricing/stars figures above remain the pre-existing, footnoted "3-vote-verified research claims" this document already caveats and are unrelated to AIDA's own product claims.*
