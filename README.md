@@ -74,7 +74,31 @@ provider.
 **Never enable demo mode on an internet-facing instance** — its credentials are published in
 `.env.example` and this README.
 
-<!-- comparison table: Task 2 -->
+## How AIDA compares
+
+| | **AIDA** | Hosted SaaS helpdesks (Zendesk, Intercom, …) | Open-source helpdesks (e.g. Chatwoot) |
+|---|---|---|---|
+| **Licence** | Apache-2.0, source-available and self-hostable | Typically proprietary and hosted-only | Varies by project (most are open source) |
+| **Where your ticket data lives** | Your server | Typically the vendor's cloud | Varies by project — your server if self-hosted |
+| **AI in the core product** | Included, no separate AI plan | Typically a paid add-on or higher tier | Typically an add-on or paid tier |
+| **Choice of LLM** | Bring your own: OpenAI, Anthropic, or a fully local model via Ollama | Usually the vendor's own model | Usually a fixed vendor integration |
+| **Per-resolution AI fees** | None; you pay your LLM provider directly | Commonly metered per AI resolution | Varies |
+| **AI can be turned off entirely** | Yes, and the helpdesk keeps working | Depends on the plan | Varies |
+| **Setup** | One `docker compose up` on a single server | Typically a vendor-hosted sign-up, no install | Typically self-host, though hosted options exist for some projects |
+
+> Comparison reflects how these product categories are commonly positioned, not a feature-by-feature audit
+> of any specific vendor. Vendors change their plans; check their own documentation for current details.
+> The AIDA column describes what this repository does today.
+
+### When AIDA is not the right choice
+
+- You want a fully managed SaaS with an uptime SLA and a support contract to call when something breaks.
+- You need a mature marketplace of third-party integrations and pre-built apps.
+- You need multi-brand or multi-workspace administration in the UI today — the data model is
+  multi-tenant-ready, but v1 ships a single workspace in the UI, and there is currently no in-product
+  way to invite a second team member to a workspace.
+- You're not comfortable operating a server yourself, including its backups and updates.
+- You need live chat / real-time messaging — AIDA starts with web-form and email intake; live chat isn't built yet.
 
 ## Screenshots
 
