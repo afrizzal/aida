@@ -146,7 +146,7 @@ Plans:
 - [x] 07-08-PLAN.md — Reproducible capture script: 10 screenshots (light+dark) + hero GIF + human sign-off (Wave 3)
 - [x] 07-09-PLAN.md — Security pass: authz/secrets/isolation/egress/dependency sweeps + 07-SECURITY-PASS.md + Phase 4/5/6 human items (Wave 4)
 - [x] 07-09.1-PLAN.md — Gap closure (not one of the original 12): replaces 07-09's three carried-forward manual verification items with automated egress/honesty/contrast tests (Wave 4)
-- [ ] 07-10-PLAN.md — README rewrite: hero GIF, badges, fixed quick start, demo section, honest comparison table, link/claim sweep (Wave 5)
+- [x] 07-10-PLAN.md — README rewrite: hero GIF, badges, fixed quick start, demo section, honest comparison table, link/claim sweep (Wave 5)
 - [ ] 07-11-PLAN.md — Docs site content: install, configuration, AI setup per provider, guides, ops, security (Wave 5)
 - [ ] 07-12-PLAN.md — Launch close-out: 8-gate run, CHANGELOG v1.0.0, LAUNCH.md checklist, planning records, human sign-off (Wave 6)
 
