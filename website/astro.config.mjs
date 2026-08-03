@@ -17,6 +17,10 @@ export default defineConfig({
 			},
 			sidebar: [
 				{ label: 'Getting started', items: [{ autogenerate: { directory: 'getting-started' } }] },
+				{ label: 'Configuration', items: [{ autogenerate: { directory: 'configuration' } }] },
+				{ label: 'Guides', items: [{ autogenerate: { directory: 'guides' } }] },
+				{ label: 'Operations', items: [{ autogenerate: { directory: 'operations' } }] },
+				{ label: 'Security', items: [{ autogenerate: { directory: 'security' } }] },
 			],
 		}),
 	],

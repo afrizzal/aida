@@ -134,7 +134,7 @@
 2. README leads with a hero GIF, one-line pitch, quick-start (`docker compose up`), and a comparison table; a docs site covers install, config, and AI/BYO-LLM setup.
 3. Backup/restore (pg_dump) and basic ops docs exist; a security pass confirms encrypted keys, enforced authz, and the AIDA-20 safeguards.
 4. The repo is ready for a Phase-1 (first-100-stars) outreach launch.
-**Plans:** 10/13 plans executed
+**Plans:** 12/13 plans executed
 Plans:
 - [x] 07-01-PLAN.md — Repo hygiene: .gitattributes + LF renormalization, middleware→proxy rename, SlaDueChip locale fix, REQUIREMENTS.md restructure (Wave 1)
 - [x] 07-02-PLAN.md — Demo dataset: fixtures + seedDemoData + pre-computed AI artifacts + `pnpm db:seed` CLI with guard (Wave 2)
@@ -147,7 +147,7 @@ Plans:
 - [x] 07-09-PLAN.md — Security pass: authz/secrets/isolation/egress/dependency sweeps + 07-SECURITY-PASS.md + Phase 4/5/6 human items (Wave 4)
 - [x] 07-09.1-PLAN.md — Gap closure (not one of the original 12): replaces 07-09's three carried-forward manual verification items with automated egress/honesty/contrast tests (Wave 4)
 - [x] 07-10-PLAN.md — README rewrite: hero GIF, badges, fixed quick start, demo section, honest comparison table, link/claim sweep (Wave 5)
-- [ ] 07-11-PLAN.md — Docs site content: install, configuration, AI setup per provider, guides, ops, security (Wave 5)
+- [x] 07-11-PLAN.md — Docs site content: install, configuration, AI setup per provider, guides, ops, security (Wave 5)
 - [ ] 07-12-PLAN.md — Launch close-out: 8-gate run, CHANGELOG v1.0.0, LAUNCH.md checklist, planning records, human sign-off (Wave 6)
 
 ---
