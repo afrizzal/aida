@@ -120,6 +120,115 @@ the workspace name server-side) and branded public pages (`/request`, `/status/[
 ## Task 1 commits
 
 - `6184901` — `fix(07-12): restore Playwright fixture destructuring pattern broken by 07-09's lint fix` (`tests/e2e/support/fixtures.ts`)
-- `<to be filled after commit>` — `docs(07-12): record Phase 7 8-gate run evidence` (`.planning/STATE.md`, this draft file)
+- `4702631` — `docs(07-12): record Phase 7 8-gate run evidence and DESIGN-SYSTEM §9 answers` (`.planning/STATE.md`, this draft file)
 
-<!-- gsd:write-continue -->
+## Task 2: v1.0.0 release notes and the launch checklist
+
+**`CHANGELOG.md`** (new file) — a single `## v1.0.0 — 2026-09-03` section, Keep-a-Changelog-style
+(*Added* / *Known limitations*). *Added* groups everything shipped across the seven build phases
+by capability area (core ticketing, intake channels, AI — triage/RAG drafts/Insight/audit-log/
+prompt-injection defenses, settings & administration, self-host & DX). *Known limitations* is
+direct: single workspace in the UI, no in-product invite flow, no logo upload, no backup
+scheduler, no hosted demo, no KB auto-generation, integration tests nightly not per-PR, root
+containers + the `sharp` CVEs (both from the security pass). Verified: `grep -Eci
+"trained|fine-tuned"` → 0, `grep -Ec "[0-9]+%|[0-9]+x "` → 0 — no invented metrics, no
+overclaimed AI-training language.
+
+**`LAUNCH.md`** (new file, repo root) — five `##` sections exactly as specified: *Before you tag*
+(gate re-run, README stranger-read, demo-credential match, placeholder-contact resolution
+naming both `CODE_OF_CONDUCT.md` and `.github/SECURITY.md`'s identical marker), *Repository
+settings* (visibility, About description, the exact 13-topic list, social preview, Discussions,
+**Settings → Pages → Source = GitHub Actions**, private vulnerability reporting), *Tag and
+release* (the four verbatim commands including `git tag -a v1.0.0` and `git push origin
+v1.0.0`), *After the release* (CI badge, Pages styled-render check, clean-machine quick start,
+adding the release badge at 07-10's HTML-comment marker), and *Outreach* (explicitly framed as
+the maintainer's judgment call, candidate venues listed without prescribed timing, one hard
+honesty rule). Cross-checked against `deferred-items.md`: the two 07-06 Pages items (Source =
+GitHub Actions; styled-render verification) both appear; nothing in `LAUNCH.md` describes work
+a Phase 7 plan already completed.
+
+**Commit:** `d9c2285` — `docs(07-12): v1.0.0 release notes and the maintainer launch checklist`
+(`CHANGELOG.md`, `LAUNCH.md`)
+
+## Task 3: Close out the planning records
+
+**(a) `REQUIREMENTS.md`** — ran `gsd-tools requirements mark-complete AIDA-12 AIDA-22 AIDA-23
+AIDA-24`; tool reported all four `already_complete` on both the checkbox and traceability
+surfaces (`updated: false`). Hand-verified: 23 `- [x] **AIDA-` checkboxes, 1 `- [ ] **AIDA-`
+(AIDA-18, backlog) — exact match to the acceptance bar. **No edit was needed or made to this
+file** — each of AIDA-12/22/23/24 had already been flipped by its own owning plan as it landed
+(07-03 for AIDA-12, 07-07 for AIDA-22, 07-10 for AIDA-23; AIDA-24 by 07-04). This is a verified
+no-op, not a missed fix.
+
+**(b) `ROADMAP.md`** — edited: Phase 7's line in the Phases list flipped `[ ]` → `[x]` with
+`(completed 2026-09-03)`; Phase 7's `**Plans:**` line changed from `12/13 plans executed` to
+`13/13 plans complete`; the `07-12-PLAN.md` entry ticked `[x]`. Already correct, left alone: the
+`**Requirements:**` line (already named AIDA-12). **One deliberate deviation from a dispatch-time
+suggestion**: the suggestion said to record 07-09.1 as Wave 5 (alongside 07-10/07-11); this
+plan's own `07-09.1-PLAN.md` frontmatter says `wave: 4`, and every prior dated log entry in this
+same ROADMAP.md file (2026-08-01, 2026-08-02) already recorded 07-09.1 running in Wave 4
+alongside 07-09, before Wave 5 (07-10/07-11) started — so the historically-accurate Wave 4 was
+kept. A dated closure note was appended explaining this explicitly, so the discrepancy is visible
+rather than silently resolved either way.
+
+**(c) `PROJECT.md`** — read Validated/Active first, as instructed. AIDA-13 and AIDA-20 were
+**already correct** under Validated (Phase 4) — no change needed. AIDA-12/22/23/24 were moved
+from Active to Validated with phase/plan attribution; the Active section (now empty) got an
+explicit "None — all 23 v1 MVP requirements are validated" note rather than being left as a
+bare, confusing empty header. The one future-tense phrase this task's read_first flagged
+("branding/channels/AI config land in Phases 4/7") was rewritten to past tense as part of the
+AIDA-12 line's rewrite.
+
+**(d) `STATE.md`** — hand-edited throughout (the tooling quirk noted in the plan's `<interfaces>`
+is confirmed still present). Frontmatter: `status: awaiting-human-verification` (LOOP-
+ENGINEERING.md's own recognized status value for exactly this situation — Task 4's checkpoint
+pending), `completed_phases: 7`, `total_plans: 60`, `completed_plans: 60`, `percent: 100`, dated
+`last_updated`. Current Position and the body `Progress:` bar both brought to 60/60 (100%),
+hand-verified to match the frontmatter. **8 new `(07-12)` Key Decisions bullets** added (exceeds
+the "at least seven" bar): the `demo-seed` honesty convention, the non-empty-workspace refuse
+guard + append-only-audit-trigger rationale, strict `DEMO_MODE === "true"` gating,
+`branding/settings.ts`'s relative-import-only constraint, `website/`'s toolchain isolation, the
+`.gitattributes` CRLF closure, the `middleware.ts` → `proxy.ts` rename, and this plan's own
+fixture-bug finding. Open Todos: appended a closing bullet naming exactly what remains (LAUNCH.md,
+deferred-items.md, `07-SECURITY-PASS.md`'s accepted findings) and what does not need to remain
+(disk hygiene stays open, but it was never Phase 7's to resolve). Session Continuity: two new
+dated entries — one for the Wave 5 merge (PR #6), one for this plan's Tasks 1-3.
+
+**Commit:** `db96a5c` — `docs(07-12): close out planning records for Phase 7 and the v1 milestone`
+(`.planning/PROJECT.md`, `.planning/ROADMAP.md`, `.planning/STATE.md`)
+
+## Requirement close-out
+
+23/23 MVP requirements (`AIDA-01` … `AIDA-17`, `AIDA-19` … `AIDA-24`) are `[x]`/Complete.
+`AIDA-18` (KB auto-generation from resolved tickets) remains `[ ]`/Pending, correctly filed as
+`Stretch`/backlog for post-v1 — never claimed as shipped anywhere in `CHANGELOG.md`, `README.md`,
+or the docs site.
+
+## Security pass — accepted known issues (for Task 4 awareness)
+
+Full detail: `.planning/phases/07-launch-readiness/07-SECURITY-PASS.md` → "Known issues accepted
+for v1". Summary, unchanged by this plan (07-12 fixed nothing here — these were already reviewed
+and accepted by the maintainer's prior instruction during 07-09):
+
+- **HIGH** — `sharp@0.34.5` libvips CVEs, behind the unauthenticated `/_next/image`; not
+  trivially patchable (fix needs a 0.x-minor bump `next` itself pins); mitigated by no
+  `images.remotePatterns`, `dangerouslyAllowSVG: false`, zero `next/image` usages in `src/`.
+- **MEDIUM** — every container runs as root (no `USER` line in the Dockerfile runner stage).
+- **LOW** — leftmost `X-Forwarded-For` is spoofable (safe only because the shipped Caddyfile sets
+  no `trusted_proxies`; breaks if an operator fronts AIDA with another proxy/CDN).
+- **LOW** — admin-authenticated SSRF via the unvalidated Ollama base URL, with a raw-error-text
+  response oracle.
+- **Product gap, not a vulnerability** — no invite flow anywhere in the codebase; a
+  self-registered user gets no `Member` row. Also named in `README.md`'s "When AIDA is not the
+  right choice" and `CHANGELOG.md`'s Known limitations.
+- Plus the 07-09.1 partial resolution (Prisma-checkpoint egress, now fixed) and the still-open
+  Google Fonts / Next telemetry build-time egress items, and no CSP anywhere in the stack — all
+  LOW/MEDIUM, all in `07-SECURITY-PASS.md`'s Known issues list with full detail.
+
+## Awaiting Task 4
+
+This plan is paused at Task 4 (`type="checkpoint:human-verify"`, `gate="blocking"`) per its own
+`autonomous: false` frontmatter and its explicit "do NOT auto-complete" instruction. See the
+executor's returned `CHECKPOINT REACHED` message for the full presentation (eight-gate matrix,
+§9 answers, requirement close-out, security pass summary, and the plan's own six numbered
+`<how-to-verify>` review steps) and the `<resume-signal>`.
