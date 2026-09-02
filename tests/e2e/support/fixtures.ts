@@ -7,7 +7,13 @@ import { prisma } from "./db";
 // limiter (max 5/hour, see src/lib/rate-limit/check-rate-limit.ts).
 export const test = base.extend<{ resetRateLimit: undefined }>({
   resetRateLimit: [
-    async (_fixtures, use) => {
+    // Playwright determines a fixture's dependencies by statically reading this parameter as an
+    // object-destructuring pattern — a plain identifier (even one Biome would prefer for an
+    // otherwise-unused param) fails Playwright's own runtime validation with "First argument must
+    // use the object destructuring pattern" (07-12 fix; 07-09 FIX 5 had renamed this to
+    // `_fixtures` to silence Biome's noEmptyPattern rule without noticing it broke the suite).
+    // biome-ignore lint/correctness/noEmptyPattern: required by Playwright's fixture API contract
+    async ({}, use) => {
       await prisma.rateLimitHit.deleteMany({});
       await use(undefined);
     },
