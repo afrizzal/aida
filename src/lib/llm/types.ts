@@ -34,6 +34,6 @@ export interface CompleteResult<T> {
 // Biased toward the cheapest/fastest tier since triage is lightweight classification.
 export const MODEL_CATALOG: Record<LlmProviderName, readonly string[]> = {
   openai: ["gpt-5.4-mini", "gpt-5.4", "gpt-5.5"],
-  anthropic: ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-4-8"],
+  anthropic: ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-4-8", "claude-opus-5"],
   ollama: ["llama3.1", "qwen2.5", "mistral"],
 } as const;
