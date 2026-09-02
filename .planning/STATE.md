@@ -3,9 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0.0
 milestone_name: milestone
 current_phase: 07
-current_phase_name: launch-readiness
-status: complete
-last_updated: "2026-09-04T09:00:00Z"
+status: completed
+last_updated: "2026-09-03T23:02:42.015Z"
 last_activity: 2026-09-04
 last_activity_desc: Phase 07 plan 07-12 signed off by maintainer 2026-09-04; all 13/13 plans complete
 progress:
@@ -14,6 +13,7 @@ progress:
   total_plans: 60
   completed_plans: 60
   percent: 100
+current_phase_name: launch-readiness
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -29,10 +29,10 @@ progress:
 
 ## Current Position
 
-Phase: 07 (launch-readiness) — CLOSED, signed off by maintainer
-Plan: 13 of 13 — all complete
-Status: Phase 07 fully executed (13/13 plans, 6/6 waves), merged to master, and formally closed. 07-12 Task 4 (the plan's human-verify checkpoint, `gate="blocking"`) received the maintainer's sign-off on 2026-09-04: reply "approved, bump SDK-nya nanti setelah phase 7 ditutup" ("approved, do the SDK bump later, after phase 7 is closed"), no blockers raised. Phase 7 and the v1 milestone are CLOSED. Next action: orchestrator-level verification of the phase, then the human-only steps in `LAUNCH.md` (repository settings, tag and release, outreach) are the maintainer's own — no further GSD execution is required to reach v1.0.0.
-Last activity: 2026-09-04 — 07-12 Task 4 sign-off received; Phase 07 and the v1 milestone formally closed
+Phase: 07 (launch-readiness) — COMPLETE and VERIFIED (07-VERIFICATION.md: passed, 23/23 must-haves, 2026-09-04)
+Plan: 13 of 13 — all complete; 07-12 human-verify checkpoint signed off by the maintainer 2026-09-04 ("approved, bump SDK-nya nanti setelah phase 7 ditutup")
+Status: All 7 phases complete — v1 milestone (Minimum Lovable Helpdesk) is code-complete and verified. Phase 7 closed via `phase.complete` on 2026-09-04 after: full 8-gate run (07-12 Task 1), orchestrator-run behaviour proofs (demo-boot idempotency, seed refuse-guard, backup/restore round trip — embedded in 07-VERIFICATION.md), advisory code review 07-REVIEW.md (0 critical / 3 warning / 2 info). Next action: the maintainer-only steps in `LAUNCH.md` (repository settings, tag + release, post-release checks, outreach), then `/gsd-complete-milestone` to archive v1. Post-v1 quick tasks are listed under Open Todos.
+Last activity: 2026-09-04 — Phase 07 verified (passed) and marked complete; v1 milestone code-complete
 
 Progress: [██████████] 100% (60/60 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 7/7 phase 05 + 7/7 phase 06 + 13/13 phase 07)
 
@@ -213,6 +213,7 @@ Progress: [██████████] 100% (60/60 plans complete — 8/8 ph
 - **Phase 7 (launch-readiness) CLOSED (2026-09-04): 13/13 plans, 6/6 waves, maintainer sign-off received.** 07-12's Task 4 (`checkpoint:human-verify`, `gate="blocking"`) was answered 2026-09-04: "approved, bump SDK-nya nanti setelah phase 7 ditutup" — no blockers raised. Everything a machine can verify has been verified (8-gate run, `CHANGELOG.md`/`LAUNCH.md`, 23/23 requirements, planning records reconciled). **Only the maintainer's own steps remain, and they are outside GSD's scope**: (1) `LAUNCH.md`'s full human-only checklist (repo settings, tag/release commands, post-release verification, outreach); (2) the deferred items catalogued in `.planning/phases/07-launch-readiness/deferred-items.md` (no logo upload, no invite flow, no backup scheduler, the `POSTGRES_PASSWORD` URL-encoding gap, the two dark-mode-follow-up screenshot notes); (3) `07-SECURITY-PASS.md`'s accepted-for-v1 known issues (sharp CVEs, root containers, spoofable XFF, SSRF error oracle, missing rate limits on 2 public routes, build/deploy-time third-party egress, no CSP) — all reviewed and accepted, re-presented at and re-accepted at the Task 4 checkpoint, not open items. Disk hygiene (stale `.claude/worktrees` dirs) remains open per standing maintainer preference — unrelated to Phase 7's scope and not a launch blocker.
 
 **Post-v1 (2026-09-04, from the Task 4 checkpoint discussion — not a blocker, not part of Phase 7):**
+
 - Bump `@anthropic-ai/sdk` 0.110.0 → 0.123.0 (no 1.x exists on npm as of 2026-09-04; changelog 0.111–0.123 touches nothing AIDA uses; add `claude-opus-5` to `MODEL_CATALOG` in `src/lib/llm/types.ts` while there). Maintainer decision 2026-09-04: after Phase 7 closes, as a `/gsd-quick` task with typecheck + unit + LLM integration tests as the gate.
 
 ### Phase 7 gate run (2026-09-03)
