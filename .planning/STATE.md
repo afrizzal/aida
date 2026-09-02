@@ -2,15 +2,17 @@
 gsd_state_version: 1.0
 milestone: v1.0.0
 milestone_name: milestone
+current_phase: 07
+current_phase_name: launch-readiness
 status: executing
-last_updated: "2026-08-03T11:34:01.774Z"
-last_activity: 2026-08-03
+last_updated: "2026-09-03T12:55:33.848Z"
+last_activity: 2026-09-03
+last_activity_desc: Phase 07 execution started
 progress:
   total_phases: 7
   completed_phases: 6
   total_plans: 60
   completed_plans: 59
-  percent: 98
 ---
 
 # STATE — AIDA v1: Minimum Lovable Helpdesk
@@ -27,9 +29,9 @@ progress:
 ## Current Position
 
 Phase: 07 (launch-readiness) — EXECUTING
-Plan: 12 of 13 (**Wave 5 COMPLETE**: 07-10 README rewrite + 07-11 docs site content, executed as parallel agents over disjoint files — README.md/docs/BRIEF.md vs `website/**`. Only 07-12 launch close-out remains, and it is `autonomous: false` — it needs maintainer sign-off.)
-Status: Wave 5 complete on branch `phase-07-wave-5-launch-readiness`, not yet merged to master. **07-10**: README rewritten top to bottom — hero GIF with a caption that discloses the recording used a local Ollama-protocol stub (07-08's binding obligation), badges against the now-genuinely-green CI, a quick start that points at the port compose actually serves, demo-mode one-liner, and a category-level comparison table with all 14 non-AIDA cells individually hedged and zero invented numbers. All 15 relative links verified against the real filesystem. Two unqualified "tickets never leave your server" claims were softened to name the actual egress boundary (the configured LLM/SMTP/IMAP endpoints), matching `docs/SECURITY.md` as 07-09 reconciled it. **07-11**: 12 docs pages across getting-started/configuration/guides/operations/security, sidebar wired to 5 groups, Starlight build verified exit 0 with 253 internal hrefs all carrying the `/aida/` base prefix, and the environment table diffed 20/20 against `.env.example`. Both agents independently confirmed zero "trained/fine-tuned" language. Note for whoever closes 07-12: the plan-count conflict these two parallel agents produced (each counted only its own plan, both landing on 58/60) was resolved to 59/60 by recount, and the same class of merge conflict should be expected if Wave 6 ever runs parallel agents.
-Last activity: 2026-08-03 -- Wave 5 complete: 07-10 (README rewrite) + 07-11 (docs site content)
+Plan: 1 of 13
+Status: Executing Phase 07
+Last activity: 2026-09-03 — Phase 07 execution started
 
 Progress: [█████████▉] 98% (59/60 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 7/7 phase 05 + 7/7 phase 06 + 12/13 phase 07)
 
@@ -199,6 +201,10 @@ Progress: [█████████▉] 98% (59/60 plans complete — 8/8 pha
 - ~~Consolidation follow-up: dedup 02-07's inline SLA/chip literals against 02-03/02-06 (see Key Decisions above) — still pending; low-priority, does not block Phase 2 sign-off, revisit at Phase 2 close-out or defer to a later phase.~~ — DONE (verified 07-01: settings/sla/page.tsx imports DEFAULT_SLA_TARGETS, sla-form.tsx imports PriorityChip, tag-manager.tsx imports TagChip)
 - ~~Phase 3 (email intake): mirror the auto-reopen logic from 02-12's follow-up route when handling inbound email replies to RESOLVED/CLOSED tickets~~ — DONE in 03-04 (`ingestMessage()`'s matched-thread transaction mirrors the follow-up route exactly).
 - ~~14 pre-existing lint-rule findings surfaced by 07-01 once CRLF noise was removed (`biome check .` currently exits non-zero: 5 errors + 9 warnings) — logged in detail at `.planning/phases/07-launch-readiness/deferred-items.md`. None block Phase 7 (all in files no plan currently owns); several (composer.tsx's draft-insertion `useEffect`, input-group.tsx's a11y roles) need deliberate review rather than a mechanical fix.~~ — DONE in 07-09 (FIX 5). Verified on merged master (`b0c96f8`): `biome check .` reports zero errors and zero warnings across 283 files, exit 0. The only config change was excluding the generated Playwright `test-results/` dir; **no rule was downgraded or disabled**, and the behavior-sensitive items (composer.tsx's draft-insertion effect, input-group.tsx's a11y roles) were resolved by deliberate review or justified suppression, not a blind mechanical fix — per-item disposition in `07-SECURITY-PASS.md` "Fixed in phase".
+
+### Phase 7 gate run (2026-09-03)
+
+All eight quality gates run against merged `master` (`a2d0a13`, PR #6). **Gates 1/2/3/6/7/8 PASS clean; gate 4 PASS; gate 5 (e2e) passes with a documented environment-load flake, not a Phase 7 regression** — full detail in `07-12-SUMMARY.md`. One genuine Phase 7 bug found and fixed (Rule 1): `tests/e2e/support/fixtures.ts`'s `resetRateLimit` fixture had its first parameter renamed `{}` → `_fixtures` by 07-09's own Biome lint-fix commit (`321ce89`), which silenced `noEmptyPattern` but broke Playwright's runtime fixture-dependency parser ("First argument must use the object destructuring pattern") — every e2e test failed immediately until reverted to `({}, use)` with a targeted `biome-ignore` comment. Also found and worked around (not a code bug): repeated `next dev` processes killed mid-write during e2e teardown left `.next/dev/types/*.d.ts` truncated, which then made both `tsc --noEmit` and `pnpm build` fail on generated-artifact syntax errors unrelated to any source file — resolved by deleting the gitignored `.next/` directory and rebuilding; worth remembering for any future session that chains several `pnpm test:e2e` runs back to back.
 
 ### Blockers
 
