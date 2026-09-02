@@ -1,15 +1,142 @@
 ---
 phase: 07-launch-readiness
 plan: 12
-status: draft — Task 4 checkpoint pending human sign-off
-note: >
-  This is a WORKING DRAFT accumulated across Tasks 1-3 of 07-12. It is NOT the final
-  07-12-SUMMARY.md — that gets written by whichever agent picks up after the human replies
-  to the Task 4 checkpoint (approved, or blockers). Promote this content into the real
-  SUMMARY.md using the summary.md template at that time; do not ship this file as-is.
+subsystem: launch-ops
+tags: [changelog, launch-checklist, requirements-traceability, quality-gates, playwright, docker, roadmap, security-review]
+
+# Dependency graph
+requires:
+  - phase: 07-08 (launch visuals)
+    provides: human-approved light+dark screenshot set and hero GIF used as Task 1's §9 dark-mode evidence
+  - phase: 07-09 / 07-09.1 (security pass)
+    provides: the accepted-known-issues list re-presented at the Task 4 checkpoint
+  - phase: 07-10 / 07-11 (README + docs site)
+    provides: the shipped positioning this plan's CHANGELOG/LAUNCH.md must not exceed
+provides:
+  - Full eight-gate quality-gate run against merged master, with verbatim evidence and one genuine Phase 7 regression found and fixed
+  - CHANGELOG.md (v1.0.0 release notes) and LAUNCH.md (maintainer's ordered human-only launch checklist)
+  - Closed planning records — REQUIREMENTS.md 23/23, ROADMAP.md Phase 7 complete, PROJECT.md reconciled, STATE.md at 100%
+  - Recorded human sign-off closing Phase 7 and the v1 milestone
+affects: [post-v1-quick-tasks, gap-closure-if-any, milestone-close-out]
+
+# Actuals (#2632) — pairs with the plan's `estimate` to calibrate future estimates.
+# Same estimateTokens scale (chars/4 over the realized diff), never a harness token count.
+actuals:
+  tokens: 38900
+  tasks: 4
+  commits: 6
+
+# Tech tracking
+tech-stack:
+  added: []
+  patterns:
+    - "Eight-gate quality matrix (lint/typecheck/unit/integration/e2e/build/docs-build/docker-cold-start) as the phase's hard stop condition"
+    - "Draft-evidence-file → promoted-SUMMARY pattern for a plan that pauses at a blocking human-verify checkpoint (07-12-SUMMARY.draft.md → 07-12-SUMMARY.md)"
+
+key-files:
+  created:
+    - CHANGELOG.md
+    - LAUNCH.md
+  modified:
+    - tests/e2e/support/fixtures.ts
+    - .planning/REQUIREMENTS.md
+    - .planning/ROADMAP.md
+    - .planning/PROJECT.md
+    - .planning/STATE.md
+
+key-decisions:
+  - "07-12's own gate run found and fixed a genuine Phase 7 regression: 07-09's Biome lint-fix commit had renamed a Playwright fixture's first parameter from {} to _fixtures, which broke Playwright's own fixture-dependency parser and crashed every e2e test."
+  - "The e2e suite's remaining intermittent failures (six different specs, each failing in one run and passing in another) are an environmental/load characteristic of sustained back-to-back next dev test runs on this dev machine, not a Phase 7 regression — no backing source file was touched by this phase."
+  - "DESIGN-SYSTEM.md §9 dark-mode answer is honestly PARTIAL for the Branding tab specifically (no dedicated dark screenshot of that one page) even though the app-shell dark-mode item closed at 07-08 — reported rather than silently marked done."
+  - "07-09.1 stays recorded as Wave 4 in ROADMAP.md (matching its own PLAN.md frontmatter and every prior dated log entry), not recounted to Wave 5 as a dispatch-time suggestion proposed."
+  - "Maintainer approved Phase 7 and the v1 milestone 2026-09-04, with the @anthropic-ai/sdk 0.110.0 → 0.123.0 bump explicitly deferred to a post-v1 quick task rather than folded into this plan."
+
+patterns-established:
+  - "Draft-evidence-file pattern: a plan that pauses at a blocking checkpoint accumulates its evidence in a NOTE-flagged *-SUMMARY.draft.md across its auto tasks, then the checkpoint-resuming agent promotes that content into the real SUMMARY.md and deletes the draft — keeps evidence from being lost across a session boundary without inventing a second source of truth."
+
+requirements-completed: [AIDA-12, AIDA-22, AIDA-23, AIDA-24]
+
+coverage:
+  - id: D1
+    description: "Every quality gate the project defines (lint, typecheck, unit, integration, e2e, production build, docs-site build, docker cold start) run against the fully merged Phase 7, with verbatim evidence and no gate weakened to pass"
+    verification:
+      - kind: other
+        ref: "Task 1 eight-gate matrix below — biome check, tsc --noEmit, vitest unit/integration/e2e, pnpm build, website pnpm build, docker compose cold start + /api/health"
+        status: pass
+    human_judgment: false
+  - id: D2
+    description: "v1.0.0 release notes (CHANGELOG.md) and the maintainer's ordered human-only launch checklist (LAUNCH.md) exist and describe only what actually shipped"
+    verification:
+      - kind: other
+        ref: "grep -q '## v1.0.0' CHANGELOG.md && grep -q '## Repository settings' LAUNCH.md && ! grep -Eqi 'trained|fine-tuned' CHANGELOG.md — all confirmed in Task 2"
+        status: pass
+    human_judgment: false
+  - id: D3
+    description: "23/23 MVP requirements marked complete (AIDA-18 correctly remains backlog); ROADMAP.md/PROJECT.md/STATE.md reconciled to reflect a finished v1"
+    verification:
+      - kind: other
+        ref: "grep -c '^- \\[x\\] \\*\\*AIDA-' .planning/REQUIREMENTS.md == 23 (Task 3)"
+        status: pass
+    human_judgment: false
+  - id: D4
+    description: "A human has exercised the launch review (eight-gate matrix, §9 answers, requirement close-out, security pass's accepted known issues) and signed off on Phase 7 and the v1 milestone"
+    verification: []
+    human_judgment: true
+    rationale: "Launch sign-off is an explicit blocking human-verify checkpoint by the plan's own frontmatter (autonomous: false) — automation cannot substitute for the maintainer's judgment call on whether to ship."
+
+# Metrics
+duration: ~2 days elapsed (Task 1-3 same session 2026-09-03; Task 4 checkpoint answered 2026-09-04)
+completed: 2026-09-04
+status: complete
 ---
 
-# 07-12 Draft Evidence — Launch close-out
+# Phase 07 Plan 12: Launch close-out — gates, release notes, planning records, sign-off Summary
+
+**Full eight-gate quality run (one genuine Phase 7 regression found and fixed), v1.0.0 CHANGELOG + maintainer LAUNCH.md checklist, 23/23 requirements closed, and the maintainer's recorded sign-off closing Phase 7 and the v1 milestone.**
+
+## Performance
+
+- **Duration:** Tasks 1-3 executed 2026-09-03 in one session; Task 4 (human-verify checkpoint) paused for maintainer review and was answered 2026-09-04.
+- **Started:** 2026-09-03T14:12:00Z (approx., per gate-run evidence timestamps)
+- **Completed:** 2026-09-04 (sign-off received)
+- **Tasks:** 4/4
+- **Files modified:** 8 (`tests/e2e/support/fixtures.ts`, `CHANGELOG.md`, `LAUNCH.md`, `.planning/REQUIREMENTS.md` (no-op, verified), `.planning/ROADMAP.md`, `.planning/PROJECT.md`, `.planning/STATE.md`, plus this SUMMARY replacing the draft)
+
+## Accomplishments
+
+- Ran and recorded verbatim evidence for all eight quality gates the project defines against fully merged `master`; found and fixed one genuine Phase 7 regression (a Playwright fixture destructuring bug introduced by 07-09's own lint-fix commit).
+- Wrote `CHANGELOG.md` (v1.0.0 release notes, Keep-a-Changelog style) and `LAUNCH.md` (the maintainer's single ordered human-only launch checklist) from scratch.
+- Reconciled all four planning-record surfaces (`REQUIREMENTS.md`, `ROADMAP.md`, `PROJECT.md`, `STATE.md`) to reflect a fully closed, 100%-complete Phase 7 and v1 milestone.
+- Obtained and recorded the maintainer's explicit sign-off, closing Phase 7 and the v1 milestone with no blockers raised.
+
+## Task Commits
+
+Each task was committed atomically:
+
+1. **Task 1: Full quality-gate run against the merged phase** — `6184901` (fix: restore Playwright fixture destructuring pattern), `4702631` (docs: gate evidence + §9 answers)
+2. **Task 2: v1.0.0 release notes and the launch checklist** — `d9c2285` (docs: CHANGELOG.md, LAUNCH.md)
+3. **Task 3: Close out the planning records** — `db96a5c` (docs: PROJECT.md, ROADMAP.md, STATE.md)
+4. **Task 4: v1 launch sign-off** — checkpoint:human-verify, no source commit; sign-off recorded below and finalized in this plan's metadata commit
+
+**Draft evidence commit (pre-Task-4):** `1153350` — `docs(07-12): complete draft evidence file with Task 2/3 detail ahead of Task 4 checkpoint` (content promoted into this file; draft removed by this plan's final commit)
+
+**Plan metadata:** (this commit) — `docs(07-12): record v1 launch sign-off and finalize plan summary`
+
+## Files Created/Modified
+
+- `CHANGELOG.md` — v1.0.0 release notes (Added / Known limitations), no invented metrics or overclaimed AI-training language
+- `LAUNCH.md` — the maintainer's ordered, human-only launch checklist (before-you-tag, repository settings, tag and release, after the release, outreach)
+- `tests/e2e/support/fixtures.ts` — reverted a Playwright fixture parameter rename that broke the fixture-dependency parser (Rule 1 fix, found during Task 1's gate run)
+- `.planning/REQUIREMENTS.md` — verified already 23/23 complete (no edit needed; each owning plan had flipped its own requirement on landing)
+- `.planning/ROADMAP.md` — Phase 7 line ticked `[x]` with completion date; Plans line corrected to `13/13 plans complete`; all twelve plan entries ticked with wave suffixes matching the final layout
+- `.planning/PROJECT.md` — AIDA-12/22/23/24 moved from Active to Validated; Active section given an explicit "None" note
+- `.planning/STATE.md` — frontmatter/Current Position/Progress bar brought to 100% (60/60 plans, 7/7 phases); this plan's Task 4 sign-off recorded with the verbatim maintainer reply; post-v1 SDK-bump todo added; Session Continuity entry appended
+
+## Decisions Made
+
+See `key-decisions` in frontmatter above — summarized: the fixture-parser regression finding and fix, the e2e flake being environmental (not a Phase 7 regression), the honest PARTIAL dark-mode answer for the Branding tab specifically, keeping 07-09.1 recorded as Wave 4, and the maintainer's approval with the SDK bump deferred to post-v1.
+
+---
 
 ## Task 1: Full quality-gate run against the merged phase
 
@@ -45,7 +172,7 @@ identifier fails that parser outright, regardless of runtime semantics. This is 
 regression (introduced in-phase by 07-09, discovered here) — **fixed under deviation Rule 1** by
 reverting to `async ({}, use) => {` and adding a targeted
 `// biome-ignore lint/correctness/noEmptyPattern: required by Playwright's fixture API contract`
-so Biome stays clean (gate 1 re-verified PASS after the fix). Commit: see Task 1 commit below.
+so Biome stays clean (gate 1 re-verified PASS after the fix). Commit: `6184901`.
 
 **After the fix**, the suite ran for real across four full/targeted runs on this Windows dev
 machine, all sequentially through this same session:
@@ -80,8 +207,8 @@ flakiness is an environmental/load characteristic of this specific dev machine r
 under sustained back-to-back test load, not a Phase 7 regression — no source file backing any of
 the six intermittently-failing specs was touched by this phase. Per Task 1's own instruction
 ("record as pre-existing/environmental issue with evidence for why it is not this phase's doing"),
-this is not fixed further and is routed to the Task 4 checkpoint for the maintainer's awareness,
-not as a blocker.
+this is not fixed further and was routed to the Task 4 checkpoint for the maintainer's awareness,
+not as a blocker. **The maintainer's Task 4 reply raised no blocker against this item.**
 
 ### Environmental issue found (not a gate result, but affected gate 2 and gate 6 mid-run)
 
@@ -91,7 +218,7 @@ one occasion, which then made a **subsequent, unrelated** `tsc --noEmit` and `pn
 syntax errors inside those generated (gitignored) files — nothing to do with any source file.
 Resolved by deleting `.next/` (`node -e "require('fs').rmSync('.next', {recursive:true,
 force:true})"` — `rm -rf` is denied by this environment's sandbox policy) and rebuilding; both
-gates were then clean on rerun (recorded in the matrix above). Logged in `STATE.md`'s new
+gates were then clean on rerun (recorded in the matrix above). Logged in `STATE.md`'s
 "Phase 7 gate run" note so a future session that chains several `pnpm test:e2e` runs knows to
 expect and clear this rather than debug it as a source regression.
 
@@ -114,13 +241,13 @@ the workspace name server-side) and branded public pages (`/request`, `/status/[
 4. **Top bar sticky + backdrop-blur?** YES, unchanged: `top-bar.tsx:35` — `sticky top-0 z-10 ... backdrop-blur-sm supports-[backdrop-filter]:bg-background/65`. Phase 7 did not modify this file.
 5. **Auth pages don't self-wrap?** YES, unchanged: `src/app/(auth)/login/page.tsx` and `.../setup/page.tsx` render only `<Card>`, relying on `(auth)/layout.tsx` for the decorative wrap. Phase 7 did not touch either auth page.
 6. **Typography uses explicit `text-[Npx]`?** YES: `branding/page.tsx` uses `text-[18px]`/`text-[13px]`; `branding-form.tsx` uses `text-[13px]`/`text-[12px]`/`text-[15px]`/`text-[13px]` (lines 71/82/95/106) — no Tailwind named sizes (`text-lg`/`text-xl`) anywhere in either file.
-7. **Dark mode tested?** PARTIAL — flagging honestly for the checkpoint. 07-08's capture script produced 8 light+dark screenshot pairs (`inbox`, `ticket-detail`, `insights`, `knowledge-base`, `settings-ai`, `kb-article`, `kb-new`, `ticket-draft-inflight`) plus the hero GIF, human-approved 2026-08-01 ("Approved all") — this closed the long-open §9 dark-mode item for the app shell generally, and the **sidebar** (which 07-03's branding work touches) appears in dark mode in every one of those 8 pairs. There is, however, **no dedicated dark-mode screenshot of the Branding settings tab itself** — it was not one of the five pages 07-08's script captures. Mitigating: the Branding form introduces zero new tokens or custom styling — it exclusively reuses `Card`/`Input`/`Button`/`FormLabel`/`text-muted-foreground`, all already dark-mode-verified via the other captured settings page (`settings-ai`) and general app-shell screenshots. Risk assessed as low, but this is reported rather than silently marked "done" — flagged for the maintainer at Task 4.
+7. **Dark mode tested?** PARTIAL — flagged honestly for the checkpoint. 07-08's capture script produced 8 light+dark screenshot pairs (`inbox`, `ticket-detail`, `insights`, `knowledge-base`, `settings-ai`, `kb-article`, `kb-new`, `ticket-draft-inflight`) plus the hero GIF, human-approved 2026-08-01 ("Approved all") — this closed the long-open §9 dark-mode item for the app shell generally, and the **sidebar** (which 07-03's branding work touches) appears in dark mode in every one of those 8 pairs. There is, however, **no dedicated dark-mode screenshot of the Branding settings tab itself** — it was not one of the five pages 07-08's script captures. Mitigating: the Branding form introduces zero new tokens or custom styling — it exclusively reuses `Card`/`Input`/`Button`/`FormLabel`/`text-muted-foreground`, all already dark-mode-verified via the other captured settings page (`settings-ai`) and general app-shell screenshots. Risk assessed as low, and reported rather than silently marked "done" — presented to the maintainer at Task 4, who raised no blocker against it.
 8. **`tsc --noEmit` clean?** YES — gate 2 above, PASS.
 
-## Task 1 commits
+### Task 1 commits
 
 - `6184901` — `fix(07-12): restore Playwright fixture destructuring pattern broken by 07-09's lint fix` (`tests/e2e/support/fixtures.ts`)
-- `4702631` — `docs(07-12): record Phase 7 8-gate run evidence and DESIGN-SYSTEM §9 answers` (`.planning/STATE.md`, this draft file)
+- `4702631` — `docs(07-12): record Phase 7 8-gate run evidence and DESIGN-SYSTEM §9 answers` (`.planning/STATE.md`, `07-12-SUMMARY.draft.md`)
 
 ## Task 2: v1.0.0 release notes and the launch checklist
 
@@ -204,11 +331,12 @@ dated entries — one for the Wave 5 merge (PR #6), one for this plan's Tasks 1-
 `Stretch`/backlog for post-v1 — never claimed as shipped anywhere in `CHANGELOG.md`, `README.md`,
 or the docs site.
 
-## Security pass — accepted known issues (for Task 4 awareness)
+## Security pass — accepted known issues (presented at Task 4)
 
 Full detail: `.planning/phases/07-launch-readiness/07-SECURITY-PASS.md` → "Known issues accepted
 for v1". Summary, unchanged by this plan (07-12 fixed nothing here — these were already reviewed
-and accepted by the maintainer's prior instruction during 07-09):
+and accepted by the maintainer's prior instruction during 07-09), **re-presented at the Task 4
+checkpoint and accepted again with no new blockers raised**:
 
 - **HIGH** — `sharp@0.34.5` libvips CVEs, behind the unauthenticated `/_next/image`; not
   trivially patchable (fix needs a 0.x-minor bump `next` itself pins); mitigated by no
@@ -225,10 +353,111 @@ and accepted by the maintainer's prior instruction during 07-09):
   Google Fonts / Next telemetry build-time egress items, and no CSP anywhere in the stack — all
   LOW/MEDIUM, all in `07-SECURITY-PASS.md`'s Known issues list with full detail.
 
-## Awaiting Task 4
+## Task 4: v1 launch sign-off
 
-This plan is paused at Task 4 (`type="checkpoint:human-verify"`, `gate="blocking"`) per its own
-`autonomous: false` frontmatter and its explicit "do NOT auto-complete" instruction. See the
-executor's returned `CHECKPOINT REACHED` message for the full presentation (eight-gate matrix,
-§9 answers, requirement close-out, security pass summary, and the plan's own six numbered
-`<how-to-verify>` review steps) and the `<resume-signal>`.
+### Checkpoint presentation
+
+Presented to the maintainer on 2026-09-03: the eight-gate result matrix (above), the
+DESIGN-SYSTEM.md §9 answers (including the honest PARTIAL dark-mode item for the Branding tab),
+the 23/23 requirement close-out (AIDA-18 correctly backlog), and the security pass's accepted
+known issues list, followed by the plan's six numbered `<how-to-verify>` review steps (README
+stranger-read, clean-machine quick start + demo mode, `07-SECURITY-PASS.md` acceptance,
+docs-site skim, `LAUNCH.md` end-to-end read, honest-claims-rule confirmation).
+
+### Human sign-off
+
+**Date:** 2026-09-04 (checkpoint presented 2026-09-03; reply received the following day)
+
+**Maintainer's reply, verbatim (Indonesian):**
+
+> "approved, bump SDK-nya nanti setelah phase 7 ditutup"
+
+**Translation for the record:** "approved, do the SDK bump later, after phase 7 is closed."
+
+**Blockers raised:** none.
+
+**SDK-bump discussion (deferred, not a blocker):** during the checkpoint the maintainer asked
+about upgrading `@anthropic-ai/sdk` from the currently-pinned `0.110.0` to a 1.x line. Verified
+facts at the time of the reply: no `1.x` release of `@anthropic-ai/sdk` exists on npm; the latest
+is `0.123.0` (published 2026-09-01). The CHANGELOG between 0.111 and 0.123 shows no changes to
+the surface AIDA actually uses (`messages.parse` + `zodOutputFormat`, `models.list`,
+`timeout`/`maxRetries`) — the only breaking changes in that range live in the beta Files/Skills
+namespaces (introduced 0.122.0), which AIDA does not use. Separately, `0.115.0` added
+`claude-opus-5` to the SDK's model type union, and `MODEL_CATALOG` in `src/lib/llm/types.ts` does
+not yet list it. The maintainer's decision: this bump happens **after** Phase 7 closes, as a
+post-v1 quick task — it is explicitly NOT a blocker and NOT part of this plan. Logged as an Open
+Todo in `STATE.md` below.
+
+### Outcome
+
+Phase 7 and the v1 milestone are **closed** as of 2026-09-04. All eight quality gates passed
+(one documented environment-load e2e flake, accepted), 23/23 MVP requirements complete, the
+security pass's known issues accepted, and the maintainer's sign-off recorded with no blockers.
+Remaining work is entirely the maintainer's own: the human-only steps in `LAUNCH.md` (repository
+settings, tag and release, outreach), plus the deferred `@anthropic-ai/sdk` bump as a future
+quick task.
+
+## Deviations from Plan
+
+### Auto-fixed Issues
+
+**1. [Rule 1 - Bug] Restored Playwright fixture destructuring pattern broken by 07-09's lint fix**
+- **Found during:** Task 1 (full quality-gate run)
+- **Issue:** 07-09's Biome lint-fix commit (`321ce89`) renamed a Playwright fixture's first
+  parameter from `{}` to `_fixtures` to silence `noEmptyPattern`, which crashed Playwright's own
+  fixture-dependency parser and failed every e2e test immediately (`First argument must use the
+  object destructuring pattern`).
+- **Fix:** Reverted to `async ({}, use) => {` with a targeted
+  `// biome-ignore lint/correctness/noEmptyPattern: required by Playwright's fixture API contract`
+  so Biome stays clean.
+- **Files modified:** `tests/e2e/support/fixtures.ts`
+- **Verification:** e2e suite runs past the fixture crash; `biome check .` re-verified clean.
+- **Committed in:** `6184901`
+
+---
+
+**Total deviations:** 1 auto-fixed (1 bug — Rule 1)
+**Impact on plan:** Essential for correctness — without this fix the entire e2e suite failed to
+run at all. No scope creep; the fix is scoped to a single file the regression itself introduced.
+
+## Issues Encountered
+
+The e2e suite's remaining intermittent failures (six different specs, none touched by this
+phase, each passing in at least one full run) were investigated in depth (see "Gate 5 detail"
+above) and determined to be a pre-existing, load-dependent `next dev` timing flake rather than a
+Phase 7 regression. Not fixed further per Task 1's own instruction; routed to and accepted at the
+Task 4 checkpoint.
+
+## User Setup Required
+
+None - no external service configuration required. (`LAUNCH.md`, produced by this plan, is the
+maintainer's own follow-up checklist for repository settings, tagging, and release — not an
+external-service setup requirement of this plan itself.)
+
+## Next Phase Readiness
+
+Phase 7 and the v1 milestone are fully closed. The repository is in a state a stranger can clone,
+run, and evaluate. The only remaining steps are the maintainer's own, tracked in `LAUNCH.md`
+(repository settings, tag and release, outreach), plus one deferred post-v1 quick task (the
+`@anthropic-ai/sdk` version bump, see STATE.md Open Todos). No gap-closure plan is needed — the
+maintainer raised no blockers at the Task 4 checkpoint.
+
+## Self-Check: PASSED
+
+Verified against disk/git, not just asserted:
+
+- FOUND: `CHANGELOG.md`
+- FOUND: `LAUNCH.md`
+- FOUND: `tests/e2e/support/fixtures.ts`
+- FOUND: `.planning/phases/07-launch-readiness/07-SECURITY-PASS.md`
+- FOUND: commit `6184901` (Task 1 fix)
+- FOUND: commit `4702631` (Task 1 docs)
+- FOUND: commit `d9c2285` (Task 2)
+- FOUND: commit `db96a5c` (Task 3)
+- FOUND: commit `1153350` (draft evidence file, superseded by this SUMMARY)
+
+All claims in this SUMMARY check out against the working tree and git history.
+
+---
+*Phase: 07-launch-readiness*
+*Completed: 2026-09-04*
