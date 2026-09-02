@@ -13,7 +13,7 @@
 - [x] **Phase 4: AI Foundation** — Model-agnostic LLM layer + auto-triage + audit log + untrusted-input safeguards (completed 2026-07-18)
 - [x] **Phase 5: RAG & Drafted Replies** — Knowledge base + embeddings + citation-backed drafts behind a human-approval gate (completed 2026-07-22, 3 items pending human UAT — see 05-HUMAN-UAT.md)
 - [x] **Phase 6: AIDA Insight** — AI-driven analytics (recurring issues, KB gaps, volume drivers, SLA/CSAT) (completed 2026-07-24, 3 items pending human UAT — see 06-HUMAN-UAT.md)
-- [ ] **Phase 7: Launch Readiness** — Demo data, docs site, star-ready README, backups, security pass, public launch
+- [x] **Phase 7: Launch Readiness** — Demo data, docs site, star-ready README, backups, security pass, public launch (completed 2026-09-03)
 
 ---
 
@@ -134,7 +134,7 @@
 2. README leads with a hero GIF, one-line pitch, quick-start (`docker compose up`), and a comparison table; a docs site covers install, config, and AI/BYO-LLM setup.
 3. Backup/restore (pg_dump) and basic ops docs exist; a security pass confirms encrypted keys, enforced authz, and the AIDA-20 safeguards.
 4. The repo is ready for a Phase-1 (first-100-stars) outreach launch.
-**Plans:** 12/13 plans executed
+**Plans:** 13/13 plans complete
 Plans:
 - [x] 07-01-PLAN.md — Repo hygiene: .gitattributes + LF renormalization, middleware→proxy rename, SlaDueChip locale fix, REQUIREMENTS.md restructure (Wave 1)
 - [x] 07-02-PLAN.md — Demo dataset: fixtures + seedDemoData + pre-computed AI artifacts + `pnpm db:seed` CLI with guard (Wave 2)
@@ -148,7 +148,7 @@ Plans:
 - [x] 07-09.1-PLAN.md — Gap closure (not one of the original 12): replaces 07-09's three carried-forward manual verification items with automated egress/honesty/contrast tests (Wave 4)
 - [x] 07-10-PLAN.md — README rewrite: hero GIF, badges, fixed quick start, demo section, honest comparison table, link/claim sweep (Wave 5)
 - [x] 07-11-PLAN.md — Docs site content: install, configuration, AI setup per provider, guides, ops, security (Wave 5)
-- [ ] 07-12-PLAN.md — Launch close-out: 8-gate run, CHANGELOG v1.0.0, LAUNCH.md checklist, planning records, human sign-off (Wave 6)
+- [x] 07-12-PLAN.md — Launch close-out: 8-gate run, CHANGELOG v1.0.0, LAUNCH.md checklist, planning records, human sign-off (Wave 6)
 
 ---
 
@@ -178,3 +178,4 @@ Plans:
 *Last updated: 2026-07-29 — Phase 7 Wave 1 (07-01) and Wave 2 (07-02..07-06) EXECUTION COMPLETE: 6/12 plans done, merged to `master` via PR #1 (https://github.com/afrizzal/aida/pull/1). Execution PAUSED here at the user's request — Wave 3 (07-07 demo mode, 07-08 visual assets) awaits a follow-up prompt before starting.*
 *Last updated: 2026-08-01 — Phase 7 Wave 4 EXECUTION COMPLETE: 07-09 (security pass, 5 fixes + 07-SECURITY-PASS.md) and 07-09.1 (gap closure, not one of the original 12 — replaces 07-09's three carried-forward Phase 4-6 manual verification items with automated egress/honesty/contrast tests) both done. 9/13 plans executed (12 original + the 07-09.1 gap-closure plan). Next: Wave 5 (07-10 README rewrite, 07-11 docs site content).*
 *Last updated: 2026-08-02 — Phase 7 Waves 3 and 4 MERGED to `master`. This log skipped Wave 3's merge entirely (07-07 + 07-08 landed via PR #2, `701c90f`) and recorded Wave 4 as executed-but-not-merged; both are now on master. Wave 4 merged via PR #3 (`b0c96f8`) after a rebase, then PR #4 (`9b475b7`) repaired the commit hashes that rebase orphaned across the planning docs — including 5 in `07-08-SUMMARY.md` that the earlier Wave 3 rebase had already broken unnoticed. **CI is green on `master` itself** (lint · typecheck · test 90/90 · build), so the badge 07-10 is about to put in the README is genuinely green — the pre-existing Biome lint debt that had been failing CI at its first step since 07-05 is cleared, with no rule downgraded to get there. **10/13 plans executed** — note the "9/13" in the entry above (and in `STATE.md` until now) was an undercount: inserting 07-09.1 moved the denominator 12 → 13 without incrementing the numerator for the extra completed plan. The `**Plans:** 10/13 plans executed` header and the checkbox list in this file were always right; STATE.md's progress bar was the side that drifted, and is now corrected to 57/60 (95%). Nothing left on an unmerged branch. Next: Wave 5 (07-10 README rewrite, 07-11 docs site content).*
+*Last updated: 2026-09-03 — Phase 7 (Launch Readiness) fully CLOSED: Wave 5 (07-10 README rewrite + 07-11 docs site content, parallel agents over disjoint files) merged via PR #6 (`a2d0a13`), and Wave 6 (07-12, this plan) closed the phase out. 07-12 ran the full 8-gate matrix against merged master (biome/tsc/unit/integration/e2e/product build/docs build/real docker-compose cold start), wrote `CHANGELOG.md` (v1.0.0 release notes) and `LAUNCH.md` (the maintainer's ordered human-only launch checklist), and reconciled the planning records: REQUIREMENTS.md was already 23/23 complete (each of AIDA-12/22/23/24 had been flipped by its own owning plan as it landed — 07-03, 07-07, 07-10 — so `gsd-tools requirements mark-complete` was a verified no-op here, not a fix). **13/13 plans complete, all 6 waves.** One correction to this file's own prior wave bookkeeping: 07-09.1 stays recorded as **Wave 4** (matching its own PLAN.md frontmatter and every prior entry in this log, including the 2026-08-01/08-02 entries above) — a dispatch-time note for this plan suggested moving it to Wave 5, but that contradicts the plan's own frontmatter and the historical record of when it actually ran (alongside 07-09, before Wave 5's README/docs-site pair), so the historically-accurate Wave 4 was kept and the suggestion was not applied. See `.planning/phases/07-launch-readiness/07-12-SUMMARY.md` for the full evidence trail and the human sign-off record.*
