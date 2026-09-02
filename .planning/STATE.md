@@ -32,7 +32,7 @@ current_phase_name: launch-readiness
 Phase: 07 (launch-readiness) — COMPLETE and VERIFIED (07-VERIFICATION.md: passed, 23/23 must-haves, 2026-09-04)
 Plan: 13 of 13 — all complete; 07-12 human-verify checkpoint signed off by the maintainer 2026-09-04 ("approved, bump SDK-nya nanti setelah phase 7 ditutup")
 Status: All 7 phases complete — v1 milestone (Minimum Lovable Helpdesk) is code-complete and verified. Phase 7 closed via `phase.complete` on 2026-09-04 after: full 8-gate run (07-12 Task 1), orchestrator-run behaviour proofs (demo-boot idempotency, seed refuse-guard, backup/restore round trip — embedded in 07-VERIFICATION.md), advisory code review 07-REVIEW.md (0 critical / 3 warning / 2 info). Next action: the maintainer-only steps in `LAUNCH.md` (repository settings, tag + release, post-release checks, outreach), then `/gsd-complete-milestone` to archive v1. Post-v1 quick tasks are listed under Open Todos.
-Last activity: 2026-09-04 — Phase 07 verified (passed) and marked complete; v1 milestone code-complete
+Last activity: 2026-09-04 — Completed quick task 260904-8h1 (`@anthropic-ai/sdk` 0.123.0 + `claude-opus-5` catalog entry) after Phase 07 was verified and marked complete; v1 milestone code-complete
 
 Progress: [██████████] 100% (60/60 plans complete — 8/8 phase 01 + 12/12 phase 02 + 6/6 phase 03 + 7/7 phase 04 + 7/7 phase 05 + 7/7 phase 06 + 13/13 phase 07)
 
@@ -214,7 +214,7 @@ Progress: [██████████] 100% (60/60 plans complete — 8/8 ph
 
 **Post-v1 (2026-09-04, from the Task 4 checkpoint discussion — not a blocker, not part of Phase 7):**
 
-- Bump `@anthropic-ai/sdk` 0.110.0 → 0.123.0 (no 1.x exists on npm as of 2026-09-04; changelog 0.111–0.123 touches nothing AIDA uses; add `claude-opus-5` to `MODEL_CATALOG` in `src/lib/llm/types.ts` while there). Maintainer decision 2026-09-04: after Phase 7 closes, as a `/gsd-quick` task with typecheck + unit + LLM integration tests as the gate.
+- ~~Bump `@anthropic-ai/sdk` 0.110.0 → 0.123.0 (no 1.x exists on npm as of 2026-09-04; changelog 0.111–0.123 touches nothing AIDA uses; add `claude-opus-5` to `MODEL_CATALOG` in `src/lib/llm/types.ts` while there). Maintainer decision 2026-09-04: after Phase 7 closes, as a `/gsd-quick` task with typecheck + unit + LLM integration tests as the gate.~~ — DONE in quick-260904-8h1 (2026-09-04): package.json/pnpm-lock.yaml pinned to exactly 0.123.0, `claude-opus-5` appended last to `MODEL_CATALOG.anthropic`; all four gates green — Biome 283 files clean, `tsc --noEmit` clean, unit 90/90 (18 files), integration 30/30 (12 files, Testcontainers pgvector).
 
 ### Phase 7 gate run (2026-09-03)
 
@@ -230,6 +230,7 @@ None.
 |---|-------------|------|--------|-----------|
 | 260705-bau | middleware 401 JSON for unauthenticated /api/* + truly-anonymous e2e context | 2026-07-05 | e0fb9e5 | [260705-bau-middleware-401-json-for-unauthenticated-](./quick/260705-bau-middleware-401-json-for-unauthenticated-/) |
 | 260705-kg0 | fix Phase 2 UI-review priority findings: error boundaries, request-form typography, chip-row wrap | 2026-07-05 | a887ce6 | [260705-kg0-fix-phase-2-ui-review-priority-findings-](./quick/260705-kg0-fix-phase-2-ui-review-priority-findings-/) |
+| 260904-8h1 | Bump `@anthropic-ai/sdk` 0.110.0 → 0.123.0 + add `claude-opus-5` to `MODEL_CATALOG` (post-v1 follow-up; biome/tsc/unit 90/90/integration 30/30 green; lockfile changed only for the SDK) | 2026-09-04 | acbe670 | [260904-8h1-bump-anthropic-ai-sdk-0-110-0-0-123-0-an](./quick/260904-8h1-bump-anthropic-ai-sdk-0-110-0-0-123-0-an/) |
 
 ## Session Continuity
 
