@@ -131,3 +131,20 @@ Semua 4 HIGH, 3 MEDIUM, dan 2 status sebagian diterima. Pendapat Codex dan keput
 Commit: `fea685d` docs(v2.0): apply second Codex roadmap critique. Cek ulang: 76/76 requirement terpetakan, fase 8 ditemukan.
 
 Codex putaran 3 (terakhir untuk topik ini) berjalan dari ekspor `fea685d`, `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Lingkupnya dibatasi pada temuan putaran 2 dan HIGH baru yang membuat fase mustahil ditutup, membocorkan data, atau memaksa bukti rekaan. Detail lebih kecil menunggu review plan per fase. Rencana sesudahnya: terapkan temuan yang valid, lalu tutup 0b. HIGH yang masih tersisa sesudah putaran 3 dicatat di CONTEXT fase terkait, dan tidak ada putaran keempat.
+
+## Putaran 4 (2026-11-07, 16.00 sampai 16.05 WIB)
+
+Dipicu oleh selesainya Codex putaran 3. Cek Berhenti total lolos (tip `1ea4281`, `no-push-run-loop`, branch benar, Docker hidup). Regresi Rekriva masih berjalan, jadi 0a tetap ditunda.
+
+Codex putaran 3 selesai 15.59, exit 0, `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Tujuh dari delapan perbaikan putaran 2 dinilai tertutup, seed dan demo dinilai sebagian, dan ada satu HIGH baru.
+
+| Klaim | Hasil cek |
+|---|---|
+| Heartbeat worker menulis `SystemSetting` setiap menit | benar: `heartbeat.ts` melakukan upsert `heartbeat:lastRunAt`, dan `worker/index.ts` menjadwalkannya `* * * * *` |
+| Tabel tanpa `organizationId` | dicek di `prisma/schema.prisma`: `user`, `session`, `account`, `verification`, `organization`, `SystemSetting`, `TicketTag`, `RateLimitHit` |
+
+Keputusan: temuan diterima. Data infrastruktur yang tidak pernah dihitung adalah `_prisma_migrations`, skema `pgboss`, `SystemSetting`, dan `RateLimitHit`. Data tenant adalah baris `organization` atau `user`. Setiap baris domain tergantung pada organisasi, jadi definisi ini lengkap dan bisa dicek dengan dua `count`. Kriteria Fase 9 disesuaikan. Codex dan Claude sependapat. Perbaikan ini tidak diperiksa ulang, karena putaran 3 adalah batas piagam. Review plan Fase 9 akan memeriksanya.
+
+Commit: `b9b1d9b` docs(v2.0): define tenant data for the seed and demo guards. `init.phase-op 8`: `phase_found: true`, `requirements_path` ada. `roadmap.analyze`: 10 fase, scope `complete`, next 8. 76/76 requirement terpetakan.
+
+Butir 0b selesai. Berikutnya 0c, karena 0a masih menunggu regresi.

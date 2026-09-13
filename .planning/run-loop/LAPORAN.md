@@ -1,17 +1,17 @@
 # Laporan run loop AIDA
 
-Keadaan per 2026-11-07 16.03 WIB, sesudah putaran 3.
+Keadaan per 2026-11-07 16.05 WIB, sesudah putaran 4.
 
 ## 1. Ringkasan
 
-Milestone v2.0 sudah dibuka di dokumen: `REQUIREMENTS.md`, `ROADMAP.md` (Phase 8 sampai 17), dan keputusan owner di `PROJECT.md` (`8a72f4c`). Kritik Codex putaran 1 menemukan 15 kelemahan, 10 di antaranya HIGH, dan semuanya sudah masuk revisi `995ed9e`, sehingga requirement menjadi 76. Putaran 2 menemukan 4 HIGH yang tersisa atau baru, dan semuanya sudah masuk revisi `fea685d`. Putaran 3, yang terakhir, sedang berjalan, jadi butir 0b belum selesai. Belum ada kode produk yang diubah. Yang perlu ditinjau owner sekarang hanya dokumen perencanaan di `.planning/`.
+Milestone v2.0 sudah dibuka (butir 0b selesai). `REQUIREMENTS.md` berisi 76 requirement, `ROADMAP.md` berisi Phase 8 sampai 17, dan keputusan owner tercatat di `PROJECT.md`. Roadmap direvisi dalam tiga putaran kritik Codex, yang bersama-sama menemukan 15 temuan, lalu 4 HIGH dan 3 MEDIUM, lalu 1 HIGH; semuanya sudah diterapkan. Belum ada kode produk yang diubah. Dokumen perencanaan di `.planning/` aman ditinjau sekarang. Butir 0a masih menunggu regresi Rekriva, jadi berikutnya butir 0c.
 
 ## 2. Fase dan requirement
 
 | Butir | Isi | Status | Bukti | Commit |
 |---|---|---|---|---|
 | 0a | Baseline tertunda | belum disentuh | regresi Rekriva masih berjalan | |
-| 0b | Milestone v2.0 | berjalan | `init.phase-op` 8 sampai 17 menemukan fasenya; 76/76 requirement terpetakan; Codex putaran 1 dan 2 selesai, putaran 3 berjalan | `8a72f4c`, `995ed9e`, `fea685d` |
+| 0b | Milestone v2.0 | selesai dengan bukti | `init.phase-op` 8 sampai 17 menemukan fasenya; 76/76 requirement terpetakan; tiga putaran kritik Codex diterapkan | `8a72f4c`, `995ed9e`, `fea685d`, `b9b1d9b` |
 | 0c | Lengkapi daftar fitur | belum disentuh | | |
 | 08 | Keamanan (AIDA-25 sampai 32) | belum disentuh | | |
 | 09 | Operasional (AIDA-33 sampai 41) | belum disentuh | | |
@@ -42,6 +42,7 @@ Rincian ada di `RUN-LOG.md` putaran 1 dan 2. Jawaban Codex disimpan di `codex/ro
 - Font Inter (F-14): awalnya saya membuka opsi "tetap fetch asal alasannya dicatat". Codex tidak setuju, karena dokumentasi tidak menutup egress. Saya berubah pikiran dan ikut Codex: `next build` tidak boleh menghubungi Google Fonts, dan default konservatifnya stack font sistem.
 - SEED-004 dikerjakan penuh (enum menjadi tabel). Codex setuju, dan atas sarannya dipecah menjadi AIDA-56 (migrasi), AIDA-97 (pengelolaan state), dan AIDA-57 (SLA dengan worker sungguhan).
 - Celah keamanan yang ditemukan Codex dan sudah saya cek ke kode: merge bisa membocorkan percakapan antar pelanggan lewat link status; `getScopedDb` tidak memeriksa ulang keanggotaan, jadi anggota yang dinonaktifkan masih bisa memakai sesinya; backup terjadwal bisa lulus tanpa lampiran. Putaran 2 menambah: jeda SLA harus menggeser tenggat, bukan sekadar menahan flag; backup harus konsisten walau lampiran berubah di tengah jalan; boot `DEMO_MODE` hanya menghitung tiket sehingga bisa menanam akun demo di workspace hidup tanpa tiket. Semuanya kini punya acceptance tersendiri.
+- Putaran 3 menilai 7 dari 8 perbaikan tertutup dan menemukan satu HIGH: heartbeat worker menulis `SystemSetting` setiap menit, sehingga syarat "hanya data demo" akan menolak boot demo ulang yang sah. AIDA-37 kini memisahkan data infrastruktur dari data tenant (`organization` atau `user`). Perbaikan ini tidak diperiksa ulang oleh Codex, karena batas 3 putaran per topik sudah habis.
 - Koreksi kejujuran: AIDA-10 di v1 tercatat selesai, padahal alur undangan tidak pernah ada (F-16). Centang v1 tidak diubah. Celahnya dicatat di `PROJECT.md` dan ditutup oleh AIDA-42.
 
 ## 6. Hasil test dan audit
@@ -73,7 +74,7 @@ Dicek 2026-11-07 15.48 WIB:
 
 ## 9. Yang belum terbukti
 
-- Revisi roadmap sesudah kritik Codex putaran 2 belum diperiksa ulang (putaran 3 berjalan).
+- Perbaikan AIDA-37 dari putaran 3 belum diperiksa Codex (batas 3 putaran). Review plan Fase 9 akan memeriksanya.
 - `pnpm build`, `pnpm test:integration`, `pnpm test:e2e`, dan `pnpm test:egress` belum pernah dijalankan di Mac ini.
 - `docker compose -p aida up -d --build` belum pernah dijalankan di Mac ini.
 - Daftar fitur Projects belum dicek ke demo publik (butir 0c), jadi requirement Fase 14 sampai 17 bisa bertambah.
