@@ -27,7 +27,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 **Milestone goal:** close the v1 gaps that need no human, then build a Projects module inside AIDA with a real backend. The owner's decision behind this is recorded in `PROJECT.md` → Key Decisions (2026-11-07).
 **Granularity:** 10 phases. A phase may split into more plans, but nothing in it may be dropped.
 **Sequencing:** phases run in numeric order. `Depends on` lists only the hard parking chain from `run-loop/PIAGAM.md`; softer links are in Cross-phase risks below.
-**Coverage:** 73/73 requirements mapped (`REQUIREMENTS.md`).
+**Coverage:** 76/76 requirements mapped (`REQUIREMENTS.md`).
 
 - [ ] **Phase 8: Security Hardening** — Dependency audit to zero critical and high, non-root containers, CSP, trusted client IP, public-route abuse controls
 - [ ] **Phase 9: Operations** — Backup schedule, logo upload, password encoding, single `<h1>`, seed guard, permanent regression tests, repo health
@@ -48,7 +48,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 **Goal:** The v1 code is safe to release: no known critical or high production advisory, and every accepted v1 security finding is fixed or justified in writing.
 **Success Criteria (what must be TRUE):**
 
-1. `pnpm audit --prod` reports 0 critical and 0 high, or each residual has a written reason in `docs/SECURITY.md`.
+1. `pnpm audit --prod --audit-level=high` exits 0, or the gate is reported red with every residual explained in `docs/SECURITY.md`.
 2. `docker compose -p aida up -d --build` serves `https://localhost/api/health` with `app`, `worker` and `migrate` running as non-root, and uploads still work.
 3. Every HTML response carries a CSP, and the core pages run with zero CSP violations.
 4. A spoofed `X-Forwarded-For` cannot change a rate-limit identity, and the two unthrottled public routes are throttled while the container healthcheck stays green.
@@ -66,10 +66,10 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 **Goal:** A self-hoster can run AIDA unattended: backups happen on their own, the known boot and seed traps are fixed and pinned by tests, and the planning records tell the truth.
 **Success Criteria (what must be TRUE):**
 
-1. A scheduled backup produces a dump that restores, and old dumps are pruned.
+1. A scheduled backup produces one set of database dump and uploads archive that restores with matching attachments, a failed part fails the set, and old sets are pruned.
 2. A logo uploads, shows in the sidebar and on public pages, and falls back to the name.
-3. A password containing `/ @ : # ?` works, and every app page has exactly one `<h1>`.
-4. `pnpm db:seed` on a populated workspace changes nothing and prints no password, and the demo-boot, seed-guard and backup/restore tests live in the repository suites.
+3. A compose stack with a password containing `/ @ : # ?` connects from every service, and every app page has exactly one `<h1>`.
+4. `pnpm db:seed` on a non-empty database changes nothing and prints no password, and the demo-boot, seed-guard and backup/restore tests live in the repository suites.
 5. `01-VERIFICATION.md` exists and is backed by evidence, and `STATE.md` has no stale statement.
 6. `scripts/install.sh`, `check-version`, `AGENTS.md`, `CODEOWNERS` and the README widgets exist, or an item needing an owner account is recorded as manual.
 
@@ -85,7 +85,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 **Success Criteria (what must be TRUE):**
 
 1. An admin invites a person, who joins with the invited role; expired and mismatched invitations fail.
-2. An admin can change roles and deactivate members, and cannot remove the last admin.
+2. An admin can change roles and deactivate members; an already-open session of a deactivated member is refused on its next request; the last admin cannot be removed, even concurrently.
 3. Assignment, customer reply, mention and SLA events produce per-user notifications in the top bar.
 4. A mention in an internal note notifies the member and cannot reach the customer.
 5. Preferences apply, and the digest sends one batched email through a fake SMTP with no PII in the subject.
@@ -112,16 +112,16 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 ### Phase 12: Ticket Lifecycle
 
 **Depends on:** Nothing beyond run order
-**Requirements:** AIDA-18, AIDA-52, AIDA-53, AIDA-54, AIDA-55, AIDA-56, AIDA-57
+**Requirements:** AIDA-18, AIDA-52, AIDA-53, AIDA-54, AIDA-55, AIDA-56, AIDA-57, AIDA-97
 **UI hint**: yes
 **Goal:** Tickets model real support work: duplicates, waiting, a team's own states, and knowledge that grows from resolved work.
 **Success Criteria (what must be TRUE):**
 
 1. Tickets link in all three relation types, and links show from both sides.
-2. A merge moves the thread, closes the source as a duplicate, keeps the old status link working, and leaves a full audit event.
+2. A merge moves the thread, closes the source as a duplicate, and leaves a full audit event, and no status link exposes one contact's messages to another.
 3. A snoozed ticket wakes by date or by customer reply, and auto-close skips it.
-4. Custom states migrate existing data without loss, and every reader of status reasons about the group.
-5. SLA clocks pause in `pending`-group states, including repeated pauses.
+4. Custom states migrate existing data without loss, admins can manage them, and every reader of status, including the `sla-flag` worker, reasons about the group.
+5. The real SLA worker raises no flag while a ticket is paused, including repeated pauses.
 6. An admin can review a proposed KB article from resolved tickets, and nothing publishes without that review.
 
 **Plans:** 0 plans
@@ -134,7 +134,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 **Goal:** AIDA plugs into other tools through a public API, signed webhooks and an issue-tracker bridge.
 **Success Criteria (what must be TRUE):**
 
-1. API tokens are hashed, expire, and are rate-limited, and `/api/v1/*` never crosses organizations.
+1. API tokens are hashed, scoped, expire and are rate-limited, and every `/api/v1/*` operation has an authentication test and a cross-org test.
 2. Webhook deliveries are signed, retried, logged and auto-deactivated, and the SSRF guard blocks private targets and rebinding.
 3. A ticket escalates to GitHub Issues and to Plane against fake servers.
 4. A tracker status change returns as an internal note, and a bad signature or replay is rejected before parsing.
@@ -154,9 +154,10 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 1. Projects, tasks, subtasks, comments, attachments, activity and teams are scoped through `scopedDb`, with unmocked isolation tests.
 2. Every mutation writes one activity record.
-3. A private project cannot be reached by a non-member through any read path, proven by unmocked tests.
-4. Archive, restore and favorite work.
-5. `git grep -i -n gr8r -- src docs website README.md public prisma tests` is empty.
+3. A private project can be neither read nor changed by a non-member or another organization through any path, proven by unmocked tests.
+4. The logic layer offers every operation the Phase 15 views need (move, reorder, bulk update, date change), each authorized on the server.
+5. Archive, restore and favorite work.
+6. `git grep -i -n gr8r -- src docs website README.md public prisma tests` is empty.
 
 **Plans:** 0 plans
 
@@ -179,7 +180,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 ### Phase 16: Workspace
 
 **Depends on:** Phase 10, Phase 14
-**Requirements:** AIDA-81, AIDA-82, AIDA-83, AIDA-84, AIDA-85, AIDA-86, AIDA-87, AIDA-88, AIDA-89, AIDA-90
+**Requirements:** AIDA-81, AIDA-82, AIDA-83, AIDA-84, AIDA-85, AIDA-86, AIDA-87, AIDA-88, AIDA-89, AIDA-90, AIDA-98, AIDA-99
 **UI hint**: yes
 **Goal:** Projects and tickets feel like one workspace, with one place for what is mine, what changed, and how I work.
 **Success Criteria (what must be TRUE):**
@@ -188,7 +189,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 2. One notification center covers tickets and tasks, and "Inbox" still means tickets.
 3. Search and Activity never expose a private project to a non-member, proven by unmocked tests.
 4. Onboarding complements `/setup` without changing it.
-5. Preferences persist per user, and the accent cannot break the contrast tests.
+5. Preferences persist per user and survive re-login, the accent cannot break the contrast tests, and a password change needs the current password.
 6. Every page handles empty, loading, error and narrow-screen states.
 7. The clean-room grep is empty, and DESIGN-SYSTEM §9 passes.
 
@@ -206,7 +207,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 2. Task status returns as an internal note, never a public reply.
 3. AI suggestions pass through a human gate, stay off when AI is off, and survive injection tests with fakes.
 4. Demo data covers Projects, and the README and docs describe it honestly.
-5. Every gate below passes on the final commit, including the compose health check.
+5. Every gate below runs on one named code commit, including the compose health check, and later commits touch only `.planning/`.
 6. The clean-room grep is empty.
 
 **Stays open for a human:** the visual pass and the release decision.
@@ -220,20 +221,29 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 **Phases with a UI:** the checklist in `DESIGN-SYSTEM.md` §9. **Phases 14–17:** the clean-room grep.
 
+How a gate result is recorded:
+
+- **Audit.** `pnpm audit --prod` exits non-zero while any advisory remains, moderate and low included. Record its exit code as it is. The security bar is `pnpm audit --prod --audit-level=high`. A residual high or critical with a written reason is reported as red with that reason, never as passed.
+- **Network.** Install, audit and the Prisma engine download need the package registry, the advisory service and the Prisma binary host. If one is unreachable, the gate is recorded as blocked, never assumed.
+- **Human checks.** In §9, the token, typography and contrast items, including dark mode, are proven by tests. The look itself stays a human item. A `human_needed` verification never becomes `passed`.
+- **Commit.** Each result names the commit it ran on. A later commit that touches only `.planning/` keeps the result valid if `git diff --stat <tested>..HEAD -- . ':!.planning'` is empty.
+
 ## Cross-phase risks
 
-These links are softer than the parking chain, so a later phase must check them instead of assuming them.
+These links are softer than the parking chain in `run-loop/PIAGAM.md`, which this table does not change. Before relying on a link, run the check. If the prerequisite is missing, only the named requirement parks or takes the fallback, and the fallback is recorded in `RUN-LOG.md` for reconciliation when the earlier phase returns.
 
-| Risk | Where it bites | Rule |
+| Link | Check before relying on it | If the prerequisite is missing |
 |---|---|---|
-| Saved views store status values (Phase 11), then the status enum becomes a table (Phase 12) | AIDA-56 | Migrate stored filters in the same plan as the enum |
-| Auto-close ships before snooze and custom states exist | AIDA-54, AIDA-56 | Phase 12 must update the auto-close query |
-| Notifications start with ticket events only (Phase 10), then gain task events (Phase 16) | AIDA-44, AIDA-83 | Keep the model entity-generic from the start |
-| The tracker adapter is built for HTTP providers (Phase 13), then gains `internal` (Phase 17) | AIDA-61, AIDA-91 | The interface must not assume a network call |
-| AIDA-86 needs the Phase 11 palette, and AIDA-80 prefers its saved-view model, but the chain does not make Phase 11 a phase dependency | AIDA-80, AIDA-86 | If Phase 11 parks, AIDA-86 parks alone; AIDA-80 records its fallback |
-| A Better Auth upgrade in Phase 8 may change its schema or API | AIDA-25, AIDA-42 | Check migrations during the bump, and build invitations on the upgraded version |
-| A nonce-based CSP forces dynamic rendering, and any later inline script breaks it | AIDA-28 | The CSP E2E test stays in the suite for every later UI phase |
-| Throttling `/api/health` can trip the container healthcheck, which calls it from loopback with no `X-Forwarded-For` | AIDA-29, AIDA-30 | Design the two requirements together |
+| Saved views store status values (Phase 11), then the status enum becomes a table (AIDA-56) | `SavedView` exists in `prisma/schema.prisma` | Nothing to migrate. When Phase 11 returns, its filters are built on states |
+| Auto-close ships before snooze and custom states (AIDA-51 vs AIDA-54, AIDA-56) | the auto-close job is registered in `src/lib/worker/` | AIDA-54 and AIDA-56 skip that part. When Phase 11 returns, auto-close must skip snoozed tickets and use state groups |
+| AIDA-86 reuses the Phase 11 palette registry, and AIDA-80 prefers its saved-view model | AIDA-49 and AIDA-47 are closed | AIDA-86 parks alone. AIDA-80 builds a per-project view store and records it for merging later |
+| Phase 16 uses Phase 15 for task links, other views (AIDA-82) and how a task opens (AIDA-98) | AIDA-73 and one more Phase 15 view are closed | Those parts of AIDA-82 and AIDA-98 park alone; the rest of Phase 16 proceeds |
+| Invitations (Phase 10) build on Better Auth after the Phase 8 upgrade | `better-auth` in `package.json` matches the version Phase 8 recorded | Build on the current version, and record that a later upgrade must rerun the invitation tests |
+| Notifications start with ticket events (Phase 10), then gain task events (AIDA-83) | the `Notification` model is entity-generic | Covered by the chain: Phase 16 needs Phase 10 |
+| The tracker adapter is built for HTTP providers (Phase 13), then gains `internal` (AIDA-91) | the interface does not assume a network call | Covered by the chain: Phase 17 needs Phase 13 |
+| Every new data path must honor deactivation (AIDA-43) and private projects (AIDA-71) | new access goes through the membership-checking helper | A new path without the check is a defect, not a fallback |
+| A nonce-based CSP forces dynamic rendering, and a later inline script breaks it (AIDA-28) | the CSP E2E test is in the suite | If Phase 8 parks, later phases still add no inline script |
+| Throttling `/api/health` can trip the container healthcheck, which calls it from loopback without `X-Forwarded-For` | AIDA-29 and AIDA-30 are designed together | Not applicable: same phase |
 
 ## Backlog
 
