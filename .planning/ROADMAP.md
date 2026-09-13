@@ -69,7 +69,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 1. A scheduled backup produces one consistent set of database dump and uploads archive, even while attachments change, that restores with matching attachments; a failed part fails the set; old sets are pruned.
 2. A logo uploads, shows in the sidebar and on public pages, and falls back to the name.
 3. A compose stack with a password containing `/ @ : # ?` connects from every service, and every app page has exactly one `<h1>`.
-4. Neither `pnpm db:seed` nor the `DEMO_MODE` boot touches a non-empty database or prints a password, and the demo-boot, seed-guard and backup/restore tests live in the repository suites.
+4. Neither `pnpm db:seed` nor the `DEMO_MODE` boot writes into a database holding non-demo tenant data, a repeated demo boot still works after the heartbeat has run, neither prints a password, and the demo-boot, seed-guard and backup/restore tests live in the repository suites.
 5. `01-VERIFICATION.md` exists and is backed by evidence, and `STATE.md` has no stale statement.
 6. `scripts/install.sh`, `check-version`, `AGENTS.md`, `CODEOWNERS` and the README widgets exist, or an item needing an owner account is recorded as manual.
 

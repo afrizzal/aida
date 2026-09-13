@@ -5,9 +5,9 @@ milestone_name: Helpdesk & Projects
 current_phase: 08
 current_phase_name: security-hardening
 status: Milestone opened, Phase 8 not started
-last_updated: "2026-11-07T08:46:16.000Z"
+last_updated: "2026-11-07T09:00:41.000Z"
 last_activity: 2026-11-07
-last_activity_desc: Milestone v2.0 opened by hand under the run charter; roadmap critique by Codex pending
+last_activity_desc: Milestone v2.0 opened by hand under the run charter; roadmap revised over three Codex critique rounds; 76 requirements
 progress:
   total_phases: 10
   completed_phases: 0
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-11-07, v2.0 opened)
 
 Phase: 08 (security-hardening), not started
 Plan: —
-Status: Milestone v2.0 opened by hand on 2026-11-07. `REQUIREMENTS.md` (73 requirements) and `ROADMAP.md` (Phases 8–17) are written. Codex critique of the roadmap is the open step of queue item 0b. Baseline item 0a waits for the Rekriva regression to finish.
+Status: Milestone v2.0 opened by hand on 2026-11-07. `REQUIREMENTS.md` (76 requirements) and `ROADMAP.md` (Phases 8–17) are written and were revised over three Codex critique rounds (queue item 0b done). Baseline item 0a waits for the Rekriva regression to finish; item 0c (feature list check) is next.
 Last activity: 2026-11-07 — v2.0 opened under the run charter. v1.0.0 stays complete and archived; its archives are `milestones/v1.0.0-*`.
 
 ## Accumulated Context
