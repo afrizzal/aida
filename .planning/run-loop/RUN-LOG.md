@@ -108,3 +108,26 @@ Codex putaran 1 selesai pukul 15.50, exit 0, `model: gpt-6.1-terra`, `reasoning 
 Commit: `995ed9e` docs(v2.0): tighten requirements after Codex roadmap critique. Cek ulang: `init.phase-op` menemukan fasenya, `roadmap.analyze` 10 fase dengan scope `complete`, dan 76/76 requirement terpetakan tanpa ganda.
 
 Codex putaran 2 (verifikasi revisi) berjalan dari ekspor `995ed9e`, `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Ekspor lama `tmp.6gJHaLnEVS` di `TMPDIR` tidak dihapus, karena aturan deny `rm -rf` dan isinya hanya file tracked.
+
+## Putaran 3 (2026-11-07, 15.56 sampai 16.03 WIB)
+
+Dipicu oleh selesainya Codex putaran 2. Cek Berhenti total lolos (tip `1ea4281`, `no-push-run-loop`, branch benar, Docker hidup). Regresi Rekriva masih berjalan (`Workspace`, `Phase14AbilityMatrixTest`), jadi 0a tetap ditunda.
+
+Codex putaran 2 selesai 15.56, exit 0, `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Hasilnya: 9 temuan tertutup, 6 sebagian, 4 HIGH tersisa atau baru, 3 MEDIUM.
+
+### Cek fakta
+
+| Klaim | Hasil cek |
+|---|---|
+| `migrate` one-shot, `app` menunggu selesai | benar: `restart: "no"`, `service_completed_successfully` |
+| Backup dump lalu tar berurutan, file bisa berubah di antaranya | benar: `scripts/backup.sh` berurutan, `local-file-storage.ts` memakai `unlink` |
+| Boot demo hanya menghitung tiket sebelum membuat akun | benar: `src/lib/demo/bootstrap-demo.ts` |
+| Worker SLA memakai tenggat absolut | benar, sudah dicek di putaran 2 |
+
+### Keputusan
+
+Semua 4 HIGH, 3 MEDIUM, dan 2 status sebagian diterima. Pendapat Codex dan keputusan saya sama, jadi tidak ada perbedaan yang perlu dibawa ke aturan keputusan 4. Satu pilihan saya buat sendiri: definisi database tidak kosong untuk `pnpm db:seed` adalah "sudah ada organisasi atau user", karena seed sendiri yang membuat organisasi pertama. Definisi ini lengkap dan bisa dicek dengan satu query.
+
+Commit: `fea685d` docs(v2.0): apply second Codex roadmap critique. Cek ulang: 76/76 requirement terpetakan, fase 8 ditemukan.
+
+Codex putaran 3 (terakhir untuk topik ini) berjalan dari ekspor `fea685d`, `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Lingkupnya dibatasi pada temuan putaran 2 dan HIGH baru yang membuat fase mustahil ditutup, membocorkan data, atau memaksa bukti rekaan. Detail lebih kecil menunggu review plan per fase. Rencana sesudahnya: terapkan temuan yang valid, lalu tutup 0b. HIGH yang masih tersisa sesudah putaran 3 dicatat di CONTEXT fase terkait, dan tidak ada putaran keempat.
