@@ -1,209 +1,30 @@
-# Roadmap — Milestone v1: Minimum Lovable Helpdesk
+# Roadmap — AIDA (Open-Source AI-Native Helpdesk)
 
-**Granularity:** coarse (7 phases) · **Sequencing:** MVP-first — ship a usable helpdesk before the hard AI; introduce AI risk only after the core works; repo health last so the launch is polished.
-**Coverage:** 23/23 MVP requirements mapped (AIDA-18 is backlog/stretch).
+## Milestones
 
----
+- ✅ **v1.0.0 Minimum Lovable Helpdesk** — Phases 1–7 (shipped 2026-09-13; archive: [`milestones/v1.0.0-ROADMAP.md`](milestones/v1.0.0-ROADMAP.md))
+- ⏭ **Next milestone** — not yet defined. Run `/gsd-new-milestone`; the ten dormant seeds in `seeds/` and AIDA-18 surface there. Phase numbering continues at 08.
 
 ## Phases
 
-- [x] **Phase 1: Foundation** — App scaffold, data model, auth + workspace scoping, one-command self-host shell (completed 2026-06-29)
-- [x] **Phase 2: Core Ticketing** — Shared inbox, ticket lifecycle, contacts, replies/notes, tags, SLA, web intake (completed 2026-07-02)
-- [x] **Phase 3: Email Channel** — Inbound email → ticket threading + outbound SMTP replies (completed 2026-07-06)
-- [x] **Phase 4: AI Foundation** — Model-agnostic LLM layer + auto-triage + audit log + untrusted-input safeguards (completed 2026-07-18)
-- [x] **Phase 5: RAG & Drafted Replies** — Knowledge base + embeddings + citation-backed drafts behind a human-approval gate (completed 2026-07-22, 3 items pending human UAT — see 05-HUMAN-UAT.md)
-- [x] **Phase 6: AIDA Insight** — AI-driven analytics (recurring issues, KB gaps, volume drivers, SLA/CSAT) (completed 2026-07-24, 3 items pending human UAT — see 06-HUMAN-UAT.md)
-- [x] **Phase 7: Launch Readiness** — Demo data, docs site, star-ready README, backups, security pass, public launch (completed 2026-09-03)
+<details>
+<summary>✅ v1.0.0 Minimum Lovable Helpdesk (Phases 1–7) — SHIPPED 2026-09-13</summary>
 
----
+- [x] Phase 1: Foundation (8/8 plans) — completed 2026-06-29
+- [x] Phase 2: Core Ticketing (12/12 plans) — completed 2026-07-02
+- [x] Phase 3: Email Channel (6/6 plans) — completed 2026-07-06
+- [x] Phase 4: AI Foundation (7/7 plans) — completed 2026-07-18
+- [x] Phase 5: RAG & Drafted Replies (7/7 plans) — completed 2026-07-22
+- [x] Phase 6: AIDA Insight (7/7 plans) — completed 2026-07-24
+- [x] Phase 7: Launch Readiness (13/13 plans, incl. inserted gap-closure 07-09.1) — completed 2026-09-03
 
-## Phase Details
+Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeout 2026-09-13 as override_closeout (23 acknowledged items — `STATE.md` → Deferred Items); git tag left to `LAUNCH.md`. Full phase goals, plan lists and success criteria: `milestones/v1.0.0-ROADMAP.md`. Phase artifacts: `milestones/v1.0.0-phases/`.
 
-### Phase 1: Foundation
+</details>
 
-**Timebox:** ~1–2 weeks · **Depends on:** nothing (greenfield) · **Requirements:** AIDA-10, AIDA-11, AIDA-21
-**Goal:** A running, self-hostable Next.js + Prisma + Postgres(pgvector) + pg-boss app with auth, workspace-scoped data, and `docker compose up`.
-**Success Criteria (what must be TRUE):**
+## Backlog
 
-1. `docker compose up` from a clean clone brings up the app, PostgreSQL with the pgvector extension, and a pg-boss worker; the app is reachable and a healthcheck passes.
-2. A user can register/log in; roles `admin` and `agent` exist; an admin can invite/manage users; protected routes are enforced server-side.
-3. Every domain table carries a `workspaceId`; a data-access helper scopes all queries to the active workspace (verified by a test seeding two workspaces).
-4. Prisma schema + migrations are committed; `.env.example` documents required config; `LICENSE` (Apache-2.0) and a skeleton README are present.
-
-**Plans:** 8/8 plans complete
-
-- [x] 01-01-PLAN.md — Project scaffold, tooling, shadcn/ui design system + documented .env.example (Wave 1)
-- [x] 01-02-PLAN.md — Database + auth backbone: Prisma 7, Better Auth (org + admin), schema, initial migration (Wave 2)
-- [x] 01-03-PLAN.md — Multi-tenant data access: scopedDb + AIDA-11 real-Postgres isolation test + session bridge (Wave 3)
-- [x] 01-04-PLAN.md — Background worker + heartbeat job + /api/health liveness (Wave 3)
-- [x] 01-05-PLAN.md — Auth flow: middleware guard, self-disabling setup wizard, login, env bootstrap (Wave 3)
-- [x] 01-06-PLAN.md — App shell + Tickets/KB stubs + tenant-scoped AI toggle ("full shell, empty rooms") (Wave 4)
-- [x] 01-07-PLAN.md — Self-host: multi-stage Dockerfile, docker-compose (db+app+worker+caddy), Caddyfile (Wave 5)
-- [x] 01-08-PLAN.md — Visual verification checkpoint: human walkthrough of the self-hosted experience (Wave 6) [GATE OPEN — awaiting human]
-
-### Phase 2: Core Ticketing
-
-**Timebox:** ~2 weeks · **Depends on:** Phase 1 · **Requirements:** AIDA-01, AIDA-02, AIDA-03, AIDA-04, AIDA-05, AIDA-06, AIDA-07, AIDA-08, AIDA-12 (partial)
-**Goal:** A genuinely usable helpdesk (no AI yet): create/work tickets through a shared inbox via the web.
-**Success Criteria:**
-
-1. An agent can create a ticket and move it `new→open→pending→resolved→closed`; changes persist and render in the thread.
-2. The shared inbox lists tickets with views (Unassigned/Mine/by status), filter, and full-text search.
-3. Tickets link to contact records showing per-contact history; agents can assign tickets and post public replies vs private notes (visually distinct).
-4. Tags + basic custom fields work and are filterable; SLA first-response/resolution timers compute from priority and show at-risk/breached states.
-5. A public web form creates a ticket and returns a status link; the conversation thread supports attachments.
-
-**Plans:** 12/12 plans complete
-
-- [x] 02-01-PLAN.md — Data model + relational/FTS migrations + scopedDb allowlist + tenant-in-tx smoke test (Wave 1)
-- [x] 02-02-PLAN.md — Deps + shadcn primitives + warning/success tokens + Badge variants + renderMarkdown (Wave 1)
-- [x] 02-03-PLAN.md — Ticket core: status-token, SLA helpers, contact find-or-create, createTicket transaction (Wave 2)
-- [x] 02-04-PLAN.md — Org-safe full-text search + attachment storage (FileStorage/local/constants) (Wave 2)
-- [x] 02-05-PLAN.md — SLA-flag worker job + Postgres rate limiting + cleanup + worker wiring (Wave 2)
-- [x] 02-06-PLAN.md — Reusable chip/avatar components (status/priority/SLA/tag/attachment/assignee) (Wave 2)
-- [x] 02-07-PLAN.md — Settings surfaces: SLA policies, tags, custom fields + CustomFieldInput (admin-gated) (Wave 2)
-- [x] 02-08-PLAN.md — Shared inbox: 2-pane shell, list rows, view/status/tag/custom-field filters + FTS search (Wave 3)
-- [x] 02-09-PLAN.md — Reading pane: thread + composer (public/note) + attachments + ticket mutations + New Ticket (Wave 4)
-- [x] 02-10-PLAN.md — Contacts list + detail + per-contact ticket history + Notes autosave (Wave 3)
-- [x] 02-11-PLAN.md — Public web intake form + route (honeypot/rate-limit) + uploads volume + Caddy/middleware (Wave 3)
-- [x] 02-12-PLAN.md — Tokenized public status page + follow-up (auto-reopen) + token-scoped attachment serve (Wave 5)
-
-### Phase 3: Email Channel
-
-**Timebox:** ~1–1.5 weeks · **Depends on:** Phase 2 · **Requirements:** AIDA-09
-**Goal:** Real email support — the default channel for a CS helpdesk.
-**Success Criteria:**
-
-1. An inbound email creates a ticket; a reply to an existing thread is attached to the correct ticket via message-id/headers (no duplicate tickets).
-2. An agent's public reply is delivered by SMTP to the requester and recorded in the thread.
-3. Email config (IMAP/inbound + SMTP) lives in settings; failures are surfaced, not silent.
-
-**Plans:** 6/6 plans complete
-
-- [x] 03-01-PLAN.md — Deps + Message email fields/deliveryStatus enum + EmailIngestFailure model + scopedDb allowlist (Wave 1)
-- [x] 03-02-PLAN.md — AES-256-GCM secret-box helper (TDD) + typed email-settings module over Setting store (Wave 1)
-- [x] 03-03-PLAN.md — Parsing primitives: sanitizeEmailHtml + extractEmailBody + thread-match + isAutoGenerated (Wave 2)
-- [x] 03-05-PLAN.md — Outbound SMTP send job + boss-client enqueue + deliveryStatus + Failed-to-send/Retry (Wave 2)
-- [x] 03-04-PLAN.md — Inbound ingest + IMAP poll job + poison guard + auto-reopen + worker wiring (Wave 3)
-- [x] 03-06-PLAN.md — Settings Email tab: toggle + IMAP/SMTP/from form + Test Connection + health line (Wave 4)
-
-### Phase 4: AI Foundation
-
-**Timebox:** ~2 weeks · **Depends on:** Phase 2 (tickets exist) · **Requirements:** AIDA-13, AIDA-14, AIDA-19, AIDA-20
-**Goal:** Pluggable AI + the first visible AI value (triage), governed and safe.
-**Success Criteria:**
-
-1. One LLM provider abstraction supports OpenAI, Anthropic, and Ollama (local), selectable in settings; keys are encrypted at rest; toggling AI off leaves the helpdesk fully functional.
-2. New tickets are auto-triaged (category, priority, sentiment, language) with results attached and overrideable by an agent.
-3. Every AI action is written to an append-only audit log (input ref, output, model).
-4. Ticket text is handled as untrusted: a prompt-injection test case cannot make the AI take actions or reveal system context; obvious secrets are redacted before reaching the LLM/logs; no network egress occurs except to the configured LLM endpoint.
-
-**Plans:** 7/7 plans complete
-
-- [x] 04-01-PLAN.md — Provider SDKs + Ticket triage columns + append-only AuditEvent model + DB immutability trigger (Wave 1)
-- [x] 04-02-PLAN.md — `lib/llm` port: redact + encrypted llm:* settings + complete() + OpenAI/Anthropic/Ollama adapters + probe (Wave 2)
-- [x] 04-03-PLAN.md — Triage engine: schema + fenced/escaped prompt (D-12) + runTriage + recordAuditEvent + injection test (D-15) (Wave 3)
-- [x] 04-04-PLAN.md — Settings "AI Features" page: provider/model/key config + Test Connection + toggle gating (D-21) (Wave 3)
-- [x] 04-05-PLAN.md — Runtime wiring: ai-triage pg-boss queue + post-commit enqueue + rerunTriage action (Wave 4)
-- [x] 04-06-PLAN.md — Triage UI: result chips + edit affordance + AI Activity section + Re-run button + failure badge (Wave 5)
-- [x] 04-07-PLAN.md — Gap closure (UAT test 2): key={provider} on Model Select (Radix bubble-input stale-options race) + revert T2/T10 e2e workarounds to assert auto-reset (Wave 6)
-
-### Phase 5: RAG & Drafted Replies
-
-**Timebox:** ~2–2.5 weeks · **Depends on:** Phase 4 (LLM layer) · **Requirements:** AIDA-15, AIDA-16
-**Goal:** The agent copilot — cited, grounded drafts with a human gate.
-**Success Criteria:**
-
-1. Admins can author/import KB articles; content is chunked, embedded, and stored in pgvector; retrieval returns relevant chunks for a query.
-2. For an open ticket, AIDA produces a drafted reply grounded in retrieved KB/past tickets with **inline citations** to sources.
-3. The draft requires explicit agent approval/edit before sending; nothing is sent to a customer autonomously; the approval and final send are audited.
-4. When retrieval finds nothing relevant, the draft says so rather than hallucinating a source.
-
-**Plans:** 7/7 plans executed
-
-- [x] 05-01-PLAN.md — RAG data foundation: KbArticle/KbChunk models + vector(768) + KbEmbeddingStatus + widen AuditActionType + scopedDb allowlist (Wave 1)
-- [x] 05-02-PLAN.md — Embedding port: src/lib/rag settings/embed/providers (OpenAI+Ollama, 768-dim) + Test Connection + unit tests (Wave 1)
-- [x] 05-03-PLAN.md — KB chunking + createKbArticle + kb-embed-article pg-boss job + queue registration + integration test (Wave 2)
-- [x] 05-04-PLAN.md — Retrieval (raw-SQL KNN) + grounded draft engine + maxOutputTokens + generateDraftReply + groundedness/injection test (Wave 2)
-- [x] 05-05-PLAN.md — Settings embedding provider config + Test Connection + Re-embed-all (Wave 3)
-- [x] 05-06-PLAN.md — KB authoring pages: list/new/edit + embedding status chip + admin-gated actions (Wave 3)
-- [x] 05-07-PLAN.md — Ticket draft UI: DraftCard + citations + Composer insert + human gate + DRAFT_APPROVED audit (Wave 3)
-
-### Phase 6: AIDA Insight
-
-**Timebox:** ~2 weeks · **Depends on:** Phases 2 + 4 (ticket history + AI) · **Requirements:** AIDA-17
-**Goal:** The headline differentiator — analysis, not just dashboards.
-**Success Criteria:**
-
-1. Insight clusters recurring issues across tickets and names each cluster with an example set.
-2. It flags knowledge-base gaps (frequent question themes with no good KB article).
-3. It surfaces top ticket-volume drivers over a period and an SLA/CSAT insight summary.
-4. Outputs cite the underlying tickets/data and are reproducible (not free-floating prose); compute runs as a pg-boss job, not blocking the UI.
-
-**Plans:** 7/7 plans executed
-
-- [x] 06-01-PLAN.md — Schema foundation: InsightRun/TicketEmbedding/CsatResponse models + InsightRunStatus + widened AuditActionType + scopedDb allowlist + shared insight/types.ts contract (Wave 1)
-- [x] 06-02-PLAN.md — Deterministic leader-clustering math + redact-then-embed excerpts + raw-SQL ticket-embedding cache (Wave 2)
-- [x] 06-03-PLAN.md — SQL aggregates: volume drivers (category/tag/company + previous-period deltas) + SLA/CSAT summary (Wave 2)
-- [x] 06-04-PLAN.md — KB-gap KNN (centroid vs KbChunk) + schema-forced cluster-label & narrative prompt pairs (fenced, no-ID) (Wave 2)
-- [x] 06-05-PLAN.md — CSAT public capture: 1–5 rating + optional comment on the status page + upsert route (Wave 2)
-- [x] 06-06-PLAN.md — insight-run orchestrator + pg-boss job/queue wiring + reproducibility/AI-off integration test (Wave 3)
-- [x] 06-07-PLAN.md — /insights UI: period tabs + guarded generate button + 4 design-system cards + sidebar nav (Wave 4)
-
-### Phase 7: Launch Readiness
-
-**Timebox:** ~1.5 weeks · **Depends on:** Phases 1–6 · **Requirements:** AIDA-12 (branding remainder), AIDA-22, AIDA-23, AIDA-24
-**Goal:** Make the public repo star-worthy and operable.
-**Success Criteria:**
-
-1. A seed/demo dataset + demo mode let a newcomer explore a populated helpdesk instantly; screenshots/GIF are captured from it.
-2. README leads with a hero GIF, one-line pitch, quick-start (`docker compose up`), and a comparison table; a docs site covers install, config, and AI/BYO-LLM setup.
-3. Backup/restore (pg_dump) and basic ops docs exist; a security pass confirms encrypted keys, enforced authz, and the AIDA-20 safeguards.
-4. The repo is ready for a Phase-1 (first-100-stars) outreach launch.
-
-**Plans:** 13/13 plans complete
-
-- [x] 07-01-PLAN.md — Repo hygiene: .gitattributes + LF renormalization, middleware→proxy rename, SlaDueChip locale fix, REQUIREMENTS.md restructure (Wave 1)
-- [x] 07-02-PLAN.md — Demo dataset: fixtures + seedDemoData + pre-computed AI artifacts + `pnpm db:seed` CLI with guard (Wave 2)
-- [x] 07-03-PLAN.md — Settings → Branding tab (workspace display name) applied to sidebar, public pages, email from-name — closes AIDA-12 (Wave 2)
-- [x] 07-04-PLAN.md — backup.sh/restore.sh (DB + uploads volume) + proven round-trip + docs/OPERATIONS.md runbook (Wave 2)
-- [x] 07-05-PLAN.md — GitHub CI + nightly integration workflow + CONTRIBUTING/CODE_OF_CONDUCT/SECURITY policy + issue & PR templates (Wave 2)
-- [x] 07-06-PLAN.md — Astro Starlight docs site scaffold in website/ + GitHub Pages workflow + toolchain isolation (Wave 2)
-- [x] 07-07-PLAN.md — DEMO_MODE boot flag + compose/env plumbing + real cold-boot verification (Wave 3)
-- [x] 07-08-PLAN.md — Reproducible capture script: 10 screenshots (light+dark) + hero GIF + human sign-off (Wave 3)
-- [x] 07-09-PLAN.md — Security pass: authz/secrets/isolation/egress/dependency sweeps + 07-SECURITY-PASS.md + Phase 4/5/6 human items (Wave 4)
-- [x] 07-09.1-PLAN.md — Gap closure (not one of the original 12): replaces 07-09's three carried-forward manual verification items with automated egress/honesty/contrast tests (Wave 4)
-- [x] 07-10-PLAN.md — README rewrite: hero GIF, badges, fixed quick start, demo section, honest comparison table, link/claim sweep (Wave 5)
-- [x] 07-11-PLAN.md — Docs site content: install, configuration, AI setup per provider, guides, ops, security (Wave 5)
-- [x] 07-12-PLAN.md — Launch close-out: 8-gate run, CHANGELOG v1.0.0, LAUNCH.md checklist, planning records, human sign-off (Wave 6)
-
----
-
-## Requirement Coverage
-
-| Requirement | Phase | | Requirement | Phase |
-|---|---|---|---|---|
-| AIDA-01 | 2 | | AIDA-13 | 4 |
-| AIDA-02 | 2 | | AIDA-14 | 4 |
-| AIDA-03 | 2 | | AIDA-15 | 5 |
-| AIDA-04 | 2 | | AIDA-16 | 5 |
-| AIDA-05 | 2 | | AIDA-17 | 6 |
-| AIDA-06 | 2 | | AIDA-19 | 4 |
-| AIDA-07 | 2 | | AIDA-20 | 4 |
-| AIDA-08 | 2 | | AIDA-21 | 1 |
-| AIDA-09 | 3 | | AIDA-22 | 7 |
-| AIDA-10 | 1 | | AIDA-23 | 7 |
-| AIDA-11 | 1 | | AIDA-24 | 7 |
-| AIDA-12 | 2,4,7 | | AIDA-18 | backlog |
-
-**Coverage: 23/23 MVP requirements mapped. No orphans.** (AIDA-18 deferred to backlog.)
-
----
-*Last updated: 2026-07-24 — Phase 6 (AIDA Insight) planned via /gsd:plan-phase 6: 7 plans across 4 waves (schema foundation → deterministic clustering + SQL aggregates + KB-gap/prompt pairs + CSAT capture → insight-run orchestrator/job → /insights UI). Formula-level plans (leader-clustering math, pgvector KNN, raw-SQL aggregates, Zod schemas) carried verbatim from 06-RESEARCH.md. AIDA-17; binding AIDA-13/19/20.*
-*Last updated: 2026-07-24 — Phase 6 (AIDA Insight) EXECUTION COMPLETE: all 7 plans across 4 waves done (06-01 schema, 06-02 clustering math, 06-03 SQL aggregates, 06-04 KB-gap + prompts, 06-05 CSAT capture, 06-06 insight-run orchestrator, 06-07 /insights UI). AIDA-17 fully code-complete end-to-end. Phase checkbox checked; combined-suite verification + phase-goal check + human sign-off remain before Phase 7 begins.*
-*Last updated: 2026-07-28 — Phase 7 (Launch Readiness) planned via /gsd:plan-phase 7: 12 plans across 6 waves. Wave 1 is the repo-hygiene/LF-renormalization pass ALONE (a repo-wide `git add --renormalize .` cannot run in parallel with any other plan). Wave 2 runs five independent foundations in parallel (demo dataset, branding settings, backup/ops, CI + community files, docs-site scaffold); Wave 3 adds demo mode + visual asset capture; Wave 4 the security pass alone (it audits every prior plan's output, including demo mode's documented credentials and the backup scripts); Wave 5 the README rewrite + the docs content in parallel; Wave 6 the launch close-out. Requirements: AIDA-22, AIDA-23, AIDA-24 + the AIDA-12 branding remainder (D-16). Branding ships name-only per D-16's fallback clause — logo upload and a public tagline are both logged as deferred ideas (07-03). Tagging, GitHub Pages enablement and outreach are human-only steps captured in LAUNCH.md (D-15).*
-*Last updated: 2026-07-29 — Phase 7 Wave 1 (07-01) and Wave 2 (07-02..07-06) EXECUTION COMPLETE: 6/12 plans done, merged to `master` via PR #1 (https://github.com/afrizzal/aida/pull/1). Execution PAUSED here at the user's request — Wave 3 (07-07 demo mode, 07-08 visual assets) awaits a follow-up prompt before starting.*
-*Last updated: 2026-08-01 — Phase 7 Wave 4 EXECUTION COMPLETE: 07-09 (security pass, 5 fixes + 07-SECURITY-PASS.md) and 07-09.1 (gap closure, not one of the original 12 — replaces 07-09's three carried-forward Phase 4-6 manual verification items with automated egress/honesty/contrast tests) both done. 9/13 plans executed (12 original + the 07-09.1 gap-closure plan). Next: Wave 5 (07-10 README rewrite, 07-11 docs site content).*
-*Last updated: 2026-08-02 — Phase 7 Waves 3 and 4 MERGED to `master`. This log skipped Wave 3's merge entirely (07-07 + 07-08 landed via PR #2, `701c90f`) and recorded Wave 4 as executed-but-not-merged; both are now on master. Wave 4 merged via PR #3 (`b0c96f8`) after a rebase, then PR #4 (`9b475b7`) repaired the commit hashes that rebase orphaned across the planning docs — including 5 in `07-08-SUMMARY.md` that the earlier Wave 3 rebase had already broken unnoticed. **CI is green on `master` itself** (lint · typecheck · test 90/90 · build), so the badge 07-10 is about to put in the README is genuinely green — the pre-existing Biome lint debt that had been failing CI at its first step since 07-05 is cleared, with no rule downgraded to get there. **10/13 plans executed** — note the "9/13" in the entry above (and in `STATE.md` until now) was an undercount: inserting 07-09.1 moved the denominator 12 → 13 without incrementing the numerator for the extra completed plan. The `**Plans:** 10/13 plans executed` header and the checkbox list in this file were always right; STATE.md's progress bar was the side that drifted, and is now corrected to 57/60 (95%). Nothing left on an unmerged branch. Next: Wave 5 (07-10 README rewrite, 07-11 docs site content).*
-*Last updated: 2026-09-03 — Phase 7 (Launch Readiness) fully CLOSED: Wave 5 (07-10 README rewrite + 07-11 docs site content, parallel agents over disjoint files) merged via PR #6 (`a2d0a13`), and Wave 6 (07-12, this plan) closed the phase out. 07-12 ran the full 8-gate matrix against merged master (biome/tsc/unit/integration/e2e/product build/docs build/real docker-compose cold start), wrote `CHANGELOG.md` (v1.0.0 release notes) and `LAUNCH.md` (the maintainer's ordered human-only launch checklist), and reconciled the planning records: REQUIREMENTS.md was already 23/23 complete (each of AIDA-12/22/23/24 had been flipped by its own owning plan as it landed — 07-03, 07-07, 07-10 — so `gsd-tools requirements mark-complete` was a verified no-op here, not a fix). **13/13 plans complete, all 6 waves.** One correction to this file's own prior wave bookkeeping: 07-09.1 stays recorded as **Wave 4** (matching its own PLAN.md frontmatter and every prior entry in this log, including the 2026-08-01/08-02 entries above) — a dispatch-time note for this plan suggested moving it to Wave 5, but that contradicts the plan's own frontmatter and the historical record of when it actually ran (alongside 07-09, before Wave 5's README/docs-site pair), so the historically-accurate Wave 4 was kept and the suggestion was not applied. See `.planning/phases/07-launch-readiness/07-12-SUMMARY.md` for the full evidence trail and the human sign-off record.*
-*Last updated: 2026-09-04 — 07-12's Task 4 human-verify checkpoint answered: the maintainer replied "approved, bump SDK-nya nanti setelah phase 7 ditutup" (approved; the `@anthropic-ai/sdk` version bump deferred to a post-v1 quick task), no blockers raised. **Phase 7 and the v1 milestone are now formally CLOSED.** Remaining work is entirely the maintainer's own, tracked in `LAUNCH.md`.*
+- **AIDA-18** `Stretch` — AIDA proposes a new KB article drafted from one or more resolved tickets, for admin review/approval. Never scheduled in v1; carried into the next milestone's requirements discussion.
+- **Seeds** (auto-surface at `/gsd-new-milestone`; details in `seeds/` and `research/plane-inspiration.md`):
+  - SEED-001 issue-tracker bridge (Plane / GitHub Issues) · SEED-002 public API + tokens + signed webhooks · SEED-003 ticket relations / merge / snooze · SEED-004 custom workflow states + SLA pause · SEED-005 saved views + bulk actions · SEED-006 command palette + keyboard inbox · SEED-007 team invite flow + roles · SEED-008 notifications + @mentions · SEED-009 lifecycle automations (auto-close) · SEED-010 repo-health installer + version gate
+- Longer-horizon (PROJECT.md Out of Scope until a milestone pulls them in): live chat widget, more channels (WhatsApp/social/voice), i18n UI, SSO/SAML + advanced RBAC, hosted offering.

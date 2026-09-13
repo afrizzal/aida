@@ -10,13 +10,35 @@ Launch beachhead is **customer support**, but the ticketing core is built generi
 
 **Ship a star-worthy, genuinely useful self-hostable AI helpdesk MLP whose AI experience (triage → cited RAG drafted replies → AIDA Insight) and one-command self-host (`docker compose up`) are the wedge.** Everything else exists to make that experience real, trustworthy (human-in-the-loop, privacy-first), and easy to run.
 
-## Current Milestone: v1 — Minimum Lovable Helpdesk
+## Current State
+
+**Shipped: v1.0.0 "Minimum Lovable Helpdesk" — 2026-09-13** (code-complete, verified, archived via `/gsd-complete-milestone`; 7 phases, 60 plans, 154 tasks, 401 commits over 78 days). The public release itself — placeholder security contact, repository settings, `git tag v1.0.0`, GitHub release, Pages — is still the maintainer's `LAUNCH.md` checklist.
+
+What exists today: multi-tenant ticketing core (shared inbox + FTS, contacts, tags/custom fields, SLA timers, attachments, public intake + tokenized status page, CSAT), email channel (IMAP ingest, SMTP replies, encrypted settings), model-agnostic LLM port (OpenAI/Anthropic/Ollama) with advisory triage and a DB-enforced append-only audit log, RAG knowledge base with cited drafts behind a human gate, AIDA Insight analytics, one-command self-host with `DEMO_MODE`, backup/restore, CI, docs site, star-ready README, and a written security pass with a runtime egress proof.
+
+Known gaps accepted for v1: no team invite flow (admin/agent are created via setup/bootstrap only), fixed `TicketStatus` enum, no public API/webhooks, no notifications/mentions, no logo upload, no backup scheduler, `POSTGRES_PASSWORD` not URL-encoded in `DATABASE_URL`. Two human checks remain open (Phase 5 aesthetic visual pass, Phase 6 real-LLM Insight quality). Full lists: `STATE.md` → Deferred Items, `milestones/v1.0.0-phases/07-launch-readiness/deferred-items.md`, `07-SECURITY-PASS.md`.
+
+<details>
+<summary>v1 milestone goal as originally planned</summary>
 
 **Goal:** A self-hostable helpdesk an SMB support team would actually adopt — core ticketing + email/web intake + the three AI wedges (triage, RAG drafted replies, Insight) + BYO-LLM — packaged so a stranger can `docker compose up` and be impressed, and so the public repo is star-ready.
 
 **Target capabilities:** core ticketing & shared inbox; web + email intake; model-agnostic AI triage; RAG knowledge base with cited drafted replies behind a human-approval gate; AIDA Insight analytics; one-command self-host; star-ready README + docs.
 
 **Key context:** crowded category — differentiation is *AI-native + self-host + BYO/local LLM + privacy + no usage fees*. Riskiest/most-impressive AI is introduced only after the core helpdesk works. Repo health (README/GIF/docs) is a milestone deliverable, not an afterthought.
+
+</details>
+
+## Next Milestone Goals
+
+Not yet defined — `/gsd-new-milestone` decides scope and requirements. Candidates on the table as of 2026-09-13 (each a dormant seed in `.planning/seeds/`, researched in `research/plane-inspiration.md`):
+
+1. **Team & inbox ergonomics** — invite flow + roles (SEED-007, closes the loudest v1 gap), saved views + bulk actions (SEED-005), command palette / keyboard inbox (SEED-006), auto-close automation (SEED-009)
+2. **Ticket lifecycle** — relations / merge / snooze (SEED-003), custom workflow states with SLA pause (SEED-004), notifications + @mentions (SEED-008), plus AIDA-18 KB auto-generation from resolved tickets
+3. **Integrations** — public API + tokens + signed webhooks (SEED-002), then an issue-tracker bridge to Plane / GitHub Issues (SEED-001)
+4. **Repo health** — one-liner installer, version-bump CI gate, social-proof widgets (SEED-010)
+
+Guardrail carried forward: AIDA does **not** become a project-management tool; it bridges to one (see Out of Scope).
 
 ## Requirements
 
@@ -52,8 +74,9 @@ Launch beachhead is **customer support**, but the ticketing core is built generi
 
 <!-- v1 MLP. Full statements in REQUIREMENTS.md. -->
 
-None — all 23 v1 MVP requirements are validated as of Phase 7 (launch-readiness). AIDA-18 (KB
-auto-generation) remains Out of Scope/backlog for v1; see below.
+None — all 23 v1 MVP requirements shipped in v1.0.0 (see Validated). The next milestone's requirements are
+written by `/gsd-new-milestone`; candidates are listed under Next Milestone Goals. AIDA-18 (KB auto-generation,
+Stretch) is the one carried-over requirement statement — still backlog, never scheduled.
 
 ### Out of Scope
 
@@ -67,6 +90,8 @@ auto-generation) remains Out of Scope/backlog for v1; see below.
 - Fine-tuning / training models — AIDA orchestrates LLMs via API/local, it does not train them
 - Mobile apps — responsive web only
 - SSO/SAML, advanced RBAC beyond admin/agent — later
+- A built-in project-management module (Plane/Linear-style cycles, modules, gantt, pages) — never; a helpdesk with half a PM tool loses to both. Bridge tickets to the team's tracker instead (SEED-001; `research/plane-inspiration.md`, 2026-09-13)
+- Reusing AGPL-licensed code (e.g. makeplane/plane) — incompatible with Apache-2.0; patterns may be re-implemented clean-room, code never copied
 
 ## Context
 
@@ -77,6 +102,8 @@ auto-generation) remains Out of Scope/backlog for v1; see below.
 **Why now:** commercial AI helpdesks lock AI behind per-resolution pricing and host your data; open-source helpdesks have weak/absent AI. Local/BYO LLMs are now good enough for triage and viable for RAG, so an AI-native, privacy-first, self-hostable helpdesk is buildable and differentiated.
 
 **Technical environment:** Next.js 16 (App Router) + TypeScript + Prisma + PostgreSQL 16 + pgvector + pg-boss + a model-agnostic LLM layer + Tailwind/shadcn, all in one `docker compose` on a single host.
+
+**State after v1.0.0 (2026-09-13):** ~17.4k LOC TypeScript in `src/` (excluding the generated Prisma client) + ~6.2k LOC tests (unit 90, integration 30 on Testcontainers, e2e suites per phase + a11y + honesty invariants); 30 Prisma models/enums; 16 app routes; `website/` docs site as a separate pnpm project. Not yet publicly launched, so no user feedback themes yet. Technical debt and accepted gaps are tracked in `STATE.md` → Deferred Items and `milestones/v1.0.0-phases/07-launch-readiness/deferred-items.md`.
 
 **Architecture principles:**
 - Single server, minimal moving parts (pg-boss not Redis; pgvector in the same Postgres).
@@ -98,17 +125,26 @@ auto-generation) remains Out of Scope/backlog for v1; see below.
 
 | Decision | Rationale | Outcome |
 |---|---|---|
-| AI-native open-source helpdesk, self-host, BYO/local LLM | The unfilled market gap between expensive commercial AI and AI-less OSS | — Active |
-| Customer-support beachhead, generic core | Largest self-hoster/star audience + sharp incumbent contrast; core still serves IT/ITSM | — Active |
-| Apache-2.0 license | Permissive + patent grant → maximizes adoption & stars | — Active |
-| Single server (Next.js monolith + pg-boss + pgvector) | Easiest self-host (`docker compose up`); fewest moving parts | — Active |
-| AI after core helpdesk works (phase ordering) | De-risk; ship a usable product before the hardest part | — Active |
-| Human-in-the-loop for AI sends; citations required | Trust + anti-hallucination; the thing that separates "leads AI" from "uses ChatGPT" | — Active |
-| Repo health (README/GIF/docs) as a milestone deliverable | Verified top star-driver | — Active |
+| AI-native open-source helpdesk, self-host, BYO/local LLM | The unfilled market gap between expensive commercial AI and AI-less OSS | ✓ Good — v1.0.0 shipped on it; market validation pending public launch |
+| Customer-support beachhead, generic core | Largest self-hoster/star audience + sharp incumbent contrast; core still serves IT/ITSM | ✓ Good — core stayed generic (org-scoped, no support-only assumptions) |
+| Apache-2.0 license | Permissive + patent grant → maximizes adoption & stars | ✓ Good — also the reason Plane (AGPL) code can only inspire, never be copied |
+| Single server (Next.js monolith + pg-boss + pgvector) | Easiest self-host (`docker compose up`); fewest moving parts | ✓ Good — 4 containers vs. e.g. Plane's 13; no Redis ever needed |
+| AI after core helpdesk works (phase ordering) | De-risk; ship a usable product before the hardest part | ✓ Good — AI phases were thin wiring over Phase 1–3 entrypoints |
+| Human-in-the-loop for AI sends; citations required | Trust + anti-hallucination; the thing that separates "leads AI" from "uses ChatGPT" | ✓ Good — Insert-then-Send gate + `DRAFT_APPROVED` audit; groundedness gate in code |
+| Repo health (README/GIF/docs) as a milestone deliverable | Verified top star-driver | ✓ Good — but it cost a full 13-plan phase; budget it explicitly next time |
+| Better Auth (org + admin plugins) + `scopedDb` allowlist for tenancy (01-02/01-03) | One auth library covering sessions, orgs and roles; tenant scoping enforced in the data layer, not per query | ✓ Good — isolation proven by never-mocked Testcontainers tests; invite flow still unbuilt (⚠️ SEED-007) |
+| Append-only `AuditEvent` enforced by a DB trigger (04-01) | Audit integrity cannot depend on app code | ✓ Good — side effect: no destructive reset exists, so seed/demo paths guard on `ticket.count()` |
+| One LLM port `complete<T>()` with structured outputs and zero tool surface (04-02) | Prompt-injection can only produce data, never actions | ✓ Good — injection tests hold across triage, drafts and Insight |
+| Fixed `TicketStatus` enum for v1 | Simplicity; SLA/filters/Insight SQL reason about it directly | ⚠️ Revisit — teams will want custom states + SLA pause (SEED-004) |
+| Runtime egress test on a deny-all Docker network instead of a static sweep (07-09.1) | A runtime claim needs a runtime proof | ✓ Good — found the Prisma CLI checkpoint leak a static sweep had deprioritized |
+| Two-tier brand color (`--primary` bg / `--primary-emphasis` text) (07-09.1 follow-up) | Same hue cannot pass WCAG AA as both background and text | ✓ Good — a11y contrast suite 8/8; screenshots re-captured once |
+| Honest demo stamping (`provider: "demo"`) + strict `DEMO_MODE === "true"` (07-02/07-07) | Stored demo AI output must never look like a live model call | ✓ Good — README/docs make the stored-vs-live distinction explicit |
+| GSD balanced profile (Opus plans, Sonnet executes) | Token cost without a quality hit | ✓ Good — 60 plans, no recorded quality complaint |
+| Milestone closed as override_closeout, no tag (2026-09-13) | Remaining items are human-only (visual/LLM-quality passes, LAUNCH.md); tagging before the placeholder contact is replaced would ship a wrong contact | — Pending: LAUNCH.md steps, then tag v1.0.0 |
 
 ## Evolution
 
-This document evolves at phase/milestone transitions (validated → move requirements; new ones → Active; decisions → table). v1 = Minimum Lovable Helpdesk; post-v1 candidates: KB autogen (AIDA-18), live chat, more channels, hosted offering.
+This document evolves at phase/milestone transitions (validated → move requirements; new ones → Active; decisions → table). v1.0.0 = Minimum Lovable Helpdesk (shipped 2026-09-13). Post-v1 candidates are the ten seeds + AIDA-18 listed under Next Milestone Goals; longer-horizon ideas (live chat, more channels, hosted offering) stay in Out of Scope until a milestone pulls them in.
 
 ---
 *Last updated: 2026-07-18 — Phase 4 (ai-foundation) fully closed out (7/7 plans, 6/6 waves): 04-07 gap closure fixed the sole UAT gap (test 2, provider-switch model reset) — 04-UAT.md is now 10/10 pass, AIDA-13/AIDA-14/AIDA-19/AIDA-20 all validated end-to-end. Non-blocking human verification items (dark-mode visual pass, live-provider smoke test, network-egress capture) remain open per 04-VERIFICATION.md.*
@@ -116,3 +152,4 @@ This document evolves at phase/milestone transitions (validated → move require
 *Last updated: 2026-07-25 — Phase 6 (aida-insight) fully closed out (7/7 plans, 4/4 waves): InsightRun/TicketEmbedding/CsatResponse schema, deterministic leader-clustering + redact-then-embed excerpts, SQL volume-driver/SLA/CSAT aggregates, KB-gap KNN + schema-forced cluster-label/narrative prompts, public CSAT capture, the insight-run pg-boss orchestrator, and the /insights UI (period tabs, guarded generate button, 4 design-system cards, sidebar nav). AIDA-17 validated end-to-end — 06-VERIFICATION.md: 4/4 ROADMAP success criteria confirmed against a live Testcontainers-backed integration run (reproducibility, AI-off degradation, redaction proof). Combined-suite verification (tsc clean, 81/81 unit, 26/26 integration, production build) and phase-goal check both passed. Non-blocking human verification items (insights page visual pass, CSAT click-through, real-LLM output quality) remain open per 06-HUMAN-UAT.md.*
 *Last updated: 2026-09-03 — Phase 7 (launch-readiness) fully closed out (13/13 plans, 6/6 waves): demo dataset + `DEMO_MODE` (AIDA-22), the Branding settings tab closing the AIDA-12 remainder, backup/restore scripts + ops runbook + a written security pass (AIDA-24), the star-ready README + Starlight docs site (AIDA-23), CI/community files, and the 07-12 launch close-out (8-gate run, `CHANGELOG.md`, `LAUNCH.md`, planning-records reconciliation). **All 23 v1 MVP requirements are now Validated; AIDA-18 remains Out of Scope/backlog.** AIDA-12/22/23/24 moved from Active to Validated above; AIDA-13/AIDA-20 were already Validated (Phase 4) and needed no change. v1 — Minimum Lovable Helpdesk — is code-complete; the only remaining steps are the human-only items in `LAUNCH.md` (repo settings, tag, release, outreach).*
 *Last updated: 2026-09-04 — Phase 7 verification PASSED (07-VERIFICATION.md: 23/23 must-haves; the three behaviour invariants — demo-boot idempotency, seed refuse-guard, backup/restore round trip — were executed for real against a live docker compose stack by the orchestrator and embedded as evidence). Code review 07-REVIEW.md: 0 critical, 3 warning, 2 info (advisory, non-blocking). Maintainer sign-off on 07-12 received 2026-09-04. Phase 7 marked complete via phase.complete; v1 milestone is code-complete pending the maintainer's own LAUNCH.md steps. Post-v1 follow-ups logged in STATE.md Open Todos (`@anthropic-ai/sdk` 0.110→0.123 bump; persisted regression tests for the three invariants).*
+*Last updated: 2026-09-13 after v1.0.0 milestone — closed via `/gsd-complete-milestone` (override closeout: 23 acknowledged items, no git tag — `LAUNCH.md` owns tag/release). "Current Milestone" section replaced by Current State + Next Milestone Goals; Key Decisions table given outcomes and extended with the v1 architecture decisions; Out of Scope gained the "no PM module / no AGPL code" guardrails from the Plane research (`research/plane-inspiration.md`, SEED-001…010). Archives: `milestones/v1.0.0-{ROADMAP,REQUIREMENTS,STATE}.md`, `milestones/v1.0.0-phases/`.*

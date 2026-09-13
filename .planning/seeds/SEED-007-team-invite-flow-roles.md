@@ -29,7 +29,7 @@ This seed will surface during `/gsd-new-milestone` when the milestone scope matc
 - Existing schema: `prisma/schema.prisma` (`model invitation`, `model member`, `model organization`) — Better Auth org + admin plugins (01-02).
 - Auth wiring: `src/lib/auth.ts`, `src/lib/auth-client.ts`, `src/lib/authz.ts`; bootstrap of first org/admin: `src/lib/bootstrap.ts` (`createFirstOrgAndAdmin`).
 - Outbound email job to reuse: SMTP send path from 03-05 (`src/lib/channels/email/`).
-- Where the gap is recorded: `.planning/phases/07-launch-readiness/deferred-items.md` ("From 07-09"), `README.md` comparison footnote.
+- Where the gap is recorded: `.planning/milestones/v1.0.0-phases/07-launch-readiness/deferred-items.md` ("From 07-09"), `README.md` comparison footnote.
 
 ## Notes
 
