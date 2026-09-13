@@ -75,3 +75,36 @@ Pendapat Codex untuk K1 sampai K5 masih ditunggu. Keputusan bisa berubah sesudah
 - `AIDA-10` di v1 tercentang "admins can invite", padahal alur undangan tidak ada (F-16). Dicatat jujur di `PROJECT.md` → Active dan di AIDA-42, centang v1 tidak diubah.
 - Parser GSD hanya membaca `**Requirements:**` yang berdiri di baris sendiri dan menolak rentang ID. Format v1 yang menaruhnya satu baris dengan Timebox tidak terbaca, jadi roadmap v2 memakai baris terpisah.
 - Putaran berikutnya: baca jawaban Codex begitu selesai, lalu lanjut 0c sambil 0a menunggu regresi.
+
+## Putaran 2 (2026-11-07, 15.50 sampai 15.58 WIB)
+
+Dipicu oleh selesainya Codex putaran 1. Cek Berhenti total lolos lagi (tip `1ea4281`, `no-push-run-loop`, branch benar, Docker hidup). Regresi Rekriva masih berjalan, jadi 0a tetap ditunda.
+
+Codex putaran 1 selesai pukul 15.50, exit 0, `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Hasilnya 15 temuan: 10 HIGH, 5 MEDIUM.
+
+### Cek fakta atas klaim Codex
+
+| Klaim | Hasil cek |
+|---|---|
+| Link status memakai token sebagai otorisasi dan menampilkan semua pesan publik tiket | benar, `src/app/(public)/status/[token]/page.tsx` |
+| `scopedDb` hanya membatasi organisasi | benar, `src/lib/scoped-db.ts` |
+| `requireOrgDb()` tidak memeriksa ulang keanggotaan | nama fungsinya salah, yang ada `getScopedDb` (27 pemanggil). Substansinya benar: hanya `requireOrgAdmin` yang membaca `member` |
+| Backup terdiri atas dump dan arsip upload | benar, `scripts/backup.sh` |
+| Worker SLA memakai SQL mentah atas enum `status` | benar, `src/lib/worker/jobs/sla-flag.ts`. Catatan: breadcrumb seed menyebut `src/lib/tickets/jobs/`, yang tidak ada |
+| Guard seed hanya menghitung tiket | benar, `prisma/seed.ts` |
+| `pnpm audit --prod` exit non-zero selama ada advisory | benar: exit 1 untuk `--audit-level=high` dan `low` sekarang |
+
+### Keputusan
+
+| No | Pertanyaan | Opsi | Pendapat Codex | Keputusan | Alasan |
+|---|---|---|---|---|---|
+| K1 | Isi `Depends on` | rantai piagam saja, atau ditambah | setuju, tetapi tabel risiko harus berisi tindakan | rantai piagam, tabel diberi kolom cek dan fallback | Codex benar: "fase berikutnya harus memeriksa" tidak bisa ditindaklanjuti |
+| K2 | Letak halaman proyek dan drawer task | Fase 14 atau 15 | setuju dengan Fase 15, asal Fase 14 menyediakan operasi dan otorisasinya | Fase 15, kriteria Fase 14 ditambah | sesuai piagam dan saran Codex |
+| K3 | Temuan v1 di luar tabel | kerjakan atau lewati | setuju | kerjakan | tujuan piagam |
+| K4 | Font Inter | sistem, vendor, atau catat alasan | tidak setuju dengan opsi catat alasan | berubah pikiran, ikut Codex: tanpa fetch Google, default stack sistem | dokumentasi tidak menutup egress, dan stack sistem tidak butuh paket |
+| K5 | Lebar SEED-004 | penuh atau `pendingReason` | setuju penuh, minta dipecah | dipecah menjadi AIDA-56, AIDA-97, AIDA-57 | migrasi berisiko tinggi |
+| T1 sampai T15 | Terima temuan? | terima, tolak, atau sebagian | | terima semua 15 | semuanya mengetatkan acceptance tanpa mengurangi scope. Tiga ID baru: AIDA-97, AIDA-98, AIDA-99 |
+
+Commit: `995ed9e` docs(v2.0): tighten requirements after Codex roadmap critique. Cek ulang: `init.phase-op` menemukan fasenya, `roadmap.analyze` 10 fase dengan scope `complete`, dan 76/76 requirement terpetakan tanpa ganda.
+
+Codex putaran 2 (verifikasi revisi) berjalan dari ekspor `995ed9e`, `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Ekspor lama `tmp.6gJHaLnEVS` di `TMPDIR` tidak dihapus, karena aturan deny `rm -rf` dan isinya hanya file tracked.
