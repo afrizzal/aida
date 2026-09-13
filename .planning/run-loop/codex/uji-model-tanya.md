@@ -1,0 +1,1 @@
+Balas satu kata: siap
