@@ -78,33 +78,48 @@ Clean-room rule for this and every later section: `PIAGAM.md` → Clean-room. So
 - [ ] **AIDA-69** `v2` — A workspace can define teams, add and remove their members, and assign teams to projects. [Charter, FITUR] Accept: an org-scoped `Team` model with unmocked isolation; tests cover membership changes and project assignment.
 - [ ] **AIDA-70** `v2` — Projects can be archived and restored, and a user can favorite a project. [Charter, FITUR] Accept: archived projects leave default lists and can be restored; favorites are per user.
 - [ ] **AIDA-71** `v2` — A private project is hidden from non-members, who can neither read nor change it. [Charter, FITUR] Accept: unmocked tests as a member, a non-member of the same organization, and a user of another organization cover every read and write path of the project and its tasks, subtasks, comments, attachments and activity; no relation can point to a task in another project or organization. `scopedDb` alone only scopes by organization, so this needs its own server-side check. Search and notifications inherit the rule in Phase 16, ticket links and AI suggestions in Phase 17.
+- [ ] **AIDA-100** `v2` — A project has an icon, a description, a status from a fixed set, a due date, and progress derived from its tasks. [FITUR] Accept: progress is computed from tasks, never typed in, and tested, including an empty project; status changes write activity; the status set is decided in the Phase 14 CONTEXT.
+- [ ] **AIDA-101** `v2` — Each task has a key made of its project prefix and a number, plus a start date, an estimate, and a rich-text description. [FITUR] Accept: keys stay unique under concurrent creation, tested the way `TicketCounter` is; the description renders through the sanitized markdown path; a start date after the due date is rejected.
+- [ ] **AIDA-102** `v2` — A task can repeat daily, weekly or monthly, and completing it creates the next occurrence. [FITUR] Accept: tests cover each rule, month ends and time zones; the next occurrence is created exactly once, even when completion is retried.
+- [ ] **AIDA-103** `v2` — A task can be duplicated, moved to another project, favorited, archived and restored, and deleted. [FITUR] Accept: a moved task gets a new key while its old link still resolves; archive keeps history; delete needs confirmation and writes an audit event; private-project rules hold across a move.
+- [ ] **AIDA-104** `v2` — A project can be edited, duplicated with or without its tasks, and deleted. [FITUR] Accept: both duplicate options are tested; delete needs confirmation, writes an audit event, and never removes `AuditEvent` rows.
+- [ ] **AIDA-105** `v2` — A project can have dated milestones, and a task can belong to one. [FITUR] Accept: org-scoped with an unmocked isolation test; milestones show in the Timeline (AIDA-78) and the workspace overview (AIDA-107).
 
 ## Work views
 
-- [ ] **AIDA-72** `v2` — Projects have a list page in grid and list form and a detail page with overview and progress, including favorite and archive controls. [FITUR] Accept: E2E covers both list forms, the detail page's overview and progress, and favorite and archive from both pages.
+- [ ] **AIDA-72** `v2` — Projects have a list page in grid, list and table form, with search, a status filter and sorting, and a detail page with tabs for the overview, each Phase 15 view and activity, including favorite and archive controls. [FITUR] Accept: E2E covers the three list forms, search, filter and sort, the detail page's overview and progress, and favorite and archive from both pages.
 - [ ] **AIDA-73** `v2` — A task opens in a drawer or on a full page. [FITUR] Accept: both render the same data and deep links work.
 - [ ] **AIDA-74** `v2` — The List view has collapsible groups, a quick-add composer and multi-select bulk actions. [Charter, FITUR] Accept: E2E covers collapsing a group, quick add and each bulk action offered, and checks the result after reload.
 - [ ] **AIDA-75** `v2` — The Board view has a column per status, drag and drop, collapsible columns and a keyboard alternative. [Charter, FITUR] Accept: E2E performs the same move by mouse and by keyboard and collapses a column, and both persist after reload.
-- [ ] **AIDA-76** `v2` — The Table view has columns with in-cell editing. [Charter, FITUR] Accept: edits persist after reload and invalid values are rejected.
-- [ ] **AIDA-77** `v2` — The Calendar view shows a month and lets a task move to another date. [Charter, FITUR] Accept: a move persists after reload; a keyboard alternative exists; time zones are tested.
+- [ ] **AIDA-76** `v2` — The Table view has in-cell editing, a choice of visible columns, and grouping. [Charter, FITUR] Accept: edits and the column choice persist after reload, and invalid values are rejected.
+- [ ] **AIDA-77** `v2` — The Calendar view shows a month or a week, can add a task on a chosen day, and lets a task move to another date. [Charter, FITUR] Accept: a move persists after reload; a keyboard alternative exists; time zones are tested.
 - [ ] **AIDA-78** `v2` — The Timeline view supports zoom, grouping and moving a schedule. [Charter, FITUR] Accept: zoom, grouping and a schedule move each work and persist after reload; a keyboard alternative exists.
 - [ ] **AIDA-79** `v2` — The Files view lists project attachments in grid and list form. [Charter, FITUR] Accept: access follows project privacy.
 - [ ] **AIDA-80** `v2` — A user can save a view per project. [Charter, FITUR] Accept: stored per user, using the SEED-005 model when Phase 11 shipped it.
+- [ ] **AIDA-106** `v2` — Tasks, Calendar and Timeline also work at workspace level, across every project the user may see. [FITUR] Accept: the workspace Tasks page offers list, board and table with grouping and a column choice; private projects are excluded for non-members, with an unmocked test.
 
 ## Workspace
 
-- [ ] **AIDA-81** `v2` — Home summarizes upcoming tasks, projects, activity and assigned tickets. [Charter, FITUR] Accept: E2E on seeded data.
+- [ ] **AIDA-81** `v2` — Home summarizes upcoming tasks, projects, activity and assigned tickets. [Charter, FITUR] Accept: E2E on seeded data covers the summary counts, the user's tasks split into upcoming, overdue and done with completion in place, project progress, deadlines grouped by day, recent activity, and the quick actions.
 - [ ] **AIDA-82** `v2` — My Tasks shows the user's tasks across projects in a list and in at least one other Phase 15 view. [Charter, FITUR] Accept: E2E covers both views; private projects are honored.
-- [ ] **AIDA-83** `v2` — One notification center covers ticket and task events, with categories, an unread filter and a detail panel. [Charter, FITUR, SEED-008] Accept: it extends AIDA-44 rather than adding a second system; E2E covers categories, the unread filter and the detail panel; "Inbox" keeps meaning tickets.
-- [ ] **AIDA-84** `v2` — An Activity page shows a filtered timeline. [Charter, FITUR] Accept: it reads the AIDA-68 source and honors project privacy.
+- [ ] **AIDA-83** `v2` — One notification center covers ticket and task events, with categories, an unread filter and a detail panel. [Charter, FITUR, SEED-008] Accept: it extends AIDA-44 rather than adding a second system; E2E covers categories by event type, mark all as read, the unread filter, the detail panel and a project at-risk alert; "Inbox" keeps meaning tickets.
+- [ ] **AIDA-84** `v2` — An Activity page shows a timeline filtered by event type and by person. [Charter, FITUR] Accept: it reads the AIDA-68 source and honors project privacy; E2E covers both filters.
 - [ ] **AIDA-85** `v2` — Search returns results grouped by task, project, person and ticket. [Charter, FITUR] Accept: Postgres FTS only; org-scoped; private projects excluded for non-members, with an unmocked test.
 - [ ] **AIDA-86** `v2` — The command palette, shortcuts and context menus reach the Projects module through the AIDA-49 registry. [FITUR] Accept: one mechanism, no second palette; tests cover command search, each shortcut and each context menu in Projects.
-- [ ] **AIDA-87** `v2` — A Members page lists members, roles, invitations and teams. [Charter, FITUR] Accept: it reuses AIDA-42, AIDA-43 and AIDA-69.
+- [ ] **AIDA-87** `v2` — A Members page lists members with search and a role filter, invitations and teams, and can invite several addresses at once with a role and a team. [Charter, FITUR] Accept: it reuses AIDA-42, AIDA-43 and AIDA-69; E2E covers search, the role filter and a multi-address invitation.
 - [ ] **AIDA-88** `v2` — First-run onboarding guides workspace, first project, template and invitations, and complements `/setup`. [Charter, FITUR] Accept: `/setup` still works unchanged; E2E covers skipping, finishing, starting from a template and sending an invitation.
 - [ ] **AIDA-89** `v2` — A user can set theme, accent, density, sidebar size and motion. [Charter, FITUR] Accept: stored per user through design tokens and applied again after re-login; the accent cannot break the brand color rule, proven by the contrast tests.
-- [ ] **AIDA-98** `v2` — A user can set week start, date format, time zone, start page and how a task opens. [Charter, FITUR] Accept: each setting changes what that user sees and survives re-login, each one tested.
+- [ ] **AIDA-98** `v2` — A user can set week start, date format, time zone, start page, how a task opens, and which view a project opens on. [Charter, FITUR] Accept: each setting changes what that user sees and survives re-login, each one tested.
 - [ ] **AIDA-99** `v2` — A user can change their password. [Charter, FITUR] Accept: the current password is required; the user's other sessions are revoked; tests cover a wrong current password.
-- [ ] **AIDA-90** `v2` — Every Projects and Workspace page handles empty, loading, error and narrow-screen states. [FITUR] Accept: E2E or component checks per page, following the AIDA empty-state pattern.
+- [ ] **AIDA-90** `v2` — Every Projects and Workspace page handles empty, loading, error and narrow-screen states, and the module has a not-found page and an offline notice. [FITUR] Accept: E2E or component checks per page, following the AIDA empty-state pattern.
+- [ ] **AIDA-107** `v2` — A workspace overview shows project portfolio status, tasks by status, workload per person and upcoming milestones. [FITUR] Accept: the numbers come from org-scoped SQL aggregates tested against seeded data; private projects are honored.
+- [ ] **AIDA-108** `v2` — Favorites and Archive pages list the user's favorite projects and tasks, and the archived tasks and projects with a restore action. [FITUR] Accept: E2E covers favoriting, archiving, restoring and both empty states.
+- [ ] **AIDA-109** `v2` — Each team has a page with its projects, open tasks and members, and teams can be created and edited from the UI. [FITUR] Accept: E2E covers create, edit and the team page, on top of the AIDA-69 logic.
+- [ ] **AIDA-110** `v2` — A guest role sees only the projects shared with it and no helpdesk data, and admins choose which roles may create projects and invite guests. [FITUR] Accept: unmocked tests prove a guest cannot reach tickets, contacts, the KB, settings or unshared projects through any path; the permission choices are enforced on the server.
+- [ ] **AIDA-111** `v2` — A user can switch between the workspaces they belong to and create a new workspace. [FITUR] Accept: every page and query follows the active workspace, with unmocked isolation tests; who may create a workspace is decided in the Phase 16 CONTEXT, and the conservative default is instance admins only; `/setup` keeps creating the first one.
+- [ ] **AIDA-112** `v2` — A user can edit their profile name, title and avatar color. [FITUR] Accept: the change shows wherever the user appears; the email is read-only on this page.
+- [ ] **AIDA-113** `v2` — A user can list their active sessions and sign out of the others. [FITUR] Accept: a revoked session is refused on its next request, tested.
+- [ ] **AIDA-114** `v2` — A user can turn on two-factor authentication with an authenticator app and recovery codes. [FITUR] Accept: once enabled, login needs the second factor; recovery codes are single-use and stored hashed; nothing leaves the server; tests use generated codes; any new package follows the charter's package rule.
 
 ## Unification
 
@@ -204,5 +219,20 @@ Clean-room rule for this and every later section: `PIAGAM.md` → Clean-room. So
 | AIDA-94 | Phase 17 | Pending |
 | AIDA-95 | Phase 17 | Pending |
 | AIDA-96 | Phase 17 | Pending |
+| AIDA-100 | Phase 14 | Pending |
+| AIDA-101 | Phase 14 | Pending |
+| AIDA-102 | Phase 14 | Pending |
+| AIDA-103 | Phase 14 | Pending |
+| AIDA-104 | Phase 14 | Pending |
+| AIDA-105 | Phase 14 | Pending |
+| AIDA-106 | Phase 15 | Pending |
+| AIDA-107 | Phase 16 | Pending |
+| AIDA-108 | Phase 16 | Pending |
+| AIDA-109 | Phase 16 | Pending |
+| AIDA-110 | Phase 16 | Pending |
+| AIDA-111 | Phase 16 | Pending |
+| AIDA-112 | Phase 16 | Pending |
+| AIDA-113 | Phase 16 | Pending |
+| AIDA-114 | Phase 16 | Pending |
 
-76 requirements: AIDA-18 and AIDA-25 through AIDA-99. Revised after Codex roadmap critique rounds 1 to 3 (`run-loop/codex/roadmap-v2-jawab.md`, `roadmap-v2-r2-jawab.md`, `roadmap-v2-r3-jawab.md`). Item 0c of the run queue may add rows after walking the public demo; new IDs continue at AIDA-100.
+91 requirements: AIDA-18 and AIDA-25 through AIDA-114. Revised after Codex roadmap critique rounds 1 to 3 (`run-loop/codex/roadmap-v2-jawab.md`, `roadmap-v2-r2-jawab.md`, `roadmap-v2-r3-jawab.md`). Run-queue item 0c walked the public demo and added AIDA-100 through AIDA-114 (`run-loop/FITUR-PROJECTS.md` → Hasil penelusuran demo); new IDs continue at AIDA-115.

@@ -31,7 +31,7 @@ Known gaps accepted for v1: no team invite flow (admin/agent are created via set
 
 ## Current Milestone: v2.0 Helpdesk & Projects
 
-**Goal:** close the v1 gaps that need no human, then build a Projects module inside AIDA with a real backend. Phases 8–17 in `ROADMAP.md`, 73 requirements in `REQUIREMENTS.md`.
+**Goal:** close the v1 gaps that need no human, then build a Projects module inside AIDA with a real backend. Phases 8–17 in `ROADMAP.md`, 91 requirements in `REQUIREMENTS.md`.
 
 **How it runs:** on branch `v2/run-loop` under `run-loop/PIAGAM.md`. Autonomy stays at level 2: the branch is a draft and the owner applies it. Human sign-off steps become manual items, never recorded approvals.
 
@@ -71,7 +71,7 @@ Known gaps accepted for v1: no team invite flow (admin/agent are created via set
 
 <!-- v1 MLP. Full statements in REQUIREMENTS.md. -->
 
-v2.0: AIDA-18 and AIDA-25 through AIDA-96, in `REQUIREMENTS.md`. All 23 v1 MVP requirements shipped in v1.0.0
+v2.0: AIDA-18 and AIDA-25 through AIDA-114, in `REQUIREMENTS.md`. All 23 v1 MVP requirements shipped in v1.0.0
 (see Validated). One correction: AIDA-10 is listed as validated, but its "admins can invite" clause never shipped
 (F-16 in `07-SECURITY-PASS.md`). AIDA-42 delivers that clause.
 

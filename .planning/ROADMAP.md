@@ -27,7 +27,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 **Milestone goal:** close the v1 gaps that need no human, then build a Projects module inside AIDA with a real backend. The owner's decision behind this is recorded in `PROJECT.md` → Key Decisions (2026-11-07).
 **Granularity:** 10 phases. A phase may split into more plans, but nothing in it may be dropped.
 **Sequencing:** phases run in numeric order. `Depends on` lists only the hard parking chain from `run-loop/PIAGAM.md`; softer links are in Cross-phase risks below.
-**Coverage:** 76/76 requirements mapped (`REQUIREMENTS.md`).
+**Coverage:** 91/91 requirements mapped (`REQUIREMENTS.md`).
 
 - [ ] **Phase 8: Security Hardening** — Dependency audit to zero critical and high, non-root containers, CSP, trusted client IP, public-route abuse controls
 - [ ] **Phase 9: Operations** — Backup schedule, logo upload, password encoding, single `<h1>`, seed guard, permanent regression tests, repo health
@@ -147,7 +147,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 ### Phase 14: Projects Foundation
 
 **Depends on:** Nothing beyond run order
-**Requirements:** AIDA-64, AIDA-65, AIDA-66, AIDA-67, AIDA-68, AIDA-69, AIDA-70, AIDA-71
+**Requirements:** AIDA-64, AIDA-65, AIDA-66, AIDA-67, AIDA-68, AIDA-69, AIDA-70, AIDA-71, AIDA-100, AIDA-101, AIDA-102, AIDA-103, AIDA-104, AIDA-105
 **UI hint**: no
 **Goal:** The Projects module has a correct, tenant-safe data and logic layer before any view is built.
 **Success Criteria (what must be TRUE):**
@@ -158,13 +158,14 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 4. The logic layer offers every operation the Phase 15 views need (move, reorder, bulk update, date change), each authorized on the server.
 5. Archive, restore and favorite work.
 6. `git grep -i -n gr8r -- src docs website README.md public prisma tests` is empty.
+7. Task keys stay unique under concurrency, a recurring task produces its next occurrence exactly once, and project progress is derived from tasks.
 
 **Plans:** 0 plans
 
 ### Phase 15: Work Views
 
 **Depends on:** Phase 14
-**Requirements:** AIDA-72, AIDA-73, AIDA-74, AIDA-75, AIDA-76, AIDA-77, AIDA-78, AIDA-79, AIDA-80
+**Requirements:** AIDA-72, AIDA-73, AIDA-74, AIDA-75, AIDA-76, AIDA-77, AIDA-78, AIDA-79, AIDA-80, AIDA-106
 **UI hint**: yes
 **Goal:** A team can plan and move work through the views it expects, all on real data.
 **Success Criteria (what must be TRUE):**
@@ -174,13 +175,14 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 3. Every drag has a keyboard alternative, proven by E2E.
 4. Saved views persist per user and per project.
 5. The clean-room grep is empty, and DESIGN-SYSTEM §9 passes.
+6. Workspace-level Tasks, Calendar and Timeline never show a private project to a non-member.
 
 **Plans:** 0 plans
 
 ### Phase 16: Workspace
 
 **Depends on:** Phase 10, Phase 14
-**Requirements:** AIDA-81, AIDA-82, AIDA-83, AIDA-84, AIDA-85, AIDA-86, AIDA-87, AIDA-88, AIDA-89, AIDA-90, AIDA-98, AIDA-99
+**Requirements:** AIDA-81, AIDA-82, AIDA-83, AIDA-84, AIDA-85, AIDA-86, AIDA-87, AIDA-88, AIDA-89, AIDA-90, AIDA-98, AIDA-99, AIDA-107, AIDA-108, AIDA-109, AIDA-110, AIDA-111, AIDA-112, AIDA-113, AIDA-114
 **UI hint**: yes
 **Goal:** Projects and tickets feel like one workspace, with one place for what is mine, what changed, and how I work.
 **Success Criteria (what must be TRUE):**
@@ -192,6 +194,8 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 5. Preferences persist per user and survive re-login, the accent cannot break the contrast tests, and a password change needs the current password.
 6. Every page handles empty, loading, error and narrow-screen states.
 7. The clean-room grep is empty, and DESIGN-SYSTEM §9 passes.
+8. A guest cannot reach helpdesk data or unshared projects, and switching workspaces never mixes data, proven by unmocked tests.
+9. Session revocation and two-factor login work end to end.
 
 **Plans:** 0 plans
 
