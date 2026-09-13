@@ -1,37 +1,37 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0.0
-milestone_name: Minimum Lovable Helpdesk
-current_phase: 07
-current_phase_name: launch-readiness
-status: Awaiting next milestone
-last_updated: "2026-09-13T22:36:18.958Z"
-last_activity: 2026-09-13
-last_activity_desc: Milestone v1.0.0 completed and archived (override closeout — 23 acknowledged items, see Deferred Items); no git tag (LAUNCH.md owns it)
+milestone: v2.0
+milestone_name: Helpdesk & Projects
+current_phase: 08
+current_phase_name: security-hardening
+status: Milestone opened, Phase 8 not started
+last_updated: "2026-11-07T08:46:16.000Z"
+last_activity: 2026-11-07
+last_activity_desc: Milestone v2.0 opened by hand under the run charter; roadmap critique by Codex pending
 progress:
-  total_phases: 7
-  completed_phases: 7
-  total_plans: 60
-  completed_plans: 60
-  percent: 100
+  total_phases: 10
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # STATE — AIDA
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-13 after v1.0.0)
+See: .planning/PROJECT.md (updated 2026-11-07, v2.0 opened)
 
 **Core value:** Ship a star-worthy, genuinely useful self-hostable AI-native helpdesk whose AI experience (triage → cited RAG drafted replies → AIDA Insight) and one-command self-host (`docker compose up`) are the wedge.
-**Current focus:** Planning next milestone — run `/gsd-new-milestone` (ten dormant seeds in `seeds/` + AIDA-18 will surface). In parallel, the maintainer's `LAUNCH.md` steps for the public v1.0.0 release are still open.
+**Current focus:** v2.0 Helpdesk & Projects, Phases 8–17, on branch `v2/run-loop` under `run-loop/PIAGAM.md`. The live queue is `run-loop/ANTREAN.md`; the run report is `run-loop/LAPORAN.md`. The maintainer's `LAUNCH.md` steps for the public v1.0.0 release are still open.
 **Model profile:** balanced (Opus plans/verifies, Sonnet executes) · **Granularity:** coarse · **License:** Apache-2.0
 
 ## Current Position
 
-Phase: Milestone v1.0.0 (Minimum Lovable Helpdesk) — COMPLETE and ARCHIVED 2026-09-13
+Phase: 08 (security-hardening), not started
 Plan: —
-Status: Awaiting next milestone. Closeout type: **override_closeout** — all 7 phases executed (60/60 plans, 154 tasks) and 23/23 MVP requirements validated, but `init.manager` could not mark every phase "verified": Phase 1 never had a VERIFICATION.md (closed via the 01-08 human gate + `01-UAT.md`), and Phase 5's `05-VERIFICATION.md` stays `human_needed` for an aesthetic visual pass. Everything acknowledged is listed under Deferred Items; nothing was re-labelled "passed". Archives: `milestones/v1.0.0-ROADMAP.md`, `milestones/v1.0.0-REQUIREMENTS.md`, `milestones/v1.0.0-STATE.md` (full pre-close STATE, per-plan decision log), `milestones/v1.0.0-phases/` (all phase artifacts); summary in `MILESTONES.md`; lessons in `RETROSPECTIVE.md`.
-Last activity: 2026-09-13 — Milestone v1.0.0 completed and archived. Same session: makeplane/plane researched (`research/plane-inspiration.md`) and SEED-001…010 planted.
+Status: Milestone v2.0 opened by hand on 2026-11-07. `REQUIREMENTS.md` (73 requirements) and `ROADMAP.md` (Phases 8–17) are written. Codex critique of the roadmap is the open step of queue item 0b. Baseline item 0a waits for the Rekriva regression to finish.
+Last activity: 2026-11-07 — v2.0 opened under the run charter. v1.0.0 stays complete and archived; its archives are `milestones/v1.0.0-*`.
 
 ## Accumulated Context
 
@@ -61,8 +61,8 @@ Items acknowledged and deferred at milestone close on 2026-09-13 (override close
 | verification_gap | Phase 05 — `05-VERIFICATION.md` | `human_needed` — only the aesthetic DESIGN-SYSTEM §9 visual pass (light/dark) remains; the mechanical half was closed by 07-09.1's contrast/token tests |
 | uat_gap | Phase 05 — `05-HUMAN-UAT.md` item 3 | file `closed`, 1 pending scenario (same visual pass) |
 | uat_gap | Phase 06 — `06-HUMAN-UAT.md` item 3 | `partial` — subjective real-LLM Insight quality (cluster labels / KB-gap matches); objective half closed by `honesty-invariants.spec.ts` |
-| verification_gap (implicit) | Phase 01 — no `01-VERIFICATION.md` | phase closed via 01-08 human gate + `01-UAT.md` complete; artefact never written |
-| requirement | AIDA-18 KB auto-generation (Stretch) | backlog — recorded as Known Gap in `MILESTONES.md` |
+| verification_gap (implicit) | Phase 01 — no `01-VERIFICATION.md` | phase closed via 01-08 human gate + `01-UAT.md` complete; artefact never written. Scheduled: AIDA-39, Phase 9 |
+| requirement | AIDA-18 KB auto-generation | scheduled in v2.0, Phase 12 |
 | deferred_item | Phase 02 — CRLF vs LF formatter mismatch (2 entries) | RESOLVED in 07-01 (`.gitattributes`) — tool cannot parse the annotation |
 | deferred_item | Phase 02 — import order in `src/lib/worker/index.ts` | RESOLVED in 07-01 (was already correct) |
 | deferred_item | Phase 02 — `gsd-tools requirements mark-complete` not_found (2 entries) | RESOLVED in 07-01 (REQUIREMENTS.md restructured) |
@@ -71,7 +71,7 @@ Items acknowledged and deferred at milestone close on 2026-09-13 (override close
 | deferred_item | Phase 05 — CRLF vs LF (same root cause) | RESOLVED in 07-01 |
 | deferred_item | Phase 07 — enable GitHub Pages (Source = GitHub Actions) | human-only; in `LAUNCH.md` |
 | deferred_item | Phase 07 — verify `afrizzal.github.io/aida` renders with CSS after first deploy | human-only; in `LAUNCH.md` |
-| seeds | SEED-001 … SEED-010 (Plane-inspired v2 candidates) | dormant by design — surface at `/gsd-new-milestone` |
+| seeds | SEED-001 … SEED-010 (Plane-inspired v2 candidates) | all scheduled in v2.0; mapping in `REQUIREMENTS.md`. Seed files stay unchanged |
 
 Also open (not audit items): `milestones/v1.0.0-phases/07-launch-readiness/deferred-items.md` — no logo upload, no invite flow (→ SEED-007), no backup scheduler, `POSTGRES_PASSWORD` not URL-encoded in `docker-compose.yml`'s `DATABASE_URL`, duplicate `<h1>` per app page — and `07-SECURITY-PASS.md`'s accepted-for-v1 known issues (sharp CVEs, root containers, spoofable XFF, SSRF error oracle, two unthrottled public routes, build-time third-party egress, no CSP).
 
@@ -96,10 +96,10 @@ None.
 
 ## Session Continuity
 
-**Last action (2026-09-13):** v1.0.0 closed via `/gsd-complete-milestone` — pre-close audit acknowledged (override closeout), archives written, `MILESTONES.md`/`RETROSPECTIVE.md` created, `PROJECT.md` evolved (Current State, Next Milestone Goals, decision outcomes), `ROADMAP.md` collapsed to milestone grouping + Backlog, `REQUIREMENTS.md` removed (archived), this file reset to a lean baseline. No tag, nothing pushed.
+**Last action (2026-11-07):** v2.0 opened by hand: owner decision recorded in `PROJECT.md`, `REQUIREMENTS.md` and `ROADMAP.md` written, this file moved to the new milestone. No tag, nothing pushed.
 
-**Next action:** maintainer works through `LAUNCH.md`; then `/gsd-new-milestone` (seeds auto-surface; phase numbering continues at 08).
+**Next action:** follow `run-loop/PIAGAM.md`; the first open row of `run-loop/ANTREAN.md` decides the next step.
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Read `run-loop/LAPORAN.md`. Branch `v2/run-loop` is a draft for the owner to review and apply.

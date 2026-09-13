@@ -29,16 +29,13 @@ Known gaps accepted for v1: no team invite flow (admin/agent are created via set
 
 </details>
 
-## Next Milestone Goals
+## Current Milestone: v2.0 Helpdesk & Projects
 
-Not yet defined — `/gsd-new-milestone` decides scope and requirements. Candidates on the table as of 2026-09-13 (each a dormant seed in `.planning/seeds/`, researched in `research/plane-inspiration.md`):
+**Goal:** close the v1 gaps that need no human, then build a Projects module inside AIDA with a real backend. Phases 8–17 in `ROADMAP.md`, 73 requirements in `REQUIREMENTS.md`.
 
-1. **Team & inbox ergonomics** — invite flow + roles (SEED-007, closes the loudest v1 gap), saved views + bulk actions (SEED-005), command palette / keyboard inbox (SEED-006), auto-close automation (SEED-009)
-2. **Ticket lifecycle** — relations / merge / snooze (SEED-003), custom workflow states with SLA pause (SEED-004), notifications + @mentions (SEED-008), plus AIDA-18 KB auto-generation from resolved tickets
-3. **Integrations** — public API + tokens + signed webhooks (SEED-002), then an issue-tracker bridge to Plane / GitHub Issues (SEED-001)
-4. **Repo health** — one-liner installer, version-bump CI gate, social-proof widgets (SEED-010)
+**How it runs:** on branch `v2/run-loop` under `run-loop/PIAGAM.md`. Autonomy stays at level 2: the branch is a draft and the owner applies it. Human sign-off steps become manual items, never recorded approvals.
 
-Guardrail carried forward: AIDA does **not** become a project-management tool; it bridges to one (see Out of Scope).
+**Owner decision, 2026-11-07:** the "no built-in project-management module" guardrail is lifted. The Projects module is built clean-room. The ban on AGPL and unlicensed code stays in force.
 
 ## Requirements
 
@@ -74,15 +71,14 @@ Guardrail carried forward: AIDA does **not** become a project-management tool; i
 
 <!-- v1 MLP. Full statements in REQUIREMENTS.md. -->
 
-None — all 23 v1 MVP requirements shipped in v1.0.0 (see Validated). The next milestone's requirements are
-written by `/gsd-new-milestone`; candidates are listed under Next Milestone Goals. AIDA-18 (KB auto-generation,
-Stretch) is the one carried-over requirement statement — still backlog, never scheduled.
+v2.0: AIDA-18 and AIDA-25 through AIDA-96, in `REQUIREMENTS.md`. All 23 v1 MVP requirements shipped in v1.0.0
+(see Validated). One correction: AIDA-10 is listed as validated, but its "admins can invite" clause never shipped
+(F-16 in `07-SECURITY-PASS.md`). AIDA-42 delivers that clause.
 
 ### Out of Scope
 
 <!-- v1 discipline. -->
 
-- **AIDA-18** KB auto-generation from resolved tickets — stretch, post-v1
 - Live chat widget / real-time messaging — later (start with form + email)
 - Additional channels (WhatsApp, social, voice) — later; pluggable channel interface only
 - Multi-language UI / i18n beyond AI language detection — later
@@ -90,8 +86,7 @@ Stretch) is the one carried-over requirement statement — still backlog, never 
 - Fine-tuning / training models — AIDA orchestrates LLMs via API/local, it does not train them
 - Mobile apps — responsive web only
 - SSO/SAML, advanced RBAC beyond admin/agent — later
-- A built-in project-management module (Plane/Linear-style cycles, modules, gantt, pages) — never; a helpdesk with half a PM tool loses to both. Bridge tickets to the team's tracker instead (SEED-001; `research/plane-inspiration.md`, 2026-09-13)
-- Reusing AGPL-licensed code (e.g. makeplane/plane) — incompatible with Apache-2.0; patterns may be re-implemented clean-room, code never copied
+- Reusing AGPL-licensed or unlicensed code (e.g. makeplane/plane, gr8rstudio/gr8r-studio) — incompatible with Apache-2.0 or simply not ours to use; behavior may be re-implemented clean-room, code never copied. The rules for the Projects module are in `run-loop/PIAGAM.md` → Clean-room
 
 ## Context
 
@@ -141,10 +136,11 @@ Stretch) is the one carried-over requirement statement — still backlog, never 
 | Honest demo stamping (`provider: "demo"`) + strict `DEMO_MODE === "true"` (07-02/07-07) | Stored demo AI output must never look like a live model call | ✓ Good — README/docs make the stored-vs-live distinction explicit |
 | GSD balanced profile (Opus plans, Sonnet executes) | Token cost without a quality hit | ✓ Good — 60 plans, no recorded quality complaint |
 | Milestone closed as override_closeout, no tag (2026-09-13) | Remaining items are human-only (visual/LLM-quality passes, LAUNCH.md); tagging before the placeholder contact is replaced would ship a wrong contact | — Pending: LAUNCH.md steps, then tag v1.0.0 |
+| Lift the "no built-in project-management module" guardrail; build the Projects module clean-room inside AIDA (owner decision, 2026-11-07) | Reverses the 2026-09-13 guardrail. The ban on AGPL and unlicensed code stays in force, so only behavior may be rebuilt, never code | — Pending: Phases 14–17 of v2.0 |
 
 ## Evolution
 
-This document evolves at phase/milestone transitions (validated → move requirements; new ones → Active; decisions → table). v1.0.0 = Minimum Lovable Helpdesk (shipped 2026-09-13). Post-v1 candidates are the ten seeds + AIDA-18 listed under Next Milestone Goals; longer-horizon ideas (live chat, more channels, hosted offering) stay in Out of Scope until a milestone pulls them in.
+This document evolves at phase/milestone transitions (validated → move requirements; new ones → Active; decisions → table). v1.0.0 = Minimum Lovable Helpdesk (shipped 2026-09-13). v2.0 = Helpdesk & Projects (opened 2026-11-07), which pulls in the ten seeds and AIDA-18. Longer-horizon ideas (live chat, more channels, hosted offering) stay in Out of Scope until a milestone pulls them in.
 
 ---
 *Last updated: 2026-07-18 — Phase 4 (ai-foundation) fully closed out (7/7 plans, 6/6 waves): 04-07 gap closure fixed the sole UAT gap (test 2, provider-switch model reset) — 04-UAT.md is now 10/10 pass, AIDA-13/AIDA-14/AIDA-19/AIDA-20 all validated end-to-end. Non-blocking human verification items (dark-mode visual pass, live-provider smoke test, network-egress capture) remain open per 04-VERIFICATION.md.*
@@ -153,3 +149,4 @@ This document evolves at phase/milestone transitions (validated → move require
 *Last updated: 2026-09-03 — Phase 7 (launch-readiness) fully closed out (13/13 plans, 6/6 waves): demo dataset + `DEMO_MODE` (AIDA-22), the Branding settings tab closing the AIDA-12 remainder, backup/restore scripts + ops runbook + a written security pass (AIDA-24), the star-ready README + Starlight docs site (AIDA-23), CI/community files, and the 07-12 launch close-out (8-gate run, `CHANGELOG.md`, `LAUNCH.md`, planning-records reconciliation). **All 23 v1 MVP requirements are now Validated; AIDA-18 remains Out of Scope/backlog.** AIDA-12/22/23/24 moved from Active to Validated above; AIDA-13/AIDA-20 were already Validated (Phase 4) and needed no change. v1 — Minimum Lovable Helpdesk — is code-complete; the only remaining steps are the human-only items in `LAUNCH.md` (repo settings, tag, release, outreach).*
 *Last updated: 2026-09-04 — Phase 7 verification PASSED (07-VERIFICATION.md: 23/23 must-haves; the three behaviour invariants — demo-boot idempotency, seed refuse-guard, backup/restore round trip — were executed for real against a live docker compose stack by the orchestrator and embedded as evidence). Code review 07-REVIEW.md: 0 critical, 3 warning, 2 info (advisory, non-blocking). Maintainer sign-off on 07-12 received 2026-09-04. Phase 7 marked complete via phase.complete; v1 milestone is code-complete pending the maintainer's own LAUNCH.md steps. Post-v1 follow-ups logged in STATE.md Open Todos (`@anthropic-ai/sdk` 0.110→0.123 bump; persisted regression tests for the three invariants).*
 *Last updated: 2026-09-13 after v1.0.0 milestone — closed via `/gsd-complete-milestone` (override closeout: 23 acknowledged items, no git tag — `LAUNCH.md` owns tag/release). "Current Milestone" section replaced by Current State + Next Milestone Goals; Key Decisions table given outcomes and extended with the v1 architecture decisions; Out of Scope gained the "no PM module / no AGPL code" guardrails from the Plane research (`research/plane-inspiration.md`, SEED-001…010). Archives: `milestones/v1.0.0-{ROADMAP,REQUIREMENTS,STATE}.md`, `milestones/v1.0.0-phases/`.*
+*Last updated: 2026-11-07 — v2.0 Helpdesk & Projects opened by hand under `run-loop/PIAGAM.md` (not via `/gsd-new-milestone`). Owner decision recorded: the no-PM-module guardrail is lifted, the Projects module is clean-room, and the AGPL and unlicensed code ban stays. Next Milestone Goals replaced by Current Milestone; AIDA-18 moved from Out of Scope to Active.*

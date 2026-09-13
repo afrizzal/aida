@@ -4,6 +4,7 @@
 **Source:** https://github.com/makeplane/plane — shallow clone inspected on 2026-09-13
 (root `package.json` 1.4.2, `apps/api/pyproject.toml` 0.24.0). Every claim below cites a path in that repo.
 **Seeds:** each candidate idea is also planted as `.planning/seeds/SEED-001…010` so it surfaces at `/gsd-new-milestone`.
+**Superseded in part (2026-11-07):** the owner lifted the "no project-management module" recommendation below; see `PROJECT.md` → Key Decisions. The license rules in §2 and §6 still apply in full.
 
 ---
 
