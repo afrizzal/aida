@@ -49,7 +49,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 **Success Criteria (what must be TRUE):**
 
 1. `pnpm audit --prod --audit-level=high` exits 0, or the gate is reported red with every residual explained in `docs/SECURITY.md`.
-2. `docker compose -p aida up -d --build` serves `https://localhost/api/health` with `app`, `worker` and `migrate` running as non-root, and uploads still work.
+2. `docker compose -p aida up -d --build` serves `https://localhost/api/health`; `app` and `worker` run as non-root; the one-shot `migrate` ran as non-root and exited 0; uploads still work.
 3. Every HTML response carries a CSP, and the core pages run with zero CSP violations.
 4. A spoofed `X-Forwarded-For` cannot change a rate-limit identity, and the two unthrottled public routes are throttled while the container healthcheck stays green.
 5. All four connection tests return categorized errors, and `docs/SECURITY.md` matches the code.
@@ -66,10 +66,10 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 **Goal:** A self-hoster can run AIDA unattended: backups happen on their own, the known boot and seed traps are fixed and pinned by tests, and the planning records tell the truth.
 **Success Criteria (what must be TRUE):**
 
-1. A scheduled backup produces one set of database dump and uploads archive that restores with matching attachments, a failed part fails the set, and old sets are pruned.
+1. A scheduled backup produces one consistent set of database dump and uploads archive, even while attachments change, that restores with matching attachments; a failed part fails the set; old sets are pruned.
 2. A logo uploads, shows in the sidebar and on public pages, and falls back to the name.
 3. A compose stack with a password containing `/ @ : # ?` connects from every service, and every app page has exactly one `<h1>`.
-4. `pnpm db:seed` on a non-empty database changes nothing and prints no password, and the demo-boot, seed-guard and backup/restore tests live in the repository suites.
+4. Neither `pnpm db:seed` nor the `DEMO_MODE` boot touches a non-empty database or prints a password, and the demo-boot, seed-guard and backup/restore tests live in the repository suites.
 5. `01-VERIFICATION.md` exists and is backed by evidence, and `STATE.md` has no stale statement.
 6. `scripts/install.sh`, `check-version`, `AGENTS.md`, `CODEOWNERS` and the README widgets exist, or an item needing an owner account is recorded as manual.
 
@@ -121,7 +121,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 2. A merge moves the thread, closes the source as a duplicate, and leaves a full audit event, and no status link exposes one contact's messages to another.
 3. A snoozed ticket wakes by date or by customer reply, and auto-close skips it.
 4. Custom states migrate existing data without loss, admins can manage them, and every reader of status, including the `sla-flag` worker, reasons about the group.
-5. The real SLA worker raises no flag while a ticket is paused, including repeated pauses.
+5. Each SLA due time moves by exactly the paused time across repeated pauses, and the real SLA worker raises no flag while a ticket is paused.
 6. An admin can review a proposed KB article from resolved tickets, and nothing publishes without that review.
 
 **Plans:** 0 plans
@@ -230,14 +230,14 @@ How a gate result is recorded:
 
 ## Cross-phase risks
 
-These links are softer than the parking chain in `run-loop/PIAGAM.md`, which this table does not change. Before relying on a link, run the check. If the prerequisite is missing, only the named requirement parks or takes the fallback, and the fallback is recorded in `RUN-LOG.md` for reconciliation when the earlier phase returns.
+These links are softer than the parking chain in `run-loop/PIAGAM.md`, which this table does not change. Before relying on a link, run the check. If the prerequisite is missing, independent work continues, but a requirement whose acceptance includes the missing part stays open: it is never closed, and the phase verification lists it as incomplete until the earlier phase returns and its tests run. A fallback keeps building possible; it never closes a requirement. Every fallback is recorded in `RUN-LOG.md`.
 
 | Link | Check before relying on it | If the prerequisite is missing |
 |---|---|---|
-| Saved views store status values (Phase 11), then the status enum becomes a table (AIDA-56) | `SavedView` exists in `prisma/schema.prisma` | Nothing to migrate. When Phase 11 returns, its filters are built on states |
-| Auto-close ships before snooze and custom states (AIDA-51 vs AIDA-54, AIDA-56) | the auto-close job is registered in `src/lib/worker/` | AIDA-54 and AIDA-56 skip that part. When Phase 11 returns, auto-close must skip snoozed tickets and use state groups |
-| AIDA-86 reuses the Phase 11 palette registry, and AIDA-80 prefers its saved-view model | AIDA-49 and AIDA-47 are closed | AIDA-86 parks alone. AIDA-80 builds a per-project view store and records it for merging later |
-| Phase 16 uses Phase 15 for task links, other views (AIDA-82) and how a task opens (AIDA-98) | AIDA-73 and one more Phase 15 view are closed | Those parts of AIDA-82 and AIDA-98 park alone; the rest of Phase 16 proceeds |
+| Saved views store status values (Phase 11), then the status enum becomes a table (AIDA-56) | `SavedView` exists in `prisma/schema.prisma` | The saved-view part of AIDA-56 stays open. When Phase 11 returns, its filters are built on states and that test runs |
+| Auto-close ships before snooze and custom states (AIDA-51 vs AIDA-54, AIDA-56) | the auto-close job is registered in `src/lib/worker/` | The auto-close parts of AIDA-54 and AIDA-56 stay open. When Phase 11 returns, auto-close must skip snoozed tickets and use state groups, with those tests |
+| AIDA-86 reuses the Phase 11 palette registry, and AIDA-80 prefers its saved-view model | AIDA-49 and AIDA-47 are closed | AIDA-86 stays open. AIDA-80 builds a per-project view store, which its acceptance allows, and records it for merging later |
+| Phase 16 uses Phase 15 for task links, other views (AIDA-82) and how a task opens (AIDA-98) | AIDA-73 and one more Phase 15 view are closed | AIDA-82 and AIDA-98 stay open; the rest of Phase 16 proceeds |
 | Invitations (Phase 10) build on Better Auth after the Phase 8 upgrade | `better-auth` in `package.json` matches the version Phase 8 recorded | Build on the current version, and record that a later upgrade must rerun the invitation tests |
 | Notifications start with ticket events (Phase 10), then gain task events (AIDA-83) | the `Notification` model is entity-generic | Covered by the chain: Phase 16 needs Phase 10 |
 | The tracker adapter is built for HTTP providers (Phase 13), then gains `internal` (AIDA-91) | the interface does not assume a network call | Covered by the chain: Phase 17 needs Phase 13 |
