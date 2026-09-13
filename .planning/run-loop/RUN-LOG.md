@@ -40,3 +40,38 @@ Nama model juga cocok dengan `codex debug models`: slug `gpt-6.1-terra`, tampila
 - `prisma` yang diam di CPU 0% berarti `binaries.prisma.sh` macet lagi. Uji dengan `schema-engine.gz` (10,6 MB), bukan berkas sha256, karena berkas kecil bisa lolos saat binary-nya tetap macet. Build Docker juga bergantung pada host ini.
 - Regresi Rekriva berjalan per potongan (`MasterData` dan `Offers`, lalu `Rubric` dan `Selection`), jadi `pgrep` bisa kosong sebentar di antara potongan. Kosong sekali belum tentu regresi selesai.
 - `Bash(rm -rf *)` ada di aturan deny Claude Code, sedangkan piagam meminta menghapus `.next/` kalau rusak. Kalau ditolak, jangan diakali dan jangan mengubah izin. Catat sebagai item owner.
+
+## Putaran 1 (2026-11-07, 15.40 sampai 15.50 WIB)
+
+Cek Berhenti total lolos semua: tidak ada `BERHENTI`, tip `origin/master` = `1ea4281`, `pushurl` = `no-push-run-loop`, branch `v2/run-loop`, `master` lokal = `1ea4281`, Docker 29.5.2 hidup. Cek beban: `pgrep` menemukan `artisan test` (potongan `Screening` dan `Search`, lalu `Tenancy` dan `Uat`), jadi Docker, build, dan E2E tidak dijalankan.
+
+Butir: 0a ditunda karena regresi, sesuai catatannya. Lanjut ke 0b.
+
+| Langkah | Hasil |
+|---|---|
+| Baca sumber | `PROJECT.md`, `ROADMAP.md`, `STATE.md`, arsip `milestones/v1.0.0-*`, 10 seed, `research/plane-inspiration.md`, `07-SECURITY-PASS.md` (Findings, Known issues), `deferred-items.md`, `FITUR-PROJECTS.md` |
+| Cek celah v1 ke kode | F-05 sampai F-15 masih terbuka. Oracle error ada di 4 titik, bukan 2 seperti catatan v1, karena Test Connection SMTP dan IMAP juga menggemakan pesan mentah |
+| Tulis dokumen | `REQUIREMENTS.md` baru (73 requirement: AIDA-18, AIDA-25 sampai AIDA-96), `ROADMAP.md` dengan Phase 8 sampai 17, `PROJECT.md` (keputusan owner 2026-11-07), `STATE.md`, satu baris catatan di `research/plane-inspiration.md`. Seed tidak diubah, sesuai aturan workflow new-milestone |
+| Cek tool | `query init.phase-op` 8 sampai 17: `phase_found: true` semua, slug `08-security-hardening` sampai `17-unification`. `roadmap.analyze`: milestone `v2.0`, 10 fase, scope `complete` |
+| Cek silang | 73 ID terdefinisi, 73 di traceability, 73 di baris `**Requirements:**`, tidak ada yang ganda atau bolong |
+| Commit | `8a72f4c` docs(v2.0): open milestone with requirements and roadmap |
+| Codex | Ekspor `HEAD` = `8a72f4c` diperiksa: tidak ada `.env`, dump, atau kunci. Kecocokan pola kunci hanya `sk-test-DUMMY…` di test. Log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Kritik roadmap putaran 1 berjalan di latar |
+
+### Keputusan putaran ini
+
+Pendapat Codex untuk K1 sampai K5 masih ditunggu. Keputusan bisa berubah sesudah jawabannya dibaca.
+
+| No | Pertanyaan | Opsi | Keputusan | Alasan |
+|---|---|---|---|---|
+| K1 | Apa isi `Depends on` | rantai parkir piagam saja, atau ditambah ketergantungan baru | rantai piagam saja, tautan lain di tabel Cross-phase risks | ketergantungan baru mengubah aturan parkir piagam |
+| K2 | Di mana halaman proyek dan drawer task | Fase 14 atau 15 | Fase 15 (AIDA-72, AIDA-73), palette Projects di Fase 16 (AIDA-86) | baris Fase 14 di piagam hanya skema dan logika |
+| K3 | Temuan v1 di luar tabel fase | dikerjakan atau dilewati | dikerjakan: F-11, F-13, F-14 di AIDA-32, F-09, F-10 di AIDA-37 | tujuan piagam menutup semua celah v1 yang bisa tanpa manusia |
+| K4 | Font Inter (OFL) di F-14 | stack font sistem, paket font, atau parkir | diputuskan di CONTEXT Fase 08 | OFL tidak ada di daftar lisensi package piagam |
+| K5 | Lebar SEED-004 | enum menjadi tabel, atau `pendingReason` saja | enum menjadi tabel | piagam menyebut status kustom dengan jeda SLA |
+
+### Catatan
+
+- `ls -la` di akar repo menunjukkan `.env` sudah ada sejak 15.38, ukurannya sama dengan `.env.example`. Isinya tidak dibaca.
+- `AIDA-10` di v1 tercentang "admins can invite", padahal alur undangan tidak ada (F-16). Dicatat jujur di `PROJECT.md` → Active dan di AIDA-42, centang v1 tidak diubah.
+- Parser GSD hanya membaca `**Requirements:**` yang berdiri di baris sendiri dan menolak rentang ID. Format v1 yang menaruhnya satu baris dengan Timebox tidak terbaca, jadi roadmap v2 memakai baris terpisah.
+- Putaran berikutnya: baca jawaban Codex begitu selesai, lalu lanjut 0c sambil 0a menunggu regresi.
