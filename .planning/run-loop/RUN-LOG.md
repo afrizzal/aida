@@ -148,3 +148,32 @@ Keputusan: temuan diterima. Data infrastruktur yang tidak pernah dihitung adalah
 Commit: `b9b1d9b` docs(v2.0): define tenant data for the seed and demo guards. `init.phase-op 8`: `phase_found: true`, `requirements_path` ada. `roadmap.analyze`: 10 fase, scope `complete`, next 8. 76/76 requirement terpetakan.
 
 Butir 0b selesai. Berikutnya 0c, karena 0a masih menunggu regresi.
+
+## Putaran 5 (2026-11-07, 16.03 sampai 16.20 WIB)
+
+Dipicu wakeup. Cek Berhenti total lolos (tip `1ea4281`, `no-push-run-loop`, branch benar, Docker hidup). Regresi Rekriva masih berjalan, jadi 0a tetap ditunda. Butir: 0c.
+
+| Langkah | Hasil |
+|---|---|
+| Alat | Sesi tidak punya alat browser; ToolSearch hanya memberi stub autentikasi Gmail, Calendar, dan Drive. Akar demo adalah shell SPA 1009 byte, jadi pengambilan HTML tidak memperlihatkan perilaku. Dipakai Chromium headless lewat `@playwright/test` milik repo. Satu tab, jauh lebih ringan dari E2E atau build yang dilarang selama regresi |
+| Clean-room | Hanya UI tampak yang dibaca: judul, heading, nama aksesibel, dan potongan teks. Bundle JS dan CSS tidak dibaca. Skrip dan screenshot ada di scratchpad sesi, tidak di repo. Navigasi demo berbasis state, satu URL |
+| Penelusuran | Tiga skrip: halaman awal; klik 14 item navigasi, palette, menu, drawer task, dan tiga dialog; menu popover, detail proyek, Board, Table, menu task, Members, dan 10 bagian Settings. Item proyek di sidebar tidak bisa diklik sebagai tombol, jadi detail proyek dibuka dari halaman Projects |
+| Hasil | `FITUR-PROJECTS.md` mendapat 29 baris perilaku baru dan 6 baris di luar scope dengan alasan. Nama, email, warna, dan data contoh demo tidak ikut tersalin (dicek dengan grep) |
+| Requirement | AIDA-100 sampai AIDA-114 ditambahkan (Fase 14: 6, Fase 15: 1, Fase 16: 8). Acceptance AIDA-72, 76, 77, 81, 83, 84, 87, 90, dan 98 diperluas. Total 91, terpetakan 91/91. Kriteria sukses Fase 14, 15, dan 16 ditambah |
+| Koreksi | `PROJECT.md` masih menulis 73 requirement dan rentang sampai AIDA-96 sejak putaran 1. Diperbaiki menjadi 91 dan AIDA-114 |
+| Gerbang | `git grep -i -n gr8r -- src docs website README.md public prisma tests`: exit 1, kosong |
+| Commit | `cb10c1c` docs(v2.0): add Projects behaviors from the public demo walk |
+
+### Keputusan
+
+| No | Pertanyaan | Opsi | Keputusan | Alasan |
+|---|---|---|---|---|
+| K6 | Push notification browser | bangun atau tidak | tidak | Web Push butuh layanan push vendor browser, egress pihak ketiga yang dilarang `CLAUDE.md` |
+| K7 | Hapus workspace | bangun atau tidak | tidak | `AuditEvent` append-only di level database, reset destruktif tidak ada |
+| K8 | Link publik proyek | bangun atau tidak | tidak, berbagi berarti link internal dan menambah anggota | privacy-first; owner bisa meninjau ulang |
+| K9 | Siapa yang membuat workspace baru (AIDA-111) | semua user, admin workspace, atau admin instance | diserahkan ke CONTEXT Fase 16, default konservatif admin instance | menyangkut tenancy dan otorisasi, jadi wajib lewat Codex |
+| K10 | Requirement baru tanpa Codex | konsultasi sekarang atau saat fase | saat CONTEXT dan review plan Fase 14 dan 16 | protokol mewajibkan Codex sebelum CONTEXT; requirement ini belum dikritik, dan itu dicatat di laporan |
+
+Codex tidak dipakai di putaran ini (`tanpa Codex`). Pekerjaannya berisiko rendah, berupa dokumen, dan keputusan keamanan di dalamnya diserahkan ke CONTEXT fase.
+
+Berikutnya: 0a masih menunggu regresi. Fase 08 langkah 1 (baca sumber) dan langkah 2 (brainstorm area abu-abu dengan Codex) tidak butuh build, jadi bisa dikerjakan.

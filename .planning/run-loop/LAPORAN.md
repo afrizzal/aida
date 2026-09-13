@@ -1,10 +1,10 @@
 # Laporan run loop AIDA
 
-Keadaan per 2026-11-07 16.05 WIB, sesudah putaran 4.
+Keadaan per 2026-11-07 16.20 WIB, sesudah putaran 5.
 
 ## 1. Ringkasan
 
-Milestone v2.0 sudah dibuka (butir 0b selesai). `REQUIREMENTS.md` berisi 76 requirement, `ROADMAP.md` berisi Phase 8 sampai 17, dan keputusan owner tercatat di `PROJECT.md`. Roadmap direvisi dalam tiga putaran kritik Codex, yang bersama-sama menemukan 15 temuan, lalu 4 HIGH dan 3 MEDIUM, lalu 1 HIGH; semuanya sudah diterapkan. Belum ada kode produk yang diubah. Dokumen perencanaan di `.planning/` aman ditinjau sekarang. Butir 0a masih menunggu regresi Rekriva, jadi berikutnya butir 0c.
+Milestone v2.0 sudah dibuka (butir 0b selesai), dan daftar fitur Projects sudah dicek ke demo publik (butir 0c selesai). `REQUIREMENTS.md` berisi 91 requirement, `ROADMAP.md` berisi Phase 8 sampai 17, dan keputusan owner tercatat di `PROJECT.md`. Roadmap direvisi dalam tiga putaran kritik Codex, yang bersama-sama menemukan 15 temuan, lalu 4 HIGH dan 3 MEDIUM, lalu 1 HIGH; semuanya sudah diterapkan. Belum ada kode produk yang diubah. Dokumen perencanaan di `.planning/` aman ditinjau sekarang. Butir 0a masih menunggu regresi Rekriva, jadi berikutnya Fase 08, mulai dari langkah yang tidak butuh build.
 
 ## 2. Fase dan requirement
 
@@ -12,16 +12,16 @@ Milestone v2.0 sudah dibuka (butir 0b selesai). `REQUIREMENTS.md` berisi 76 requ
 |---|---|---|---|---|
 | 0a | Baseline tertunda | belum disentuh | regresi Rekriva masih berjalan | |
 | 0b | Milestone v2.0 | selesai dengan bukti | `init.phase-op` 8 sampai 17 menemukan fasenya; 76/76 requirement terpetakan; tiga putaran kritik Codex diterapkan | `8a72f4c`, `995ed9e`, `fea685d`, `b9b1d9b` |
-| 0c | Lengkapi daftar fitur | belum disentuh | | |
+| 0c | Lengkapi daftar fitur | selesai dengan bukti | 29 perilaku baru di `FITUR-PROJECTS.md`, AIDA-100 sampai 114, 91/91 terpetakan, grep clean-room kosong (exit 1) | `cb10c1c` |
 | 08 | Keamanan (AIDA-25 sampai 32) | belum disentuh | | |
 | 09 | Operasional (AIDA-33 sampai 41) | belum disentuh | | |
 | 10 | Tim (AIDA-42 sampai 46) | belum disentuh | | |
 | 11 | Inbox (AIDA-47 sampai 51) | belum disentuh | | |
 | 12 | Siklus tiket (AIDA-18, 52 sampai 57, 97) | belum disentuh | | |
 | 13 | Integrasi (AIDA-58 sampai 63) | belum disentuh | | |
-| 14 | Fondasi Projects (AIDA-64 sampai 71) | belum disentuh | | |
-| 15 | Tampilan kerja (AIDA-72 sampai 80) | belum disentuh | | |
-| 16 | Ruang kerja (AIDA-81 sampai 90, 98, 99) | belum disentuh | | |
+| 14 | Fondasi Projects (AIDA-64 sampai 71, 100 sampai 105) | belum disentuh | | |
+| 15 | Tampilan kerja (AIDA-72 sampai 80, 106) | belum disentuh | | |
+| 16 | Ruang kerja (AIDA-81 sampai 90, 98, 99, 107 sampai 114) | belum disentuh | | |
 | 17 | Penyatuan (AIDA-91 sampai 96) | belum disentuh | | |
 
 ## 3. Menunggu owner
@@ -43,6 +43,8 @@ Rincian ada di `RUN-LOG.md` putaran 1 dan 2. Jawaban Codex disimpan di `codex/ro
 - SEED-004 dikerjakan penuh (enum menjadi tabel). Codex setuju, dan atas sarannya dipecah menjadi AIDA-56 (migrasi), AIDA-97 (pengelolaan state), dan AIDA-57 (SLA dengan worker sungguhan).
 - Celah keamanan yang ditemukan Codex dan sudah saya cek ke kode: merge bisa membocorkan percakapan antar pelanggan lewat link status; `getScopedDb` tidak memeriksa ulang keanggotaan, jadi anggota yang dinonaktifkan masih bisa memakai sesinya; backup terjadwal bisa lulus tanpa lampiran. Putaran 2 menambah: jeda SLA harus menggeser tenggat, bukan sekadar menahan flag; backup harus konsisten walau lampiran berubah di tengah jalan; boot `DEMO_MODE` hanya menghitung tiket sehingga bisa menanam akun demo di workspace hidup tanpa tiket. Semuanya kini punya acceptance tersendiri.
 - Putaran 3 menilai 7 dari 8 perbaikan tertutup dan menemukan satu HIGH: heartbeat worker menulis `SystemSetting` setiap menit, sehingga syarat "hanya data demo" akan menolak boot demo ulang yang sah. AIDA-37 kini memisahkan data infrastruktur dari data tenant (`organization` atau `user`). Perbaikan ini tidak diperiksa ulang oleh Codex, karena batas 3 putaran per topik sudah habis.
+- Butir 0c: perilaku demo yang bertentangan dengan aturan AIDA tidak dibangun. Push notification browser butuh layanan push vendor (egress pihak ketiga). Hapus workspace bentrok dengan `AuditEvent` append-only. Link publik proyek membuka data tanpa login. Billing dan bahasa UI memang di luar scope. Owner bisa meninjau ulang link publik.
+- Keputusan yang sengaja diserahkan ke CONTEXT fase: siapa yang boleh membuat workspace baru (AIDA-111, default konservatif hanya admin instance) dan set status proyek (AIDA-100).
 - Koreksi kejujuran: AIDA-10 di v1 tercatat selesai, padahal alur undangan tidak pernah ada (F-16). Centang v1 tidak diubah. Celahnya dicatat di `PROJECT.md` dan ditutup oleh AIDA-42.
 
 ## 6. Hasil test dan audit
@@ -77,4 +79,5 @@ Dicek 2026-11-07 15.48 WIB:
 - Perbaikan AIDA-37 dari putaran 3 belum diperiksa Codex (batas 3 putaran). Review plan Fase 9 akan memeriksanya.
 - `pnpm build`, `pnpm test:integration`, `pnpm test:e2e`, dan `pnpm test:egress` belum pernah dijalankan di Mac ini.
 - `docker compose -p aida up -d --build` belum pernah dijalankan di Mac ini.
-- Daftar fitur Projects belum dicek ke demo publik (butir 0c), jadi requirement Fase 14 sampai 17 bisa bertambah.
+- AIDA-100 sampai AIDA-114 (dari butir 0c) belum dikritik Codex. Codex akan memeriksanya saat CONTEXT dan review plan Fase 14 dan 16.
+- Penelusuran demo hanya mencakup yang bisa diklik dari halaman utama. Drag and drop, isi dialog Share, dan halaman detail proyek dari sidebar tidak dibuka.
