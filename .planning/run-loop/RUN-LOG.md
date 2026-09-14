@@ -397,3 +397,20 @@ Codex siklus 3 (terakhir) selesai (10.46 sampai 10.48): 4 HIGH, 1 MEDIUM; verdic
 Temuan R3-2 juga berlaku untuk baseline 0a2: sebelum `pnpm test:egress` dijalankan orkestrator, container, network, dan volume project `aida-egress-test` dicek dulu; kalau ada yang bukan buatan run ini, test tidak dijalankan.
 
 Berikutnya: Fase 09, langkah 1 (baca sumber) dan langkah 2 (brainstorm Codex). 0a2 dijalankan begitu regresi Rekriva selesai, dengan pengaman R3-2.
+
+## Putaran 16 (2026-11-08, mulai 10.52 WIB)
+
+Dipicu wakeup. Cek A (sisa 30 GiB), B, dan Berhenti total lolos. Regresi Rekriva berjalan (Compliance), jadi 0a2 menunggu. Butir: Fase 09 (Fase 08 diparkir), langkah 1 dan 2.
+
+### Langkah 1: fakta Fase 09 dari kode
+
+| Hal | Fakta |
+|---|---|
+| Backup | `scripts/backup.sh`: `pg_dump --format=custom` lewat `db`, lalu `tar czf` atas `/data/uploads` lewat `docker compose run app`, dua langkah terpisah tanpa snapshot bersama. Tidak ada jadwal. `restore.sh`: `pg_restore --clean --if-exists` |
+| `POSTGRES_PASSWORD` | `docker-compose.yml` baris 29, 49, 101 menyisipkan password mentah ke `DATABASE_URL` untuk `migrate`, `app`, `worker` |
+| Seed dan demo | `prisma/seed.ts` memanggil `ensureDemoIdentities()` (baris 31) sebelum guard jumlah tiket (baris 34), dan mencetak password (baris 59). `src/lib/demo/bootstrap-demo.ts` hanya menghitung tiket. Boot dipanggil dari `src/instrumentation.ts`. Heartbeat worker menulis `SystemSetting` |
+| Logo | branding v1 hanya nama (`src/lib/branding/settings.ts`, D-16). Halaman publik memilih organisasi dengan `prisma.organization.findFirst()` |
+| `<h1>` | `src/components/top-bar.tsx` merender `<h1>`, dan 12 halaman app juga punya `<h1>` sendiri; `ticket-meta-header.tsx` juga. Halaman status publik punya dua `<h1>` di satu berkas |
+| Test | tidak ada test demo boot, guard seed, atau backup di `tests/` |
+| Phase 1 v1 | `milestones/v1.0.0-phases/01-foundation/` tanpa `01-VERIFICATION.md`; ada `01-UAT.md` dan SUMMARY |
+| SEED-010 | belum ada `scripts/install.sh`, `AGENTS.md`, `.github/CODEOWNERS`, workflow `check-version`; `package.json` tanpa field `version` |
