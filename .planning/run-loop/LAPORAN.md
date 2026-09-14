@@ -1,16 +1,17 @@
 # Laporan run loop AIDA
 
-Keadaan per 2026-11-08 07.45 WIB, putaran 7.
+Keadaan per 2026-11-08 08.05 WIB, putaran 8.
 
 ## 1. Ringkasan
 
-Milestone v2.0 sudah dibuka (butir 0b selesai), dan daftar fitur Projects sudah dicek ke demo publik (butir 0c selesai). `REQUIREMENTS.md` berisi 91 requirement, `ROADMAP.md` berisi Phase 8 sampai 17, dan keputusan owner tercatat di `PROJECT.md`. Belum ada kode produk yang diubah. Dokumen perencanaan di `.planning/` aman ditinjau sekarang. Fase 08 sudah punya `08-CONTEXT.md` (30 keputusan dari brainstorm Codex, dicek ulang ke kode, dua koreksi), dan langkah berikutnya menyusun plan. Baseline 0a akhirnya berjalan karena regresi Rekriva sudah selesai: `pnpm build` lolos, sedangkan integration dan E2E gagal sebelum test mana pun berjalan karena Testcontainers belum diarahkan ke socket Colima. Keduanya diulang dengan variabel yang benar sesudah `test:egress` selesai.
+Milestone v2.0 sudah dibuka (butir 0b selesai), dan daftar fitur Projects sudah dicek ke demo publik (butir 0c selesai). `REQUIREMENTS.md` berisi 91 requirement, `ROADMAP.md` berisi Phase 8 sampai 17, dan keputusan owner tercatat di `PROJECT.md`. Belum ada kode produk yang diubah. Dokumen perencanaan di `.planning/` aman ditinjau sekarang. Fase 08 sudah punya `08-CONTEXT.md` (30 keputusan dari brainstorm Codex, dicek ulang ke kode, dua koreksi), dan langkah berikutnya menyusun plan. Baseline 0a selesai di Mac ini: build lolos; integration lolos kecuali test egress; E2E lolos 63 dengan 2 flake di `honesty-invariants.spec.ts` yang lolos saat dijalankan sendirian. Test egress terhalang gangguan host `binaries.prisma.sh` (di luar proyek) dan diparkir sebagai 0a2. Plan Fase 08 sedang disusun.
 
 ## 2. Fase dan requirement
 
 | Butir | Isi | Status | Bukti | Commit |
 |---|---|---|---|---|
-| 0a | Baseline tertunda | berjalan | `pnpm build` exit 0; integration dan E2E exit 1 karena socket Colima, diulang; egress berjalan | |
+| 0a | Baseline tertunda | selesai dengan bukti | build exit 0; integration 11/12 berkas (gagal hanya egress); E2E 63 lolos, 2 flake lolos 2/2 saat sendirian | |
+| 0a2 | Baseline egress | diparkir | `binaries.prisma.sh` mengirim 0 byte pada `GET`; build image tidak selesai | |
 | 0b | Milestone v2.0 | selesai dengan bukti | `init.phase-op` 8 sampai 17 menemukan fasenya; 76/76 requirement terpetakan; tiga putaran kritik Codex diterapkan | `8a72f4c`, `995ed9e`, `fea685d`, `b9b1d9b` |
 | 0c | Lengkapi daftar fitur | selesai dengan bukti | 29 perilaku baru di `FITUR-PROJECTS.md`, AIDA-100 sampai 114, 91/91 terpetakan, grep clean-room kosong (exit 1) | `cb10c1c` |
 | 08 | Keamanan (AIDA-25 sampai 32) | berjalan | langkah 1 sampai 3 selesai (CONTEXT), langkah 4 dilewati (`UI hint: no`), berikutnya plan | `4d8efca`, `8abbc6c` |
@@ -60,9 +61,9 @@ Baris bertanda baseline berasal dari persiapan (`1ea4281`). Baris 0a dijalankan 
 | `pnpm test` | 0 | 18 berkas, 90 test lolos (baseline) |
 | `pnpm audit --prod` | 1 | 7 critical, 52 high, 69 moderate, 13 low (baseline) |
 | `pnpm build` | 0 | butir 0a; satu peringatan Turbopack NFT yang sudah dikenal sejak v1 |
-| `pnpm test:integration` | 1 | butir 0a; Testcontainers tidak menemukan socket Colima, tidak ada test yang berjalan. Diulang |
-| `pnpm test:e2e` | 1 | butir 0a; sebab yang sama di global setup. Diulang |
-| `pnpm test:egress` | berjalan | butir 0a |
+| `pnpm test:integration` | 1 | butir 0a, dengan socket Colima: 11 dari 12 berkas lolos, 26 test lolos, 4 di-skip; satu-satunya yang gagal `egress-isolation.test.ts` (ikut terjaring `include`), sebab sama dengan baris egress |
+| `pnpm test:e2e` | 1 | butir 0a, dengan socket Colima: 63 lolos, 1 di-skip, 2 gagal di `honesty-invariants.spec.ts` (a, b). Dijalankan sendirian: exit 0, 2/2 lolos. Flake; teardown memakai `taskkill` khusus Windows |
+| `pnpm test:egress` | 1 | butir 0a2: `docker compose up --build` dihentikan batas 480 detik; build macet di `@prisma/engines postinstall` karena `binaries.prisma.sh` mengirim 0 byte pada `GET`. 4 test di-skip, tidak ada yang lolos |
 
 ## 7. Package baru
 
@@ -79,7 +80,7 @@ Dicek 2026-11-08 07.33 WIB:
 ## 9. Yang belum terbukti
 
 - Perbaikan AIDA-37 dari putaran 3 belum diperiksa Codex (batas 3 putaran). Review plan Fase 9 akan memeriksanya.
-- `pnpm test:integration`, `pnpm test:e2e`, dan `pnpm test:egress` belum pernah lolos di Mac ini. `pnpm build` sudah lolos (putaran 7).
+- `pnpm test:egress` belum pernah lolos di Mac ini (host Prisma macet). `pnpm test:integration` dan `pnpm test:e2e` belum pernah exit 0 dalam satu run penuh: yang pertama hanya karena berkas egress, yang kedua karena dua flake.
 - `docker compose -p aida up -d --build` belum pernah dijalankan di Mac ini.
 - AIDA-100 sampai AIDA-114 (dari butir 0c) belum dikritik Codex. Codex akan memeriksanya saat CONTEXT dan review plan Fase 14 dan 16.
 - Penelusuran demo hanya mencakup yang bisa diklik dari halaman utama. Drag and drop, isi dialog Share, dan halaman detail proyek dari sidebar tidak dibuka.

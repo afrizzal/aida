@@ -262,3 +262,48 @@ Aturan C: putaran ini tidak membuat ekspor maupun worktree. Folder `tmp.*` lama 
 - Testcontainers di Mac ini butuh `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock` dan `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock` di variabel perintah untuk `pnpm test:integration` dan `pnpm test:e2e`, termasuk di gerbang akhir fase dan di setiap dispatch eksekutor.
 
 Berikutnya: begitu `test:egress` selesai, ulangi integration dan E2E dengan dua variabel itu. Sambil menunggu, Fase 08 langkah 5 (`/gsd-plan-phase 8`) tidak butuh build dan boleh berjalan.
+
+## Putaran 8 (2026-11-08, mulai 07.42 WIB)
+
+Dipicu wakeup. Cek A (sisa 33 GiB), B (`colima status` dan `docker info` exit 0, stderr kosong), dan Berhenti total lolos. `pgrep -f 'artisan test'` sempat menemukan PID, tetapi itu shell latar sesi ini sendiri: baris perintah baseline putaran 7 memuat teks pola itu. `ps` tanpa shell sesi ini: tidak ada proses `artisan`. Pelajaran: jangan menaruh teks pola `pgrep` di perintah latar.
+
+### Butir 0a: hasil `pnpm test:egress`
+
+| Perintah | Exit | Hasil |
+|---|---|---|
+| `pnpm test:egress` | 1 | `docker compose up -d --build` dihentikan oleh `timeout: 480_000` di test (durasi 480,08 detik); 4 test di-skip. Build image berhenti di `@prisma/engines postinstall` |
+
+Sebab, diuji 07.45: `binaries.prisma.sh` untuk `schema-engine.gz` (`linux-musl-arm64-openssl-3.0.x`, engine `3c6e1927`) menjawab `HEAD` 200 dalam 0,35 detik, tetapi `GET` 0 byte dalam 60 detik (curl exit 28). Ini pola gangguan yang sama dengan penyimpangan 1 di persiapan. Gangguan host luar, bukan kode. Mirror pihak ketiga tidak dipakai. Test egress dan gerbang `docker compose -p aida up --build` menunggu host pulih. Stack `aida-egress-test` tidak meninggalkan container; image `dns-logger` dan `stub-llm` (234 MB masing-masing) dibiarkan sebagai cache.
+
+Integration dan E2E diulang 07.47 dengan `DOCKER_HOST` dan `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE`: Testcontainers kini menemukan runtime (container `pgvector/pgvector:pg16` dan `ryuk` jalan, migrasi diterapkan).
+
+### Fase 08, langkah 5 (berjalan)
+
+`/gsd-plan-phase 8`: `phase_status: Pending`, gerbang closed-phase tidak berlaku; drift konteks dan codebase `skipped`; gerbang UI `frontend: false`. Pattern mapper berjalan.
+
+Pattern mapper selesai: `08-PATTERNS.md`, 41 berkas, 36 dengan analog. Dua klaimnya dicek ke kode dan cocok: `find ... "@prisma+client@7.8.0*"` di stage builder `Dockerfile`, dan klien IMAP/SMTP dibuat di luar `try` di `settings/email/actions.ts`. Probe tanpa SPEC (default aktif, key config tidak ada): 26 edge dari AIDA-25 sampai 32, semua `unresolved`, diteruskan ke planner untuk diselesaikan dengan aturan `--auto`. Planner berjalan.
+
+| No | Pertanyaan | Opsi | Keputusan | Alasan |
+|---|---|---|---|---|
+| K15 | Riset sebelum plan Fase 08 | riset atau lewati | lewati | `workflow.research: false` dan tidak ada hook riset aktif; CONTEXT memuat fakta yang dicek ke kode; planner diminta memakai Context7 atau menjadikan cek catatan upgrade sebagai task pertama untuk versi yang belum terverifikasi |
+| K16 | Gerbang reversibilitas (`checkpoint:decision` untuk keputusan one-way) | aktif atau `REVERSIBILITY_GATES=false` | `false` | run tanpa manusia; keputusan one-way Fase 08 sudah dikunci di CONTEXT bersama Codex; rating tetap dicatat di task |
+| K17 | Saran schema-gate `prisma db push` | ikuti atau sesuaikan | sesuaikan | proyek berbasis migrasi: `migrate dev` di `aida-dev-db` (127.0.0.1:55432), lalu bukti `migrate deploy` dan suite integration |
+
+### Butir 0a: hasil ulang integration dan E2E (07.47 sampai 07.58)
+
+| Perintah | Exit | Hasil |
+|---|---|---|
+| `pnpm test:integration` | 1 | 11 dari 12 berkas lolos, 26 test lolos, 4 di-skip. Satu-satunya yang gagal: `egress-isolation.test.ts`, yang ikut terjaring `include` di `vitest.integration.config.ts`. Sebabnya sama: build image di compose dihentikan batas 480 detik. Compose juga memperingatkan plugin buildx tidak terpasang (builder klasik) |
+| `pnpm test:e2e` | 1 | 63 lolos, 1 di-skip, 2 gagal: `honesty-invariants.spec.ts` (a) dan (b) |
+
+Diagnosis E2E, dari log dan kode test (belum dibuktikan):
+
+- (a) timeout 90 detik menunggu opsi "Ollama" sesudah klik dropdown Provider di form AI Provider. Opsi itu ada di `llm-provider-form.tsx` dan berhasil dipakai di form embedding pada test (b). Dugaan: klik pertama terjadi sebelum `/settings` selesai hydrate di `next dev` (kompilasi pertama 611 ms), karena `gotoWarm` hanya menunggu `domcontentloaded`.
+- (b) gagal berantai: ia hanya menyimpan provider embedding, sedangkan provider LLM seharusnya sudah disimpan oleh (a). `generateDraftReply` selesai 12 ms tanpa draf.
+- `afterAll` mematikan worker dengan `taskkill`, perintah Windows: `/bin/sh: taskkill: command not found`. Tidak ada proses worker yang tertinggal sesudah run (dicek dengan `ps`), tetapi teardown ini tidak portabel. `tests/e2e/global-setup.ts` sudah punya `killTree` yang membedakan platform.
+
+Spec itu dijalankan sendirian sekali lagi untuk membedakan race dari kegagalan tetap.
+
+Spec `honesty-invariants.spec.ts` dijalankan sendirian (08.0x): exit 0, (a) dan (b) lolos (2/2, 14,3 detik). Kesimpulan: flake di run penuh, bukan kegagalan tetap. `taskkill` tetap gagal di teardown; tidak ada worker yang tertinggal. Perbaikan test (tunggu dropdown sampai siap, `killTree` lintas platform seperti `global-setup.ts`) dimasukkan ke Fase 08 lewat review plan, karena gerbang akhir fase mewajibkan E2E hijau.
+
+Antrean: 0a `selesai` dengan bukti untuk build, integration, dan E2E. Egress dipisah menjadi 0a2 `diparkir` karena gangguan host luar, dengan syarat coba ulang di awal setiap putaran.
