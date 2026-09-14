@@ -109,3 +109,21 @@ All HIGH items except C4 are accepted as stated or with the property above. C2 i
 ### Consensus summary (cycle 2)
 
 All nine cycle 2 findings are accepted. C8 is closed: Codex accepted the rejection of whole-chain validation under the documented topology contract. C4 is resolved by K22. This is cycle 2 of at most 3.
+
+### Cycle 3 (last)
+
+- Question: `run-loop/codex/fase08-plan-r3-tanya.md` (commit `40d555d`); answer: `run-loop/codex/fase08-plan-r3-jawab.md`.
+- Export: `40d555d`. Log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`.
+- Codex verdict: not ready; 4 HIGH, 1 MEDIUM; "per the three-cycle rule the phase must be parked". R2-4, R2-5, R2-7 and R2-9 confirmed as incorporated.
+
+| ID | Codex severity | Finding (short) | Orchestrator check | Disposition |
+|---|---|---|---|---|
+| R3-1 | HIGH | K22 cleanup is project-wide: one pre-flight, then `up` and `down --remove-orphans` on project `aida`; a stack started by someone else after the pre-flight could be replaced or removed (race) | Verified: 08-14 `preflight()` then `teardown()` runs `down --remove-orphans`; 08-16 Task 3 has the same window | accept: record the IDs the run created and remove only those after re-checking ownership; re-check immediately before `up`; never project-wide cleanup when a foreign resource is present |
+| R3-2 | HIGH | The charter-mandated `pnpm test:egress` uses the fixed project `aida-egress-test` with `up -d --build` and `down -v --remove-orphans` and no guard | Verified: `tests/integration/egress-isolation.test.ts:126` and `:135` | accept: an external guard before the suite (containers, networks, volumes and images of `aida-egress-test`); if anything foreign exists, `not run` and do not call the suite. Applies to the orchestrator's own baseline 0a2 as well |
+| R3-3 | HIGH | Image tags: `checkRenderedConfig` checks only the image prefix, `startStack` does not check that a tag is new before building, 08-09 builds and removes tags without that check, and the 08-16 gate's `up --build` builds compose-default image names (`build:` services in `docker-compose.yml` have no `image:`) | Verified: `docker-compose.yml` lines 21 and 41/93 have `build:` without `image:`; 08-16 Task 3 step 3; 08-14 `checkRenderedConfig` text | accept: unique tags for every build, checked before building; record created image IDs and remove a tag only while it still points to that ID; never prune shared build cache |
+| R3-4 | HIGH | The 08-16 evidence matrix verifier checks only the matrix's internal consistency, not the source result lines; some evidence commands the table requires are not in Task 2's command list | Verified: the 08-16 Task 3 verify parses `08-GATE.md` sections only | accept: run and record every evidence command; derive each matrix state mechanically from its source line; the verifier matches every item, its required evidence kind and the source state |
+| R3-5 | MEDIUM | The reporter classifies a test as blocked from its first message only | Verified: 08-14 `classifyTest` text | accept: one non-blocker error makes the entry `failed`; add mixed cases to the unit test and the R2-8 checker |
+
+### Outcome
+
+The third and last review cycle ended with four HIGH findings. Under `run-loop/PIAGAM.md` → Titik keputusan ("3 siklus review plan habis dengan temuan HIGH tersisa → Parkir fase"), **Phase 8 is parked** (run-loop decision K24). The findings above are accepted and must be incorporated by a `--reviews` replan before any execution, but that replan would not be reviewed by Codex. Whether to unpark is the owner's decision (`run-loop/LAPORAN.md` → Menunggu owner).

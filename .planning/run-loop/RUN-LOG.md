@@ -385,3 +385,15 @@ Plan-checker putaran 2: 0 BLOCKER, 1 WARNING (sembilan plan disebut berisi 4 tas
 | No | Pertanyaan | Opsi | Keputusan | Alasan |
 |---|---|---|---|---|
 | K23 | Warning checker putaran 2 (4 task) | revisi atau tolak | tolak | salah hitung: setiap plan berisi 3 task menurut `verify.plan-structure` |
+
+Codex siklus 3 (terakhir): pertanyaan `codex/fase08-plan-r3-tanya.md` (commit `40d555d`), ekspor `40d555d` diperiksa (hanya `.env.example`, dua kunci contoh). Berjalan di latar.
+
+Codex siklus 3 (terakhir) selesai (10.46 sampai 10.48): 4 HIGH, 1 MEDIUM; verdict "belum siap, fase harus diparkir". Log tetap `gpt-6.1-terra`, `xhigh`. Klaim dicek ke plan dan kode dan cocok: teardown 08-14 `down --remove-orphans` per project sesudah satu pre-flight; `egress-isolation.test.ts:126,135` tanpa pengaman; service `build:` di `docker-compose.yml` tanpa `image:` sehingga `up --build` 08-16 memakai nama image bawaan; verifier matriks 08-16 hanya membaca matriks. Ditulis ke `08-REVIEWS.md` → `### Cycle 3` dan `### Outcome`, semua diterima.
+
+| No | Pertanyaan | Opsi | Pendapat Codex | Keputusan | Alasan |
+|---|---|---|---|---|---|
+| K24 | Fase 08 sesudah siklus review ketiga dengan 4 HIGH | (a) replan lalu eksekusi tanpa review lagi; (b) parkir | parkir | parkir; temuan siklus 3 diterima dan dicatat, belum dimasukkan ke plan | Titik keputusan piagam: "3 siklus review plan habis dengan temuan HIGH tersisa → Parkir fase". Pembacaan (a) ada, tetapi perbaikannya tidak akan direview, dan urusannya keselamatan resource Docker bersama; diambil yang lebih ketat. Rantai parkir piagam tidak memuat fase yang bergantung pada 08; ROADMAP Cross-phase risks sudah mengatur Fase 10 dan aturan inline script kalau 08 diparkir. Keputusan lanjut ada di owner |
+
+Temuan R3-2 juga berlaku untuk baseline 0a2: sebelum `pnpm test:egress` dijalankan orkestrator, container, network, dan volume project `aida-egress-test` dicek dulu; kalau ada yang bukan buatan run ini, test tidak dijalankan.
+
+Berikutnya: Fase 09, langkah 1 (baca sumber) dan langkah 2 (brainstorm Codex). 0a2 dijalankan begitu regresi Rekriva selesai, dengan pengaman R3-2.

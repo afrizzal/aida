@@ -321,7 +321,7 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |---|---|---|---|---|
-| 8. Security Hardening | v2.0 | 0/0 | Not started | - |
+| 8. Security Hardening | v2.0 | 0/23 | Parked (Codex plan review cycle 3 left HIGH findings; owner decision) | - |
 | 9. Operations | v2.0 | 0/0 | Not started | - |
 | 10. Team | v2.0 | 0/0 | Not started | - |
 | 11. Inbox | v2.0 | 0/0 | Not started | - |

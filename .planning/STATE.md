@@ -4,10 +4,10 @@ milestone: v2.0
 milestone_name: Helpdesk & Projects
 current_phase: 08
 current_phase_name: security-hardening
-status: Phase 8 replanned from Codex review cycle 2 (23 plans), Codex cycle 3 next
+status: Phase 8 parked after Codex plan review cycle 3 (owner decision); Phase 9 next
 last_updated: "2026-11-08T03:45:40.698Z"
 last_activity: 2026-11-08
-last_activity_desc: Phase 8 replanned from Codex cycle 2, 23 plans in 14 waves, plan checker passed; container proofs run under project aida behind a guard (K22)
+last_activity_desc: Phase 8 parked, the third Codex plan review still had HIGH findings on shared Docker safety and evidence honesty; Phase 9 is next
 state_head: 96d7c8feb8dc8264c7436fd8ed60fcbfddf355c0
 progress:
   total_phases: 10
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-11-07, v2.0 opened)
 
 ## Current Position
 
-Phase: 08 (security-hardening), planned: 23 plans in 14 waves after Codex review cycles 1 and 2; Codex cycle 3 (last) next, then execution
+Phase: 08 (security-hardening), PARKED: 23 plans, three Codex review cycles; cycle 3 left 4 HIGH findings (see 08-REVIEWS.md), so the charter parks the phase until the owner decides. Next: Phase 09 (operations)
 Plan: —
-Status: Milestone v2.0 opened by hand on 2026-11-07. `REQUIREMENTS.md` (91 requirements) and `ROADMAP.md` (Phases 8–17) are written and were revised over three Codex critique rounds (queue item 0b done). The public demo was walked under the clean-room rules and added AIDA-100 to AIDA-114 (item 0c done). Phase 8 context is committed (`08-CONTEXT.md`, `8abbc6c`) and the phase is planned: 23 plans in 14 waves after Codex review cycles 1 and 2 (`08-REVIEWS.md`); plan checker passed. Baseline 0a is done: build passes; integration passes except the egress file; E2E passes 63 with two honesty-invariants flakes that pass alone (fixed by plan 08-17). The egress baseline (0a2) was parked while `binaries.prisma.sh` sent no bytes on GET (07.45 to 09.09); the host recovered and the test waits for the Rekriva regression to finish.
+Status: Milestone v2.0 opened by hand on 2026-11-07. `REQUIREMENTS.md` (91 requirements) and `ROADMAP.md` (Phases 8–17) are written and were revised over three Codex critique rounds (queue item 0b done). The public demo was walked under the clean-room rules and added AIDA-100 to AIDA-114 (item 0c done). Phase 8 context is committed (`08-CONTEXT.md`, `8abbc6c`) and the phase is planned: 23 plans in 14 waves; three Codex review cycles; parked after cycle 3 (owner decision, `run-loop/LAPORAN.md`). No Phase 8 code has been executed. Baseline 0a is done: build passes; integration passes except the egress file; E2E passes 63 with two honesty-invariants flakes that pass alone (fixed by plan 08-17). The egress baseline (0a2) was parked while `binaries.prisma.sh` sent no bytes on GET (07.45 to 09.09); the host recovered and the test waits for the Rekriva regression to finish.
 Last activity: 2026-11-08 — Phase 8 planned under the run charter. v1.0.0 stays complete and archived; its archives are `milestones/v1.0.0-*`.
 
 ## Accumulated Context
@@ -98,7 +98,7 @@ None.
 
 ## Session Continuity
 
-**Last action (2026-11-08):** Phase 8 replanned from Codex review cycle 2 (23 plans, 14 waves, plan checker passed). No tag, nothing pushed.
+**Last action (2026-11-08):** Phase 8 parked after the third Codex plan review (4 HIGH findings accepted, not yet incorporated). No tag, nothing pushed.
 
 **Next action:** follow `run-loop/PIAGAM.md`; the first open row of `run-loop/ANTREAN.md` decides the next step.
 
