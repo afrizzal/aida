@@ -367,3 +367,21 @@ Codex siklus 2 selesai (09.56 sampai 09.58): 3 HIGH, 5 MEDIUM, 1 LOW, verdict "b
 | No | Pertanyaan | Opsi | Pendapat Codex | Keputusan | Alasan |
 |---|---|---|---|---|---|
 | K22 | C4, sesudah dua putaran tetap berbeda | project test sendiri; parkir semua test container; project `aida` dengan pengaman | argumen operasional meyakinkan, tetapi teks piagam melarang; parkir sampai owner memperjelas, jangan pakai stack `aida` yang berjalan | project `aida` dengan pengaman (parkir kalau ada container `aida` atau port terpakai; volume bernama per run; hapus hanya yang dibuat run); test egress v1 dan Testcontainers tetap karena disebut piagam | aturan keputusan 4: opsi paling konservatif yang tetap di dalam teks piagam dan memenuhi syarat Codex soal stack yang berjalan; dilaporkan ke owner |
+
+Replan mode reviews putaran 2 berjalan sejak 10.02 (ledger `Round 2 — 96d7c8f`). Regresi Rekriva masih berjalan (Screening, Search), 0a2 menunggu.
+
+## Putaran 14 (2026-11-08, 10.22 WIB)
+
+Dipicu wakeup cadangan. Cek A (31 GiB), B, dan Berhenti total lolos. Regresi Rekriva masih berjalan (Interviews). Planner putaran 2 aktif (08-14 sedang diubah). Menunggu.
+
+## Putaran 15 (2026-11-08, 10.43 WIB)
+
+Dipicu wakeup cadangan. Cek A (31 GiB), B, dan Berhenti total lolos. Regresi Rekriva masih berjalan (Analytics). Planner putaran 2 masih aktif (21 plan berubah dalam 10 menit terakhir). Menunggu.
+
+Replan putaran 2 selesai (sekitar 10.45): 23 plan direvisi, 14 wave; semua K22 dan R2-1 sampai R2-9 masuk isi plan, tidak ada yang ditunda. 08-21 Task 3 (Caddy mandiri) pindah ke 08-22 sesuai K22; 08-23 sesudah 08-22. Pengaman juga parkir kalau ada network `aida`. Repo dicek: tidak ada berkas tersisa dari skrip yang dijalankan planner. Probe: 100 perintah, semua severity `none`. Docker: tidak ada container, network, atau volume `aida`. Plan-checker putaran 2 berjalan.
+
+Plan-checker putaran 2: 0 BLOCKER, 1 WARNING (sembilan plan disebut berisi 4 task), 0 INFO. K22 dan R2-1 sampai R2-9 ditelusuri checker ke isi plan. Warning ditolak sesudah dicek: `verify.plan-structure` dan hitungan elemen `<task` memberi 3 task untuk kesembilan plan itu (checker ikut menghitung pembungkus `<tasks>`, kesalahan yang sama dengan iterasi 1). Gerbang 13: requirement 8/8, keputusan 30/30, gap-analysis 38/38. ROADMAP ditulis ulang tangan (23 plan, 14 wave) lalu `annotate-dependencies`; Current Position di STATE diperbaiki tangan lagi.
+
+| No | Pertanyaan | Opsi | Keputusan | Alasan |
+|---|---|---|---|---|
+| K23 | Warning checker putaran 2 (4 task) | revisi atau tolak | tolak | salah hitung: setiap plan berisi 3 task menurut `verify.plan-structure` |

@@ -81,7 +81,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 **Wave 5** *(blocked on Wave 4 completion)*
 
 - [ ] 08-08-PLAN.md — CSP zero-violation E2E on the five acceptance pages, 404 and error cases (Wave 5)
-- [ ] 08-09-PLAN.md — Non-root `app`, `worker`, `migrate`; root-owned volume procedure (Wave 5)
+- [ ] 08-09-PLAN.md — Non-root `app`, `worker`, `migrate` images; root-owned volume procedure (Wave 5)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
@@ -94,7 +94,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 **Wave 8** *(blocked on Wave 7 completion)*
 
-- [ ] 08-12-PLAN.md — `/api/health` cache and in-memory throttle (Wave 8)
+- [ ] 08-12-PLAN.md — `/api/health` cache and in-memory throttle in one process-global store (Wave 8)
 - [ ] 08-13-PLAN.md — Byte caps on received bytes, three-layer alignment, cleanup on failure (Wave 8)
 
 **Wave 9** *(blocked on Wave 8 completion)*
@@ -103,21 +103,24 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 **Wave 10** *(blocked on Wave 9 completion)*
 
-- [ ] 08-14-PLAN.md — Real-stack container harness and first runtime proofs (Wave 10)
+- [ ] 08-14-PLAN.md — Guarded project-`aida` container harness, four-state reporter, first runtime proofs (K22) (Wave 10)
 
 **Wave 11** *(blocked on Wave 10 completion)*
 
-- [ ] 08-21-PLAN.md — Production-mode host E2E: CSP and client identity over real HTTP and real Caddy (reviews C6, C7) (Wave 11)
-- [ ] 08-22-PLAN.md — Compose stack through real Caddy: spoofing, health under flood (Wave 11)
-- [ ] 08-23-PLAN.md — Root-owned uploads volume procedure and non-root backup on the real stack (Wave 11)
+- [ ] 08-21-PLAN.md — Production-mode host E2E: CSP, client identity and the health DB bound (reviews C6, C7) (Wave 11)
+- [ ] 08-22-PLAN.md — Real Caddy: spoofing, probe refusal at an instrumented upstream, health floods (Wave 11)
 
 **Wave 12** *(blocked on Wave 11 completion)*
 
-- [ ] 08-15-PLAN.md — `docs/SECURITY.md` reconciliation with an evidence-status table (Wave 12)
+- [ ] 08-23-PLAN.md — Root-owned uploads volume procedure and non-root backup on the real stack (Wave 12)
 
 **Wave 13** *(blocked on Wave 12 completion)*
 
-- [ ] 08-16-PLAN.md — End-of-phase gate on one tested commit with a per-requirement evidence matrix (Wave 13)
+- [ ] 08-15-PLAN.md — `docs/SECURITY.md` reconciliation with an evidence-status table (Wave 13)
+
+**Wave 14** *(blocked on Wave 13 completion)*
+
+- [ ] 08-16-PLAN.md — End-of-phase gate on one tested commit, guarded compose gate, evidence matrix (Wave 14)
 
 ### Phase 9: Operations
 
