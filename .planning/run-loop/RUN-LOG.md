@@ -330,3 +330,16 @@ Gerbang langkah 13: requirement 8/8 (AIDA-25 sampai 32 di `requirements` plan); 
 Langkah 13e: `gap-analysis.plan-post` 38/38 tercakup (8 requirement, 30 keputusan). Tidak ada auto-advance (`auto_advance` dan `_auto_chain_active` `false`). `/gsd-plan-phase 8` selesai; commit `339ade5`. `.planning/state.json` (proyeksi turunan gsd-tools, dibuat 08.56 oleh `state.planned-phase`) dibiarkan tidak dilacak; sumber kebenaran tetap `STATE.md`.
 
 Berikutnya: langkah 5 lanjutan, review plan oleh Codex dari ekspor `HEAD`.
+
+## Putaran 10 (2026-11-08, mulai 08.59 WIB)
+
+Dipicu wakeup. Cek A (sisa 28 GiB), B, dan Berhenti total lolos. Cek beban: regresi Rekriva berjalan (`php artisan test --testsuite=Feature tests/Feature/Workspace`), jadi Docker, Testcontainers, E2E, dan build dilarang selama itu. 0a2: host Prisma masih 0 byte (curl exit 28), tetap diparkir. Butir: Fase 08 langkah 5, review plan oleh Codex siklus 1 (boleh saat regresi berjalan).
+
+Pertanyaan: `codex/fase08-plan-tanya.md`, commit `c86beb3`. Ekspor dari `c86beb3` (di bawah `TMPDIR`, path disimpan di scratchpad sesi). Akar ekspor hanya berisi berkas yang dilacak; satu-satunya berkas env adalah `.env.example`. Pindaian pola kunci: dua kecocokan, keduanya contoh (`AKIAIOSFODNN7EXAMPLE` dari dokumentasi AWS dan dummy `sk-ant-ABCDEFG…`). Perintah pemeriksaan pertama ditolak hook Secret read guard karena memuat pola nama berkas env; tidak diakali, pemeriksaan diganti `ls -a` atas akar ekspor. Log Codex: `model: gpt-6.1-terra`, `reasoning effort: xhigh`, workdir = ekspor. Codex berjalan di latar.
+
+Codex siklus 1 selesai (09.01 sampai 09.03): 7 HIGH, 5 MEDIUM, 1 LOW, verdict "plan belum siap". Log tetap `gpt-6.1-terra`, `xhigh`. Setiap klaim dicek ke plan dan kode; semua klaim fakta cocok. Disposisi di `08-REVIEWS.md` bagian `## Codex`: C1, C3, C5, C6, C7, C9 sampai C13 diterima; C2 diterima walau saya menilainya MEDIUM (hanya terjadi saat `TRUSTED_PROXY_HOPS` salah); C4 sebagian (nama project test, lihat K20); C8 sebagian (validasi seluruh rantai XFF ditolak karena entri kiri dikendalikan klien dan bisa dipakai untuk sengaja masuk bucket bersama).
+
+| No | Pertanyaan | Opsi | Pendapat Codex | Keputusan | Alasan |
+|---|---|---|---|---|---|
+| K20 | Project compose untuk suite container 08-14 | project sendiri, atau `aida` | harfiah: hanya `aida` dan `aida-dev-db` | project sendiri, hanya menghapus yang dibuatnya; dibawa ke Codex siklus 2 dan ke owner | piagam juga mewajibkan Testcontainers dan `pnpm test:egress` (`aida-egress-test`); berbagi `aida` bisa menimpa stack operator. Kalau tetap berbeda sesudah siklus 2: opsi paling konservatif (aturan keputusan 4) |
+| K21 | Validasi seluruh rantai XFF (C8) | seluruh rantai, atau bagian tepercaya saja | seluruh rantai | bagian tepercaya saja | entri kiri dikendalikan klien; gagal tertutup di sana membuat klien bisa sengaja masuk bucket bersama |

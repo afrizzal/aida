@@ -27,8 +27,9 @@ Milestone v2.0 sudah dibuka (butir 0b selesai), dan daftar fitur Projects sudah 
 
 ## 3. Menunggu owner
 
-1. Putuskan cara menghapus `.next/` kalau rusak. Aturan deny `Bash(rm -rf *)` menolak langkah yang diminta piagam.
-2. `cp .env.example .env` tampaknya sudah dijalankan: `ls -la` menunjukkan file itu ada sejak 15.38 dengan ukuran sama dengan contoh. Isinya tidak dibaca. Kalau bukan owner yang membuatnya, mohon diperiksa.
+1. Nama compose project untuk test container. Piagam hanya mengizinkan container dan volume project `aida` dan `aida-dev-db`, tetapi juga mewajibkan `pnpm test:egress` (project `aida-egress-test`) dan test yang memakai Testcontainers. Saya membaca container yang dibuat dan dibuang test AIDA sendiri sebagai milik AIDA (K14); Codex membacanya harfiah. Opsi: (a) izinkan project test berawalan `aida-` yang dibuat dan dibongkar oleh suite AIDA; (b) semua test container memakai project `aida`, dengan risiko menimpa stack operator yang sedang jalan. Yang terhalang: tidak ada sekarang; plan 08-14 tetap memakai project sendiri dan hanya menghapus yang dibuatnya. Kalau Codex tetap tidak setuju di siklus 2, run memakai opsi paling konservatif.
+2. Putuskan cara menghapus `.next/` kalau rusak. Aturan deny `Bash(rm -rf *)` menolak langkah yang diminta piagam.
+3. `cp .env.example .env` tampaknya sudah dijalankan: `ls -la` menunjukkan file itu ada sejak 15.38 dengan ukuran sama dengan contoh. Isinya tidak dibaca. Kalau bukan owner yang membuatnya, mohon diperiksa.
 
 ## 4. Titik aman rilis `v1.0.0`
 
