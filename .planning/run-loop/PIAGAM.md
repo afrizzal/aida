@@ -23,7 +23,7 @@ Kalau antrean habis, tulis laporan akhir, commit, lalu hentikan loop. Kalau tiga
 
 ## Aturan owner 2026-11-08
 
-Ditambahkan oleh owner dan mengikat seperti Larangan. Kalau bertentangan dengan bagian lain piagam ini, ambil yang lebih ketat.
+Ditambahkan oleh owner dan mengikat seperti Larangan. Seluruh isi bagian ini, termasuk jeda 1800 detik di A dan B, disetujui owner 2026-11-08. Kalau bertentangan dengan bagian lain piagam ini, ambil yang lebih ketat.
 
 **A. Ruang disk.** Di awal setiap putaran, jalankan `df -h /System/Volumes/Data`. Kalau sisa di bawah 15 GB, jangan kerjakan apa pun. Catat di `RUN-LOG.md`, lalu jadwalkan putaran berikutnya 1800 detik kemudian. Putaran seperti ini terhitung menunggu, bukan putaran tanpa commit.
 
@@ -32,16 +32,18 @@ Ditambahkan oleh owner dan mengikat seperti Larangan. Kalau bertentangan dengan 
 **C. Bersih-bersih.** Worktree yang dibuat dalam putaran dibuang beserta branch-nya setelah branch itu di-merge. Salinan atau ekspor repo sementara, termasuk folder ekspor Codex, dihapus di akhir putaran.
 
 - `git merge` tetap dilarang untuk Claude, dan `workflow.use_worktrees` bernilai `false`, jadi putaran tidak membuat worktree. Worktree yang branch-nya belum masuk `v2/run-loop` jangan dibuang. Catat sebagai item owner.
-- Hapus hanya path yang dibuat putaran itu sendiri. Simpan path dari `mktemp -d` saat membuatnya. Worktree dibuang dengan `git worktree remove`, ekspor dengan `rm -r -- "${EXPORT}"` sesudah memastikan path itu ada di bawah `${TMPDIR}`. Aturan deny `rm -rf` tetap berlaku.
+- Hapus hanya path yang dibuat putaran itu sendiri. Simpan path dari `mktemp -d` saat membuatnya. Worktree dibuang dengan `git worktree remove`.
+- Ekspor dihapus dengan `rm -r -- "${EXPORT}"`. Ini pengecualian resmi, disetujui owner 2026-11-08, dengan dua batas: hanya path dari `mktemp -d` milik putaran itu sendiri, dan hanya kalau path itu ada di bawah `${TMPDIR}`. Di luar dua batas itu, jangan hapus. Aturan deny `rm -rf` tetap berlaku.
 
-**D. Penulis kode.** Semua kode ditulis oleh Claude (Opus 5.5). Codex hanya dipakai untuk pendapat kedua atau review, dan tidak menulis kode. Semua agen GSD mewarisi model sesi lewat `"model_profile": "inherit"` di `.planning/config.json`. Jangan ubah profil itu, dan jangan isi parameter `model` saat dispatch agen. Catatan profil `balanced` di `CLAUDE.md` sudah digantikan keputusan ini.
+**D. Penulis kode.** Semua kode ditulis oleh Claude (Opus 5.5). Codex hanya dipakai untuk pendapat kedua atau review, dan tidak menulis kode. Semua agen GSD mewarisi model sesi lewat `"model_profile": "inherit"` di `.planning/config.json`. Jangan ubah profil itu, dan jangan isi parameter `model` saat dispatch agen. `CLAUDE.md` sudah memuat profil ini dan merujuk ke aturan ini.
 
-**E. Rujukan fitur project management.** Fitur project management mengacu ke `<URL-REPO, belum diisi owner>`. Sebelum mengambil satu baris pun, baca lisensinya dan catat di dokumen fase. AIDA berlisensi Apache-2.0 dan publik.
+**E. Rujukan fitur project management.** Fitur project management mengacu ke `https://github.com/gr8rstudio/gr8r-studio`. Sebelum mengambil satu baris pun, baca lisensinya dan catat di dokumen fase. AIDA berlisensi Apache-2.0 dan publik.
 
 - MIT, BSD, atau Apache-2.0 boleh diadaptasi. Pertahankan pemberitahuan hak cipta dan lisensinya, lalu catat di `NOTICE` beserta commit SHA sumber dan daftar file yang diadaptasi.
 - GPL, AGPL, LGPL, atau tanpa lisensi: jangan salin kodenya. Pelajari perilakunya saja, lalu tulis implementasi sendiri.
 - Kalau lisensinya tidak jelas, itu keputusan owner. Ikuti aturan F.
-- Selama URL di atas belum diisi owner, jangan menebak repo rujukan. Sumber yang boleh tetap yang ada di bagian Clean-room. Bagian Clean-room untuk gr8r tetap berlaku penuh. Repo itu tanpa lisensi, jadi termasuk butir kedua.
+- Repo rujukan ini sama dengan repo di bagian Clean-room modul Projects. Menurut owner (2026-11-08), repo itu tanpa lisensi dan bukan milik owner, jadi yang berlaku butir "tanpa lisensi": clean-room saja. Jangan salin kode, teks UI, CSS, ikon, atau aset lain. Status lisensinya sudah tercatat di sini, jadi jangan membuka atau mengambil repo itu untuk memeriksanya ulang. Dokumen fase cukup mencatat "tanpa lisensi, menurut owner 2026-11-08".
+- Jangan menebak repo rujukan lain. Sumber yang boleh tetap yang ada di bagian Clean-room, dan bagian itu tetap berlaku penuh.
 
 **F. Keputusan owner.** Keputusan yang hanya bisa diambil owner (lisensi, cakupan fitur, dan apa pun yang mengubah `PROJECT.md` atau `REQUIREMENTS.md`) jangan dipilih sendiri, dan jangan otomatis memilih opsi pertama. Catat keputusan itu di `ANTREAN.md` dengan status `menunggu owner`, berisi pertanyaan, opsi, dan apa yang terhalang. Status itu diperlakukan seperti diparkir. Lalu kerjakan hal lain yang tidak bergantung padanya. Memperbarui status traceability di `REQUIREMENTS.md` berdasarkan acceptance dan bukti bukan keputusan owner.
 
@@ -137,6 +139,8 @@ Kalau Codex gagal, ulangi sekali sesudah 15 menit. Kalau masih gagal, lanjutkan 
 ## Clean-room modul Projects
 
 Repo `gr8rstudio/gr8r-studio` tidak punya lisensi, jadi kodenya tidak boleh dipakai. Fiturnya dibangun ulang dari nol.
+
+Ini repo rujukan yang sama dengan aturan E di bagian Aturan owner 2026-11-08 (`https://github.com/gr8rstudio/gr8r-studio`). Kedua bagian berlaku bersama.
 
 - Sumber yang boleh: `FITUR-PROJECTS.md`, dan demo publik `https://gr8r-taskmanagement.vercel.app/` untuk melihat perilaku.
 - Dilarang meng-clone atau mengambil repo itu, membuka `src/`-nya, dan membaca bundle JS atau CSS demo.

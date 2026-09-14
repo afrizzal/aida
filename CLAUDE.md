@@ -24,7 +24,7 @@ Differentiator: **AI is the core, not a paid add-on.** Self-host on one server, 
 ## Workflow
 
 - Use GSD: `/gsd:plan-phase N` → `/gsd:execute-phase N`. Atomic commits per plan. Keep `.planning/STATE.md` current.
-- **Model profile: `balanced` (token-saving, required).** Planning/thinking agents (`/gsd:plan-phase`, discuss, review) run on **Opus**; execution/implementation agents (`/gsd:execute-phase`) run on **Sonnet**. Set in `.planning/config.json` (`model_profile: "balanced"`); change only via `/gsd:set-profile`.
+- **Model profile: `inherit` (all agents run on Opus 5.5).** Every GSD agent (planner, executor, verifier, plan-checker, mapper, reviewer) inherits the session model, so all of them run on Opus 5.5. Set in `.planning/config.json` (`model_profile: "inherit"`); see rule D in `.planning/run-loop/PIAGAM.md`. Change only via `/gsd:set-profile`.
 - Quality gates: typecheck clean (`tsc --noEmit`), tests for logic, dogfood through the real UI (no hardcoded shortcuts).
 - **Repo health is a feature.** README with a hero GIF, clean docs, and a frictionless quick-start are deliverables, not afterthoughts — they convert visitors into stars.
 
