@@ -414,3 +414,13 @@ Dipicu wakeup. Cek A (sisa 30 GiB), B, dan Berhenti total lolos. Regresi Rekriva
 | Test | tidak ada test demo boot, guard seed, atau backup di `tests/` |
 | Phase 1 v1 | `milestones/v1.0.0-phases/01-foundation/` tanpa `01-VERIFICATION.md`; ada `01-UAT.md` dan SUMMARY |
 | SEED-010 | belum ada `scripts/install.sh`, `AGENTS.md`, `.github/CODEOWNERS`, workflow `check-version`; `package.json` tanpa field `version` |
+
+### Langkah 2
+
+Pertanyaan: `codex/fase09-tanya.md`, 11 area abu-abu, commit `1e276dc`. Ekspor `1e276dc` diperiksa (hanya `.env.example`, dua kunci contoh). Codex berjalan di latar.
+
+Codex Fase 09 selesai (10.54 sampai 10.56): 11 area dijawab. Log `gpt-6.1-terra`, `xhigh`. Klaim dicek ke kode dan cocok; satu fakta saya dikoreksi: dua `<h1>` di halaman status ada di cabang berbeda, jadi bukan pelanggaran.
+
+### Langkah 3: `09-CONTEXT.md`
+
+27 keputusan dengan sumbernya, batas manusia, instruksi planner, ringkasan aturan owner, dan Larangan verbatim (`diff` identik, 11 butir). Keputusan yang berbeda dari Codex: D-02 protokol konsistensi backup (lease plus penundaan hapus fisik, arsip seluruh uploads lalu verifikasi kunci dari dump, tanpa ekspor snapshot lintas proses) lebih sederhana dari usulan Codex, dan akan dikritik Codex saat review plan; D-09 throttle logo memakai `checkRateLimit` yang ada dengan dokumentasi jujur atas batasnya (Codex menyarankan limiter atomik baru atau parkir; saya menilai itu menduplikasi Fase 08); D-12 menambah syarat kompatibilitas mundur. Bukti level stack AIDA-33 dan AIDA-35 ditulis tetapi tidak dijalankan sampai owner memutuskan soal test container (sama dengan Fase 08). Dua keputusan owner baru dicatat di antrean (09-o1, 09-o2).

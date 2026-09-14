@@ -9,7 +9,7 @@ Status: `belum`, `berjalan`, `selesai`, `menunggu manusia`, `diparkir`.
 | 0b | Buka milestone v2.0 dengan tangan. Catat keputusan owner bertanggal 2026-11-07 di `PROJECT.md`: pagar "tanpa modul project management" dicabut, modul Projects dibangun clean-room, larangan memakai kode AGPL atau tanpa lisensi tetap berlaku. Tulis `REQUIREMENTS.md` (ID mulai AIDA-25, AIDA-18 tetap) dan `ROADMAP.md` dengan format arsip `milestones/v1.0.0-*`, Phase 08 sampai 17. Perbarui `STATE.md`. Minta Codex mengkritik roadmap. Selesai kalau `gsd-tools.cjs query init.phase-op 8` berhasil | selesai | Dokumen `8a72f4c`. Codex tiga putaran: 15 temuan (`995ed9e`), 4 HIGH dan 3 MEDIUM (`fea685d`), 1 HIGH (`b9b1d9b`). `init.phase-op 8` menemukan fase 8 dengan requirement. Perbaikan putaran 3 tidak diperiksa ulang Codex karena batas 3 putaran |
 | 0c | Lengkapi `FITUR-PROJECTS.md` dengan menelusuri demo publik sesuai aturan clean-room | selesai | `cb10c1c`. Chromium headless, hanya UI tampak. 29 baris perilaku baru, 6 di luar scope dengan alasan. AIDA-100 sampai AIDA-114 ditambahkan, total 91 requirement |
 | 08 | Keamanan | diparkir | Langkah 1 sampai 5 dijalankan: CONTEXT `8abbc6c`; plan 23 dalam 14 wave (`ded5f56`); review Codex 3 siklus (`99721fd`, `96d7c8f`, siklus 3 di `08-REVIEWS.md`). Siklus 3 (terakhir) masih memberi 4 HIGH soal keselamatan resource Docker bersama dan kejujuran matriks bukti, jadi fase diparkir sesuai Titik keputusan (K24). Menunggu keputusan owner (LAPORAN bagian 3). Tidak ada fase lain yang ikut diparkir |
-| 09 | Operasional | berjalan | Putaran 16: langkah 1 (baca sumber) selesai; langkah 2 (brainstorm Codex `codex/fase09-*`) berjalan |
+| 09 | Operasional | berjalan | Langkah 1 sampai 3 selesai: CONTEXT (27 keputusan, Codex `fase09-jawab.md`). Berikutnya langkah 4: `/gsd-ui-phase 9` (fase ber-UI). Bukti level stack AIDA-33 dan AIDA-35 ditulis tetapi tidak dijalankan sampai keputusan owner soal test container |
 | 10 | Tim | belum | |
 | 11 | Inbox | belum | |
 | 12 | Siklus tiket | belum | |
@@ -18,3 +18,5 @@ Status: `belum`, `berjalan`, `selesai`, `menunggu manusia`, `diparkir`.
 | 15 | Tampilan kerja | belum | |
 | 16 | Ruang kerja | belum | |
 | 17 | Penyatuan | belum | |
+| 09-o1 | Owner: baseline `version` di `package.json` dan kebijakan bump untuk `check-version` (D-23) | menunggu owner | Opsi: tetapkan versi awal (mis. `1.0.0` sesudah tag) atau biarkan workflow memberi notice. Terhalang: aktivasi gerbang versi |
+| 09-o2 | Owner: handle untuk `CODEOWNERS` dan widget README pihak ketiga (D-25) | menunggu owner | Opsi: isi handle/tim dan izinkan widget, atau biarkan tidak ada. Terhalang: dua butir AIDA-40 |
