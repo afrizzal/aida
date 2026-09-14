@@ -1,10 +1,10 @@
 # Laporan run loop AIDA
 
-Keadaan per 2026-11-08 08.05 WIB, putaran 8.
+Keadaan per 2026-11-08 09.05 WIB, putaran 9.
 
 ## 1. Ringkasan
 
-Milestone v2.0 sudah dibuka (butir 0b selesai), dan daftar fitur Projects sudah dicek ke demo publik (butir 0c selesai). `REQUIREMENTS.md` berisi 91 requirement, `ROADMAP.md` berisi Phase 8 sampai 17, dan keputusan owner tercatat di `PROJECT.md`. Belum ada kode produk yang diubah. Dokumen perencanaan di `.planning/` aman ditinjau sekarang. Fase 08 sudah punya `08-CONTEXT.md` (30 keputusan dari brainstorm Codex, dicek ulang ke kode, dua koreksi), dan langkah berikutnya menyusun plan. Baseline 0a selesai di Mac ini: build lolos; integration lolos kecuali test egress; E2E lolos 63 dengan 2 flake di `honesty-invariants.spec.ts` yang lolos saat dijalankan sendirian. Test egress terhalang gangguan host `binaries.prisma.sh` (di luar proyek) dan diparkir sebagai 0a2. Plan Fase 08 sedang disusun.
+Milestone v2.0 sudah dibuka (butir 0b selesai), dan daftar fitur Projects sudah dicek ke demo publik (butir 0c selesai). `REQUIREMENTS.md` berisi 91 requirement, `ROADMAP.md` berisi Phase 8 sampai 17, dan keputusan owner tercatat di `PROJECT.md`. Belum ada kode produk yang diubah. Dokumen perencanaan di `.planning/` aman ditinjau sekarang. Fase 08 sudah punya `08-CONTEXT.md` (30 keputusan dari brainstorm Codex, dicek ulang ke kode, dua koreksi), dan langkah berikutnya menyusun plan. Baseline 0a selesai di Mac ini: build lolos; integration lolos kecuali test egress; E2E lolos 63 dengan 2 flake di `honesty-invariants.spec.ts` yang lolos saat dijalankan sendirian. Test egress terhalang gangguan host `binaries.prisma.sh` (di luar proyek) dan diparkir sebagai 0a2. Fase 08 sudah punya 18 plan yang lolos plan-checker tanpa blocker; berikutnya review plan oleh Codex, baru eksekusi. Belum ada kode produk yang diubah.
 
 ## 2. Fase dan requirement
 
@@ -14,7 +14,7 @@ Milestone v2.0 sudah dibuka (butir 0b selesai), dan daftar fitur Projects sudah 
 | 0a2 | Baseline egress | diparkir | `binaries.prisma.sh` mengirim 0 byte pada `GET`; build image tidak selesai | |
 | 0b | Milestone v2.0 | selesai dengan bukti | `init.phase-op` 8 sampai 17 menemukan fasenya; 76/76 requirement terpetakan; tiga putaran kritik Codex diterapkan | `8a72f4c`, `995ed9e`, `fea685d`, `b9b1d9b` |
 | 0c | Lengkapi daftar fitur | selesai dengan bukti | 29 perilaku baru di `FITUR-PROJECTS.md`, AIDA-100 sampai 114, 91/91 terpetakan, grep clean-room kosong (exit 1) | `cb10c1c` |
-| 08 | Keamanan (AIDA-25 sampai 32) | berjalan | langkah 1 sampai 3 selesai (CONTEXT), langkah 4 dilewati (`UI hint: no`), berikutnya plan | `4d8efca`, `8abbc6c` |
+| 08 | Keamanan (AIDA-25 sampai 32) | berjalan | CONTEXT selesai; 18 plan, plan-checker tanpa blocker, requirement 8/8, keputusan 30/30; berikutnya review Codex | `4d8efca`, `8abbc6c`, `339ade5` |
 | 09 | Operasional (AIDA-33 sampai 41) | belum disentuh | | |
 | 10 | Tim (AIDA-42 sampai 46) | belum disentuh | | |
 | 11 | Inbox (AIDA-47 sampai 51) | belum disentuh | | |
@@ -47,6 +47,7 @@ Rincian ada di `RUN-LOG.md` putaran 1 dan 2. Jawaban Codex disimpan di `codex/ro
 - Butir 0c: perilaku demo yang bertentangan dengan aturan AIDA tidak dibangun. Push notification browser butuh layanan push vendor (egress pihak ketiga). Hapus workspace bentrok dengan `AuditEvent` append-only. Link publik proyek membuka data tanpa login. Billing dan bahasa UI memang di luar scope. Owner bisa meninjau ulang link publik.
 - Keputusan yang sengaja diserahkan ke CONTEXT fase: siapa yang boleh membuat workspace baru (AIDA-111, default konservatif hanya admin instance) dan set status proyek (AIDA-100).
 - Fase 08 (putaran 6 dan 7): urutan upgrade `next`, lalu `better-auth`, lalu sisanya dengan `shadcn` pindah ke `devDependencies` hanya kalau artefak build terbukti bersih; CSP nonce dengan `strict-dynamic`; IP klien hanya lewat Caddy yang menimpa header, `TRUSTED_PROXY_HOPS` sebagai opsi lanjutan yang gagal tertutup; volume upload lama diurus prosedur manual, tanpa entrypoint root. Saya condong ke `TRUSTED_PROXY_HOPS` sebagai inti; Codex menolak hitungan hop sebagai bukti kepercayaan, dan saya ikut Codex. Rincian di `08-CONTEXT.md`.
+- Plan Fase 08 (putaran 8 dan 9): riset dilewati karena config proyek; gerbang reversibilitas dimatikan untuk run tanpa manusia; saran `prisma db push` dari schema-gate diganti alur migrasi. Plan-checker iterasi 1 memberi 2 warning dan 1 info; info-nya salah (dicek di kode) dan ditolak. Dari baseline saya menambah plan 08-17 untuk flake E2E dan teardown `taskkill`. Warning iterasi 2 (E2E paralel) diterima tanpa revisi karena `use_worktrees: false` memaksa eksekusi berurutan.
 - Putaran 7: draf CONTEXT dari putaran 6 salah membaca F-11 (`addTag` sudah memvalidasi sebelum gerbang, bukan sebaliknya). Diperbaiki sebelum commit.
 - Koreksi kejujuran: AIDA-10 di v1 tercatat selesai, padahal alur undangan tidak pernah ada (F-16). Centang v1 tidak diubah. Celahnya dicatat di `PROJECT.md` dan ditutup oleh AIDA-42.
 
