@@ -56,7 +56,54 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 6. Dependabot and a CI audit job exist as files.
 
 **Stays open for a human:** the real security contact, the `v1.0.0` tag, the release, and repository settings in `LAUNCH.md`.
-**Plans:** 0 plans
+**Plans:** 0/18 plans complete
+**Wave 1**
+
+- [ ] 08-01-PLAN.md — Upgrade `next` to >=16.4.1, pinned (Wave 1)
+- [ ] 08-05-PLAN.md — System font stack, telemetry off in CI, audit workflow, Dependabot (Wave 1)
+- [ ] 08-06-PLAN.md — Categorized connection-test errors, `addTag` gate first, `sla-flag` comment (Wave 1)
+- [ ] 08-17-PLAN.md — E2E harness: cross-platform worker teardown, honesty-invariants flake (Wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 08-02-PLAN.md — Upgrade `better-auth` to >=1.7.7 with migration proof (Wave 2)
+- [ ] 08-07-PLAN.md — Nonce CSP with `strict-dynamic` and security headers in `src/proxy.ts` (Wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 08-03-PLAN.md — Better Auth upgrade regression tests (Wave 3)
+- [ ] 08-04-PLAN.md — `shadcn` out of production, remaining bumps, residual advisory table (Wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 08-08-PLAN.md — CSP zero-violation E2E on the five acceptance pages (Wave 4)
+- [ ] 08-09-PLAN.md — Non-root `app`, `worker`, `migrate`; root-owned volume procedure (Wave 4)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 08-10-PLAN.md — Trusted-proxy-aware client-IP helper, Caddy header, Better Auth alignment (Wave 5)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 08-11-PLAN.md — Atomic limiter, limit before parsing and token lookup, attachment throttle (Wave 6)
+- [ ] 08-18-PLAN.md — Client-IP deployment contract and `TRUSTED_PROXY_HOPS` plumbing (Wave 6)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 08-12-PLAN.md — `/api/health` cache and in-memory throttle, healthcheck kept green (Wave 7)
+- [ ] 08-13-PLAN.md — Byte caps on received bytes, three-layer alignment, cleanup on failure (Wave 7)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 08-14-PLAN.md — Container suite on the real compose stack through real Caddy (Wave 8)
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 08-15-PLAN.md — `docs/SECURITY.md` reconciliation (Wave 9)
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
+- [ ] 08-16-PLAN.md — End-of-phase gate on one tested commit (Wave 10)
 
 ### Phase 9: Operations
 

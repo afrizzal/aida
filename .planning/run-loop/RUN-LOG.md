@@ -307,3 +307,22 @@ Spec itu dijalankan sendirian sekali lagi untuk membedakan race dari kegagalan t
 Spec `honesty-invariants.spec.ts` dijalankan sendirian (08.0x): exit 0, (a) dan (b) lolos (2/2, 14,3 detik). Kesimpulan: flake di run penuh, bukan kegagalan tetap. `taskkill` tetap gagal di teardown; tidak ada worker yang tertinggal. Perbaikan test (tunggu dropdown sampai siap, `killTree` lintas platform seperti `global-setup.ts`) dimasukkan ke Fase 08 lewat review plan, karena gerbang akhir fase mewajibkan E2E hijau.
 
 Antrean: 0a `selesai` dengan bukti untuk build, integration, dan E2E. Egress dipisah menjadi 0a2 `diparkir` karena gangguan host luar, dengan syarat coba ulang di awal setiap putaran.
+
+## Putaran 9 (2026-11-08, 08.22 WIB)
+
+Dipicu wakeup cadangan. Cek A (sisa 30 GiB; turun dari 36 GiB sejak 07.33 karena image Docker dan artefak test), B, dan Berhenti total lolos. Tidak ada proses `artisan`. 0a2: `GET` `schema-engine.gz` masih 0 byte dalam 30 detik (curl exit 28), tetap diparkir. Planner Fase 08 masih menulis (`08-01` sampai `08-07-PLAN.md`, terakhir 08.22). Putaran menunggu planner; tidak ada pekerjaan lain yang tidak bergantung padanya.
+
+Planner selesai (08.3x): 16 plan dalam 10 wave, semua `autonomous`, tanpa checkpoint. Menurut laporan planner (belum dicek orkestrator, menunggu checker dan Codex): `frontmatter.validate` dan `verify.plan-structure` 16/16, `check.decision-coverage-plan` 30/30, AIDA-25 sampai 32 tercakup, 26 edge masuk `must_haves` (25 explicit, 1 backstop), prohibisi tanpa deskriptor, `COVERAGE.md` berisi pernyataan "No external API integration". Probe orkestrator: `verify-command-paths` dan `verify-failure-directions` masing-masing 69 perintah, semua severity `none`. Pilihan planner yang perlu ditinjau Codex: hash sha256 untuk style tag sonner di CSP (penyimpangan sempit dari `style-src-elem` D-11), `get-nonce` untuk scroll lock Radix, header `x-aida-client-ip` dari proxy untuk Better Auth, `migrate` memanggil Prisma CLI lewat node (tanpa corepack), dan nilai limit pilihan sendiri. Plan-checker berjalan.
+
+Plan-checker iterasi 1: 0 BLOCKER, 2 WARNING (08-10 berisi 14 berkas; delapan plan berisi 4 task), 1 INFO. INFO ditolak sesudah dicek: `gotoWarm` memang ada di `tests/e2e/a11y-contrast.spec.ts:100`, jadi acuan 08-08 benar. Revisi iterasi 1 dijalankan: 08-10 dipecah (docs dan env ke plan sendiri); plan 4 task diterima kalau task-nya satu unit yang tak bisa diuji terpisah, dengan alasan tertulis; ditambah temuan orkestrator `gate_readiness`: flake `honesty-invariants.spec.ts` dan teardown `taskkill` harus diperbaiki di plan supaya gerbang E2E 08-16 bisa hijau tanpa melonggarkan produk.
+
+Revisi iterasi 1 selesai: 18 plan. Baru: 08-17 (wave 1, perbaikan harness E2E: `killTree` lintas platform di `tests/e2e/support/process-tree.ts`, `pickSelectOption` dengan `toPass`, (b) tidak lagi bergantung pada (a); cakupannya diperluas karena `phase4-ai` dan `phase5-rag` juga memakai `taskkill`, dicek di kode) dan 08-18 (wave 6, kontrak IP klien dan `TRUSTED_PROXY_HOPS` di docs, env, compose). Warning "4 task" ternyata salah hitung checker: `verify.plan-structure` memberi 3 task untuk 08-02, 08-10, 08-13 (dicek orkestrator). Probe ulang: 74 perintah, semua severity `none`. Plan-checker iterasi 2 berjalan.
+
+Plan-checker iterasi 2: 0 BLOCKER, 1 WARNING: wave 1 berisi tiga plan yang menjalankan Playwright di port 3100, dan `parallelization: true`. Tidak direvisi lagi: `execute-phase.md:134` memaksa isolasi `none` dan eksekusi berurutan di working tree utama kalau `workflow.use_worktrees` `false`, yang memang nilai proyek ini (aturan C). Sifat "satu proses test pada satu waktu" sudah dijamin konfigurasi, dan dispatch eksekutor juga akan menyebutnya. Keputusan K18 di bawah.
+
+Gerbang langkah 13: requirement 8/8 (AIDA-25 sampai 32 di `requirements` plan); `check.decision-coverage-plan` 30/30. `state.planned-phase` menyentuh frontmatter dan baris fase saja; teks Current Position dan `status` diperbaiki tangan. ROADMAP masih `**Plans:** 0 plans`, jadi daftar 18 plan ditulis tangan dengan format arsip v1, lalu `roadmap.annotate-dependencies` menambah header wave.
+
+| No | Pertanyaan | Opsi | Keputusan | Alasan |
+|---|---|---|---|---|
+| K18 | Warning checker iterasi 2 (E2E paralel di wave 1) | revisi ketiga, atau terima | terima | `use_worktrees: false` memaksa eksekusi berurutan (`execute-phase.md:134`); revisi tidak mengubah apa pun yang dijalankan |
+| K19 | INFO checker iterasi 1 (`gotoWarm` tidak ada di `a11y-contrast.spec.ts`) | ikuti atau tolak | tolak | dicek: ada di baris 100 |
