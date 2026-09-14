@@ -4,11 +4,12 @@ milestone: v2.0
 milestone_name: Helpdesk & Projects
 current_phase: 08
 current_phase_name: security-hardening
-status: Phase 8 parked after Codex plan review cycle 3 (owner decision); Phase 9 next
-last_updated: "2026-11-08T03:45:40.698Z"
+status: Phase 8 parked (owner decision); Phase 9 context and UI contract done, planning next
+stopped_at: Phase 9 UI-SPEC approved
+last_updated: "2026-11-08T04:13:54.222Z"
 last_activity: 2026-11-08
-last_activity_desc: Phase 8 parked, the third Codex plan review still had HIGH findings on shared Docker safety and evidence honesty; Phase 9 is next
-state_head: 96d7c8feb8dc8264c7436fd8ed60fcbfddf355c0
+last_activity_desc: Phase 9 context (27 decisions) and UI design contract approved; Phase 8 stays parked pending the owner
+state_head: 39054ffb8ac467e8bf4d0609d3bd121db29b2b14
 progress:
   total_phases: 10
   completed_phases: 0
@@ -97,6 +98,10 @@ None.
 | 260904-8h1 | Bump `@anthropic-ai/sdk` 0.110.0 → 0.123.0 + add `claude-opus-5` to `MODEL_CATALOG` (post-v1 follow-up; biome/tsc/unit 90/90/integration 30/30 green; lockfile changed only for the SDK) | 2026-09-04 | acbe670 | [260904-8h1-bump-anthropic-ai-sdk-0-110-0-0-123-0-an](./quick/260904-8h1-bump-anthropic-ai-sdk-0-110-0-0-123-0-an/) |
 
 ## Session Continuity
+
+**Last session:** 2026-11-08T04:13:54.196Z
+**Stopped at:** Phase 9 UI-SPEC approved
+**Resume file:** .planning/phases/09-operations/09-UI-SPEC.md
 
 **Last action (2026-11-08):** Phase 8 parked after the third Codex plan review (4 HIGH findings accepted, not yet incorporated). No tag, nothing pushed.
 

@@ -424,3 +424,15 @@ Codex Fase 09 selesai (10.54 sampai 10.56): 11 area dijawab. Log `gpt-6.1-terra`
 ### Langkah 3: `09-CONTEXT.md`
 
 27 keputusan dengan sumbernya, batas manusia, instruksi planner, ringkasan aturan owner, dan Larangan verbatim (`diff` identik, 11 butir). Keputusan yang berbeda dari Codex: D-02 protokol konsistensi backup (lease plus penundaan hapus fisik, arsip seluruh uploads lalu verifikasi kunci dari dump, tanpa ekspor snapshot lintas proses) lebih sederhana dari usulan Codex, dan akan dikritik Codex saat review plan; D-09 throttle logo memakai `checkRateLimit` yang ada dengan dokumentasi jujur atas batasnya (Codex menyarankan limiter atomik baru atau parkir; saya menilai itu menduplikasi Fase 08); D-12 menambah syarat kompatibilitas mundur. Bukti level stack AIDA-33 dan AIDA-35 ditulis tetapi tidak dijalankan sampai owner memutuskan soal test container (sama dengan Fase 08). Dua keputusan owner baru dicatat di antrean (09-o1, 09-o2).
+
+## Putaran 17 (2026-11-08, mulai 11.02 WIB)
+
+Dipicu wakeup. Cek A (30 GiB), B, dan Berhenti total lolos. Regresi Rekriva masih berjalan (Erasure). Butir: Fase 09 langkah 4, `/gsd-ui-phase 9`. Riset UI berjalan dengan arahan: tanpa pertanyaan ke pengguna, patuhi DESIGN-SYSTEM.md dan D-04, D-07 sampai D-11, D-14; lima permukaan UI saja (halaman branding, slot merek sidebar, halaman publik, status backup, satu `<h1>`).
+
+UI researcher selesai: `09-UI-SPEC.md` di-commit agen sendiri (`ef80cc8`, satu berkas, branch benar, tanpa path rumah atau nama). Keputusan "[RL]" di spec: batas logo 1024 px per sisi, unggah langsung saat berkas dipilih, komponen `BrandMark` bersama, tab baca-saja `/settings/backups`, judul top bar menjadi `<p>`, `<h1>` tersembunyi di `/tickets`, `/contacts`, `/kb` (judul "Knowledge Base" yang tampak di `/kb` hilang), `/login` dan `/setup` di luar scope. UI checker berjalan.
+
+UI checker: BLOCKED pada dimensi 5 (spacing: `gap-2.5` di `BrandMark` baru dan `p-3` di callout baru); dimensi 2 dan 4 FLAG; 1, 3, 6, 7 PASS; kepatuhan D-04, D-07 sampai D-11, D-14 dikonfirmasi. Revisi UI-SPEC 1 dari 2 berjalan.
+
+Revisi UI-SPEC 1 selesai (BrandMark `gap-2`; `p-3` menjadi token "callout" 12 px dengan alasan paritas; tabel titik fokus; caption dan body dibedakan warna). UI checker ulang: APPROVED (5 PASS, FLAG spacing dan tipografi). Probe UI-consideration langkah 9.5: 5 elemen, 31 pertimbangan `unresolved`; penulisan `## UI Considerations` dengan aturan `--auto` (backstop minimal, explicit bila spec sudah mendefinisikan, tanpa dismiss) diserahkan ke UI researcher.
+
+UI Considerations ditulis: 35 baris (24 explicit, 11 backstop, 0 unresolved, tidak ada dismiss); satu baris ditambah (`long-text` untuk nama organisasi di baris merek publik). UI-SPEC di-commit dengan `status: approved`. `state.record-session` menulis path absolut berisi folder rumah ke `STATE.md` (Resume file); diganti path relatif sebelum commit. Langkah 4 selesai; berikutnya langkah 5 (`/gsd-plan-phase 9`).
