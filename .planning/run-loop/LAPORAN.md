@@ -1,19 +1,19 @@
 # Laporan run loop AIDA
 
-Keadaan per 2026-11-07 16.18 WIB, sesudah putaran 6.
+Keadaan per 2026-11-08 07.45 WIB, putaran 7.
 
 ## 1. Ringkasan
 
-Milestone v2.0 sudah dibuka (butir 0b selesai), dan daftar fitur Projects sudah dicek ke demo publik (butir 0c selesai). `REQUIREMENTS.md` berisi 91 requirement, `ROADMAP.md` berisi Phase 8 sampai 17, dan keputusan owner tercatat di `PROJECT.md`. Roadmap direvisi dalam tiga putaran kritik Codex, yang bersama-sama menemukan 15 temuan, lalu 4 HIGH dan 3 MEDIUM, lalu 1 HIGH; semuanya sudah diterapkan. Belum ada kode produk yang diubah. Dokumen perencanaan di `.planning/` aman ditinjau sekarang. Butir 0a masih menunggu regresi Rekriva, Fase 08 sudah dimulai dari langkah yang tidak butuh build: sumbernya sudah dibaca, dan brainstorm area abu-abu dengan Codex sedang berjalan.
+Milestone v2.0 sudah dibuka (butir 0b selesai), dan daftar fitur Projects sudah dicek ke demo publik (butir 0c selesai). `REQUIREMENTS.md` berisi 91 requirement, `ROADMAP.md` berisi Phase 8 sampai 17, dan keputusan owner tercatat di `PROJECT.md`. Belum ada kode produk yang diubah. Dokumen perencanaan di `.planning/` aman ditinjau sekarang. Fase 08 sudah punya `08-CONTEXT.md` (30 keputusan dari brainstorm Codex, dicek ulang ke kode, dua koreksi), dan langkah berikutnya menyusun plan. Baseline 0a akhirnya berjalan karena regresi Rekriva sudah selesai: `pnpm build` lolos, sedangkan integration dan E2E gagal sebelum test mana pun berjalan karena Testcontainers belum diarahkan ke socket Colima. Keduanya diulang dengan variabel yang benar sesudah `test:egress` selesai.
 
 ## 2. Fase dan requirement
 
 | Butir | Isi | Status | Bukti | Commit |
 |---|---|---|---|---|
-| 0a | Baseline tertunda | belum disentuh | regresi Rekriva masih berjalan | |
+| 0a | Baseline tertunda | berjalan | `pnpm build` exit 0; integration dan E2E exit 1 karena socket Colima, diulang; egress berjalan | |
 | 0b | Milestone v2.0 | selesai dengan bukti | `init.phase-op` 8 sampai 17 menemukan fasenya; 76/76 requirement terpetakan; tiga putaran kritik Codex diterapkan | `8a72f4c`, `995ed9e`, `fea685d`, `b9b1d9b` |
 | 0c | Lengkapi daftar fitur | selesai dengan bukti | 29 perilaku baru di `FITUR-PROJECTS.md`, AIDA-100 sampai 114, 91/91 terpetakan, grep clean-room kosong (exit 1) | `cb10c1c` |
-| 08 | Keamanan (AIDA-25 sampai 32) | berjalan | langkah 1 selesai, langkah 2 (Codex) berjalan | `4d8efca` |
+| 08 | Keamanan (AIDA-25 sampai 32) | berjalan | langkah 1 sampai 3 selesai (CONTEXT), langkah 4 dilewati (`UI hint: no`), berikutnya plan | `4d8efca`, `8abbc6c` |
 | 09 | Operasional (AIDA-33 sampai 41) | belum disentuh | | |
 | 10 | Tim (AIDA-42 sampai 46) | belum disentuh | | |
 | 11 | Inbox (AIDA-47 sampai 51) | belum disentuh | | |
@@ -45,11 +45,13 @@ Rincian ada di `RUN-LOG.md` putaran 1 dan 2. Jawaban Codex disimpan di `codex/ro
 - Putaran 3 menilai 7 dari 8 perbaikan tertutup dan menemukan satu HIGH: heartbeat worker menulis `SystemSetting` setiap menit, sehingga syarat "hanya data demo" akan menolak boot demo ulang yang sah. AIDA-37 kini memisahkan data infrastruktur dari data tenant (`organization` atau `user`). Perbaikan ini tidak diperiksa ulang oleh Codex, karena batas 3 putaran per topik sudah habis.
 - Butir 0c: perilaku demo yang bertentangan dengan aturan AIDA tidak dibangun. Push notification browser butuh layanan push vendor (egress pihak ketiga). Hapus workspace bentrok dengan `AuditEvent` append-only. Link publik proyek membuka data tanpa login. Billing dan bahasa UI memang di luar scope. Owner bisa meninjau ulang link publik.
 - Keputusan yang sengaja diserahkan ke CONTEXT fase: siapa yang boleh membuat workspace baru (AIDA-111, default konservatif hanya admin instance) dan set status proyek (AIDA-100).
+- Fase 08 (putaran 6 dan 7): urutan upgrade `next`, lalu `better-auth`, lalu sisanya dengan `shadcn` pindah ke `devDependencies` hanya kalau artefak build terbukti bersih; CSP nonce dengan `strict-dynamic`; IP klien hanya lewat Caddy yang menimpa header, `TRUSTED_PROXY_HOPS` sebagai opsi lanjutan yang gagal tertutup; volume upload lama diurus prosedur manual, tanpa entrypoint root. Saya condong ke `TRUSTED_PROXY_HOPS` sebagai inti; Codex menolak hitungan hop sebagai bukti kepercayaan, dan saya ikut Codex. Rincian di `08-CONTEXT.md`.
+- Putaran 7: draf CONTEXT dari putaran 6 salah membaca F-11 (`addTag` sudah memvalidasi sebelum gerbang, bukan sebaliknya). Diperbaiki sebelum commit.
 - Koreksi kejujuran: AIDA-10 di v1 tercatat selesai, padahal alur undangan tidak pernah ada (F-16). Centang v1 tidak diubah. Celahnya dicatat di `PROJECT.md` dan ditutup oleh AIDA-42.
 
 ## 6. Hasil test dan audit
 
-Belum ada test baru sejak baseline. Putaran 1 hanya mengubah dokumen.
+Baris bertanda baseline berasal dari persiapan (`1ea4281`). Baris 0a dijalankan putaran 7 di `94a5c18`; kode produk sama dengan `1ea4281`.
 
 | Perintah | Exit | Hasil |
 |---|---|---|
@@ -57,10 +59,10 @@ Belum ada test baru sejak baseline. Putaran 1 hanya mengubah dokumen.
 | `pnpm typecheck` | 0 | bersih (baseline) |
 | `pnpm test` | 0 | 18 berkas, 90 test lolos (baseline) |
 | `pnpm audit --prod` | 1 | 7 critical, 52 high, 69 moderate, 13 low (baseline) |
-| `pnpm build` | belum dijalankan | butir 0a |
-| `pnpm test:integration` | belum dijalankan | butir 0a |
-| `pnpm test:e2e` | belum dijalankan | butir 0a |
-| `pnpm test:egress` | belum dijalankan | butir 0a |
+| `pnpm build` | 0 | butir 0a; satu peringatan Turbopack NFT yang sudah dikenal sejak v1 |
+| `pnpm test:integration` | 1 | butir 0a; Testcontainers tidak menemukan socket Colima, tidak ada test yang berjalan. Diulang |
+| `pnpm test:e2e` | 1 | butir 0a; sebab yang sama di global setup. Diulang |
+| `pnpm test:egress` | berjalan | butir 0a |
 
 ## 7. Package baru
 
@@ -68,16 +70,16 @@ Belum ada.
 
 ## 8. Bukti tidak ada push
 
-Dicek 2026-11-07 15.48 WIB:
+Dicek 2026-11-08 07.33 WIB:
 
 - `git ls-remote origin refs/heads/master`: `1ea4281ab7bc72955514847837b5efffa5bc837d`
 - `git remote get-url --push origin`: `no-push-run-loop`
-- `master` lokal: `1ea4281ab7bc72955514847837b5efffa5bc837d`
+- `master` lokal: `1ea4281`
 
 ## 9. Yang belum terbukti
 
 - Perbaikan AIDA-37 dari putaran 3 belum diperiksa Codex (batas 3 putaran). Review plan Fase 9 akan memeriksanya.
-- `pnpm build`, `pnpm test:integration`, `pnpm test:e2e`, dan `pnpm test:egress` belum pernah dijalankan di Mac ini.
+- `pnpm test:integration`, `pnpm test:e2e`, dan `pnpm test:egress` belum pernah lolos di Mac ini. `pnpm build` sudah lolos (putaran 7).
 - `docker compose -p aida up -d --build` belum pernah dijalankan di Mac ini.
 - AIDA-100 sampai AIDA-114 (dari butir 0c) belum dikritik Codex. Codex akan memeriksanya saat CONTEXT dan review plan Fase 14 dan 16.
 - Penelusuran demo hanya mencakup yang bisa diklik dari halaman utama. Drag and drop, isi dialog Share, dan halaman detail proyek dari sidebar tidak dibuka.

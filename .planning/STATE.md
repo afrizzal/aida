@@ -4,10 +4,10 @@ milestone: v2.0
 milestone_name: Helpdesk & Projects
 current_phase: 08
 current_phase_name: security-hardening
-status: Milestone opened, Phase 8 not started
-last_updated: "2026-11-07T09:11:24.000Z"
-last_activity: 2026-11-07
-last_activity_desc: Milestone v2.0 opened; roadmap revised over three Codex critique rounds; public demo walked, 91 requirements
+status: Phase 8 context gathered, planning next
+last_updated: "2026-11-08T00:45:00.000Z"
+last_activity: 2026-11-08
+last_activity_desc: Phase 8 context committed; baseline build passed, integration and E2E re-run with the Colima socket pending
 progress:
   total_phases: 10
   completed_phases: 0
@@ -24,14 +24,14 @@ See: .planning/PROJECT.md (updated 2026-11-07, v2.0 opened)
 
 **Core value:** Ship a star-worthy, genuinely useful self-hostable AI-native helpdesk whose AI experience (triage → cited RAG drafted replies → AIDA Insight) and one-command self-host (`docker compose up`) are the wedge.
 **Current focus:** v2.0 Helpdesk & Projects, Phases 8–17, on branch `v2/run-loop` under `run-loop/PIAGAM.md`. The live queue is `run-loop/ANTREAN.md`; the run report is `run-loop/LAPORAN.md`. The maintainer's `LAUNCH.md` steps for the public v1.0.0 release are still open.
-**Model profile:** balanced (Opus plans/verifies, Sonnet executes) · **Granularity:** coarse · **License:** Apache-2.0
+**Model profile:** inherit (every GSD agent runs on the session model, Opus 5.5; charter owner rule D) · **Granularity:** coarse · **License:** Apache-2.0
 
 ## Current Position
 
-Phase: 08 (security-hardening), not started
+Phase: 08 (security-hardening), context gathered, not planned
 Plan: —
-Status: Milestone v2.0 opened by hand on 2026-11-07. `REQUIREMENTS.md` (91 requirements) and `ROADMAP.md` (Phases 8–17) are written and were revised over three Codex critique rounds (queue item 0b done). The public demo was walked under the clean-room rules and added AIDA-100 to AIDA-114 (item 0c done). Baseline item 0a waits for the Rekriva regression to finish; Phase 8 is next.
-Last activity: 2026-11-07 — v2.0 opened under the run charter. v1.0.0 stays complete and archived; its archives are `milestones/v1.0.0-*`.
+Status: Milestone v2.0 opened by hand on 2026-11-07. `REQUIREMENTS.md` (91 requirements) and `ROADMAP.md` (Phases 8–17) are written and were revised over three Codex critique rounds (queue item 0b done). The public demo was walked under the clean-room rules and added AIDA-100 to AIDA-114 (item 0c done). Phase 8 context is committed (`08-CONTEXT.md`, `8abbc6c`); planning is next. Baseline item 0a is running: `pnpm build` exit 0; integration and E2E exited 1 before any test ran because Testcontainers could not find the Colima socket, and are re-run with the socket set.
+Last activity: 2026-11-08 — Phase 8 context committed under the run charter. v1.0.0 stays complete and archived; its archives are `milestones/v1.0.0-*`.
 
 ## Accumulated Context
 
@@ -50,6 +50,7 @@ The full v1 decision log (~160 dated, per-plan entries) lives in `milestones/v1.
 - **Lint autofix caution:** Biome's `noEmptyPattern` rename broke Playwright's fixture parser (07-12) — verify against any framework that gives a parameter's destructuring shape meaning.
 - **gsd-tools caveats on this project:** `state update-progress` / `add-decision` no-op on this hand-written STATE.md; `phase.complete` and `milestone.complete` rewrite Current Position and drop `progress.percent` — always `git diff .planning/STATE.md .planning/ROADMAP.md` afterwards and repair by hand. `query audit-open` cannot read "RESOLVED" annotations in `deferred-items.md`.
 - **Health checks through Caddy use HTTPS** (`curl -sk https://localhost/api/health`); `docker compose exec -T` inside a `while read` loop needs `</dev/null`.
+- **Testcontainers on this Mac (Colima):** `pnpm test:integration` and `pnpm test:e2e` need `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock` and `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock` on the command; the `docker` CLI works through its context, Testcontainers does not. Never restart or reconfigure Colima for this.
 - **Repeated `pnpm test:e2e` runs** can leave `.next/dev/types/*.d.ts` truncated and break `tsc`/`pnpm build` — delete the gitignored `.next/` and rebuild.
 
 ### Deferred Items
@@ -96,7 +97,7 @@ None.
 
 ## Session Continuity
 
-**Last action (2026-11-07):** v2.0 opened by hand: owner decision recorded in `PROJECT.md`, `REQUIREMENTS.md` and `ROADMAP.md` written, this file moved to the new milestone. No tag, nothing pushed.
+**Last action (2026-11-08):** Phase 8 context committed after re-checking every fact against the code; baseline 0a started. No tag, nothing pushed.
 
 **Next action:** follow `run-loop/PIAGAM.md`; the first open row of `run-loop/ANTREAN.md` decides the next step.
 

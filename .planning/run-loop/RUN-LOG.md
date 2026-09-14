@@ -198,3 +198,67 @@ Dipicu wakeup. Cek Berhenti total lolos. `pgrep -f 'artisan test'` kosong pada 1
 Pertanyaan: `codex/fase08-tanya.md`, 12 area abu-abu, commit `4d8efca`. Codex berjalan dari ekspor `4d8efca`, `model: gpt-6.1-terra`, `reasoning effort: xhigh`.
 
 Berikutnya: baca jawaban Codex, cek klaimnya, lalu tulis `08-CONTEXT.md` (langkah 3). Kalau `pgrep` masih kosong di awal putaran berikutnya, 0a (baseline build dan test) dijalankan di latar.
+
+## Putaran 7 (2026-11-08, mulai 07.33 WIB)
+
+Dipicu `/loop`, sesi baru sesudah owner menambah "Aturan owner 2026-11-08" ke piagam (`371a42f`, `94a5c18`) dan profil model `inherit` (`1ea7dbe`).
+
+| Cek | Hasil |
+|---|---|
+| A. Disk | `df -h /System/Volumes/Data`: sisa 36 GiB, di atas 15 GB |
+| B. Docker | `colima status` exit 0 (running), `docker info` exit 0 tanpa stderr. Disk Docker di VM: 20 GiB bebas dari 40 GiB |
+| Berhenti total | tidak ada `BERHENTI`; tip `origin/master` = `1ea4281`; pushurl `no-push-run-loop`; branch `v2/run-loop`; `master` lokal `1ea4281` |
+| Beban | `pgrep -f 'artisan test'` exit 1 (kosong) |
+
+### Temuan awal
+
+Putaran 6 sudah menulis `08-CONTEXT.md` (16.21, sesudah entri log terakhirnya), tetapi tidak meng-commit file itu maupun `codex/fase08-jawab.md`. Langkah 3 Fase 08 jadi belum tuntas.
+
+### Butir 0a: baseline
+
+`pgrep` kosong, jadi baseline dijalankan di latar, satu proses pada satu waktu, exit code dibaca tanpa pipe. Log ada di scratchpad sesi.
+
+| Perintah | Exit | Hasil |
+|---|---|---|
+| `pnpm build` (nilai placeholder contoh env di variabel perintah, seperti CI) | 0 | Next.js 16.2.11 Turbopack, satu peringatan "unexpected file in NFT list" yang sudah tercatat sejak v1 |
+| `pnpm test:integration` | 1 | gagal di global setup: Testcontainers "Could not find a working container runtime strategy". Tidak ada test yang berjalan |
+| `pnpm test:e2e` | 1 | sebab yang sama, di `global-setup.ts:67` |
+| `pnpm test:egress` | berjalan | compose project `aida-egress-test` memakai CLI `docker` lewat context `colima`, jadi tidak kena masalah socket |
+
+Sebab: Colima membuka socket di `$HOME/.colima/default/docker.sock`, `/var/run/docker.sock` tidak ada, dan `DOCKER_HOST` tidak disetel. CLI `docker` bekerja lewat context, Testcontainers tidak. Dokumentasi testcontainers-node v12 (Context7, "Supported container runtimes > Colima") meminta `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock` dan `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`. Keduanya dipasang hanya di variabel perintah; Colima, Docker, dan file proyek tidak diubah. Integration dan E2E diulang sesudah `test:egress` selesai.
+
+### Fase 08, langkah 3
+
+Draf CONTEXT dicek ulang ke kode di `94a5c18`. Sejak `4d8efca` hanya dokumen planning yang berubah. Cocok: urutan parse, lookup, dan limit di `intake`, `csat`, `follow-up`; attachments tanpa limit; limiter `count` lalu `create`; Caddy `max_size 12MB` tanpa `header_up X-Forwarded-For`; `MAX_TOTAL_REQUEST_BYTES` 30 MiB di `proxyClientMaxBodySize`; `migrate` dari `target: builder`; `CHECKPOINT_DISABLE` di compose; healthcheck 10 detik; override `better-call 1.3.7`; baris 8 `docs/SECURITY.md`; empat oracle `slice(0, 200)`; nol impor `next/image`; stage `runner` tidak mewarisi `base`; limiter Better Auth berkunci `x-forwarded-for` (security pass sweep 2).
+
+Koreksi:
+
+| Keputusan | Salah di draf | Fakta | Perbaikan |
+|---|---|---|---|
+| D-28 | "`addTag` calls `getScopedDb()` before validation" | `trim` dan cek kosong berjalan dulu, `getScopedDb()` pernyataan ketiga (F-11) | gerbang dipindah ke pernyataan pertama, sesuai AIDA-32, dengan test |
+| D-26 | hanya menyebut fallback `system-ui` | `--font-sans` dan `--font-heading` (baris 8 dan 9) juga menunjuk `--font-inter` | ketiganya pindah ke stack sistem |
+
+Tambahan: bagian ringkas aturan owner 2026-11-08 (C, D, G, A dan B, E) untuk planner dan eksekutor, dan satu butir diskresi tentang `worker.lastRunAt` di respons anonim `/api/health` (security pass LOW-1). Larangan di CONTEXT dibandingkan dengan `diff` terhadap piagam: identik, 11 butir. `init.phase-op 8`: `has_context: true`.
+
+Commit `8abbc6c` docs(08): capture security hardening context.
+
+### Keputusan
+
+| No | Pertanyaan | Opsi | Keputusan | Alasan |
+|---|---|---|---|---|
+| K11 | Draf CONTEXT putaran 6 yang tidak ter-commit | tulis ulang, atau cek lalu commit | cek ke kode, koreksi, commit | piagam melarang mengulang langkah yang sudah dikerjakan; semua fakta dicek ulang |
+| K12 | `/gsd-ui-phase 8` | jalankan atau lewati | lewati | `ROADMAP.md` menandai `UI hint: no`. Font dan CSP menyentuh tampilan tanpa UI baru; persetujuan visual menjadi item manual (D-26), test kontras dan token tetap jadi gerbang |
+| K13 | Testcontainers di Colima | ubah konfigurasi Colima, file proyek, atau variabel per perintah | variabel per perintah | aturan B melarang mengubah Colima; dokumentasi resmi memakai dua variabel itu |
+| K14 | Compose project `aida-egress-test` | dianggap milik `aida` atau tidak | milik `aida` | dibuat dan dibongkar oleh test AIDA sendiri, dan piagam mewajibkan `pnpm test:egress` di akhir fase |
+
+Codex tidak dipakai di putaran ini. Konsultasi wajib sebelum CONTEXT sudah dilakukan di putaran 6, dan koreksinya berupa fakta kode.
+
+Aturan C: putaran ini tidak membuat ekspor maupun worktree. Folder `tmp.*` lama di `TMPDIR` tidak bisa dipastikan milik putaran ini, jadi tidak disentuh.
+
+`STATE.md`: profil model masih tertulis `balanced`, padahal `config.json` sudah `inherit` sejak `1ea7dbe`. Diperbaiki bersama posisi terkini.
+
+### Catatan untuk putaran berikutnya
+
+- Testcontainers di Mac ini butuh `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock` dan `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock` di variabel perintah untuk `pnpm test:integration` dan `pnpm test:e2e`, termasuk di gerbang akhir fase dan di setiap dispatch eksekutor.
+
+Berikutnya: begitu `test:egress` selesai, ulangi integration dan E2E dengan dua variabel itu. Sambil menunggu, Fase 08 langkah 5 (`/gsd-plan-phase 8`) tidak butuh build dan boleh berjalan.
