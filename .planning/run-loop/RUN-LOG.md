@@ -343,3 +343,19 @@ Codex siklus 1 selesai (09.01 sampai 09.03): 7 HIGH, 5 MEDIUM, 1 LOW, verdict "p
 |---|---|---|---|---|---|
 | K20 | Project compose untuk suite container 08-14 | project sendiri, atau `aida` | harfiah: hanya `aida` dan `aida-dev-db` | project sendiri, hanya menghapus yang dibuatnya; dibawa ke Codex siklus 2 dan ke owner | piagam juga mewajibkan Testcontainers dan `pnpm test:egress` (`aida-egress-test`); berbagi `aida` bisa menimpa stack operator. Kalau tetap berbeda sesudah siklus 2: opsi paling konservatif (aturan keputusan 4) |
 | K21 | Validasi seluruh rantai XFF (C8) | seluruh rantai, atau bagian tepercaya saja | seluruh rantai | bagian tepercaya saja | entri kiri dikendalikan klien; gagal tertutup di sana membuat klien bisa sengaja masuk bucket bersama |
+
+## Putaran 11 (2026-11-08, mulai 09.09 WIB)
+
+Dipicu wakeup. Cek A (sisa 28 GiB), B, dan Berhenti total lolos. Cek beban: regresi Rekriva berjalan (`--testsuite=Unit --filter=Architecture`), jadi Docker, Testcontainers, E2E, dan build dilarang. Host Prisma pulih: `GET` `schema-engine.gz` 200, 8,66 MB. 0a2 kembali `belum`, menunggu regresi selesai. Butir: Fase 08 langkah 5, replan `--reviews --skip-research` (dokumen saja, boleh saat regresi).
+
+## Putaran 12 (2026-11-08, 09.31 WIB)
+
+Dipicu wakeup cadangan. Cek A (sisa 31 GiB), B, dan Berhenti total lolos. Regresi Rekriva masih berjalan (`--testsuite=Feature tests/Feature/Workspace`), jadi 0a2 (egress) belum dijalankan. Planner mode reviews masih menulis (`08-19-PLAN.md` baru). Putaran menunggu planner.
+
+## Putaran 13 (2026-11-08, 09.52 WIB)
+
+Dipicu wakeup cadangan. Cek A (31 GiB), B, dan Berhenti total lolos. Regresi Rekriva masih berjalan (Pipeline, Analytics). Planner mode reviews masih menulis (08-19 sampai 08-23 baru, 16 plan direvisi). Menunggu.
+
+Replan mode reviews selesai (09.5x): 23 plan dalam 13 wave (18 direvisi, 5 baru: 08-19 pengecualian egress dari integration, 08-20 `/api/health/probe` tanpa throttle yang ditolak Caddy, 08-21 E2E produksi di host plus Caddy sungguhan, 08-22 dan 08-23 pecahan suite container). Klaim planner yang dicek orkestrator: Next.js mengisi XFF yang hilang dengan peer TCP sebelum proxy (`node_modules/next/dist/server/base-server.js:577`), dan Better Auth memakai bucket `no-trusted-ip` (`rate-limiter/index.mjs:275`). Karena itu klausul C7 "header hilang masuk bucket bersama" diganti perilaku nyata di level HTTP; level unit tetap. Probe: 96 perintah, semua severity `none`. Plan-checker mode reviews berjalan. Regresi Rekriva masih berjalan (Analytics), 0a2 menunggu.
+
+Plan-checker mode reviews: VERIFICATION PASSED, tanpa issue; C1 sampai C13 ditelusuri ke isi plan. Gerbang 13: requirement 8/8, keputusan 30/30, gap-analysis 38/38. ROADMAP Fase 8 ditulis ulang tangan (23 plan, 13 wave) lalu `annotate-dependencies`; `state.planned-phase --plans 23` menimpa Current Position lagi, diperbaiki tangan.
