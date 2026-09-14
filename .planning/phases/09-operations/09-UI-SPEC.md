@@ -1,10 +1,11 @@
 ---
 phase: "09"
 slug: "operations"
-status: draft
+status: approved
 shadcn_initialized: true
 preset: "b2fA (style radix-nova, base radix, baseColor neutral, icon lucide)"
 created: "2026-11-08"
+reviewed_at: "2026-11-08"
 ---
 
 # Phase 09 — UI Design Contract
@@ -63,17 +64,23 @@ Declared values (multiples of 4), mapped to Tailwind classes already in use:
 | Token | Value | Usage in this phase |
 |-------|-------|---------------------|
 | xs | 4px (`gap-1`, `space-y-1`) | h1 + subtitle stack on settings pages [code] |
-| sm | 8px (`gap-2`) | Button row in Logo card; icon + text in callouts |
-| md | 16px (`p-4`, `space-y-4`, `gap-4`) | Card padding, form stack [DS §6] |
-| lg | 24px (`space-y-6`, `p-6`) | Between cards on a settings page; `<main>` padding [DS §6] |
+| sm | 8px (`gap-2`, `p-2`, `mr-2`, `gap-y-2`) | `BrandMark` row gap (logo/icon to name); button row in Logo card; icon + text in callouts; logo preview plate padding; spinner margin; `dl` row gap |
+| callout | 12px (`p-3`) | Destructive callout padding only (logo inline error, Backups failure callout, Backups unreadable callout) |
+| md | 16px (`p-4`, `px-4`, `space-y-4`, `gap-4`, `gap-x-4`) | Card padding, form stack, `dl` column gap, sidebar header `px-4` [DS §6] |
+| lg | 24px (`space-y-6`, `p-6`, `mb-6`) | Between cards on a settings page; `<main>` padding; public brand row bottom margin [DS §6] |
 | xl | 32px (`p-8`) | Public card padding (existing) |
 | 2xl | 48px | Not used |
-| 3xl | 64px (`size-16`) | Logo preview box height in the Logo card |
+| 3xl | 64px | Not used as spacing (the 64px logo preview plate height is a size, see below) |
 
-Exceptions (all pre-existing, preserved verbatim, never introduced in new elements):
-- Brand row gap `gap-2.5` (10px) in sidebar, preview and public shell [code, DS §4.1]. `BrandMark` keeps it so the look does not change.
-- Sidebar nav item height `h-9` (36px) and settings tab `h-8` (32px, is a multiple of 4).
-- Callout padding `p-3` (12px, multiple of 4) [code: email health line].
+**Why 12px is on the scale [RL]:** the destructive callout is reused verbatim from existing components (`email-health-line.tsx`, `tickets/[id]/error.tsx`, `contacts/error.tsx`, all `rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-[13px]`). The new callouts sit on the same settings pages as the email health line, so they keep `p-3` for visual parity. The 12px token is reserved for this one pattern; no other new element uses it.
+
+**`BrandMark` row gap is `gap-2` (8px) [RL, revision 1].** The old brand rows used `gap-2.5` (10px); `BrandMark` replaces all three (sidebar header, Name-card preview, public shell) with one markup, so the 2px change lands everywhere at once and the three stay identical. DS §4.1 does not lock the gap. When the Name-card preview box renders `<BrandMark>`, the box itself drops its `gap-2.5` (it has a single child). The `public-page-shell.tsx` comment that says "gap-2.5" is updated to point at `BrandMark`.
+
+Sizes, not spacing (outside the spacing scale by design): brand box/logo height `h-7` / `size-7` (28px, existing DS §4.1 size), logo preview plate `h-16 w-40` (64 × 160px), logo width caps `max-w-[72px]` / `max-w-[120px]`, icons `size-4` / `size-6`.
+
+Pre-existing values left untouched in unchanged markup (not new elements, not findings): sidebar nav item `h-9` and `gap-2.5`, user-footer `gap-2.5`, settings tab `h-8`, EmptyState `space-y-1.5` and halo `-m-3` [DS §4.3], Name-card preview box `px-4 py-3`.
+
+**Every spacing value used by a new or changed element in this phase is on the declared scale above (4, 8, 12, 16, 24, 32).**
 
 ---
 
@@ -88,6 +95,7 @@ Sizes used by **new or changed** elements in this phase (4 sizes, 2 weights):
 | Brand / section heading | 15px (`text-[15px] font-semibold tracking-tight`) | 600 | 1.2 | Brand name in `BrandMark` [DS §3]; `<h2>` card titles "Logo" and "Last backup" |
 | Page title | 18px (`text-[18px] font-semibold`) | 600 | 1.2 | Visible `<h1>`, top-bar title (as `<p>`), EmptyState heading [DS §3] |
 
+- **Caption vs body are separated by colour as well as size [RL, revision 1].** 12px caption is always `text-muted-foreground`. 13px body in new elements is `text-foreground` for content (Logo-card "No logo uploaded" line, `dd` values, relative time) and `text-destructive` inside callouts; 13px is muted only for page subtitles, `dt` labels and admin-only notices, which never sit directly beside a 12px caption. Where both sizes appear in one line ("2 hours ago · 8 Nov 2026, 02:00"), the 13px relative time is foreground and the 12px absolute time is muted.
 - Weights: 400 and 600 only for new elements. Existing 500 (`font-medium`) on settings tabs and sidebar user name is untouched.
 - 14px stays where it already is (nav items, EmptyState body); no new 14px text is introduced.
 - Explicit `text-[Npx]` only; never `text-sm`/`text-lg`/`text-xl` [DS §3, §8 rule 6].
@@ -117,6 +125,17 @@ Never use `text-primary` as text on a tinted or dark surface; use `text-primary-
 
 ---
 
+## Focal points (one per surface)
+
+| Surface | Focal point | How it earns it |
+|---------|-------------|-----------------|
+| `/settings/branding` | The Logo card's preview plate when a logo is set; the "Upload logo" primary button when none is | Only accent-filled element on the page (no logo) or the only image on the page (logo set); the `<h1>` "Branding" anchors the top |
+| `/settings/backups` | The result badge (`Succeeded` / `Failed`) in the "Last backup" card; the EmptyState icon box when no record exists | Only coloured element on the page (success or destructive tint); everything else is neutral 13px text |
+| Sidebar brand slot | The logo (or Sparkles box) at the top-left of the sidebar | First element in reading order; the nav below is neutral 14px text |
+| Public pages (`/request`, `/status/[token]`) | The page's form/status card, with `BrandMark` centred above it as the identity cue | `BrandMark` is small (28px high) and sits above the card so it identifies the workspace without competing with the card's `<h1>`; on an invalid token there is no brand row and the "We couldn't find that ticket" card is the only focal point |
+
+---
+
 ## Surface 1 — Settings → Branding (`/settings/branding`)
 
 Page structure (top to bottom inside the settings layout, `space-y-6`):
@@ -126,7 +145,7 @@ Page structure (top to bottom inside the settings layout, `space-y-6`):
 3. **Logo card** (new), `Card className="border-border/70 p-4 shadow-sm"`, `space-y-4`:
    - `<h2 className="text-[15px] font-semibold tracking-tight">Logo</h2>`
    - Help text, 12px `text-muted-foreground`, id-linked to the file input via `aria-describedby`: "PNG, JPEG or WebP. Up to 1 MiB and 1024 × 1024 pixels. SVG is not accepted. Use a logo that reads on both light and dark backgrounds."
-   - **No logo:** 13px muted line "No logo uploaded. The sidebar and public pages show the default icon." then the button row with **Upload logo** (default `Button`, `Upload` icon `size-4`).
+   - **No logo:** 13px `text-foreground` line "No logo uploaded. The sidebar and public pages show the default icon." then the button row with **Upload logo** (default `Button`, `Upload` icon `size-4`).
    - **Logo set:** preview plate `flex h-16 w-40 items-center justify-center rounded-md border border-border/70 bg-muted/40 p-2` containing `<img className="max-h-full max-w-full object-contain" alt="Current workspace logo">`; then the button row (`flex gap-2`): **Replace logo** (`variant="outline"`, `Upload` icon) and **Remove logo** (`variant="ghost"`, `className="text-destructive"`, `Trash2` icon).
    - **Non-admin (role not owner/admin):** preview (if any) is shown, no buttons, 13px muted line "Only workspace admins can change the logo." [code: matches the existing name-field notice].
    - Inline error slot below the button row (see Interaction).
@@ -154,7 +173,7 @@ Dimension cap [CTX D-08 discretion → RL]: **1024 px on each side** maximum; no
 | Logo set | Bounded box `flex h-7 shrink-0 items-center` with `max-w-[72px]` (sidebar) or `max-w-[120px]` (public), containing `<img src={logoUrl} alt="" height={28} className="h-7 w-auto max-w-full object-contain">`; then the name span |
 | Logo fails to load (`onError`) | Switches to the Sparkles box for the rest of the render lifetime; no error text |
 
-- Row: `flex items-center gap-2.5` (sidebar keeps its `h-14 px-4` header) [DS §4.1].
+- Row: `flex items-center gap-2` (8px, see Spacing; sidebar keeps its `h-14 px-4` header) [DS §4.1].
 - **The name is always visible** next to the logo or icon: `min-w-0 truncate text-[15px] font-semibold tracking-tight text-sidebar-foreground` (sidebar) / `text-[15px] font-semibold tracking-tight` (public). With the 72px logo cap, at least 126px of the 240px sidebar remains for the name before truncation.
 - `alt=""` because the adjacent visible name already names the brand; screen readers announce the name once [RL].
 - No rounded corners, background plate or border on the logo itself; `object-contain` never crops [CTX D-11].
@@ -284,25 +303,49 @@ The planner may rename failure categories but must keep one fixed sentence per c
 
 ## UI Considerations
 
-Applicable state considerations resolved: 12 covered, 3 backstop, 0 unresolved.
+> Populated by the ui-phase UI-consideration probe (Step 9.5, `--auto`) and lifted by plan-phase's `## UI Considerations` lift rule via the identical rule as SPEC `## Edge Coverage`: ✅ covered → a plain truth string in `must_haves.truths`; 🧪 backstop → the flat scalar `{ statement, verification: backstop }` (no explicit evidence at verify time → `insufficient_spec → human_needed`, never a silent pass); ⚠ unresolved → an explicit planner assumption. Empty-state and error-state COPY lives in `## Copywriting Contract`; rows below reference those rows by their Element name instead of restating the copy.
+>
+> Elements: **E1** Logo card (`/settings/branding`), **E2** sidebar `BrandMark`, **E3** public brand row (`/request`, `/status/[token]`), **E4** Backups tab (`/settings/backups`), **E5** single `<h1>` per app route state. Kind confirmation: E3 also carries **static-content** (the organization name next to the logo), which the heuristic missed, so `long-text` was added for E3. No other element kind was missed.
+
+Applicable state considerations resolved: 35 rows, 24 covered, 11 backstop, 0 unresolved (32 closed-taxonomy rows including 1 added at kind confirmation, plus 3 open-axis rows carried from authoring).
 
 | Category | Element(s) | Status | Resolution / Reason |
 |----------|------------|--------|---------------------|
-| empty | Logo card | ✅ covered | With no logo, the card shows the "No logo uploaded" line and an "Upload logo" button, and the sidebar shows the Sparkles box next to the name |
-| empty | Backups page | ✅ covered | With no backup record, `/settings/backups` renders the EmptyState with "No backup has run yet" |
-| populated | Sidebar brand slot | ✅ covered | With a logo set, the sidebar shows an `<img>` with `object-contain` in a box ≤ 72px wide and the workspace name stays visible |
-| populated | Public pages | ✅ covered | `/request` and a valid `/status/[token]` show the organization's logo and name |
-| error | Logo upload | ✅ covered | An SVG, an over-1-MiB file, an over-1024px image and a non-image each produce their documented inline error with `role="alert"` and no change to the stored logo |
-| error | Logo image load | ✅ covered | When the logo URL fails to load, `BrandMark` falls back to the Sparkles box |
-| error | Backups page | ✅ covered | A failed run shows the "Failed" badge, the category sentence and the logs next step; an unknown category shows the generic sentence |
-| error | Invalid status token | ✅ covered | An invalid `/status/[token]` renders no brand row (no logo, no name) |
-| loading | Logo upload/remove | ✅ covered | While pending, the active button shows a spinner and "Uploading…"/"Removing…" and both buttons are disabled |
-| permission | Logo card, Backups page | ✅ covered | A member without owner/admin role sees no logo buttons and the admin-only line; the Backups page shows only the admin-only line |
-| zero-one-many | `<h1>` per route state | ✅ covered | Every route state in the h1 table has exactly one `<h1>` inside `<main>`, asserted by the AIDA-36 E2E test |
-| duplicate title | Top bar vs page | ✅ covered | No route shows the same title text twice on screen; `/kb`, `/tickets`, `/contacts` use sr-only h1 |
-| long-text | Sidebar name with a wide logo | 🧪 backstop | A 255-character workspace name next to a 4:1 logo truncates with an ellipsis and does not push the logo out of the 240px sidebar |
-| overflow | Logo aspect ratios | 🧪 backstop | A very wide (8:1) and a very tall (1:8) logo both fit inside the bounded box without cropping or layout shift, in light and dark mode |
-| dark mode | Logo, badges, callouts | 🧪 backstop | Branding, Backups and the sidebar are reviewed in dark mode per DS §7; logo legibility on a dark sidebar is a human item (CONTEXT human boundary) |
+| empty | E1 Logo card | ✅ covered | With no logo, the card shows the Copywriting "Logo empty line" and the "Upload logo" button, and every `BrandMark` shows the Sparkles box next to the name [Surface 1 "No logo"; Surface 2 table] |
+| loading | E1 Logo card | ✅ covered | While an upload or remove is pending, the pressed button shows `Loader2` with the Copywriting "Pending labels", both buttons are disabled, and the file input is reset after every attempt; the Remove dialog's confirm button shows the spinner and stays open until the result [Surface 1 Interaction contract] |
+| error | E1 Logo card | ✅ covered | A rejected pick (client pre-check or server code) shows exactly one Copywriting "Error: …" row in the inline `role="alert"` destructive callout below the button row, sends nothing on a client-side failure, leaves the stored logo unchanged, and is cleared on the next file pick; a failed remove keeps the dialog open with the Copywriting "Error: remove failed" line as `role="alert"` [Surface 1 Interaction contract; Copywriting Contract] |
+| populated | E1 Logo card | ✅ covered | With a logo set, the card shows the `h-16 w-40` preview plate with an `object-contain` image (alt "Current workspace logo") and the button row "Replace logo" (outline) + "Remove logo" (ghost, destructive text) [Surface 1 "Logo set"] |
+| partial | E1 Logo card | 🧪 backstop | `{ statement: "When a logo record exists but its image fails to load in the preview plate, an admin still sees the Replace logo and Remove logo buttons and the card layout stays intact (visual check of the partial state)", verification: backstop }` |
+| overflow | E1 Logo card | ✅ covered | Any accepted logo (up to 1024 × 1024 px, any aspect ratio) fits inside the `h-16 w-40` preview plate via `max-h-full max-w-full object-contain` and is never cropped [Surface 1 "Logo set"; Surface 2 bullet on `object-contain`] |
+| zero-one-many | E1 Logo card | ✅ covered | The card has exactly two content states, zero logos ("No logo") and one logo ("Logo set"); a workspace holds at most one logo and "Replace logo" swaps it in place [Surface 1] |
+| long-text | E1 Logo card | 🧪 backstop | `{ statement: "The help text and the longest Copywriting error row wrap inside the Logo card at a 360px viewport without truncation or horizontal scroll, and the CircleAlert icon keeps its size-4 (shrink-0)", verification: backstop }` |
+| empty | E2 Sidebar BrandMark | ✅ covered | With `logoUrl` null, `BrandMark` renders the existing Sparkles box markup verbatim followed by the name span [Surface 2 table "No logo"] |
+| loading | E2 Sidebar BrandMark | 🧪 backstop | `{ statement: "While the logo image is still loading (throttled network), the sidebar header keeps its h-14 height, the workspace name stays visible, and no broken-image icon or spinner appears", verification: backstop }` |
+| error | E2 Sidebar BrandMark | ✅ covered | When the logo URL fails to load (`onError`), `BrandMark` switches to the Sparkles box for the rest of the render lifetime and shows no error text [Surface 2 table "Logo fails to load"] |
+| populated | E2 Sidebar BrandMark | ✅ covered | With a logo set, the sidebar shows the logo `<img>` (`alt=""`, `h-7 w-auto object-contain`) in a `max-w-[72px]` box, loaded from the versioned public URL, followed by the always-visible name [Surface 2] |
+| overflow | E2 Sidebar BrandMark | ✅ covered | The sidebar logo never exceeds 72px wide or 28px tall, `object-contain` never crops it, and the logo box is `shrink-0` so it is never pushed out of the 240px sidebar [Surface 2] |
+| long-text | E2 Sidebar BrandMark | ✅ covered | The sidebar name is `min-w-0 truncate`, so a long workspace name ends in an ellipsis within the at-least-126px space left beside the 72px logo cap [Surface 2] |
+| empty | E3 Public brand row | ✅ covered | With no logo, the public row renders `BrandMark variant="public"` in its no-logo state (Sparkles box + name); with no organization at all, `/request` shows the "AIDA" fallback with the Sparkles box [Surface 3; Surface 2 table] |
+| loading | E3 Public brand row | 🧪 backstop | `{ statement: "While the public logo image is still loading, the centered brand row keeps its height, the organization name stays visible, and no broken-image icon or spinner appears", verification: backstop }` |
+| error | E3 Public brand row | ✅ covered | An invalid `/status/[token]` renders no brand row at all (no logo, name, Sparkles or "AIDA"), so the response does not vary with which organizations exist; a logo that fails to load falls back to the Sparkles box [Surface 3; Surface 2 table] |
+| populated | E3 Public brand row | ✅ covered | `/request` and a valid `/status/[token]` render the organization's logo (`max-w-[120px]`) and name centered in the `mb-6 flex justify-center` row, using the ticket's organization on the status page [Surface 3] |
+| partial | E3 Public brand row | 🧪 backstop | `{ statement: "When an organization has a logo but no branding:workspaceName setting, the public row still shows a non-empty name next to the logo through today's name resolution, never a logo alone", verification: backstop }` |
+| overflow | E3 Public brand row | ✅ covered | The public logo never exceeds 120px wide or 28px tall and is never cropped (`object-contain`) [Surface 2 table "Logo set"] |
+| zero-one-many | E3 Public brand row | ✅ covered | Each public page branch renders zero brand rows (invalid token) or exactly one (every other branch), never more [Surface 3] |
+| long-text | E3 Public brand row (added: static-content) | 🧪 backstop | `{ statement: "A 255-character organization name in the centered public brand row wraps or truncates inside the public card at a 360px viewport with no horizontal scroll, and the logo keeps its 120px cap", verification: backstop }` |
+| empty | E4 Backups tab | ✅ covered | With no backup record, an admin sees `EmptyState` (default `h2`, icon `DatabaseBackup`) with the Copywriting "Backups empty heading" and "Backups empty body" rows [Surface 4 state table] |
+| loading | E4 Backups tab | 🧪 backstop | `{ statement: "Navigating to /settings/backups shows no layout-shifting intermediate state: the settings header and tabs stay in place while the page resolves, and any loading.tsx added under (app) renders the Backups h1 (Surface 5)", verification: backstop }` |
+| error | E4 Backups tab | ✅ covered | A failed run shows the "Failed" badge, the matching Copywriting "Backup failure: …" sentence (unknown category → the generic sentence) and the `role="status"` callout with the Copywriting "Backup failure next step"; a malformed record shows only the Copywriting "Backup record unreadable" callout; raw error text is never shown [Surface 4] |
+| populated | E4 Backups tab | ✅ covered | A succeeded run shows the "Last backup" card with the `dl` rows Result (Succeeded badge), Finished (relative `<time>` plus absolute time) and Backup set (set id in `font-mono`) [Surface 4 card] |
+| partial | E4 Backups tab | ✅ covered | A failed run that published no set shows the Copywriting "Backup set none" value; the Failure reason row appears only on failure; a malformed record shows the unreadable callout instead of a partial card [Surface 4] |
+| overflow | E4 Backups tab | 🧪 backstop | `{ statement: "A long backup set id in font-mono breaks or wraps inside its dd column at a 360px viewport with no horizontal page scroll", verification: backstop }` |
+| zero-one-many | E4 Backups tab | ✅ covered | The page shows only the most recent run: zero runs → the empty state, otherwise exactly one card; there is no history list and no action button [Surface 4] |
+| long-text | E4 Backups tab | 🧪 backstop | `{ statement: "The Finished value (relative time and absolute time) and the longest failure sentence wrap inside the dd column without overlapping the dt column at a 360px viewport", verification: backstop }` |
+| overflow | E5 Per-route h1 | ✅ covered | The h1 change adds no visible layout: sr-only h1s take no space, the TopBar `<p>` keeps the same text and `text-[18px] font-semibold` look, and the `/kb` header row becomes `flex justify-end` so "New article" stays right-aligned [Surface 5] |
+| long-text | E5 Per-route h1 | 🧪 backstop | `{ statement: "A 255-character visible h1 (ticket subject, contact display name or article title) wraps inside main without horizontal scroll and without pushing the page's actions off screen", verification: backstop }` |
+| permission (open-axis, carried) | E1 Logo card, E4 Backups tab | ✅ covered | A member without the owner or admin role sees no logo buttons and the Copywriting "Admin-only (logo)" line; on the Backups tab they see only the Copywriting "Backups admin-only" line and nothing else is read [Surface 1; Surface 4] |
+| duplicate title (open-axis, carried) | E5 Top bar vs page | ✅ covered | Every route state in the Surface 5 table has exactly one `<h1>` inside `<main>`, asserted by the AIDA-36 E2E test, and no title text appears twice on screen (`/tickets`, `/contacts`, `/kb` use sr-only h1s) [Surface 5] |
+| dark mode (open-axis, carried) | E1, E2, E4 | 🧪 backstop | `{ statement: "Branding, Backups and the sidebar are reviewed in dark mode per DS section 7, including logo legibility on the dark sidebar, which is a human item", verification: backstop }` |
 
 ---
 
