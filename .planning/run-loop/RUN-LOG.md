@@ -177,3 +177,24 @@ Dipicu wakeup. Cek Berhenti total lolos (tip `1ea4281`, `no-push-run-loop`, bran
 Codex tidak dipakai di putaran ini (`tanpa Codex`). Pekerjaannya berisiko rendah, berupa dokumen, dan keputusan keamanan di dalamnya diserahkan ke CONTEXT fase.
 
 Berikutnya: 0a masih menunggu regresi. Fase 08 langkah 1 (baca sumber) dan langkah 2 (brainstorm area abu-abu dengan Codex) tidak butuh build, jadi bisa dikerjakan.
+
+## Putaran 6 (2026-11-07, 16.14 sampai 16.18 WIB)
+
+Dipicu wakeup. Cek Berhenti total lolos. `pgrep -f 'artisan test'` kosong pada 16.14 dan 16.16. Proses yang masih ada hanya `tail -f` milik sesi Claude di folder recruitment, dan folder itu tidak disentuh. Karena potongan regresi bisa berjeda, 0a belum dijalankan. Butir: Fase 08, langkah 1 dan 2.
+
+### Langkah 1: fakta Fase 08 dari kode
+
+| Hal | Fakta |
+|---|---|
+| Audit critical dan high per dependensi langsung | `shadcn` (di `dependencies`) membawa `proxy-addr` critical, `@modelcontextprotocol/sdk`, `body-parser`, `undici`, `systeminformation`, dan lainnya. `next@16.2.11` (critical, butuh >=16.4.1) membawa `sharp@0.34.5`. `better-auth@1.6.22` (critical, butuh >=1.7.7) membawa `drizzle-orm`, `mysql2`, dan `vitest`. `prisma` membawa `fast-uri`. `imapflow` membawa `ip-address`. `html-to-text` membawa `deepmerge-ts@7`. `nodemailer@9.0.3` dan `zod@4.4.3` rentan sendiri |
+| `shadcn` | hanya `@import "shadcn/tailwind.css"` di `globals.css`, tanpa impor JS di `src/`. Kandidat pindah ke `devDependencies`, tetapi harus dibuktikan dari isi `.next/standalone` |
+| Container | `runner` tanpa `USER`. Upload ke volume `uploads_data`. Healthcheck dari loopback setiap 10 detik |
+| CSP | belum ada. Context7 (Next.js 16.2.9): nonce dibuat di `proxy.ts`, header `x-nonce`, semua halaman dirender dinamis |
+| Route publik | `csat` dan `follow-up` melakukan lookup token dan `formData()` sebelum rate limit. `follow-up` tanpa batas total. `health` dan attachments tanpa rate limit |
+| Lain-lain | 4 titik oracle error, Inter dari `next/font/google`, tanpa Dependabot, `ci.yml` satu job |
+
+### Langkah 2
+
+Pertanyaan: `codex/fase08-tanya.md`, 12 area abu-abu, commit `4d8efca`. Codex berjalan dari ekspor `4d8efca`, `model: gpt-6.1-terra`, `reasoning effort: xhigh`.
+
+Berikutnya: baca jawaban Codex, cek klaimnya, lalu tulis `08-CONTEXT.md` (langkah 3). Kalau `pgrep` masih kosong di awal putaran berikutnya, 0a (baseline build dan test) dijalankan di latar.

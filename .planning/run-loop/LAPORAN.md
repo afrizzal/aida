@@ -1,10 +1,10 @@
 # Laporan run loop AIDA
 
-Keadaan per 2026-11-07 16.20 WIB, sesudah putaran 5.
+Keadaan per 2026-11-07 16.18 WIB, sesudah putaran 6.
 
 ## 1. Ringkasan
 
-Milestone v2.0 sudah dibuka (butir 0b selesai), dan daftar fitur Projects sudah dicek ke demo publik (butir 0c selesai). `REQUIREMENTS.md` berisi 91 requirement, `ROADMAP.md` berisi Phase 8 sampai 17, dan keputusan owner tercatat di `PROJECT.md`. Roadmap direvisi dalam tiga putaran kritik Codex, yang bersama-sama menemukan 15 temuan, lalu 4 HIGH dan 3 MEDIUM, lalu 1 HIGH; semuanya sudah diterapkan. Belum ada kode produk yang diubah. Dokumen perencanaan di `.planning/` aman ditinjau sekarang. Butir 0a masih menunggu regresi Rekriva, jadi berikutnya Fase 08, mulai dari langkah yang tidak butuh build.
+Milestone v2.0 sudah dibuka (butir 0b selesai), dan daftar fitur Projects sudah dicek ke demo publik (butir 0c selesai). `REQUIREMENTS.md` berisi 91 requirement, `ROADMAP.md` berisi Phase 8 sampai 17, dan keputusan owner tercatat di `PROJECT.md`. Roadmap direvisi dalam tiga putaran kritik Codex, yang bersama-sama menemukan 15 temuan, lalu 4 HIGH dan 3 MEDIUM, lalu 1 HIGH; semuanya sudah diterapkan. Belum ada kode produk yang diubah. Dokumen perencanaan di `.planning/` aman ditinjau sekarang. Butir 0a masih menunggu regresi Rekriva, Fase 08 sudah dimulai dari langkah yang tidak butuh build: sumbernya sudah dibaca, dan brainstorm area abu-abu dengan Codex sedang berjalan.
 
 ## 2. Fase dan requirement
 
@@ -13,7 +13,7 @@ Milestone v2.0 sudah dibuka (butir 0b selesai), dan daftar fitur Projects sudah 
 | 0a | Baseline tertunda | belum disentuh | regresi Rekriva masih berjalan | |
 | 0b | Milestone v2.0 | selesai dengan bukti | `init.phase-op` 8 sampai 17 menemukan fasenya; 76/76 requirement terpetakan; tiga putaran kritik Codex diterapkan | `8a72f4c`, `995ed9e`, `fea685d`, `b9b1d9b` |
 | 0c | Lengkapi daftar fitur | selesai dengan bukti | 29 perilaku baru di `FITUR-PROJECTS.md`, AIDA-100 sampai 114, 91/91 terpetakan, grep clean-room kosong (exit 1) | `cb10c1c` |
-| 08 | Keamanan (AIDA-25 sampai 32) | belum disentuh | | |
+| 08 | Keamanan (AIDA-25 sampai 32) | berjalan | langkah 1 selesai, langkah 2 (Codex) berjalan | `4d8efca` |
 | 09 | Operasional (AIDA-33 sampai 41) | belum disentuh | | |
 | 10 | Tim (AIDA-42 sampai 46) | belum disentuh | | |
 | 11 | Inbox (AIDA-47 sampai 51) | belum disentuh | | |
