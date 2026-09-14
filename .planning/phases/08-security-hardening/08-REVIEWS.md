@@ -62,3 +62,50 @@ All HIGH items except C4 are accepted as stated or with the property above. C2 i
 
 - C4: Codex reads the container rule literally; the orchestrator reads containers created and removed by AIDA's own mandated tests as AIDA's. Kept for cycle 2 and reported to the owner.
 - C8: whole-chain validation is rejected for the reason above.
+
+### Cycle 2
+
+- Question: `run-loop/codex/fase08-plan-r2-tanya.md` (commit `e686220`); answer: `run-loop/codex/fase08-plan-r2-jawab.md`.
+- Export: `e686220`. Log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`.
+- Codex verdict: not ready (3 HIGH, 5 MEDIUM, 1 LOW). Cycle 1 findings C1, C3, C6, C7, C8, C9, C10 and C12 confirmed as incorporated; C2, C4, C5, C11 and C13 incorporated with gaps (R2-1 to R2-9 below). C8 rejection accepted by Codex. C4 still disputed after two rounds (see K22).
+
+| ID | Codex severity | Finding (short) | Orchestrator check | Disposition |
+|---|---|---|---|---|
+| R2-1 | HIGH | 08-16 Task 3 continues when ports are held by project `aida`, then runs `up -d --build` and `down` on that project: it can replace and stop a running operator stack | Verified: 08-16 Task 3 step 1 parks only when ports are taken "by something other than project `aida`" | accept |
+| R2-2 | HIGH | Docker-unhealthy and dirty-tree branches contradict the charter and the plans' own acceptance | Verified in 08-14 Task 1, 08-16 Tasks 1–2: they continue on an unhealthy Docker; the dirty-tree branch still demands real exit codes and an empty diff | accept |
+| R2-3 | HIGH | 08-16 evidence-matrix closing rule is self-contradictory; host evidence alone could close a container acceptance item | Verified: step 8 versus the acceptance bullet "No requirement is marked closed while any of its acceptance items is failed, blocked or not run" | accept |
+| R2-4 | MEDIUM | 08-21 Task 3 readiness polling can spend the health quota before the 61-request test; all setup errors become `BLOCKED` | Verified behavior text of 08-21 Task 3 | accept |
+| R2-5 | MEDIUM | 08-22 fail-closed flood only requires some 429, which the per-identity limit also produces; no minimum number of observed healthcheck entries | Accepted as described; not re-read line by line | accept |
+| R2-6 | MEDIUM | Per-run project names: no collision check before `up`/`down -v`; 08-21 acceptance contradicts leftovers being left alone | Superseded by K22, but the collision rule applies to run-scoped volume names | accept (via K22) |
+| R2-7 | MEDIUM | `/api/health/probe` refusal is only checked by 404 responses, not by proving the request never reached the upstream; the DB bound is proven with an in-process mock; module-level cache may not be shared across routes in a production build | Accepted as described | accept |
+| R2-8 | MEDIUM | Verify commands accept a non-zero exit whenever any `BLOCKED:` line exists, so one blocked test can mask another failed test (08-21 Task 3, 08-14) | Verified: 08-21 Task 3 and 08-14 `<fails_when>` texts | accept |
+| R2-9 | LOW | The C13 error-response fallback is defined too late; a pre-proxy error from Next.js carries no CSP | Accepted as described | accept |
+
+### Required properties for the replan (cycle 2)
+
+**K22 (C4 resolution, binding, replaces the C4 partial of cycle 1).** After two rounds the disagreement on the container rule persists, so the run takes the most conservative option that is still literally inside the charter (decision rule 4):
+- Every container-level proof added in this phase (08-14, 08-21 Task 3, 08-22, 08-23) runs under compose project `aida`, which the charter names. No new compose project names, and no standalone containers outside project `aida`.
+- Pre-flight guard, before any `up`: if any container of project `aida` exists (running or stopped), or port 80 or 443 is held by anything, record `not run (parked: existing aida stack or port in use)` and touch nothing.
+- Test overlays give every volume an explicit run-scoped name (for example `aida_ct_<runid>_db_data`, with a run id of at least 12 hex characters) and check that each name does not exist before creating it. Pre-existing `aida_*` volumes are recorded, never mounted and never removed. Teardown runs `down` for project `aida` and then removes only the volumes this run created, and asserts that nothing of the run remains.
+- The real-Caddy-in-front-of-host proof (08-21 Task 3) either runs as a service of project `aida` under the same guard, or moves to the compose-stack proof (08-22); record which.
+- The charter-mandated suites stay as they are: `pnpm test:integration` and `pnpm test:e2e` (Testcontainers), and `pnpm test:egress` (project `aida-egress-test`). The owner question in `LAPORAN.md` stays open.
+
+**R2-1.** The 08-16 compose gate applies the same pre-flight guard (parks if any project `aida` container exists or a port is held, including by project `aida`). Before `up` it records which `aida_*` volumes exist; if any exist that this run did not create, it parks instead of mounting them. After `down` it removes only the volumes the gate created, so the next gate starts clean.
+
+**R2-2.** Before any Docker step, every plan runs `colima status` and `docker info`. If either fails it never restarts or stops Colima or Docker, records `blocked (docker unhealthy)` for the Docker rows, finishes only the non-Docker work, commits, and reports to the orchestrator, which applies charter rule B and "Berhenti total". The dirty-tree branch of 08-16 gets its own evidence and verify commands and never claims a clean tree.
+
+**R2-3.** The 08-16 evidence matrix names, per acceptance item, the evidence that is required (host, container or both). An item is closed only when every required cell is `passed`. A verify command checks this rule on every row and sub-row.
+
+**R2-4.** Readiness checks never consume the bucket under test (use a path outside the throttle, or reset the in-memory state in a controlled way before counting). Setup errors are classified: an image pull or Docker failure is `blocked`; a Caddyfile, harness or assertion error is `failed`.
+
+**R2-5.** The fail-closed flood case proves the misconfiguration is active (read the environment inside the container), proves the shared 120-request bucket is the one in use (not the 60-request per-identity bucket), and requires at least five healthcheck entries that started inside the flood window, all healthy.
+
+**R2-7.** Probe refusal is proven at the upstream: an instrumented upstream or app-side request count shows that none of the refused variants reached `app`. The raw-path corpus includes encoded slashes and combined normalizations. The DB bound is measured across `/api/health` and `/api/health/probe` together on a production build (not only with an in-process mock). The docs state that anyone who can reach `app:3000` directly can read the binary DB status from the probe.
+
+**R2-8.** A structured reporter classifies every test as `passed`, `failed`, `blocked` or `not run`. A run counts as blocked only if every failure carries blocker evidence and no other failure exists; a verify command enforces this.
+
+**R2-9.** 08-08 defines up front an error response that is guaranteed to pass through the proxy, and records pre-proxy errors from Next.js as a separate, documented boundary.
+
+### Consensus summary (cycle 2)
+
+All nine cycle 2 findings are accepted. C8 is closed: Codex accepted the rejection of whole-chain validation under the documented topology contract. C4 is resolved by K22. This is cycle 2 of at most 3.
