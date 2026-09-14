@@ -10,6 +10,8 @@ Autonomy level AIDA tetap 2: branch ini adalah draf, dan owner yang menerapkanny
 
 ## Satu putaran
 
+Sebelum langkah 1, jalankan cek A dan B di bagian Aturan owner 2026-11-08. Kalau salah satu gagal, putaran berhenti di situ.
+
 1. Jalankan cek di bagian Berhenti total. Kalau file `.planning/run-loop/BERHENTI` ada, tulis laporan, commit, lalu hentikan loop.
 2. Cek beban. Kalau `pgrep -f 'artisan test'` menemukan proses, regresi Rekriva masih berjalan. Selama itu dilarang menjalankan Docker, Testcontainers, E2E, dan build. Yang boleh: membaca kode, menulis dokumen dan plan, serta konsultasi Codex.
 3. Ambil butir pertama di `ANTREAN.md` yang berstatus `belum` atau `berjalan`. Lewati yang diparkir.
@@ -18,6 +20,32 @@ Autonomy level AIDA tetap 2: branch ini adalah draf, dan owner yang menerapkanny
 6. Jadwalkan putaran berikutnya: 60 detik kalau masih ada pekerjaan, 1200 detik sebagai cadangan kalau menunggu proses latar, 1800 detik kalau hanya menunggu regresi Rekriva tanpa pekerjaan ringan.
 
 Kalau antrean habis, tulis laporan akhir, commit, lalu hentikan loop. Kalau tiga putaran berturut-turut tidak menghasilkan commit, padahal tidak sedang menunggu apa pun, hentikan loop dan laporkan sebabnya.
+
+## Aturan owner 2026-11-08
+
+Ditambahkan oleh owner dan mengikat seperti Larangan. Kalau bertentangan dengan bagian lain piagam ini, ambil yang lebih ketat.
+
+**A. Ruang disk.** Di awal setiap putaran, jalankan `df -h /System/Volumes/Data`. Kalau sisa di bawah 15 GB, jangan kerjakan apa pun. Catat di `RUN-LOG.md`, lalu jadwalkan putaran berikutnya 1800 detik kemudian. Putaran seperti ini terhitung menunggu, bukan putaran tanpa commit.
+
+**B. Docker.** Di awal setiap putaran, `colima status` dan `docker info` harus sehat: keduanya exit 0 tanpa error. Kalau tidak, catat di `RUN-LOG.md` dan lewati putaran itu dengan jadwal 1800 detik. Jangan stop, restart, atau delete Colima maupun Docker, karena VM ini dipakai project lain. Kalau putaran berikutnya masih gagal, itu kondisi "Docker mati dan tidak pulih" di bagian Berhenti total. Keduanya wajib: saat disk VM rusak pada 2026-11-07, `docker info` tetap menjawab, dan hanya `colima status` yang gagal.
+
+**C. Bersih-bersih.** Worktree yang dibuat dalam putaran dibuang beserta branch-nya setelah branch itu di-merge. Salinan atau ekspor repo sementara, termasuk folder ekspor Codex, dihapus di akhir putaran.
+
+- `git merge` tetap dilarang untuk Claude, dan `workflow.use_worktrees` bernilai `false`, jadi putaran tidak membuat worktree. Worktree yang branch-nya belum masuk `v2/run-loop` jangan dibuang. Catat sebagai item owner.
+- Hapus hanya path yang dibuat putaran itu sendiri. Simpan path dari `mktemp -d` saat membuatnya. Worktree dibuang dengan `git worktree remove`, ekspor dengan `rm -r -- "${EXPORT}"` sesudah memastikan path itu ada di bawah `${TMPDIR}`. Aturan deny `rm -rf` tetap berlaku.
+
+**D. Penulis kode.** Semua kode ditulis oleh Claude (Opus 5.5). Codex hanya dipakai untuk pendapat kedua atau review, dan tidak menulis kode. Semua agen GSD mewarisi model sesi lewat `"model_profile": "inherit"` di `.planning/config.json`. Jangan ubah profil itu, dan jangan isi parameter `model` saat dispatch agen. Catatan profil `balanced` di `CLAUDE.md` sudah digantikan keputusan ini.
+
+**E. Rujukan fitur project management.** Fitur project management mengacu ke `<URL-REPO, belum diisi owner>`. Sebelum mengambil satu baris pun, baca lisensinya dan catat di dokumen fase. AIDA berlisensi Apache-2.0 dan publik.
+
+- MIT, BSD, atau Apache-2.0 boleh diadaptasi. Pertahankan pemberitahuan hak cipta dan lisensinya, lalu catat di `NOTICE` beserta commit SHA sumber dan daftar file yang diadaptasi.
+- GPL, AGPL, LGPL, atau tanpa lisensi: jangan salin kodenya. Pelajari perilakunya saja, lalu tulis implementasi sendiri.
+- Kalau lisensinya tidak jelas, itu keputusan owner. Ikuti aturan F.
+- Selama URL di atas belum diisi owner, jangan menebak repo rujukan. Sumber yang boleh tetap yang ada di bagian Clean-room. Bagian Clean-room untuk gr8r tetap berlaku penuh. Repo itu tanpa lisensi, jadi termasuk butir kedua.
+
+**F. Keputusan owner.** Keputusan yang hanya bisa diambil owner (lisensi, cakupan fitur, dan apa pun yang mengubah `PROJECT.md` atau `REQUIREMENTS.md`) jangan dipilih sendiri, dan jangan otomatis memilih opsi pertama. Catat keputusan itu di `ANTREAN.md` dengan status `menunggu owner`, berisi pertanyaan, opsi, dan apa yang terhalang. Status itu diperlakukan seperti diparkir. Lalu kerjakan hal lain yang tidak bergantung padanya. Memperbarui status traceability di `REQUIREMENTS.md` berdasarkan acceptance dan bukti bukan keputusan owner.
+
+**G. Push.** Jangan push kecuali owner memintanya langsung. AIDA publik, jadi push langsung mempublikasikan kode. Larangan push dan kunci `pushurl` di bawah tetap berlaku penuh.
 
 ## Urutan fase
 
