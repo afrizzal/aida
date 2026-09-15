@@ -10,7 +10,7 @@ Status: `belum`, `berjalan`, `selesai`, `menunggu manusia`, `diparkir`.
 | 0c | Lengkapi `FITUR-PROJECTS.md` dengan menelusuri demo publik sesuai aturan clean-room | selesai | `cb10c1c`. Chromium headless, hanya UI tampak. 29 baris perilaku baru, 6 di luar scope dengan alasan. AIDA-100 sampai AIDA-114 ditambahkan, total 91 requirement |
 | 08 | Keamanan | diparkir | Langkah 1 sampai 5 dijalankan: CONTEXT `8abbc6c`; plan 23 dalam 14 wave (`ded5f56`); review Codex 3 siklus (`99721fd`, `96d7c8f`, siklus 3 di `08-REVIEWS.md`). Siklus 3 (terakhir) masih memberi 4 HIGH soal keselamatan resource Docker bersama dan kejujuran matriks bukti, jadi fase diparkir sesuai Titik keputusan (K24). Menunggu keputusan owner (LAPORAN bagian 3). Tidak ada fase lain yang ikut diparkir |
 | 09 | Operasional | diparkir | CONTEXT `5ebef8b`, UI-SPEC disetujui, 11 plan (`f4b5dfc`), tiga siklus review Codex. Siklus 3 menyisakan 1 HIGH: recovery `demo-partial` menghapus data demo, bertentangan dengan AIDA-37 (K25). Belum ada kode yang dieksekusi. Menunggu keputusan owner |
-| 10 | Tim | berjalan | Putaran 23: langkah 1 (baca sumber, fakta kode lewat agen Explore) berjalan. Fase 08 diparkir, jadi undangan dibangun di atas Better Auth versi sekarang (ROADMAP Cross-phase risks) |
+| 10 | Tim | berjalan | Langkah 1 sampai 3 selesai: CONTEXT 29 keputusan (Codex `fase10-jawab.md`), tanpa peran ketiga. Berikutnya langkah 4: `/gsd-ui-phase 10` (fase ber-UI). Undangan di atas Better Auth 1.6.22; test undangan diulang sesudah upgrade |
 | 11 | Inbox | belum | |
 | 12 | Siklus tiket | belum | |
 | 13 | Integrasi | belum | |
@@ -20,3 +20,4 @@ Status: `belum`, `berjalan`, `selesai`, `menunggu manusia`, `diparkir`.
 | 17 | Penyatuan | belum | |
 | 09-o1 | Owner: baseline `version` di `package.json` dan kebijakan bump untuk `check-version` (D-23) | menunggu owner | Opsi: tetapkan versi awal (mis. `1.0.0` sesudah tag) atau biarkan workflow memberi notice. Terhalang: aktivasi gerbang versi |
 | 09-o2 | Owner: handle untuk `CODEOWNERS` dan widget README pihak ketiga (D-25) | menunggu owner | Opsi: isi handle/tim dan izinkan widget, atau biarkan tidak ada. Terhalang: dua butir AIDA-40 |
+| 10-o2 | Owner: apakah balasan pelanggan dan peringatan SLA pada tiket tanpa assignee memberi notifikasi ke seseorang (CONTEXT Fase 10, O-2) | menunggu owner | Sementara hanya assignee yang diberi notifikasi. Terhalang: cakupan notifikasi untuk tiket tanpa assignee |

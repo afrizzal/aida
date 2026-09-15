@@ -506,3 +506,11 @@ Dipicu wakeup. Cek A (30 GiB), B, dan Berhenti total lolos. Regresi Rekriva berj
 ### Langkah 1 Fase 10: fakta kode (agen Explore, dicek orkestrator untuk `getScopedDb`)
 
 `better-auth` 1.6.22 dengan plugin `organization({ allowUserToCreateOrganization: false })` dan `admin` (`src/lib/auth.ts:22-24`), tanpa pengirim undangan; `@better-auth/cli` 1.4.21 tidak cocok versinya. Model `member` dan `invitation` ada di skema. Peran: owner, admin, member (`src/lib/authz.ts:5`). `getScopedDb` (`src/lib/session.ts:38-43`) hanya memeriksa sesi dan `activeOrganizationId`, tidak memeriksa keanggotaan. Belum ada model `Notification`, lonceng, halaman member, kode undangan (F-16), maupun parsing mention. Catatan internal sudah ada (`Message.visibility` PUBLIC atau INTERNAL). Email lewat `src/lib/channels/email/`; job worker: ai-triage, email-inbound-poll, email-outbound-send, heartbeat, insight-run, kb-embed-article, rate-limit-cleanup, sla-flag.
+
+### Langkah 2 Fase 10
+
+Pertanyaan `codex/fase10-tanya.md` (7 area, dengan pelajaran dari dua fase yang diparkir: hindari test stack compose dan protokol data rumit). Ekspor diperiksa (hanya `.env.example`, dua kunci contoh). Codex berjalan. Sesudahnya: cek klaim, tulis `10-CONTEXT.md` (langkah 3), hapus ekspor.
+
+Codex Fase 10 selesai (`gpt-6.1-terra`, `xhigh`, 1416 kata). Langkah 3: `10-CONTEXT.md` ditulis subagen Claude (model sama) dengan struktur `09-CONTEXT.md`, karena konteks orkestrator hampir habis; subagen wajib mengecek klaim Codex ke kode, menyalin Larangan verbatim, dan memeriksa scan serta `init.phase-op 10`. Orkestrator memverifikasi lagi sebelum commit.
+
+`10-CONTEXT.md` ditulis subagen: 29 keputusan; tiga rekomendasi Codex tidak diikuti dengan alasan (undangan dikelola AIDA di atas tabel `invitation` plugin dan endpoint plugin yang mengubah member ditutup, karena otorisasi; `MemberAuditEvent` terpisah karena `AuditEvent` khusus AI; subjek digest bahasa Inggris). Tanpa peran ketiga (D-13). Item owner: O-1 test container (sudah ada), O-2 notifikasi untuk tiket tanpa assignee (dicatat sebagai 10-o2), O-3 peran ketiga nanti. Orkestrator memverifikasi: Larangan identik, scan nama dan path bersih, `has_context: true`.
