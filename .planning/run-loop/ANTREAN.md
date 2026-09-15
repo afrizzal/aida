@@ -11,7 +11,7 @@ Status: `belum`, `berjalan`, `selesai`, `menunggu manusia`, `diparkir`.
 | 08 | Keamanan | diparkir | Langkah 1 sampai 5 dijalankan: CONTEXT `8abbc6c`; plan 23 dalam 14 wave (`ded5f56`); review Codex 3 siklus (`99721fd`, `96d7c8f`, siklus 3 di `08-REVIEWS.md`). Siklus 3 (terakhir) masih memberi 4 HIGH soal keselamatan resource Docker bersama dan kejujuran matriks bukti, jadi fase diparkir sesuai Titik keputusan (K24). Menunggu keputusan owner (LAPORAN bagian 3). Tidak ada fase lain yang ikut diparkir |
 | 09 | Operasional | diparkir | CONTEXT `5ebef8b`, UI-SPEC disetujui, 11 plan (`f4b5dfc`), tiga siklus review Codex. Siklus 3 menyisakan 1 HIGH: recovery `demo-partial` menghapus data demo, bertentangan dengan AIDA-37 (K25). Belum ada kode yang dieksekusi. Menunggu keputusan owner |
 | 10 | Tim | diparkir | CONTEXT `fcd034e`, UI-SPEC disetujui `0706c49`, 16 plan (`2730d11`), tiga siklus review Codex (`eed405e`, `1e11185`, siklus 3 di `10-REVIEWS.md`). Siklus 3 (terakhir) menyisakan 2 HIGH: dua skrip E2E di 10-13 bertentangan dengan perilaku yang ditetapkan plan sebelumnya (K27). Belum ada kode yang dieksekusi. Menunggu keputusan owner |
-| 11 | Inbox | berjalan | Langkah 1 dan 2 selesai (brainstorm Codex `codex/fase11-jawab.md`). Langkah 3: `11-CONTEXT.md` (D-01 sampai D-24, K28). Berikutnya: langkah 4, `/gsd-ui-phase 11` |
+| 11 | Inbox | berjalan | Langkah 1 sampai 4 selesai: brainstorm Codex, `11-CONTEXT.md` (`ff2dbab`, K28), UI-SPEC disetujui (71 baris UI Considerations). Berikutnya: langkah 5, `/gsd-plan-phase 11`, lalu Codex review plan |
 | 12 | Siklus tiket | belum | |
 | 13 | Integrasi | diparkir | Ikut diparkir karena bergantung pada Fase 10 (rantai piagam) |
 | 14 | Fondasi Projects | belum | |
