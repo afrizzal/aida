@@ -272,7 +272,7 @@ Composer (`composer.tsx`, internal mode only) [CTX D-20, D-21]:
 - Options: current members of the active organization only, served through the D-08 membership helper; each `CommandItem` = Avatar `size-8` + stack name (13px, 600) and email (12px muted). Max 8 visible, `max-h-[288px]` scroll [RL]. The signed-in author is not listed (mentioning yourself has no use) [RL].
 - Keyboard: ArrowUp/ArrowDown move, Enter or Tab inserts, Escape closes and leaves the typed text; focus stays in the textarea (`aria-activedescendant` on the textarea, `role="combobox"` / `aria-expanded` / `aria-controls` wired to the list).
 - Insert: replaces `@query` with `@{Name} ` and records the member id in client state. Deleting any character of an inserted `@{Name}` drops that id. Only ids are sent as structured data next to the body; the body never contains an email [CTX D-20].
-- Public mode: typing `@` opens nothing. Switching from internal to public with recorded mentions clears the ids and shows a 12px muted line under the textarea: "Mentions only work in internal notes. The names in this reply are plain text and notify nobody." It disappears on the next switch back or on send.
+- Public mode: typing `@` opens nothing. Switching from internal to public with recorded mentions removes each inserted `@{Name} ` from the text (plain `@text` the agent typed stays), clears the ids, and shows a 12px muted line under the textarea: "Mentions only work in internal notes. The mentioned names were removed from this reply." (changed in plan review round 1, C7: an inserted member name must never reach a public body) It disappears on the next switch back or on send.
 - Member list loads once per composer mount; while loading, the list shows one `Skeleton h-8 mx-2 my-2`.
 
 Thread rendering (`thread-message.tsx`, through `renderMarkdown` only, no raw HTML) [CTX D-20]:
@@ -362,7 +362,7 @@ All copy is English and final; the executor uses it verbatim. `{…}` are runtim
 | Bell list cap | Showing the 20 most recent. |
 | Bell load error | Notifications could not be loaded. Try again. (button "Try again") |
 | Bell action error | That change could not be saved. Try again. |
-| Mention: no match / mode switch note | No member matches "{query}". / Mentions only work in internal notes. The names in this reply are plain text and notify nobody. |
+| Mention: no match / mode switch note | No member matches "{query}". / Mentions only work in internal notes. The mentioned names were removed from this reply. |
 | Notifications subtitle | Choose what you hear about in this workspace. These settings are yours; other members have their own. |
 | Notifications SMTP-off line | This server has no email set up, so digests are not sent. In-app notifications still work. |
 | Digest cadence line | Email digests are sent {digest interval text} and list only unread notifications. |

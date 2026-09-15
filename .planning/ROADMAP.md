@@ -183,11 +183,12 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 5. Preferences apply, and the digest sends one batched email through a fake SMTP with no PII in the subject.
 
 **Stays open for a human:** a test with real email.
-**Plans:** 0/14 plans complete
+**Plans:** 0/15 plans complete
 **Wave 1**
 
 - [ ] 10-01-PLAN.md — Lay the whole Phase 10 data foundation in one migration so later waves never edit the schema in parallel (Wave 1)
 - [ ] 10-02-PLAN.md — Build the one membership-checking helper every data path uses (D-08) and close the Better Auth bypasses (D-02) (Wave 1)
+- [ ] 10-15-PLAN.md — Close the Better Auth organization and admin plugin endpoints over HTTP (D-02) and open /invite with no referrer (D-04, D-05) (Wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
