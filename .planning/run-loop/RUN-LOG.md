@@ -486,3 +486,15 @@ Plan-checker putaran 2: 2 BLOCKER (09-04 membuat dan menghapus container `aida-m
 Revisi checker iterasi 1 selesai: 09-04 memakai database baru di dalam `aida-dev-db` (tanpa container baru; `aida-migr-` dan `docker rm` sudah hilang, dicek); restore 09-10 punya marker `target-touched` dan satu hasil per kasus dengan unit test; nama `status-unrecorded-<setId>.json` seragam (dicek); shim docker 09-11 mengecek label run per mutasi; S1/S3 dicatat di tabel tunda Round 2; `fenced_action` mengecek kunci restore sebelum publikasi. Checker iterasi 2 berjalan. Sesudahnya: commit replan, Codex siklus 3 (terakhir).
 
 Plan-checker iterasi 2: VERIFICATION PASSED; keenam masalah iterasi 1 beres, batas run terpenuhi, requirement 9/9. Replan putaran 2 di-commit. Berikutnya: Codex siklus 3 (terakhir) untuk plan Fase 09; HIGH tersisa sesudahnya berarti parkir (seperti K24). Ringkasan siklus 1 dan 2 untuk pertanyaan siklus 3 ada di `09-REVIEWS.md`.
+
+## Putaran 22 (2026-11-08, mulai 12.19 WIB)
+
+Dipicu wakeup. Cek A (30 GiB), B, dan Berhenti total lolos. Regresi Rekriva berjalan (Rubric), 0a2 menunggu. Butir: Fase 09 langkah 5, Codex siklus 3 (terakhir). Pertanyaan `codex/fase09-plan-r3-tanya.md`; ekspor diperiksa (hanya `.env.example`, dua kunci contoh). Codex berjalan. Sesudahnya: cek klaim; kalau ada HIGH tersisa, Fase 09 diparkir seperti K24 dan run lanjut ke Fase 10; kalau tidak, replan `--reviews` terakhir bila ada temuan, lalu langkah 6 (eksekusi).
+
+Codex siklus 3 Fase 09 selesai: 1 HIGH, 4 MEDIUM, 1 LOW. HIGH dicek: `recoverDemoPartial()` dipakai seed CLI dan demo boot (09-02 baris 96, 114) untuk menghapus data demo, bertentangan dengan AIDA-37.
+
+| No | Pertanyaan | Opsi | Pendapat Codex | Keputusan | Alasan |
+|---|---|---|---|---|---|
+| K25 | Fase 09 sesudah siklus review ketiga dengan 1 HIGH | replan lalu eksekusi tanpa review; parkir | parkir | parkir | aturan yang sama dengan K24; temuan diterima dan dicatat. Fase 10 tidak bergantung pada 08 atau 09 menurut rantai parkir piagam |
+
+Berikutnya: Fase 10 (Tim), langkah 1. 0a2 tetap menunggu regresi Rekriva, dengan pengaman R3-2.

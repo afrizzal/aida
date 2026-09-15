@@ -67,3 +67,21 @@ Reviews run under `run-loop/PIAGAM.md` step 5: Codex reads a `git archive` expor
 - **Q8:** one order for publish, status and retention, one assertion set per test case, a fallback channel visible when both the database and the status volume cannot be written, and the record of a missed status kept (history or reconciliation) instead of deleted.
 - **Q9:** every write inside `createFirstOrgAndAdmin` is inventoried, each partial state has a defined recovery, and a crash is injected between each pair.
 - **Q10:** the migration is created with `prisma migrate dev --create-only`, edited, then applied and verified on a clean disposable database.
+
+### Cycle 3 (last)
+
+- Question: `run-loop/codex/fase09-plan-r3-tanya.md`; answer: `run-loop/codex/fase09-plan-r3-jawab.md`. Log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`.
+- Codex verdict: not ready; 1 HIGH, 4 MEDIUM, 1 LOW; "the phase must be parked".
+
+| ID | Severity | Finding (short) | Orchestrator check | Disposition |
+|---|---|---|---|---|
+| R1 | HIGH | `recoverDemoPartial()` deletes demo organizations and users that lack the new completion marker, on both the seed CLI and the demo boot path; AIDA-37 requires the seed to refuse before any write when tenant data exists and the boot to skip a demo-only database; a legitimate demo dataset created before the marker existed would be deleted | Verified: 09-02 lines 96 and 114 use the recovery on both paths | accept |
+| R2 | MEDIUM | The advisory-lock fence does not stop a file action if the lock holder's database session drops mid-action (Q2 partial) | Accepted | accept |
+| R3 | MEDIUM | `uploads:volume-id` is undefined before the first upload, so an empty backup and restore round trip has no complete contract | Accepted | accept |
+| R4 | MEDIUM | 09-06 Task 3 still has a blanket "for each" assertion that contradicts the success cases (Q8 partial) | Accepted | accept |
+| R5 | MEDIUM | The Docker shim still has a check-to-mutation window inside one call (Q5 partial); not a parking reason while the suite stays unrun | Accepted | accept |
+| R6 | LOW | 09-04 acceptance still asks for a removed container name although the task now drops a database | Accepted | accept |
+
+### Outcome
+
+The third and last review cycle ended with one HIGH finding (R1). Under `run-loop/PIAGAM.md` → Titik keputusan, **Phase 9 is parked** (run-loop decision K25, same rule as K24 for Phase 8). The findings are accepted and recorded but not incorporated; no Phase 9 code was executed. Unparking is the owner's decision (`run-loop/LAPORAN.md`).

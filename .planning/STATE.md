@@ -4,11 +4,11 @@ milestone: v2.0
 milestone_name: Helpdesk & Projects
 current_phase: 09
 current_phase_name: operations
-status: Phase 8 parked (owner decision); Phase 9 planned (11 plans), Codex plan review next
+status: Phases 8 and 9 parked after three Codex plan reviews each (owner decision); Phase 10 next
 stopped_at: context exhaustion at 75% (2026-11-08)
 last_updated: "2026-11-08T04:37:45.666Z"
 last_activity: 2026-11-08
-last_activity_desc: Phase 9 planned, 11 plans in 6 waves, plan checker passed; Codex plan review next
+last_activity_desc: Phase 9 parked, the third Codex plan review found demo recovery deleting data against AIDA-37; Phase 10 is next
 state_head: 96d6b68991a1f5b1bdf788a1970b39ab7414e172
 progress:
   total_phases: 10
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-11-07, v2.0 opened)
 
 ## Current Position
 
-Phase: 09 (operations), planned: 11 plans in 6 waves; Codex plan review next. Phase 08 is parked (owner decision).
+Phase: 10 (team) is next. Phases 08 and 09 are PARKED after three Codex plan reviews each (see their REVIEWS.md); no code from either was executed.
 Plan: —
 Status: Milestone v2.0 opened by hand on 2026-11-07. `REQUIREMENTS.md` (91 requirements) and `ROADMAP.md` (Phases 8–17) are written and were revised over three Codex critique rounds (queue item 0b done). The public demo was walked under the clean-room rules and added AIDA-100 to AIDA-114 (item 0c done). Phase 8 context is committed (`08-CONTEXT.md`, `8abbc6c`) and the phase is planned: 23 plans in 14 waves; three Codex review cycles; parked after cycle 3 (owner decision, `run-loop/LAPORAN.md`). No Phase 8 code has been executed. Baseline 0a is done: build passes; integration passes except the egress file; E2E passes 63 with two honesty-invariants flakes that pass alone (fixed by plan 08-17). The egress baseline (0a2) was parked while `binaries.prisma.sh` sent no bytes on GET (07.45 to 09.09); the host recovered and the test waits for the Rekriva regression to finish.
 Last activity: 2026-11-08 — Phase 8 planned under the run charter. v1.0.0 stays complete and archived; its archives are `milestones/v1.0.0-*`.
