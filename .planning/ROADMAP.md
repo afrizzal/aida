@@ -138,7 +138,35 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 6. `scripts/install.sh`, `check-version`, `AGENTS.md`, `CODEOWNERS` and the README widgets exist, or an item needing an owner account is recorded as manual.
 
 **Stays open for a human:** the Phase 5 visual pass and the Phase 6 real-LLM Insight quality check.
-**Plans:** 0 plans
+**Plans:** 0/11 plans complete
+**Wave 1**
+
+- [ ] 09-01-PLAN.md — Make a `POSTGRES_PASSWORD` with URL-reserved characters work for migrate, app and worker (AIDA-35, D-12, D-13) (Wave 1)
+- [ ] 09-02-PLAN.md — Close F-09 and F-10 (AIDA-37) and make the guards permanent regression tests (AIDA-38) (Wave 1)
+- [ ] 09-03-PLAN.md — Make the planning records true (AIDA-39, AIDA-41) and ship the repo-health files that need no owner account (A (Wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 09-04-PLAN.md — Build the storage half of the D-02 consistency protocol (Wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 09-05-PLAN.md — Logo backend (AIDA-34) (Wave 3)
+- [ ] 09-06-PLAN.md — The backup core for AIDA-33 with its permanent tests (AIDA-38) (Wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 09-07-PLAN.md — Logo UI for AIDA-34 per `09-UI-SPEC.md` Surfaces 1-3 (Wave 4)
+- [ ] 09-08-PLAN.md — Put the backup core on a schedule inside the single compose stack (AIDA-33, D-01), give admins a read-only sta (Wave 4)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 09-09-PLAN.md — Exactly one `<h1>` per app route state (AIDA-36, D-14), per UI-SPEC Surface 5, pinned by an E2E test over ever (Wave 5)
+- [ ] 09-10-PLAN.md — Restore (D-05, D-06 component half of AIDA-33/AIDA-38) and the installer (D-22, AIDA-40), built against the fi (Wave 5)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 09-11-PLAN.md — Write the stack-level proofs (run later, after the owner's container decision), then run the phase gate, the D (Wave 6)
 
 ### Phase 10: Team
 
@@ -322,7 +350,7 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 | Phase | Milestone | Plans Complete | Status | Completed |
 |---|---|---|---|---|
 | 8. Security Hardening | v2.0 | 0/23 | Parked (Codex plan review cycle 3 left HIGH findings; owner decision) | - |
-| 9. Operations | v2.0 | 0/0 | Not started | - |
+| 9. Operations | v2.0 | 0/11 | Planned (Codex plan review next) | - |
 | 10. Team | v2.0 | 0/0 | Not started | - |
 | 11. Inbox | v2.0 | 0/0 | Not started | - |
 | 12. Ticket Lifecycle | v2.0 | 0/0 | Not started | - |
