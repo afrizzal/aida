@@ -37,3 +37,33 @@ Reviews run under `run-loop/PIAGAM.md` step 5: Codex reads a `git archive` expor
 - **P10:** logo replace is serialized per organization (row lock or compare-and-swap) with an interleaving test; the cache policy either documents that removal does not revoke cached copies or uses revalidation.
 - **P11:** test failures use real causes that still allow the status write; permission tests run as a non-root user; "database unreachable" is its own test.
 - **P12:** `docs/SECURITY.md` records the installer's single download; the fake-`curl` test covers every subcommand and fails on any other host.
+
+### Cycle 2
+
+- Question: `run-loop/codex/fase09-plan-r2-tanya.md` (commit `661c76b`); answer: `run-loop/codex/fase09-plan-r2-jawab.md`. Log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`.
+- Codex verdict: not ready (6 HIGH, 4 MEDIUM). P1, P8 and P10 confirmed incorporated; P2–P7, P9, P11 and P12 have gaps. Of the five deferrals, long-lived logo caching with documentation, lease loss as `unknown`, and stack tests waiting for the owner are accepted as grounded; the unsigned manifest is accepted as an integrity (not authenticity) limit; status-unrecorded may stay out of Settings but its evidence must not vanish on the next run.
+
+| ID | Severity | Finding (short) | Orchestrator check | Disposition |
+|---|---|---|---|---|
+| Q1 | HIGH | The outbox trigger misses `storageKey` updates on `Attachment` and its INSERT omits `id`, while `Attachment.id` has no database default | Verified: `prisma/migrations/20260701234550_core_ticketing/migration.sql` line 142 `"id" TEXT NOT NULL`; 09-04 lists AFTER UPDATE only for the logo setting | accept |
+| Q2 | HIGH | Lease check then unlink, and ownership check then rename/retention/status, are not atomic fencing | Accepted as described (09-04 Task 2, 09-06 Task 1) | accept |
+| Q3 | HIGH | Restore takes the lease without renewal, drops the lease carried in the dump, and its holder id is not unique | Accepted as described (09-10 Tasks 1–2) | accept |
+| Q4 | HIGH | The root marker `.aida-uploads-volume` is archived by backup but rejected by the restore validator's member rule | Accepted as described; 09-10 does not name the marker | accept |
+| Q5 | HIGH | Stack guard: labels not set on every resource, ownership not proven for IDs gathered after `up`, and `scripts/restore.sh` runs Docker outside `mutate()` | Accepted as described (09-11) | accept |
+| Q6 | HIGH | The charter requires new egress in both `docs/SECURITY.md` and `tests/integration/egress-isolation.test.ts`; 09-10 covers only the docs | Verified: 09-10 never references the egress test | accept |
+| Q7 | MEDIUM | The volume marker does not prove the right volume is mounted | Accepted | accept |
+| Q8 | MEDIUM | Backup failure evidence is inconsistent (order, holder file before directory, per-case assertions, status file on a read-only volume, marker removed by the next run) | Accepted | accept |
+| Q9 | MEDIUM | Demo recovery does not inventory the writes inside `createFirstOrgAndAdmin` (user created, organization or membership missing) | Accepted; feasibility unverified | accept |
+| Q10 | MEDIUM | The trigger migration is edited after `prisma migrate dev` applied it | Accepted; generate with `--create-only`, edit, then apply on a clean disposable database | accept |
+
+### Required properties for the replan (cycle 2)
+
+- **Q1:** trigger rows get an id the database supplies (or the trigger supplies), `AFTER UPDATE OF "storageKey"` is covered, and each operation is tested on commit and on rollback.
+- **Q2 and Q3:** one mutual-exclusion protocol that covers the file action together with lease acquisition (for example the backup and the deletion path take the same transaction-scoped advisory lock around check and action, or a fencing token enforced at the mutation); restore uses its own lock that survives the database replacement, with a random holder id, renewal and release on every path; tests interleave exactly after the check, during long pauses, with a manual backup and with two restores.
+- **Q4:** the marker is excluded from the archive and recreated safely after restore, or explicitly allowed by the validator, proven by a real round trip.
+- **Q5:** every stack resource carries the run label from the overlay; only resources proven created by the run are recorded; `scripts/restore.sh` runs through the same guard (or the stack test calls a guarded wrapper); a fake test covers a partial `up` and a foreign resource appearing at the mutation boundary.
+- **Q6:** installer download evidence is added to `tests/integration/egress-isolation.test.ts` in a way that suite can run, besides `docs/SECURITY.md`.
+- **Q7:** mount identity is verified (expected volume, not just a marker), with a test where a local directory already holds a marker.
+- **Q8:** one order for publish, status and retention, one assertion set per test case, a fallback channel visible when both the database and the status volume cannot be written, and the record of a missed status kept (history or reconciliation) instead of deleted.
+- **Q9:** every write inside `createFirstOrgAndAdmin` is inventoried, each partial state has a defined recovery, and a crash is injected between each pair.
+- **Q10:** the migration is created with `prisma migrate dev --create-only`, edited, then applied and verified on a clean disposable database.
