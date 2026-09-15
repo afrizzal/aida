@@ -32,8 +32,9 @@ model user {
   members     member[]
   invitations invitation[]
 
-  assignedTickets  Ticket[]  @relation("TicketAssignee")
-  authoredMessages Message[] @relation("MessageAuthor")
+  assignedTickets  Ticket[]    @relation("TicketAssignee")
+  authoredMessages Message[]   @relation("MessageAuthor")
+  savedViews       SavedView[]
 }
 
 model session {
@@ -116,6 +117,8 @@ model organization {
   insightRuns      InsightRun[]
   ticketEmbeddings TicketEmbedding[]
   csatResponses    CsatResponse[]
+  savedViews        SavedView[]
+  ticketAuditEvents TicketAuditEvent[]
 }
 
 model member {
@@ -573,4 +576,73 @@ model CsatResponse {
   ticket         Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
+}
+
+// ---------------------------------------------------------------------------
+// Domain models (Phase 11 — Inbox: saved views and ticket audit)
+// ---------------------------------------------------------------------------
+
+enum SavedViewVisibility {
+  PRIVATE
+  SHARED
+}
+
+enum TicketAuditActorType {
+  USER
+  SYSTEM
+}
+
+enum TicketAuditAction {
+  ASSIGNEE_CHANGED
+  STATUS_CHANGED
+  PRIORITY_CHANGED
+  TAG_ADDED
+  TAG_REMOVED
+  AUTO_CLOSED
+}
+
+// The two partial unique name indexes (SavedView_private_name_key per owner among PRIVATE
+// views, SavedView_shared_name_key per organization among SHARED views, both on lower(name))
+// and the CHECK constraint SavedView_name_length_check (1 to 80 characters) live ONLY in
+// migration 20261108140000_inbox, because Prisma cannot express them. Any migration Prisma
+// generates after that one must keep them (delete any DROP statement for them by hand).
+model SavedView {
+  id             String              @id @default(cuid())
+  organizationId String
+  ownerUserId    String
+  name           String
+  visibility     SavedViewVisibility
+  /// Stored inbox filters: { version: 1, view, statuses, tagId?, cf?, q? } (src/lib/tickets/list-filters.ts).
+  filters        Json
+  position       Int
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  organization   organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  owner          user                @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, visibility, position])
+  @@index([organizationId, ownerUserId])
+}
+
+// Append-only at the database level: trigger aida_ticket_audit_event_no_update_delete
+// (function aida_ticket_audit_event_immutable) rejects UPDATE and DELETE. The CHECK constraint
+// TicketAuditEvent_actor_check (SYSTEM with null actorUserId, USER with a non-null one) lives
+// only in migration 20261108140000_inbox; later Prisma-generated migrations must keep it.
+// ticketId and actorUserId carry no relation on purpose: history survives ticket and user
+// removal. before/after hold ids, enum values and booleans only, never ticket text.
+model TicketAuditEvent {
+  id             String               @id @default(cuid())
+  organizationId String
+  ticketId       String
+  actorType      TicketAuditActorType
+  actorUserId    String?
+  action         TicketAuditAction
+  before         Json
+  after          Json
+  batchId        String?
+  createdAt      DateTime             @default(now())
+  organization   organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, ticketId])
+  @@index([organizationId, batchId])
 }

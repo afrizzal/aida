@@ -29,6 +29,8 @@ export const DOMAIN_MODELS = [
   "InsightRun",
   "TicketEmbedding",
   "CsatResponse",
+  "SavedView",
+  "TicketAuditEvent",
 ] as const;
 
 const isDomain = (model?: string): boolean =>
