@@ -538,3 +538,11 @@ Plan-checker Fase 10: VERIFICATION PASSED (dipersingkat karena konteks: frontmat
 ## Putaran 26 (2026-11-08)
 
 Cek awal lolos semua: ruang kosong 30 GiB (minimal 15 GB), `colima status` dan `docker info` exit 0, tidak ada file `BERHENTI`, `origin/master` dan `master` lokal di `1ea4281`, push URL `no-push-run-loop`, branch `v2/run-loop`. Daftar plan Fase 10 di ROADMAP ditulis (14 plan dalam 6 wave, lalu `roadmap.annotate-dependencies 10`), baris Progress Fase 10 jadi `0/14`, Planned. STATE diperbarui lewat `state.planned-phase` lalu dirapikan dengan tangan (status, `last_activity_desc`, baris `Phase:`; tidak ada path absolut). Langkah berikutnya: Codex plan review siklus 1 untuk Fase 10, file pertanyaan `codex/fase10-plan-tanya.md` dengan `codex/fase09-plan-tanya.md` sebagai contoh.
+
+## Putaran 27 (2026-11-08)
+
+Cek awal lolos semua: ruang kosong 30 GiB (minimal 15 GB), `colima status` dan `docker info` exit 0, tidak ada file `BERHENTI`, `origin/master` dan `master` lokal di `1ea4281`, push URL `no-push-run-loop`, branch `v2/run-loop`. Regresi Rekriva berjalan (`--testsuite=Feature tests/Feature/Platform`), jadi hanya pekerjaan dokumen dan Codex. Butir: Fase 10 langkah 5, Codex siklus 1 untuk plan.
+
+Pertanyaan `codex/fase10-plan-tanya.md` (`69ee4ea`). Ekspor dari `69ee4ea` di bawah `TMPDIR`: akar hanya memuat `.env.example`; pola kunci hanya dua dummy yang dikenal. Log Codex: `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Jawaban 992 kata, vonis belum siap: 9 HIGH, 3 MEDIUM, 0 LOW. Semua klaim dicek ke plan dan kode; 12 diterima, tiga dengan penyempitan (C5 aturan action sudah per fungsi; C9 `nextCookies()` sudah ada di `src/lib/auth.ts`; C12 `Caddyfile` tanpa `log` dan `src` tanpa log URL). C1 (gerbang 10-14 menjalankan stack compose `aida-egress-test`) diterima dengan tafsiran konservatif: `test:egress` dicatat "blocked (O-1)" selama O-1 belum diputuskan. Tidak ada yang ditolak. Rincian dan properti wajib replan di `10-REVIEWS.md`. Ekspor dihapus dengan `rm -r --`.
+
+Berikutnya: `/gsd-plan-phase 10 --reviews --skip-research`, lalu Codex siklus 2.
