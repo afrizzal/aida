@@ -17,7 +17,7 @@ Milestone v2.0 sudah dibuka (0b) dan daftar fitur Projects sudah dicek ke demo p
 | 08 | Keamanan (AIDA-25 sampai 32) | diparkir | CONTEXT; 23 plan; tiga siklus review Codex; siklus 3 menyisakan 4 HIGH (diterima, belum dimasukkan ke plan). Belum ada kode yang dieksekusi | `8abbc6c`, `6238af7`, `ded5f56`, `99721fd`, `96d7c8f` |
 | 09 | Operasional (AIDA-33 sampai 41) | diparkir | CONTEXT, UI-SPEC disetujui, 11 plan, tiga siklus review Codex. Siklus 3 menyisakan 1 HIGH (K25). Belum ada kode yang dieksekusi | `5ebef8b`, `f4b5dfc` |
 | 10 | Tim (AIDA-42 sampai 46) | diparkir | CONTEXT (D-01 sampai D-29), UI-SPEC disetujui, 16 plan dalam 6 wave, tiga siklus review Codex (12, lalu 6, lalu 4 temuan). Siklus 3 menyisakan 2 HIGH, keduanya kontradiksi skrip E2E di 10-13 (K27). Belum ada kode yang dieksekusi | `fcd034e`, `0706c49`, `f188b06`, `eed405e`, `05570ee`, `1e11185`, `2730d11` |
-| 11 | Inbox (AIDA-47 sampai 51) | belum disentuh | | |
+| 11 | Inbox (AIDA-47 sampai 51) | berjalan (CONTEXT) | Brainstorm Codex; CONTEXT D-01 sampai D-24 (K28). Belum ada plan atau kode | |
 | 12 | Siklus tiket (AIDA-18, 52 sampai 57, 97) | belum disentuh | | |
 | 13 | Integrasi (AIDA-58 sampai 63) | diparkir (bergantung pada Fase 10) | | |
 | 14 | Fondasi Projects (AIDA-64 sampai 71, 100 sampai 105) | belum disentuh | | |
@@ -33,9 +33,10 @@ Milestone v2.0 sudah dibuka (0b) dan daftar fitur Projects sudah dicek ke demo p
 2. Nama compose project untuk test container. Piagam hanya mengizinkan container dan volume project `aida` dan `aida-dev-db`, tetapi juga mewajibkan `pnpm test:egress` (project `aida-egress-test`) dan test yang memakai Testcontainers. Saya membaca container yang dibuat dan dibuang test AIDA sendiri sebagai milik AIDA (K14); Codex membacanya harfiah. Opsi: (a) izinkan project test berawalan `aida-` yang dibuat dan dibongkar oleh suite AIDA; (b) semua test container memakai project `aida`, dengan risiko menimpa stack operator yang sedang jalan. Codex tetap tidak setuju di siklus 2, jadi run memakai opsi paling konservatif (K22): semua bukti container baru berjalan di project `aida` dengan pengaman, volume bernama per run, dan tidak menyentuh stack atau volume `aida` yang sudah ada. Yang terhalang: bukti container diparkir kalau ada stack `aida` lain di mesin ini. Sejak putaran 27 (C1 Fase 10, K26), run juga tidak menjalankan test egress v1 (`aida-egress-test`) selama butir ini terbuka; baseline 0a2 dan gerbang `test:egress` setiap fase tercatat "blocked (O-1)". Opsi (a) akan membuka keduanya.
 3. Putuskan cara menghapus `.next/` kalau rusak. Aturan deny `Bash(rm -rf *)` menolak langkah yang diminta piagam.
 4. `cp .env.example .env` tampaknya sudah dijalankan: `ls -la` menunjukkan file itu ada sejak 15.38 dengan ukuran sama dengan contoh. Isinya tidak dibaca. Kalau bukan owner yang membuatnya, mohon diperiksa.
-5. Fase 10, O-2: apakah balasan pelanggan dan peringatan SLA pada tiket **tanpa assignee** memberi notifikasi ke seseorang (misalnya semua admin). Ini memperluas AIDA-44. Sementara hanya assignee yang diberi notifikasi, dan batas itu didokumentasikan.
-6. Fase 10, O-3: peran ketiga di luar owner, admin, dan member akan mengubah scope `REQUIREMENTS.md`. Fase 10 tidak membuatnya (D-13).
-7. Fase 09 (berlaku kalau fase itu dilanjutkan): baseline `version` di `package.json` dan kebijakan bump untuk `check-version` (09-o1), serta handle `CODEOWNERS` dan widget README pihak ketiga (09-o2).
+5. Fase 11, O-2: apakah pemberitahuan template tetap boleh dikirim otomatis ke pelanggan saat tiket auto-close, tanpa persetujuan manusia per pesan. AIDA-51 mengizinkan notice opsional, tetapi piagam menyatakan apa pun yang sampai ke pelanggan melewati manusia. Sementara tidak ada yang dikirim.
+6. Fase 10, O-2: apakah balasan pelanggan dan peringatan SLA pada tiket **tanpa assignee** memberi notifikasi ke seseorang (misalnya semua admin). Ini memperluas AIDA-44. Sementara hanya assignee yang diberi notifikasi, dan batas itu didokumentasikan.
+7. Fase 10, O-3: peran ketiga di luar owner, admin, dan member akan mengubah scope `REQUIREMENTS.md`. Fase 10 tidak membuatnya (D-13).
+8. Fase 09 (berlaku kalau fase itu dilanjutkan): baseline `version` di `package.json` dan kebijakan bump untuk `check-version` (09-o1), serta handle `CODEOWNERS` dan widget README pihak ketiga (09-o2).
 
 ## 4. Titik aman rilis `v1.0.0`
 
