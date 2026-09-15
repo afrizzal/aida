@@ -456,3 +456,9 @@ Fase 09 langkah 5 sedang berjalan. Plan 09-01 sampai 09-11 ada di `.planning/pha
 Tetap berlaku: Fase 08 diparkir; 0a2 (egress) menunggu regresi Rekriva selesai dan wajib dijaga pengaman R3-2 (cek resource `aida-egress-test` dulu); Testcontainers butuh `DOCKER_HOST` dan `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE`.
 
 Plan-checker iterasi 2: VERIFICATION PASSED. Gerbang 13: requirement 9/9, keputusan 27/27, gap-analysis 36/36. ROADMAP Fase 9 berisi 11 plan dalam 6 wave (ditulis tangan, lalu `annotate-dependencies`); STATE diperbaiki tangan tanpa path rumah. Berikutnya: review Codex siklus 1 untuk plan Fase 09 (lihat catatan lanjutan di atas).
+
+## Putaran 19 (2026-11-08, mulai 11.39 WIB)
+
+Dipicu wakeup. Cek A (30 GiB), B, dan Berhenti total lolos. Regresi Rekriva berjalan (Llm), 0a2 menunggu. Butir: Fase 09 langkah 5, review plan Codex siklus 1. Pertanyaan `codex/fase09-plan-tanya.md` (commit `1954b75`); ekspor `1954b75` diperiksa (hanya `.env.example`, dua kunci contoh). Codex berjalan di latar.
+
+Codex siklus 1 plan Fase 09 selesai (11.39 sampai 11.4x): 7 HIGH, 5 MEDIUM, verdict "belum siap". Klaim kunci dicek: compose tidak meneruskan `POSTGRES_PASSWORD` ke migrate, app, worker; worker tanpa mount `uploads_data`; `identities.ts` 6 operasi terpisah; `PendingFileDeletion` diklasifikasi infrastruktur. Semua diterima di `09-REVIEWS.md`. P3: piagam (model baru wajib ter-scope `scopedDb`) mengalahkan D-15 CONTEXT saya; Codex benar. Berikutnya: `/gsd-plan-phase 9 --reviews --skip-research` (ledger Round 1 dengan sha `09-REVIEWS.md`).
