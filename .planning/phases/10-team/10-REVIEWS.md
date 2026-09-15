@@ -64,3 +64,19 @@ Also noted (LOW, accept): 10-04's digest pair listing reads across organizations
 - **R2-5:** digest success is the resolved `sendMail` result after the DATA terminator; the fake SMTP gains a "RCPT accepted, DATA rejected" fault that must release the batch; the docs say repeated ambiguous failures can produce more than one duplicate.
 - **R2-6:** 10-03 acceptance checks that `member-admin.ts` calls `lockOrganization` and that `org-lock.ts` holds the `FOR UPDATE` SQL.
 - **LOW:** the cross-organization digest pair listing is named as the single exception to D-15's recipient filter, with its reason.
+
+### Cycle 3 (last)
+
+- Question: `run-loop/codex/fase10-plan-r3-tanya.md` (commit `36fcc66`); answer: `run-loop/codex/fase10-plan-r3-jawab.md`. Log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`.
+- Codex verdict: not ready (2 HIGH, 2 MEDIUM); Codex concludes the phase must be parked. Codex judges R2-1 to R2-6 and the LOW note as present in plan content, apart from the defects below (execution unverified; Better Auth cache-off behaviour unverified without the package).
+
+| ID | Severity | Finding (short) | Orchestrator check | Disposition |
+|---|---|---|---|---|
+| R3-1 | HIGH | 10-13 Task 1 path (c) revokes the invitation before the create-account form is submitted and then expects a user row; 10-08 Task 2 validates the token before `signUpEmail`, so no account is created and the E2E cannot pass | Verified: 10-13 line 93; 10-08 line 146 ("validate the token with getInvitationView first") | accept (not incorporated) |
+| R3-2 | HIGH | 10-13 Task 3 presses Backspace once after inserting "Omega Probe" and expects the whole name to disappear, but the span excludes the trailing space (10-12), so that Backspace only removes the space; the same test describes the identical keystroke after "Zeta Prime" as removing the trailing space | Verified: 10-12 lines 24 and 108; 10-13 line 149 | accept (not incorporated) |
+| R3-3 | MEDIUM | `waitForLockWaiter` requires an ungranted `pg_locks` row on the organization relation; in PostgreSQL the first waiter on a row lock holds the tuple lock (granted) and waits on the holder's `transactionid` lock (ungranted, no relation), so the predicate may never match and every race test would time out | Verified in the plan (10-01 line 150). This clause was added by the orchestrator after the round 2 plan-checker info, without review. The PostgreSQL behaviour matches the documented row-lock wait pattern but was not executed here; if confirmed it blocks acceptance | accept (not incorporated) |
+| R3-4 | MEDIUM | Rule E (10-16 Task 2) requires the lookup helper but allows any other model access when its key is listed in the SUMMARY, so a route could call the helper and read other tenant data not bound to the returned ticket | Verified: 10-16 line 130 | accept (not incorporated) |
+
+### Outcome
+
+The third and last review cycle ended with two HIGH findings (R3-1, R3-2), both contradictions between the E2E acceptance script in 10-13 and the behaviour the earlier plans specify. Under `run-loop/PIAGAM.md` → Titik keputusan, **Phase 10 is parked** (run-loop decision K27, same rule as K24 for Phase 8 and K25 for Phase 9). The findings are accepted and recorded but not incorporated; no Phase 10 code was executed. Under the charter's dependency chain, Phases 13, 16 and 17 are parked with it. Unparking is the owner's decision (`run-loop/LAPORAN.md`).
