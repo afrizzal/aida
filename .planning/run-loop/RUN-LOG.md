@@ -462,3 +462,11 @@ Plan-checker iterasi 2: VERIFICATION PASSED. Gerbang 13: requirement 9/9, keputu
 Dipicu wakeup. Cek A (30 GiB), B, dan Berhenti total lolos. Regresi Rekriva berjalan (Llm), 0a2 menunggu. Butir: Fase 09 langkah 5, review plan Codex siklus 1. Pertanyaan `codex/fase09-plan-tanya.md` (commit `1954b75`); ekspor `1954b75` diperiksa (hanya `.env.example`, dua kunci contoh). Codex berjalan di latar.
 
 Codex siklus 1 plan Fase 09 selesai (11.39 sampai 11.4x): 7 HIGH, 5 MEDIUM, verdict "belum siap". Klaim kunci dicek: compose tidak meneruskan `POSTGRES_PASSWORD` ke migrate, app, worker; worker tanpa mount `uploads_data`; `identities.ts` 6 operasi terpisah; `PendingFileDeletion` diklasifikasi infrastruktur. Semua diterima di `09-REVIEWS.md`. P3: piagam (model baru wajib ter-scope `scopedDb`) mengalahkan D-15 CONTEXT saya; Codex benar. Berikutnya: `/gsd-plan-phase 9 --reviews --skip-research` (ledger Round 1 dengan sha `09-REVIEWS.md`).
+
+## Putaran 20 (2026-11-08, mulai 11.44 WIB)
+
+Dipicu wakeup. Cek A (30 GiB), B, dan Berhenti total lolos. Regresi Rekriva berjalan (MasterData), 0a2 menunggu. Butir: Fase 09 langkah 5, replan `--reviews --skip-research` (ledger `Round 1 — 089e2c3`). Planner berjalan.
+
+Replan mode reviews Fase 09 selesai: 8 plan direvisi (09-03, 09-07, 09-09 tidak berubah), wave tetap; semua P1 sampai P12 dijawab. Yang menonjol: `PendingFileDeletion` ter-scope `scopedDb` (P3 mengalahkan D-15); record hapus ditulis trigger DB (P4); TTL lease 900 detik dengan perpanjangan (P2); restore memvalidasi di staging (P5); gerbang `AIDA_STACK_TESTS=owner-approved` untuk test stack (P8). Lima ditunda/ditolak dengan alasan (revalidasi cache logo, kategori lease, status di Settings, manifest tak bertanda tangan, test stack). Probe: 33 perintah, semua severity `none`; scan nama dan path bersih. Plan-checker mode reviews berjalan.
+
+Plan-checker mode reviews: 0 BLOCKER, 0 WARNING, 1 INFO (jejak `status-unrecorded.json` hilang sesudah run berikutnya berhasil); P1 sampai P12 ditelusuri ke isi plan; lima penundaan dinilai berdasar. Wave dan daftar plan tetap, ROADMAP tidak diubah. Berikutnya: Codex siklus 2.
