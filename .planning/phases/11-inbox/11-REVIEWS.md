@@ -32,3 +32,20 @@ Reviews run under `run-loop/PIAGAM.md` step 5: Codex reads a `git archive` expor
 - **C7:** saved-view update and delete lock the view row (or use a conditional update on owner, visibility and organization) and re-check permission and visibility inside the transaction; a test forces both orders of "owner makes the view private" against "admin edits it". For 11-02, the plan states what a member removal racing a mutation guarantees, and tests it if a guarantee is claimed.
 - **C8:** the close statement reads the setting inside the same statement (or locks the setting row first), and the plan defines the behaviour: a setting change applies to closes that start after it commits. A test forces both orders of "admin turns auto-close off" and "job closes".
 - **C9:** a timer clears the chord hint after `CHORD_TIMEOUT_MS`; it is cleared on completion, cancel, navigation and unmount. A test proves the hint disappears with no further key.
+
+### Cycle 2
+
+- Question: `run-loop/codex/fase11-plan-r2-tanya.md` (commit `2ae3fc7`); answer: `run-loop/codex/fase11-plan-r2-jawab.md`. Log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`.
+- Codex verdict: no HIGH; 2 MEDIUM and 1 LOW, which Codex wants in the plans before execution. Codex confirms C1 to C5 and C8 to C9 in task content; the saved-view lock with both visibility orders; PID-bound waits where the helper is used; the deadlock control waiting on the second waiter blocked by the first; no deadlock cycle in the setting-then-ticket lock order; `vimBindings={false}` and the in-palette `Ctrl+K` E2E; no charter violation found. Runtime behaviour is unverified.
+
+| ID | Severity | Finding (short) | Orchestrator check | Disposition |
+|---|---|---|---|---|
+| R2-1 | MEDIUM | C7: the stated guarantee for a member removal committed **after** the membership read is not tested; only the before-read order is | Verified: 11-02 line 28 (truth states both sides) and line 165 (test covers only the before-read order) | accept |
+| R2-2 | MEDIUM | C6: two saved-view races (create with the same shared name; two concurrent edits) still use `Promise.allSettled` without recorded PIDs or a forced overlap; the `addTagByName` same-name race is claimed safe but has no test | Verified: 11-01 line 152, 11-03 line 126, 11-02 line 132 | accept |
+| R2-3 | LOW | `SELECT … FOR SHARE` on a missing auto-close setting row locks nothing; a row inserted before the next read would be read without the lock | Verified: 11-04 line 131 (lock and reads are separate statements) | accept |
+
+### Required properties for replan round 2
+
+- **R2-1:** a test holds the mutation in a hook placed after the membership read, commits the member removal from another connection, releases the hook, and asserts the outcome the truth states (the mutation and its audit row commit); the truth and the test say the same thing.
+- **R2-2:** the shared-name create race and the concurrent-edit race become forced-order tests: the winning transaction is held before commit (hook), the second is observed as blocked through its recorded PID with `pg_blocking_pids`, then the first commits; outcomes are asserted for both the commit and the rollback of the first. `addTagByName` gets the same forced-order test for two creators of one tag name (first commits, and first rolls back). `Promise.allSettled` alone is no longer used as concurrency evidence.
+- **R2-3:** `lockAutoCloseSettings` returns "off" when `SELECT … FOR SHARE` finds no row, and the close uses only values read under the lock; a test covers a setting row inserted concurrently while the job holds no row.

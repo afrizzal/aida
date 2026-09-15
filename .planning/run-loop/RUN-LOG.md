@@ -644,3 +644,13 @@ Dipicu wakeup. Cek A (28 GiB) dan B lolos. Berhenti total: `origin/master` dan `
 Plan-checker mode reviews: 0 blocker, 0 warning, 1 info. C1 sampai C9 ada di isi plan, masing-masing dengan baris ledger. Info-nya: 11-05 dan 11-07 tanpa ledger Round 1. Diterima tanpa perubahan, karena kedua plan itu tidak diubah dan ledger hanya untuk plan yang berubah. Tidak ada edit sesudah checker (pelajaran R3-3 Fase 10).
 
 Berikutnya: Codex siklus 2 untuk plan Fase 11.
+
+Pertanyaan `codex/fase11-plan-r2-tanya.md` (`2ae3fc7`). Ekspor dari `2ae3fc7` di bawah `TMPDIR`: akar hanya memuat `.env.example`; string mirip kunci hanya dummy test yang dikenal. Log Codex: `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Siklus 2 berjalan di latar.
+
+Codex siklus 2 selesai (15.48 sampai 15.50), 534 kata: 0 HIGH, 2 MEDIUM, 1 LOW. Log tetap `gpt-6.1-terra`, `xhigh`. Klaim dicek ke plan dan cocok. R2-1: jaminan C7 untuk penghapusan member sesudah pembacaan belum diuji. R2-2: dua race saved view masih `Promise.allSettled` tanpa overlap yang dipaksa, dan race `addTagByName` tanpa test. R2-3 (LOW): `FOR SHARE` pada baris setting yang belum ada mengunci nol baris. Semua diterima; properti wajib ada di `11-REVIEWS.md` `### Cycle 2`.
+
+| No | Pertanyaan | Opsi | Pendapat Codex | Keputusan | Alasan |
+|---|---|---|---|---|---|
+| K29 | Sesudah siklus 2 tanpa HIGH, apakah perlu siklus 3 sebelum eksekusi Fase 11 | (a) replan putaran 2 lalu plan-checker, lalu eksekusi; (b) replan lalu Codex siklus 3 | Plan belum siap sampai ketiga temuan masuk plan | (a) | Piagam langkah 5: "Siklus selesai kalau tidak ada temuan HIGH atau temuan actionable yang belum masuk PLAN.md." Siklus 2 tanpa HIGH, dan ketiga temuan dimasukkan ke plan lalu diperiksa plan-checker. Revisinya hanya menambah kasus test dan satu cabang helper. Codex tetap mengkritik diff fase di langkah 7. Siklus 3 masih bisa dipakai kalau replan mengubah lebih dari yang diminta |
+
+Berikutnya: replan putaran 2 (`/gsd-plan-phase 11 --reviews --skip-research`), plan-checker, lalu langkah 6 (eksekusi), dengan container `aida-dev-db` dibuat lebih dulu.
