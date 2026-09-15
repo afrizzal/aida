@@ -183,7 +183,38 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 5. Preferences apply, and the digest sends one batched email through a fake SMTP with no PII in the subject.
 
 **Stays open for a human:** a test with real email.
-**Plans:** 0 plans
+**Plans:** 0/14 plans complete
+**Wave 1**
+
+- [ ] 10-01-PLAN.md — Lay the whole Phase 10 data foundation in one migration so later waves never edit the schema in parallel (Wave 1)
+- [ ] 10-02-PLAN.md — Build the one membership-checking helper every data path uses (D-08) and close the Better Auth bypasses (D-02) (Wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 10-03-PLAN.md — Implement the server-side team administration service (AIDA-43): list members, change roles, deactivate (Wave 2)
+- [ ] 10-04-PLAN.md — Build the entity-generic notification core (AIDA-44) with per-type preferences and explicit defaults (D-22) (Wave 2)
+- [ ] 10-05-PLAN.md — Implement the invitation service (AIDA-42): role ceilings, hashed token, 7-day expiry, revoke, safe accept (Wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 10-06-PLAN.md — Wire the notification producers (AIDA-44): assignment, every customer-reply path and SLA transitions (Wave 3)
+- [ ] 10-07-PLAN.md — Implement mentions on the server (AIDA-45): member-validated ids, sanitized rendering, internal notes only (Wave 3)
+- [ ] 10-08-PLAN.md — Build the invitation landing page and its join flows (AIDA-42, D-05) (Wave 3)
+- [ ] 10-09-PLAN.md — Deliver the batched email digest (AIDA-46): leased scheduled job, one PII-free email per recipient (Wave 3)
+- [ ] 10-10-PLAN.md — Build Settings → Team (AIDA-43, AIDA-42 UI): members, invite dialog, pending invitations, per UI-SPEC (Wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 10-11-PLAN.md — Ship the in-app surfaces for AIDA-44 and AIDA-46: the top-bar bell and Settings → Notifications (Wave 4)
+- [ ] 10-12-PLAN.md — Add the member autocomplete to the internal-note composer (AIDA-45, UI-SPEC Surface 4) (Wave 4)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 10-13-PLAN.md — Prove the phase's acceptance criteria in the real UI (AIDA-42 to AIDA-46) (Wave 5)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 10-14-PLAN.md — Run the phase gate and the §9 design checklist, record evidence per requirement, list what stays open (Wave 6)
 
 ### Phase 11: Inbox
 
@@ -351,7 +382,7 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 |---|---|---|---|---|
 | 8. Security Hardening | v2.0 | 0/23 | Parked (Codex plan review cycle 3 left HIGH findings; owner decision) | - |
 | 9. Operations | v2.0 | 0/11 | Parked (Codex plan review cycle 3 left a HIGH finding; owner decision) | - |
-| 10. Team | v2.0 | 0/0 | Not started | - |
+| 10. Team | v2.0 | 0/14 | Planned (Codex plan review next) | - |
 | 11. Inbox | v2.0 | 0/0 | Not started | - |
 | 12. Ticket Lifecycle | v2.0 | 0/0 | Not started | - |
 | 13. Integrations | v2.0 | 0/0 | Not started | - |

@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 milestone: v2.0
 milestone_name: Helpdesk & Projects
 current_phase: 09
-current_phase_name: operations
-status: Phases 8 and 9 parked after three Codex plan reviews each (owner decision); Phase 10 next
-stopped_at: context exhaustion at 75% (2026-11-08)
-last_updated: "2026-11-08T04:37:45.666Z"
+current_phase_name: team
+status: Phases 8 and 9 parked (owner decision); Phase 10 planned (14 plans), Codex plan review next
+stopped_at: context exhaustion at 95% (2026-11-08)
+last_updated: "2026-11-08T06:10:53.391Z"
 last_activity: 2026-11-08
-last_activity_desc: Phase 9 parked, the third Codex plan review found demo recovery deleting data against AIDA-37; Phase 10 is next
-state_head: 96d6b68991a1f5b1bdf788a1970b39ab7414e172
+last_activity_desc: Phase 10 planned, 14 plans in 6 waves, plan checker passed; Codex plan review next
+state_head: f188b063c618bd61f127ecd7aa91560d8ecababb
 progress:
   total_phases: 10
   completed_phases: 0
-  total_plans: 34
+  total_plans: 48
   completed_plans: 0
   percent: 0
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-11-07, v2.0 opened)
 
 ## Current Position
 
-Phase: 10 (team) is next. Phases 08 and 09 are PARKED after three Codex plan reviews each (see their REVIEWS.md); no code from either was executed.
+Phase: 10 (team), planned: 14 plans in 6 waves; Codex plan review next. Phases 08 and 09 are PARKED (owner decision).
 Plan: —
 Status: Milestone v2.0 opened by hand on 2026-11-07. `REQUIREMENTS.md` (91 requirements) and `ROADMAP.md` (Phases 8–17) are written and were revised over three Codex critique rounds (queue item 0b done). The public demo was walked under the clean-room rules and added AIDA-100 to AIDA-114 (item 0c done). Phase 8 context is committed (`08-CONTEXT.md`, `8abbc6c`) and the phase is planned: 23 plans in 14 waves; three Codex review cycles; parked after cycle 3 (owner decision, `run-loop/LAPORAN.md`). No Phase 8 code has been executed. Baseline 0a is done: build passes; integration passes except the egress file; E2E passes 63 with two honesty-invariants flakes that pass alone (fixed by plan 08-17). The egress baseline (0a2) was parked while `binaries.prisma.sh` sent no bytes on GET (07.45 to 09.09); the host recovered and the test waits for the Rekriva regression to finish.
 Last activity: 2026-11-08 — Phase 8 planned under the run charter. v1.0.0 stays complete and archived; its archives are `milestones/v1.0.0-*`.
@@ -99,8 +99,8 @@ None.
 
 ## Session Continuity
 
-**Last session:** 2026-11-08T04:37:05.767Z
-**Stopped at:** context exhaustion at 75% (2026-11-08)
+**Last session:** 2026-11-08T06:10:29.859Z
+**Stopped at:** context exhaustion at 95% (2026-11-08)
 **Resume file:** .planning/phases/09-operations/09-UI-SPEC.md
 
 **Last action (2026-11-08):** Phase 8 parked after the third Codex plan review (4 HIGH findings accepted, not yet incorporated). No tag, nothing pushed.
