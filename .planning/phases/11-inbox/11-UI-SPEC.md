@@ -262,7 +262,7 @@ Rendered at the bottom of the list panel while at least one ticket is selected: 
 
 ### 4a. Opening
 
-- `⌘K` (Apple) and `Ctrl+K` (others) open it from anywhere in the `(app)` shell, including from inside an input; pressing the same combination again closes it; it does not open while another modal dialog is open [CTX D-11].
+- `⌘K` (Apple) and `Ctrl+K` (others) open it from anywhere in the `(app)` shell, including from inside an input; pressing the same combination again closes it; it does not open while another modal dialog is open [CTX D-11]. *Amended 2026-11-08 after Codex plan review cycle 1, C4:* the keyboard rules of Surface 5a apply first, so the combination does nothing on a key repeat, during IME composition or when a local handler already handled the event, and it does nothing while focus is inside an open popover or menu (close it with `Esc` first); an input is the only place the combination works where other shortcuts are ignored.
 - **Top-bar trigger** [RL: a visible entry point for mouse and touch users]: TopBar right cluster becomes palette trigger, `ThemeToggle`, `UserMenu` (existing `flex items-center gap-2`). Trigger: `Button variant="outline" size="sm" className="gap-2 text-[13px] text-muted-foreground"` with `Search size-4`, visible text "Search", and a key cap showing `⌘ K` or `Ctrl K`; `aria-keyshortcuts="Meta+K Control+K"`. The TopBar keeps `sticky top-0 z-10 … backdrop-blur-sm border-border/70` unchanged [DS §4.2].
 
 ### 4b. Layout
@@ -376,6 +376,8 @@ Interaction:
 - Failure: destructive callout above the Save button, `role="alert"`, with the matching "Auto-close error" row; the field keeps the typed value.
 - No customer-notice control of any kind (D-19, owner item O-2). No preview count of tickets that would close [RL].
 
+*Amended 2026-11-08 after Codex plan review cycle 1, C3 (D-16 as amended):* the quiet period starts at the later of `resolvedAt` and `autoCloseEnabledAt`, and messages are not read. Four Copywriting rows changed with it: "Auto-close description" drops "with no activity", "Auto-close status on" drops "quiet" (both implied that activity restarts the count), "Auto-close quiet rule" now states that replies from the team, internal notes and automatic emails do not restart the count while a customer reply reopens the ticket, and "Auto-close daily run" no longer says "quiet period". No other part of this surface changed.
+
 ---
 
 ## Copywriting Contract
@@ -455,12 +457,12 @@ All copy is English, written for AIDA, and final; the executor uses it verbatim.
 | Help chord joiner | then |
 | Chord hint | then a letter |
 | Auto-close heading | Auto-close resolved tickets |
-| Auto-close description | Close tickets that stay resolved with no activity for a set number of days. Customers are not notified when a ticket closes this way. |
-| Auto-close status on / off | Auto-close is on: resolved tickets close after {N} quiet days. (1 → "1 quiet day") / Auto-close is off. |
+| Auto-close description | Close tickets that stay resolved for a set number of days. Customers are not notified when a ticket closes this way. |
+| Auto-close status on / off | Auto-close is on: resolved tickets close after {N} days. (1 → "1 day") / Auto-close is off. |
 | Auto-close field label / help | Close after (days) / Enter 0 to turn auto-close off. The maximum is 365. |
 | Auto-close enabling note | Tickets that are already resolved when you turn this on start counting from that moment, so they do not all close at once. |
-| Auto-close quiet rule | A public reply on the ticket starts the count again; internal notes do not. A customer reply reopens the ticket as before. |
-| Auto-close daily run | Tickets are checked once a day, so a ticket can close up to a day after its quiet period ends. |
+| Auto-close quiet rule | The count starts when a ticket is resolved. Replies from your team, internal notes and automatic emails such as out-of-office replies do not restart it. A customer reply reopens the ticket as before. |
+| Auto-close daily run | Tickets are checked once a day, so a ticket can close up to a day after the set number of days has passed. |
 | Auto-close save / pending | Save auto-close setting / Saving… |
 | Auto-close toasts | Auto-close set to {N} days. (1 → "1 day") / Auto-close turned off. |
 | Auto-close invalid | Enter a whole number from 0 to 365. |
