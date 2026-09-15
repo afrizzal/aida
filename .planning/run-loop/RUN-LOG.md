@@ -568,3 +568,13 @@ Pengaman R3-2 lolos: tidak ada container, network, atau volume `aida-egress-test
 `LAPORAN.md` diperbarui; isinya basi sejak putaran 15 (Fase 09 dan 10 masih tertulis "belum disentuh").
 
 Berikutnya: Fase 10 langkah 5, Codex siklus 2 untuk plan (`codex/fase10-plan-r2-tanya.md`, contoh `codex/fase09-plan-r2-tanya.md`).
+
+## Putaran 30 (2026-11-08, mulai 13.41 WIB)
+
+Dipicu wakeup. Cek A (28 GiB) dan B lolos. Berhenti total: `origin/master` dan `master` lokal di `1ea4281`, push URL `no-push-run-loop`, branch `v2/run-loop`, tidak ada `BERHENTI`. Tidak ada proses `artisan test`. PIAGAM tidak berubah sejak `94a5c18`. 0a2 menunggu owner (K26), jadi butir aktif: Fase 10 langkah 5, Codex siklus 2 untuk plan.
+
+Pertanyaan `codex/fase10-plan-r2-tanya.md` (`c44ef29`). Ekspor dari `c44ef29` di bawah `TMPDIR`: akar hanya memuat `.env.example`; string mirip kunci hanya dummy test yang dikenal (`AKIAIOSFODNN7EXAMPLE`, `sk-ant-ABCD…`, `sk-proj-ABCD…`, `sk-test-DUMMY…`). Log Codex: `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Berjalan di latar.
+
+Codex siklus 2 selesai (13.41 sampai 13.44), 878 kata, vonis belum siap: 4 HIGH, 2 MEDIUM. Log tetap `gpt-6.1-terra`, `xhigh`. Klaim dicek ke plan dan kode, dan semuanya cocok. (1) Aturan `reconcileMentionIds` dan `stripMentionTokens` berbeda (10-12 baris 98 dan 100), jadi `@Nama,` lolos ke balasan publik. (2) `acceptAsSignedIn` memakai `requireSession` dengan cookie cache 5 menit (`src/lib/auth.ts:10`), dan hasil `activateSessionOrganization` tidak ditangani. (3) Rule C inventaris melarang `auth.api.` di `session.ts`, padahal Task 1 memakainya; Rule E menunjuk fungsi lookup yang tidak ada (query inline di halaman status). (4) Test race 10-03 mengharapkan `LAST_OWNER`, padahal urutan cek menghasilkan `NOT_ALLOWED`. (5) Sukses SMTP didefinisikan sebagai RCPT diterima. (6) Acceptance `FOR UPDATE` dicari di berkas yang salah. Semua diterima sebagai R2-1 sampai R2-6, ditambah satu LOW. Properti wajib ada di `10-REVIEWS.md` `### Cycle 2` (`1e11185`). Codex tidak menemukan klien AIDA yang memanggil route plugin, dan tidak menemukan deadlock dari urutan lock yang dinyatakan. Ekspor dihapus dengan `rm -r --`.
+
+Berikutnya: replan putaran 2 (`/gsd-plan-phase 10 --reviews --skip-research`), lalu Codex siklus 3 (terakhir).
