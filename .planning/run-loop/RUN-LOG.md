@@ -498,3 +498,11 @@ Codex siklus 3 Fase 09 selesai: 1 HIGH, 4 MEDIUM, 1 LOW. HIGH dicek: `recoverDem
 | K25 | Fase 09 sesudah siklus review ketiga dengan 1 HIGH | replan lalu eksekusi tanpa review; parkir | parkir | parkir | aturan yang sama dengan K24; temuan diterima dan dicatat. Fase 10 tidak bergantung pada 08 atau 09 menurut rantai parkir piagam |
 
 Berikutnya: Fase 10 (Tim), langkah 1. 0a2 tetap menunggu regresi Rekriva, dengan pengaman R3-2.
+
+## Putaran 23 (2026-11-08, mulai 12.24 WIB)
+
+Dipicu wakeup. Cek A (30 GiB), B, dan Berhenti total lolos. Regresi Rekriva berjalan, 0a2 menunggu. Butir: Fase 10 (Tim), langkah 1. ROADMAP: AIDA-42 sampai 46, ber-UI, batas manusia "uji email nyata". Fase 08 diparkir, jadi undangan dibangun di atas Better Auth versi sekarang dengan catatan test undangan diulang sesudah upgrade (Cross-phase risks). Konteks orkestrator hampir habis, jadi fakta kode dikumpulkan agen Explore.
+
+### Langkah 1 Fase 10: fakta kode (agen Explore, dicek orkestrator untuk `getScopedDb`)
+
+`better-auth` 1.6.22 dengan plugin `organization({ allowUserToCreateOrganization: false })` dan `admin` (`src/lib/auth.ts:22-24`), tanpa pengirim undangan; `@better-auth/cli` 1.4.21 tidak cocok versinya. Model `member` dan `invitation` ada di skema. Peran: owner, admin, member (`src/lib/authz.ts:5`). `getScopedDb` (`src/lib/session.ts:38-43`) hanya memeriksa sesi dan `activeOrganizationId`, tidak memeriksa keanggotaan. Belum ada model `Notification`, lonceng, halaman member, kode undangan (F-16), maupun parsing mention. Catatan internal sudah ada (`Message.visibility` PUBLIC atau INTERNAL). Email lewat `src/lib/channels/email/`; job worker: ai-triage, email-inbound-poll, email-outbound-send, heartbeat, insight-run, kb-embed-article, rate-limit-cleanup, sla-flag.
