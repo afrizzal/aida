@@ -654,3 +654,11 @@ Codex siklus 2 selesai (15.48 sampai 15.50), 534 kata: 0 HIGH, 2 MEDIUM, 1 LOW. 
 | K29 | Sesudah siklus 2 tanpa HIGH, apakah perlu siklus 3 sebelum eksekusi Fase 11 | (a) replan putaran 2 lalu plan-checker, lalu eksekusi; (b) replan lalu Codex siklus 3 | Plan belum siap sampai ketiga temuan masuk plan | (a) | Piagam langkah 5: "Siklus selesai kalau tidak ada temuan HIGH atau temuan actionable yang belum masuk PLAN.md." Siklus 2 tanpa HIGH, dan ketiga temuan dimasukkan ke plan lalu diperiksa plan-checker. Revisinya hanya menambah kasus test dan satu cabang helper. Codex tetap mengkritik diff fase di langkah 7. Siklus 3 masih bisa dipakai kalau replan mengubah lebih dari yang diminta |
 
 Berikutnya: replan putaran 2 (`/gsd-plan-phase 11 --reviews --skip-research`), plan-checker, lalu langkah 6 (eksekusi), dengan container `aida-dev-db` dibuat lebih dulu.
+
+Replan putaran 2 selesai (perubahan minimal, 4 plan, sekitar 90 baris): R2-1 di 11-02 Task 3; R2-2 di 11-01 Task 2, 11-03 Task 2, dan 11-02 Task 3 (test urutan paksa dengan kasus commit dan rollback); R2-3 di 11-04 Task 1 dan 2 (satu hook test tambahan, `afterShareLock`). Ledger `### Round 2 — b5e0d3e` ada di keempat plan, dan tidak tersisa `Promise.allSettled` sebagai bukti konkurensi. Plan-checker berjalan sebagai gerbang terakhir sebelum eksekusi.
+
+Persiapan langkah 6: container `aida-dev-db` dibuat (sebelumnya tidak ada dan port 55432 bebas), dari image `pgvector/pgvector:pg16` yang sama dengan service `db`, di `127.0.0.1:55432`, dengan label `aida.purpose=dev-migrations`. Password acak hanya ada di environment container, tidak ditulis ke berkas mana pun. Siap dalam 2 detik. Saat itu tidak ada proses `artisan test`.
+
+Plan-checker gerbang terakhir: VERIFICATION PASSED tanpa temuan. R2-1 sampai R2-3 terpenuhi, setiap hook didefinisikan di plan yang memakainya, holder di `waitForBlockedBy` sesuai jenis lock, dan tidak ada yang berubah di luar R2. Langkah 5 Fase 11 selesai: review plan konvergen sesudah siklus 2 (K29).
+
+Berikutnya: langkah 6, eksekusi berurutan (`use_worktrees: false`), satu executor per plan dengan Aturan eksekutor dan variabel socket Colima, mulai 11-01. Sebelum setiap plan, cek beban Rekriva.

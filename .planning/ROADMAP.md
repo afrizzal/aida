@@ -411,7 +411,7 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 | 8. Security Hardening | v2.0 | 0/23 | Parked (Codex plan review cycle 3 left HIGH findings; owner decision) | - |
 | 9. Operations | v2.0 | 0/11 | Parked (Codex plan review cycle 3 left a HIGH finding; owner decision) | - |
 | 10. Team | v2.0 | 0/16 | Parked (Codex plan review cycle 3 left HIGH findings; owner decision) | - |
-| 11. Inbox | v2.0 | 0/9 | Planned (Codex plan review next) | - |
+| 11. Inbox | v2.0 | 0/9 | Planned (plan review converged; execution next) | - |
 | 12. Ticket Lifecycle | v2.0 | 0/0 | Not started | - |
 | 13. Integrations | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
 | 14. Projects Foundation | v2.0 | 0/0 | Not started | - |

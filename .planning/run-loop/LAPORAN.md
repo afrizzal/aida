@@ -4,7 +4,7 @@ Keadaan per 2026-11-08 14.20 WIB, putaran 31.
 
 ## 1. Ringkasan
 
-Milestone v2.0 sudah dibuka (0b) dan daftar fitur Projects sudah dicek ke demo publik (0c). Baseline 0a selesai di Mac ini: build lolos, integration lolos kecuali test egress, dan E2E lolos 63 dengan 2 flake. Baseline egress (0a2) menunggu owner, karena suite itu membuat dan membongkar container project `aida-egress-test` (O-1, bagian 3). **Fase 08 (Keamanan), 09 (Operasional), dan 10 (Tim) diparkir.** Ketiganya punya CONTEXT dan plan lengkap dan sudah direview Codex tiga siklus, tetapi siklus 3 masih menyisakan HIGH, jadi piagam memarkirnya. Fase 13, 16, dan 17 ikut diparkir karena bergantung pada Fase 10. Lanjut atau tidaknya keputusan owner (bagian 3, butir 1). Run berlanjut ke Fase 11 (Inbox), lalu 12, 14, dan 15. Belum ada kode produk yang diubah. Dokumen di `.planning/` aman ditinjau.
+Milestone v2.0 sudah dibuka (0b) dan daftar fitur Projects sudah dicek ke demo publik (0c). Baseline 0a selesai di Mac ini: build lolos, integration lolos kecuali test egress, dan E2E lolos 63 dengan 2 flake. Baseline egress (0a2) menunggu owner, karena suite itu membuat dan membongkar container project `aida-egress-test` (O-1, bagian 3). **Fase 08 (Keamanan), 09 (Operasional), dan 10 (Tim) diparkir.** Ketiganya punya CONTEXT dan plan lengkap dan sudah direview Codex tiga siklus, tetapi siklus 3 masih menyisakan HIGH, jadi piagam memarkirnya. Fase 13, 16, dan 17 ikut diparkir karena bergantung pada Fase 10. Lanjut atau tidaknya keputusan owner (bagian 3, butir 1). Fase 11 (Inbox) lolos review plan di siklus 2 dan siap dieksekusi; sesudahnya 12, 14, dan 15. Belum ada kode produk yang diubah. Dokumen di `.planning/` aman ditinjau.
 
 ## 2. Fase dan requirement
 
@@ -17,7 +17,7 @@ Milestone v2.0 sudah dibuka (0b) dan daftar fitur Projects sudah dicek ke demo p
 | 08 | Keamanan (AIDA-25 sampai 32) | diparkir | CONTEXT; 23 plan; tiga siklus review Codex; siklus 3 menyisakan 4 HIGH (diterima, belum dimasukkan ke plan). Belum ada kode yang dieksekusi | `8abbc6c`, `6238af7`, `ded5f56`, `99721fd`, `96d7c8f` |
 | 09 | Operasional (AIDA-33 sampai 41) | diparkir | CONTEXT, UI-SPEC disetujui, 11 plan, tiga siklus review Codex. Siklus 3 menyisakan 1 HIGH (K25). Belum ada kode yang dieksekusi | `5ebef8b`, `f4b5dfc` |
 | 10 | Tim (AIDA-42 sampai 46) | diparkir | CONTEXT (D-01 sampai D-29), UI-SPEC disetujui, 16 plan dalam 6 wave, tiga siklus review Codex (12, lalu 6, lalu 4 temuan). Siklus 3 menyisakan 2 HIGH, keduanya kontradiksi skrip E2E di 10-13 (K27). Belum ada kode yang dieksekusi | `fcd034e`, `0706c49`, `f188b06`, `eed405e`, `05570ee`, `1e11185`, `2730d11` |
-| 11 | Inbox (AIDA-47 sampai 51) | berjalan (plan) | Brainstorm Codex; CONTEXT D-01 sampai D-24 (K28, D-17 diamandemen); UI-SPEC disetujui; 9 plan dalam 6 wave, plan-checker lolos. Belum ada kode | `ff2dbab`, `bf0bd35` |
+| 11 | Inbox (AIDA-47 sampai 51) | berjalan (siap eksekusi) | CONTEXT D-01 sampai D-24 (K28; D-16 dan D-17 diamandemen); UI-SPEC disetujui; 9 plan dalam 6 wave. Review Codex konvergen di siklus 2: 9 temuan, lalu 3 tanpa HIGH, semuanya masuk plan (K29). Belum ada kode | `ff2dbab`, `bf0bd35`, `7fb2721`, `514d871`, `7652196`, `b5e0d3e` |
 | 12 | Siklus tiket (AIDA-18, 52 sampai 57, 97) | belum disentuh | | |
 | 13 | Integrasi (AIDA-58 sampai 63) | diparkir (bergantung pada Fase 10) | | |
 | 14 | Fondasi Projects (AIDA-64 sampai 71, 100 sampai 105) | belum disentuh | | |
