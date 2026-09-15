@@ -1,22 +1,22 @@
 # Laporan run loop AIDA
 
-Keadaan per 2026-11-08 10.55 WIB, putaran 15.
+Keadaan per 2026-11-08 13.40 WIB, putaran 29.
 
 ## 1. Ringkasan
 
-Milestone v2.0 sudah dibuka (0b) dan daftar fitur Projects sudah dicek ke demo publik (0c). Baseline 0a selesai di Mac ini: build lolos, integration lolos kecuali test egress, dan E2E lolos 63 dengan 2 flake. Test egress baseline (0a2) menunggu regresi Rekriva selesai; host Prisma yang sempat macet sudah pulih. **Fase 08 (Keamanan) diparkir.** Fase ini sudah punya CONTEXT dan 23 plan, dan direview Codex tiga siklus. Siklus 3, yang terakhir, masih menemukan 4 HIGH soal keselamatan resource Docker bersama dan kejujuran matriks bukti, jadi piagam memarkirnya. Lanjut atau tidaknya Fase 08 adalah keputusan owner (bagian 3). Belum ada kode produk yang diubah. Dokumen di `.planning/` aman ditinjau. Run lanjut ke Fase 09.
+Milestone v2.0 sudah dibuka (0b) dan daftar fitur Projects sudah dicek ke demo publik (0c). Baseline 0a selesai di Mac ini: build lolos, integration lolos kecuali test egress, dan E2E lolos 63 dengan 2 flake. Baseline egress (0a2) menunggu owner: suite itu membuat dan membongkar container project `aida-egress-test`, dan run mencatatnya "blocked (O-1)" sampai owner memutuskan soal test container (bagian 3). **Fase 08 (Keamanan) dan Fase 09 (Operasional) diparkir.** Masing-masing sudah punya CONTEXT dan plan, dan direview Codex tiga siklus, tetapi siklus 3 masih menyisakan HIGH, jadi piagam memarkirnya. Lanjut atau tidaknya kedua fase itu keputusan owner (bagian 3). Fase 10 (Tim) sedang direncanakan: CONTEXT, UI-SPEC yang disetujui, dan 15 plan sudah ada. Temuan review Codex siklus 1 sudah masuk ke plan, dan siklus 2 menyusul. Belum ada kode produk yang diubah. Dokumen di `.planning/` aman ditinjau.
 
 ## 2. Fase dan requirement
 
 | Butir | Isi | Status | Bukti | Commit |
 |---|---|---|---|---|
 | 0a | Baseline tertunda | selesai dengan bukti | build exit 0; integration 11/12 berkas (gagal hanya egress); E2E 63 lolos, 2 flake lolos 2/2 saat sendirian | |
-| 0a2 | Baseline egress | diparkir | `binaries.prisma.sh` mengirim 0 byte pada `GET`; build image tidak selesai | |
+| 0a2 | Baseline egress | menunggu owner | Percobaan pukul 07.45 gagal karena `binaries.prisma.sh` mengirim 0 byte (sudah pulih). Kini blocked (O-1, K26): suite membuat dan membongkar resource project `aida-egress-test`. Percobaan putaran 29 dihentikan di tahap build, tanpa resource yang tertinggal | |
 | 0b | Milestone v2.0 | selesai dengan bukti | `init.phase-op` 8 sampai 17 menemukan fasenya; 76/76 requirement terpetakan; tiga putaran kritik Codex diterapkan | `8a72f4c`, `995ed9e`, `fea685d`, `b9b1d9b` |
 | 0c | Lengkapi daftar fitur | selesai dengan bukti | 29 perilaku baru di `FITUR-PROJECTS.md`, AIDA-100 sampai 114, 91/91 terpetakan, grep clean-room kosong (exit 1) | `cb10c1c` |
 | 08 | Keamanan (AIDA-25 sampai 32) | diparkir | CONTEXT; 23 plan; tiga siklus review Codex; siklus 3 menyisakan 4 HIGH (diterima, belum dimasukkan ke plan). Belum ada kode yang dieksekusi | `8abbc6c`, `6238af7`, `ded5f56`, `99721fd`, `96d7c8f` |
-| 09 | Operasional (AIDA-33 sampai 41) | belum disentuh | | |
-| 10 | Tim (AIDA-42 sampai 46) | belum disentuh | | |
+| 09 | Operasional (AIDA-33 sampai 41) | diparkir | CONTEXT, UI-SPEC disetujui, 11 plan, tiga siklus review Codex. Siklus 3 menyisakan 1 HIGH (K25). Belum ada kode yang dieksekusi | `5ebef8b`, `f4b5dfc` |
+| 10 | Tim (AIDA-42 sampai 46) | berjalan (plan) | CONTEXT (D-01 sampai D-29), UI-SPEC disetujui, 15 plan dalam 6 wave. Codex siklus 1: 12 temuan diterima dan masuk plan; plan-checker lolos. Belum ada kode yang dieksekusi | `fcd034e`, `0706c49`, `f188b06`, `eed405e`, `05570ee` |
 | 11 | Inbox (AIDA-47 sampai 51) | belum disentuh | | |
 | 12 | Siklus tiket (AIDA-18, 52 sampai 57, 97) | belum disentuh | | |
 | 13 | Integrasi (AIDA-58 sampai 63) | belum disentuh | | |
@@ -29,9 +29,12 @@ Milestone v2.0 sudah dibuka (0b) dan daftar fitur Projects sudah dicek ke demo p
 
 1. **Fase 09 juga diparkir.** Review plan siklus 3 menyisakan satu HIGH: recovery `demo-partial` di plan 09-02 menghapus organisasi dan user demo yang tidak punya marker baru, padahal AIDA-37 mewajibkan seed menolak sebelum menulis dan demo boot melewati data demo. Empat MEDIUM dan satu LOW lain tercatat di `09-REVIEWS.md` → Cycle 3. Aturan yang sama dengan Fase 08 (K25). Opsi: sama dengan Fase 08 (siklus keempat, eksekusi sesudah replan tanpa review lagi, atau tetap diparkir). Yang terhalang: AIDA-33 sampai AIDA-41.
 1. **Fase 08 diparkir (paling menghalangi).** Review plan siklus 3 (terakhir) masih memberi 4 HIGH: pembersihan project `aida` masih per project sehingga ada celah race; suite egress wajib (`aida-egress-test`) berjalan tanpa pengaman; tag image hasil build bisa menimpa tag yang sudah ada; verifier matriks bukti tidak mencocokkan sumber. Semua sudah dicek ke kode dan diterima (`08-REVIEWS.md` → Cycle 3). Piagam: "3 siklus review plan habis dengan temuan HIGH tersisa → Parkir fase." Ada pembacaan lain (temuan cukup dimasukkan ke plan lalu lanjut), tetapi perbaikannya tidak akan direview Codex, jadi saya ambil yang lebih ketat. Opsi: (a) izinkan siklus review keempat sesudah replan; (b) izinkan eksekusi sesudah replan yang memasukkan temuan siklus 3 tanpa review Codex lagi; (c) tetap diparkir, misalnya sampai ada lingkungan Docker terpisah untuk test. Yang terhalang: seluruh AIDA-25 sampai AIDA-32 dan titik aman rilis `v1.0.0`. Fase 10 tetap bisa berjalan di atas Better Auth versi sekarang (ROADMAP → Cross-phase risks).
-2. Nama compose project untuk test container. Piagam hanya mengizinkan container dan volume project `aida` dan `aida-dev-db`, tetapi juga mewajibkan `pnpm test:egress` (project `aida-egress-test`) dan test yang memakai Testcontainers. Saya membaca container yang dibuat dan dibuang test AIDA sendiri sebagai milik AIDA (K14); Codex membacanya harfiah. Opsi: (a) izinkan project test berawalan `aida-` yang dibuat dan dibongkar oleh suite AIDA; (b) semua test container memakai project `aida`, dengan risiko menimpa stack operator yang sedang jalan. Codex tetap tidak setuju di siklus 2, jadi run memakai opsi paling konservatif (K22): semua bukti container baru berjalan di project `aida` dengan pengaman, volume bernama per run, dan tidak menyentuh stack atau volume `aida` yang sudah ada. Yang terhalang: bukti container diparkir kalau ada stack `aida` lain di mesin ini. Test egress v1 tetap memakai `aida-egress-test` karena piagam mewajibkannya; mohon dikonfirmasi.
+2. Nama compose project untuk test container. Piagam hanya mengizinkan container dan volume project `aida` dan `aida-dev-db`, tetapi juga mewajibkan `pnpm test:egress` (project `aida-egress-test`) dan test yang memakai Testcontainers. Saya membaca container yang dibuat dan dibuang test AIDA sendiri sebagai milik AIDA (K14); Codex membacanya harfiah. Opsi: (a) izinkan project test berawalan `aida-` yang dibuat dan dibongkar oleh suite AIDA; (b) semua test container memakai project `aida`, dengan risiko menimpa stack operator yang sedang jalan. Codex tetap tidak setuju di siklus 2, jadi run memakai opsi paling konservatif (K22): semua bukti container baru berjalan di project `aida` dengan pengaman, volume bernama per run, dan tidak menyentuh stack atau volume `aida` yang sudah ada. Yang terhalang: bukti container diparkir kalau ada stack `aida` lain di mesin ini. Sejak putaran 27 (C1 Fase 10, K26), run juga tidak menjalankan test egress v1 (`aida-egress-test`) selama butir ini terbuka; baseline 0a2 dan gerbang `test:egress` setiap fase tercatat "blocked (O-1)". Opsi (a) akan membuka keduanya.
 3. Putuskan cara menghapus `.next/` kalau rusak. Aturan deny `Bash(rm -rf *)` menolak langkah yang diminta piagam.
 4. `cp .env.example .env` tampaknya sudah dijalankan: `ls -la` menunjukkan file itu ada sejak 15.38 dengan ukuran sama dengan contoh. Isinya tidak dibaca. Kalau bukan owner yang membuatnya, mohon diperiksa.
+5. Fase 10, O-2: apakah balasan pelanggan dan peringatan SLA pada tiket **tanpa assignee** memberi notifikasi ke seseorang (misalnya semua admin). Ini memperluas AIDA-44. Sementara hanya assignee yang diberi notifikasi, dan batas itu didokumentasikan.
+6. Fase 10, O-3: peran ketiga di luar owner, admin, dan member akan mengubah scope `REQUIREMENTS.md`. Fase 10 tidak membuatnya (D-13).
+7. Fase 09 (berlaku kalau fase itu dilanjutkan): baseline `version` di `package.json` dan kebijakan bump untuk `check-version` (09-o1), serta handle `CODEOWNERS` dan widget README pihak ketiga (09-o2).
 
 ## 4. Titik aman rilis `v1.0.0`
 
@@ -76,7 +79,7 @@ Belum ada.
 
 ## 8. Bukti tidak ada push
 
-Dicek 2026-11-08 07.33 WIB:
+Dicek 2026-11-08 13.37 WIB:
 
 - `git ls-remote origin refs/heads/master`: `1ea4281ab7bc72955514847837b5efffa5bc837d`
 - `git remote get-url --push origin`: `no-push-run-loop`
@@ -85,7 +88,7 @@ Dicek 2026-11-08 07.33 WIB:
 ## 9. Yang belum terbukti
 
 - Perbaikan AIDA-37 dari putaran 3 belum diperiksa Codex (batas 3 putaran). Review plan Fase 9 akan memeriksanya.
-- `pnpm test:egress` belum pernah lolos di Mac ini (host Prisma macet). `pnpm test:integration` dan `pnpm test:e2e` belum pernah exit 0 dalam satu run penuh: yang pertama hanya karena berkas egress, yang kedua karena dua flake.
+- `pnpm test:egress` belum pernah lolos di Mac ini: percobaan pertama gagal karena host Prisma macet, lalu suite ini blocked (O-1). `pnpm test:integration` dan `pnpm test:e2e` belum pernah exit 0 dalam satu run penuh: yang pertama hanya karena berkas egress, yang kedua karena dua flake.
 - `docker compose -p aida up -d --build` belum pernah dijalankan di Mac ini.
 - AIDA-100 sampai AIDA-114 (dari butir 0c) belum dikritik Codex. Codex akan memeriksanya saat CONTEXT dan review plan Fase 14 dan 16.
 - Penelusuran demo hanya mencakup yang bisa diklik dari halaman utama. Drag and drop, isi dialog Share, dan halaman detail proyek dari sidebar tidak dibuka.
