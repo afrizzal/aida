@@ -514,3 +514,15 @@ Pertanyaan `codex/fase10-tanya.md` (7 area, dengan pelajaran dari dua fase yang 
 Codex Fase 10 selesai (`gpt-6.1-terra`, `xhigh`, 1416 kata). Langkah 3: `10-CONTEXT.md` ditulis subagen Claude (model sama) dengan struktur `09-CONTEXT.md`, karena konteks orkestrator hampir habis; subagen wajib mengecek klaim Codex ke kode, menyalin Larangan verbatim, dan memeriksa scan serta `init.phase-op 10`. Orkestrator memverifikasi lagi sebelum commit.
 
 `10-CONTEXT.md` ditulis subagen: 29 keputusan; tiga rekomendasi Codex tidak diikuti dengan alasan (undangan dikelola AIDA di atas tabel `invitation` plugin dan endpoint plugin yang mengubah member ditutup, karena otorisasi; `MemberAuditEvent` terpisah karena `AuditEvent` khusus AI; subjek digest bahasa Inggris). Tanpa peran ketiga (D-13). Item owner: O-1 test container (sudah ada), O-2 notifikasi untuk tiket tanpa assignee (dicatat sebagai 10-o2), O-3 peran ketiga nanti. Orkestrator memverifikasi: Larangan identik, scan nama dan path bersih, `has_context: true`.
+
+## Putaran 24 (2026-11-08, mulai 12.33 WIB)
+
+Dipicu wakeup. Cek A (30 GiB), B, dan Berhenti total lolos. Regresi Rekriva berjalan, 0a2 menunggu. Butir: Fase 10 langkah 4, `/gsd-ui-phase 10`. Riset UI berjalan dengan arahan sama seperti Fase 09 (tanpa pertanyaan, skala spacing yang dideklarasikan, tanpa commit sebelum checker). Sesudahnya: UI checker, probe UI-consideration (aturan `--auto`), commit, lalu langkah 5.
+
+UI researcher Fase 10 selesai: `10-UI-SPEC.md` (draft, belum di-commit), enam permukaan, skala spacing 4/8/12/16/24/32 dengan 12 px hanya untuk callout, empat ukuran teks, sekitar 60 string bahasa Inggris, tanpa package baru. Pilihan "[RL]": polling lonceng 30 detik saat tab terlihat, link undangan ditampilkan sekali hanya bila email tidak terkirim, satu pesan untuk semua error link undangan, `/invite/[token]` dan `/no-access` di grup `(auth)` (planner wajib cek redirect pengguna yang sudah login), dua switch preferensi per jenis kejadian. UI checker berjalan.
+
+UI checker Fase 10: BLOCKED pada dimensi 1 (label "Cancel" generik) dan 5 (padding callout 12 px di luar skala standar); dimensi lain PASS; kepatuhan D-04 sampai D-07, D-19, D-21, D-24 dikonfirmasi. Revisi UI-SPEC 1 dari 2 berjalan: label spesifik, `p-4` untuk callout baru.
+
+Revisi UI-SPEC Fase 10 selesai (label spesifik; callout baru `p-4`, skala 4/8/16/24/32). UI checker ulang berjalan. Sesudah lolos: probe UI-consideration langkah 9.5 dengan aturan `--auto` (serahkan penulisan `## UI Considerations` ke UI researcher seperti Fase 09), set `status: approved`, commit UI-SPEC, ganti path absolut di STATE kalau `state.record-session` dipakai, lalu langkah 5.
+
+UI checker ulang Fase 10: APPROVED (FLAG kecil di copywriting). Probe UI-consideration: 7 permukaan, 55 pertimbangan; ditulis 70 baris (41 explicit, 29 backstop, 0 unresolved). UI-SPEC `status: approved` di-commit. Berikutnya langkah 5: `/gsd-plan-phase 10` (riset mati; jalankan probe edge untuk AIDA-42 sampai 46; pattern mapper boleh dilewati demi konteks), lalu Codex review maksimal 3 siklus.
