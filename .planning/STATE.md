@@ -4,11 +4,11 @@ milestone: v2.0
 milestone_name: Helpdesk & Projects
 current_phase: 10
 current_phase_name: team
-status: Phases 8 and 9 parked (owner decision); Phase 10 replanned after Codex review cycle 1 (15 plans), Codex cycle 2 next
-stopped_at: Phase 10 replanned from Codex cycle 1, Codex cycle 2 next
+status: Phases 8 and 9 parked (owner decision); Phase 10 replanned after Codex review cycle 2 (16 plans), Codex cycle 3 (last) next
+stopped_at: Phase 10 replanned from Codex cycle 2, Codex cycle 3 next
 last_updated: "2026-11-08T06:10:53.391Z"
 last_activity: 2026-11-08
-last_activity_desc: Phase 10 replanned from Codex cycle 1 (12 findings in plans, new 10-15), 15 plans in 6 waves, plan checker passed; Codex cycle 2 next
+last_activity_desc: Phase 10 replanned from Codex cycle 2 (6 findings in plans, new 10-16), 16 plans in 6 waves, plan checker passed; Codex cycle 3 (last) next
 state_head: f188b063c618bd61f127ecd7aa91560d8ecababb
 progress:
   total_phases: 10
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-11-07, v2.0 opened)
 
 ## Current Position
 
-Phase: 10 (team), replanned after Codex review cycle 1: 15 plans in 6 waves; Codex review cycle 2 next. Phases 08 and 09 are PARKED (owner decision).
+Phase: 10 (team), replanned after Codex review cycle 2: 16 plans in 6 waves; Codex review cycle 3 (last) next. Phases 08 and 09 are PARKED (owner decision).
 Plan: —
 Status: Milestone v2.0 opened by hand on 2026-11-07. `REQUIREMENTS.md` (91 requirements) and `ROADMAP.md` (Phases 8–17) are written and were revised over three Codex critique rounds (queue item 0b done). The public demo was walked under the clean-room rules and added AIDA-100 to AIDA-114 (item 0c done). Phase 8 context is committed (`08-CONTEXT.md`, `8abbc6c`) and the phase is planned: 23 plans in 14 waves; three Codex review cycles; parked after cycle 3 (owner decision, `run-loop/LAPORAN.md`). No Phase 8 code has been executed. Baseline 0a is done: build passes; integration passes except the egress file; E2E passes 63 with two honesty-invariants flakes that pass alone (fixed by plan 08-17). The egress baseline (0a2) was parked while `binaries.prisma.sh` sent no bytes on GET (07.45 to 09.09); the host recovered and the test waits for the Rekriva regression to finish.
 Last activity: 2026-11-08 — Phase 8 planned under the run charter. v1.0.0 stays complete and archived; its archives are `milestones/v1.0.0-*`.

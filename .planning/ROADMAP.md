@@ -183,7 +183,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 5. Preferences apply, and the digest sends one batched email through a fake SMTP with no PII in the subject.
 
 **Stays open for a human:** a test with real email.
-**Plans:** 0/15 plans complete
+**Plans:** 0/16 plans complete
 **Wave 1**
 
 - [ ] 10-01-PLAN.md — Lay the whole Phase 10 data foundation in one migration so later waves never edit the schema in parallel (Wave 1)
@@ -195,6 +195,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 - [ ] 10-03-PLAN.md — Implement the server-side team administration service (AIDA-43): list members, change roles, deactivate (Wave 2)
 - [ ] 10-04-PLAN.md — Build the entity-generic notification core (AIDA-44) with per-type preferences and explicit defaults (D-22) (Wave 2)
 - [ ] 10-05-PLAN.md — Implement the invitation service (AIDA-42): role ceilings, hashed token, 7-day expiry, revoke, safe accept (Wave 2)
+- [ ] 10-16-PLAN.md — Give the public status-token path one named lookup helper and make the inventory's public-token rule a real check (D-08) (Wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
