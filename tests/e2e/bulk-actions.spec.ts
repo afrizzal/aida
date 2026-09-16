@@ -41,6 +41,19 @@ function bulkBar(page: Page) {
   return page.getByRole("region", { name: "Bulk actions" });
 }
 
+/**
+ * The bar's open picker. A picker that was just closed stays mounted with data-state="closed"
+ * for its exit animation, so locators that must find exactly one option are scoped to this.
+ */
+function openPickerPopover(page: Page) {
+  return page.locator('[data-slot="popover-content"][data-state="open"]');
+}
+
+/** A picker popover by its content, open or still animating closed. */
+function pickerPopover(page: Page, content: string | RegExp) {
+  return page.locator('[data-slot="popover-content"]').filter({ hasText: content });
+}
+
 function rowCheckbox(page: Page, subject: string) {
   return page.getByRole("checkbox", { name: new RegExp(`: ${subject}$`) });
 }
@@ -147,20 +160,30 @@ test.describe("Bulk actions", () => {
     const bar = bulkBar(page);
 
     // Nothing to remove yet: the selection carries no tag.
+    const emptyRemoveText = "None of the selected tickets has a tag.";
     await bar.getByRole("button", { name: "Remove tag" }).click();
-    await expect(page.getByText("None of the selected tickets has a tag.")).toBeVisible();
+    await expect(openPickerPopover(page).getByText(emptyRemoveText)).toBeVisible();
     await page.keyboard.press("Escape");
+    // Wait out the exit animation so the next picker is the only one on the page.
+    await expect(pickerPopover(page, emptyRemoveText)).toBeHidden();
 
     await bar.getByRole("button", { name: "Add tag" }).click();
-    await page.getByPlaceholder("Find a tag…").fill(tag.name);
-    await page.getByRole("option", { name: tag.name, exact: true }).click();
+    const addPicker = openPickerPopover(page);
+    await addPicker.getByPlaceholder("Find a tag…").fill(tag.name);
+    await addPicker.getByRole("option", { name: tag.name, exact: true }).click();
     await expect(page.getByText("Applied to 2 tickets.")).toBeVisible();
     await expect.poll(() => prisma.ticketTag.count({ where: { tagId: tag.id } })).toBe(2);
+    // Picking closed the Add tag picker; it lists the same tag, so wait until it is gone.
+    await expect(
+      page
+        .locator('[data-slot="popover-content"]')
+        .filter({ has: page.getByPlaceholder("Find a tag…") }),
+    ).toBeHidden();
 
     // The refreshed list now carries the tag, so Remove tag offers it.
     await expect(bar.getByText("2 tickets selected")).toBeVisible();
     await bar.getByRole("button", { name: "Remove tag" }).click();
-    await page.getByRole("option", { name: tag.name, exact: true }).click();
+    await openPickerPopover(page).getByRole("option", { name: tag.name, exact: true }).click();
     await expect
       .poll(() => prisma.ticketTag.count({ where: { ticketId: { in: [first.id, second.id] } } }))
       .toBe(0);
