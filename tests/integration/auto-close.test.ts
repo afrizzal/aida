@@ -9,10 +9,16 @@ import {
   readAutoCloseSettings,
   saveAutoCloseDays,
 } from "@/lib/tickets/auto-close-settings";
-import { type AutoCloseHandlerOptions, autoCloseHandler } from "@/lib/worker/jobs/auto-close";
+import {
+  type AutoCloseHandlerOptions,
+  autoCloseHandler,
+  closeResolvedTicketIfQuiet,
+} from "@/lib/worker/jobs/auto-close";
 import { seedOrgWithMembers, seedTicket } from "../support/inbox-fixtures";
+import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
 
 const DAY = 24 * 60 * 60 * 1000;
+const TX_OPTS = { maxWait: 10_000, timeout: 60_000 } as const;
 
 const daysAgo = (now: Date, days: number) => new Date(now.getTime() - days * DAY);
 
@@ -414,4 +420,158 @@ describe("autoCloseHandler re-reads the setting under a lock for every close (Co
       expect(stored.enabledAt).toBe(raw === "0" ? null : daysAgo(now, 30).toISOString());
     });
   }
+});
+
+async function timed(promise: Promise<void>): Promise<number> {
+  const started = Date.now();
+  await promise;
+  return Date.now() - started;
+}
+
+describe("setting change and close serialise in both orders (Codex reviews C8, C6, R2-3)", () => {
+  it("(d) setting off first: the close waits for the save, then finds auto-close off", async () => {
+    const now = new Date();
+    const { orgId, admin } = await seedAdminOrg();
+    await setAutoClose(orgId, "7", daysAgo(now, 30));
+    const t = await resolvedTicket(orgId, daysAgo(now, 10));
+
+    const savePid = deferred<number>();
+    const written = deferred<void>();
+    const releaseSave = deferred<void>();
+    const save = saveAutoCloseDays(prisma, admin, "0", {
+      hooks: {
+        async onTransactionStart(tx) {
+          savePid.resolve(await backendPid(tx));
+        },
+        async beforeCommit() {
+          written.resolve();
+          await releaseSave.promise;
+        },
+      },
+    });
+    save.catch(() => {});
+    const holderPid = await savePid.promise;
+    await written.promise;
+
+    const closePid = deferred<number>();
+    const job = runJob(orgId, now, async (tx, ticketId) => {
+      if (ticketId === t.id) closePid.resolve(await backendPid(tx));
+    });
+    job.catch(() => {});
+    const waiterPid = await closePid.promise;
+    const waitedMs = await timed(waitForBlockedBy(prisma, holderPid, [waiterPid]));
+    console.log(
+      `[race d] savePid=${holderPid} closePid=${waiterPid} observedBlockedAfterMs=${waitedMs}`,
+    );
+
+    releaseSave.resolve();
+    expect(await save).toEqual({ ok: true, days: 0, enabledAt: null });
+    const { org, lines } = await job;
+
+    expect((await ticketState(t.id)).status).toBe("RESOLVED");
+    expect(await autoClosedRows(t.id)).toHaveLength(0);
+    expect(org).toMatchObject({ closed: 0, stoppedOff: true });
+    expect(lines[0]).toContain("closed=0");
+    expect(await storedSettings(orgId)).toEqual({ days: "0", enabledAt: null });
+  });
+
+  it("(e) close first: the save waits for the close, the close stands, then nothing more closes", async () => {
+    const now = new Date();
+    const { orgId, admin } = await seedAdminOrg();
+    await setAutoClose(orgId, "7", daysAgo(now, 30));
+    const t = await resolvedTicket(orgId, daysAgo(now, 10));
+
+    const holderPidD = deferred<number>();
+    const closedD = deferred<Awaited<ReturnType<typeof closeResolvedTicketIfQuiet>>>();
+    const releaseClose = deferred<void>();
+    const holder = prisma.$transaction(async (tx) => {
+      holderPidD.resolve(await backendPid(tx));
+      closedD.resolve(await closeResolvedTicketIfQuiet(tx, { orgId, ticketId: t.id, now }));
+      await releaseClose.promise;
+    }, TX_OPTS);
+    holder.catch(() => {});
+    const holderPid = await holderPidD.promise;
+    expect(await closedD.promise).toEqual({ closed: true, off: false });
+
+    const savePid = deferred<number>();
+    const save = saveAutoCloseDays(prisma, admin, "0", {
+      hooks: {
+        async onTransactionStart(tx) {
+          savePid.resolve(await backendPid(tx));
+        },
+      },
+    });
+    save.catch(() => {});
+    const waiterPid = await savePid.promise;
+    const waitedMs = await timed(waitForBlockedBy(prisma, holderPid, [waiterPid]));
+    console.log(
+      `[race e] closePid=${holderPid} savePid=${waiterPid} observedBlockedAfterMs=${waitedMs}`,
+    );
+
+    releaseClose.resolve();
+    await holder;
+    expect(await save).toEqual({ ok: true, days: 0, enabledAt: null });
+
+    expect((await ticketState(t.id)).status).toBe("CLOSED");
+    expect(await autoClosedRows(t.id)).toHaveLength(1);
+    expect(await storedSettings(orgId)).toEqual({ days: "0", enabledAt: null });
+
+    const again = await runJob(orgId, now);
+    expect(again.org).toBeUndefined();
+    expect(again.lines).toEqual([]);
+    expect(await autoClosedRows(t.id)).toHaveLength(1);
+  });
+
+  it("(f) no days row: a setting committed after the FOR SHARE statement is never used by that close", async () => {
+    const now = new Date();
+    const { orgId, admin } = await seedAdminOrg();
+    const t = await resolvedTicket(orgId, daysAgo(now, 10));
+
+    let saveCommittedInHook = false;
+    let saveMs = -1;
+    const first = await prisma.$transaction(
+      (tx) =>
+        closeResolvedTicketIfQuiet(
+          tx,
+          { orgId, ticketId: t.id, now },
+          {
+            async afterShareLock() {
+              const started = Date.now();
+              const timeout = new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 5_000));
+              const saved = await Promise.race([saveAutoCloseDays(prisma, admin, "7"), timeout]);
+              if (saved === "timeout") throw new Error("save did not resolve within 5 seconds");
+              saveMs = Date.now() - started;
+              expect(saved).toMatchObject({ ok: true, days: 7 });
+              await prisma.setting.update({
+                where: {
+                  organizationId_key: { organizationId: orgId, key: AUTO_CLOSE_ENABLED_AT_KEY },
+                },
+                data: { value: daysAgo(now, 30).toISOString() },
+              });
+              saveCommittedInHook = true;
+            },
+          },
+        ),
+      TX_OPTS,
+    );
+    console.log(`[race f] saveCommittedInHook=${saveCommittedInHook} saveMs=${saveMs}`);
+
+    expect(saveCommittedInHook).toBe(true);
+    expect(first).toEqual({ closed: false, off: true });
+    expect((await ticketState(t.id)).status).toBe("RESOLVED");
+    expect(await autoClosedRows(t.id)).toHaveLength(0);
+    expect(await storedSettings(orgId)).toEqual({
+      days: "7",
+      enabledAt: daysAgo(now, 30).toISOString(),
+    });
+
+    // Control: the committed setting does qualify the ticket.
+    const control = await prisma.$transaction(
+      (tx) => closeResolvedTicketIfQuiet(tx, { orgId, ticketId: t.id, now }),
+      TX_OPTS,
+    );
+    expect(control).toEqual({ closed: true, off: false });
+    expect((await ticketState(t.id)).status).toBe("CLOSED");
+    expect(await autoClosedRows(t.id)).toHaveLength(1);
+  });
 });
