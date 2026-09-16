@@ -1,7 +1,7 @@
 "use client";
 
 import { Search } from "lucide-react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 
@@ -12,9 +12,15 @@ interface ContactSearchProps {
 export function ContactSearch({ defaultValue = "" }: ContactSearchProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const currentQuery = useSearchParams().get("q") ?? "";
   const [value, setValue] = useState(defaultValue);
 
   useEffect(() => {
+    // Navigate only when the search text differs from the URL. The /contacts page stays
+    // mounted until a navigation away commits, so an unconditional replace 300 ms after mount
+    // overrode a navigation started in that window (the palette's Create ticket landed back
+    // on /contacts).
+    if (value.trim() === currentQuery) return;
     const handle = setTimeout(() => {
       const params = new URLSearchParams();
       if (value.trim()) params.set("q", value.trim());
@@ -23,7 +29,7 @@ export function ContactSearch({ defaultValue = "" }: ContactSearchProps) {
     }, 300);
 
     return () => clearTimeout(handle);
-  }, [value, pathname, router]);
+  }, [value, currentQuery, pathname, router]);
 
   return (
     <div className="relative max-w-sm">
