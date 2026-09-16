@@ -3,6 +3,7 @@
 import { BookmarkPlus, Filter, SlidersHorizontal, Tag as TagIcon, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
+import { useRegisterCommands } from "@/components/command-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -85,6 +86,25 @@ export function FilterChipRow({ tags, customFieldDefinitions }: FilterChipRowPro
   const [saveViewOpen, setSaveViewOpen] = useState(false);
   // Save view (AIDA-47, UI-SPEC Surface 2a): only when at least one filter is on screen.
   const canSaveView = hasAnyFilter(parseUrlFilters(searchParams).filters);
+
+  // The palette's "Save these filters as a view…" (AIDA-49, D-12, UI-SPEC 4c): listed only while
+  // this row is mounted (the two inbox routes) and only when Save view is enabled; it opens the
+  // same dialog in create mode, after the palette has closed.
+  useRegisterCommands(
+    [
+      {
+        id: "views.save",
+        label: "Save these filters as a view…",
+        group: "views",
+        keywords: ["save view", "bookmark"],
+        order: -1,
+        icon: "bookmark-plus",
+        when: (context) => hasAnyFilter(parseUrlFilters(context.searchParams).filters),
+        run: () => setSaveViewOpen(true),
+      },
+    ],
+    [],
+  );
 
   function updateParams(updates: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams.toString());
