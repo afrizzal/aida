@@ -1,9 +1,10 @@
 "use client";
 
 import { ChevronDown, Plus } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useCommands } from "@/components/command-provider";
 import { PriorityChip } from "@/components/tickets/priority-chip";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,9 +41,36 @@ const EMPTY_FORM = {
  * needs a reachable agent-initiated creation path (STATE.md, Wave 4 open todo). */
 export function NewTicketDialog() {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const { registerNewTicketOpener } = useCommands();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [isSaving, setIsSaving] = useState(false);
+
+  // The palette's "Create ticket" (AIDA-49, D-12) opens this dialog over the current page while
+  // it is mounted (both inbox routes).
+  useEffect(
+    () =>
+      registerNewTicketOpener(() => {
+        setForm(EMPTY_FORM);
+        setOpen(true);
+      }),
+    [registerNewTicketOpener],
+  );
+
+  // From any other page the palette goes to /tickets?new=1 (UI-SPEC Assumption 11): open the
+  // dialog and replace the URL without that parameter.
+  const wantsNew = searchParams.get("new") === "1";
+  useEffect(() => {
+    if (!wantsNew) return;
+    setForm(EMPTY_FORM);
+    setOpen(true);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("new");
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname);
+  }, [wantsNew, searchParams, pathname, router]);
 
   const isValid =
     form.subject.trim().length > 0 &&
