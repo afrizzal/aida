@@ -3,7 +3,7 @@
 // agent observes in the sidebar, the filter row, the strip and the dialogs.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { ADMIN_EMAIL } from "./global-setup";
 import { createTicket, orgId, prisma } from "./support/db";
 
@@ -28,6 +28,17 @@ async function seedTicket(label: string, status: "OPEN" | "PENDING") {
   });
   await prisma.ticket.update({ where: { id: ticket.id }, data: { status } });
   return { id: ticket.id, subject };
+}
+
+function saveButton(page: Page) {
+  return page.getByRole("button", { name: "Save these filters as a view" });
+}
+
+function summaryValue(dialog: Locator, label: string) {
+  return dialog
+    .locator("dl > div")
+    .filter({ has: dialog.page().locator("dt", { hasText: label }) })
+    .locator("dd");
 }
 
 /** Every view a case creates, through prisma or the UI, is removed after the suite by name. */
@@ -75,5 +86,79 @@ test.describe
       await expect(row).toHaveAttribute("aria-current", "page");
       await expect(page.getByRole("link", { name: open.subject })).toBeVisible();
       await expect(page.getByRole("link", { name: pending.subject })).toHaveCount(0);
+    });
+
+    test("the save button is disabled until a filter is set", async ({ page }) => {
+      await page.goto("/tickets");
+      await expect(saveButton(page)).toBeDisabled();
+    });
+
+    test("an agent saves the on-screen filters as a private view and lands on it", async ({
+      page,
+    }) => {
+      const name = viewName("saved private");
+      await page.goto("/tickets?status=OPEN");
+      await saveButton(page).click();
+
+      const dialog = page.getByRole("dialog", { name: "Save view" });
+      await expect(summaryValue(dialog, "Status")).toHaveText("Open");
+      await dialog.getByLabel("Name", { exact: true }).fill(name);
+      await dialog.getByRole("button", { name: "Save view" }).click();
+
+      await expect(page.getByText("View saved.")).toBeVisible();
+      await expect(page).toHaveURL(/[?&]sv=/);
+      const row = page.getByRole("list", { name: "Private" }).getByRole("link", { name });
+      await expect(row).toHaveAttribute("aria-current", "page");
+    });
+
+    test("sharing a view with search text shows the warning first and lists it under Shared", async ({
+      page,
+    }) => {
+      const name = viewName("shared search");
+      const token = `svq${ts}`;
+      await page.goto(`/tickets?q=${token}`);
+      await saveButton(page).click();
+
+      const dialog = page.getByRole("dialog", { name: "Save view" });
+      await dialog.getByLabel("Name", { exact: true }).fill(name);
+      await expect(dialog.getByRole("status")).toHaveCount(0);
+      await dialog.getByRole("combobox", { name: "Who can see it" }).click();
+      await page.getByRole("option", { name: "Everyone in this workspace" }).click();
+      await expect(dialog.getByRole("status")).toContainText(
+        `This view includes the search text "${token}". Everyone in this workspace will be able to see it.`,
+      );
+      await dialog.getByRole("button", { name: "Save view" }).click();
+
+      await expect(page.getByText("View saved.")).toBeVisible();
+      await expect(
+        page.getByRole("list", { name: "Shared" }).getByRole("link", { name }),
+      ).toBeVisible();
+    });
+
+    test("a duplicate private name keeps the dialog open with one error", async ({ page }) => {
+      const name = viewName("duplicate");
+      const ownerUserId = await userIdOf(ADMIN_EMAIL);
+      await prisma.savedView.create({
+        data: {
+          organizationId: orgId,
+          ownerUserId,
+          name,
+          visibility: "PRIVATE",
+          filters: { version: 1, view: "all", statuses: ["PENDING"] },
+          position: 50,
+        },
+      });
+
+      await page.goto("/tickets?status=OPEN");
+      await saveButton(page).click();
+      const dialog = page.getByRole("dialog", { name: "Save view" });
+      await dialog.getByLabel("Name", { exact: true }).fill(name);
+      await dialog.getByRole("button", { name: "Save view" }).click();
+
+      await expect(dialog.getByRole("alert")).toHaveText(
+        `You already have a view named "${name}". Choose another name.`,
+      );
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(name);
     });
   });

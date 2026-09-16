@@ -1,6 +1,6 @@
 "use client";
 
-import { Filter, SlidersHorizontal, Tag as TagIcon, X } from "lucide-react";
+import { BookmarkPlus, Filter, SlidersHorizontal, Tag as TagIcon, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -24,10 +24,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { CustomFieldType, TicketStatus } from "@/generated/prisma/client";
 import { parseCfParam, serializeCfParam } from "@/lib/tickets/cf-param";
+import { hasAnyFilter, parseUrlFilters } from "@/lib/tickets/list-filters";
 import { cn } from "@/lib/utils";
 import { NewTicketDialog } from "./new-ticket-dialog";
+import { SaveViewDialog } from "./save-view-dialog";
 import { TicketSearchInput } from "./ticket-search-input";
 
 const VIEWS = [
@@ -79,6 +82,9 @@ export function FilterChipRow({ tags, customFieldDefinitions }: FilterChipRowPro
   const [cfMenuOpen, setCfMenuOpen] = useState(false);
   const [cfDraftDefinitionId, setCfDraftDefinitionId] = useState<string | null>(null);
   const [cfDraftValue, setCfDraftValue] = useState("");
+  const [saveViewOpen, setSaveViewOpen] = useState(false);
+  // Save view (AIDA-47, UI-SPEC Surface 2a): only when at least one filter is on screen.
+  const canSaveView = hasAnyFilter(parseUrlFilters(searchParams).filters);
 
   function updateParams(updates: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams.toString());
@@ -284,7 +290,39 @@ export function FilterChipRow({ tags, customFieldDefinitions }: FilterChipRowPro
             </div>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              {/* A disabled button gets no pointer events, so the wrapper carries the tooltip
+                  and is focusable only while the button is disabled. */}
+              <span className="ml-auto inline-flex" tabIndex={canSaveView ? undefined : 0}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8"
+                  aria-label="Save these filters as a view"
+                  disabled={!canSaveView}
+                  onClick={() => setSaveViewOpen(true)}
+                >
+                  <BookmarkPlus className="size-4" />
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent className="text-[12px]">
+              {canSaveView ? "Save view" : "Set at least one filter to save a view."}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
+
+      <SaveViewDialog
+        mode="create"
+        open={saveViewOpen}
+        onOpenChange={setSaveViewOpen}
+        tags={tags}
+        customFieldDefinitions={customFieldDefinitions}
+      />
     </div>
   );
 }
