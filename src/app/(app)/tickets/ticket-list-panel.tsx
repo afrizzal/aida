@@ -33,11 +33,15 @@ export async function TicketListPanel({
   const { db, orgId, session } = await getScopedDb();
   const filters = parseTicketListFilters(searchParams);
 
-  const [tickets, totalTicketCount, tags, customFieldDefinitions] = await Promise.all([
+  // Better Auth's `member` model is excluded from scopedDb's DOMAIN_MODELS allowlist — bare
+  // prisma with an explicit organizationId filter, as on the ticket page. Only the active
+  // organization's members reach the bulk bar's Assign picker (T-11-30).
+  const [tickets, totalTicketCount, tags, customFieldDefinitions, members] = await Promise.all([
     fetchTicketList(filters, { db, orgId, userId: session.user.id }),
     db.ticket.count(),
     db.tag.findMany({ orderBy: { name: "asc" } }),
     db.customFieldDefinition.findMany({ orderBy: { position: "asc" } }),
+    prisma.member.findMany({ where: { organizationId: orgId }, include: { user: true } }),
   ]);
 
   // Saved view in the URL (AIDA-47, UI-SPEC Surface 2b): the service decides the strip state and
@@ -55,6 +59,10 @@ export async function TicketListPanel({
       )
     : null;
   const tagOptions = tags.map((tag) => ({ id: tag.id, name: tag.name }));
+  const memberOptions = members
+    .map((member) => ({ id: member.user.id, name: member.user.name || member.user.email }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const listQuery = buildListQuery(searchParams);
   const fieldOptions = customFieldDefinitions.map((def) => ({
     id: def.id,
     label: def.label,
@@ -114,7 +122,12 @@ export async function TicketListPanel({
       ) : (
         <>
           {tickets.map((ticket) => (
-            <TicketListRow key={ticket.id} ticket={ticket} isOpen={ticket.id === selectedId} />
+            <TicketListRow
+              key={ticket.id}
+              ticket={ticket}
+              isOpen={ticket.id === selectedId}
+              listQuery={listQuery}
+            />
           ))}
           {canLoadMore && (
             <div className="flex justify-center py-4">
@@ -131,7 +144,14 @@ export async function TicketListPanel({
         </>
       )}
 
-      <BulkActionBar loaded={tickets.map((ticket) => ({ id: ticket.id }))} />
+      <BulkActionBar
+        loaded={tickets.map((ticket) => ({
+          id: ticket.id,
+          tagIds: ticket.tags.map(({ tag }) => tag.id),
+        }))}
+        members={memberOptions}
+        tags={tagOptions}
+      />
     </aside>
   );
 }
@@ -151,6 +171,18 @@ function toSearchParams(searchParams: Record<string, string | string[] | undefin
     }
   }
   return params;
+}
+
+/** The list parameters a row link keeps (D-10): the filters, the open view and the page size. */
+const LIST_QUERY_KEYS = ["view", "status", "tag", "cf", "q", "sv", "limit"] as const;
+
+function buildListQuery(searchParams: Record<string, string | string[] | undefined>): string {
+  const source = toSearchParams(searchParams);
+  const params = new URLSearchParams();
+  for (const key of LIST_QUERY_KEYS) {
+    for (const value of source.getAll(key)) params.append(key, value);
+  }
+  return params.toString();
 }
 
 /** The same URL without sv: the filters stay as plain filters (UI-SPEC Surface 2b). */

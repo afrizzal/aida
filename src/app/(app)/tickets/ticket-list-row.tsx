@@ -43,10 +43,14 @@ function getActiveDue(ticket: TicketListItem): Date | null {
 export function TicketListRow({
   ticket,
   isOpen = false,
+  listQuery = "",
 }: {
   ticket: TicketListItem;
   /** The ticket shown in the reading pane (left border and accent background). */
   isOpen?: boolean;
+  /** The list's query string (no leading "?"), kept on the link so opening a ticket keeps the
+   * list, the open saved view and the bulk selection (D-10). */
+  listQuery?: string;
 }) {
   const activeDue = getActiveDue(ticket);
   const visibleTags = ticket.tags.slice(0, MAX_VISIBLE_TAGS);
@@ -67,7 +71,8 @@ export function TicketListRow({
       isOpen={isOpen}
     >
       <Link
-        href={`/tickets/${ticket.id}`}
+        id={`ticket-row-${ticket.id}`}
+        href={listQuery ? `/tickets/${ticket.id}?${listQuery}` : `/tickets/${ticket.id}`}
         className="block min-h-[80px] min-w-0 flex-1 py-3 pr-4 pl-2 outline-none"
       >
         <div className="flex items-center justify-between gap-2">
@@ -120,14 +125,22 @@ export function TicketListSkeleton() {
         <div
           // biome-ignore lint/suspicious/noArrayIndexKey: static skeleton placeholder rows, never reordered
           key={index}
-          className="min-h-[80px] space-y-2 border-b border-border/70 px-4 py-3"
+          className="flex min-h-[80px] shrink-0 border-b border-border/70"
         >
-          <div className="flex items-center justify-between">
-            <Skeleton className="h-3.5 w-32" />
-            <Skeleton className="h-3 w-10" />
+          {/* Same checkbox column as SelectableRow, so rows do not shift when they load. */}
+          <div className="flex shrink-0 items-start pl-4 pt-3">
+            <div className="flex h-5 items-center">
+              <Skeleton className="size-4" />
+            </div>
           </div>
-          <Skeleton className="h-3.5 w-48" />
-          <Skeleton className="h-5 w-24" />
+          <div className="min-w-0 flex-1 space-y-2 py-3 pr-4 pl-2">
+            <div className="flex items-center justify-between">
+              <Skeleton className="h-3.5 w-32" />
+              <Skeleton className="h-3 w-10" />
+            </div>
+            <Skeleton className="h-3.5 w-48" />
+            <Skeleton className="h-5 w-24" />
+          </div>
         </div>
       ))}
     </div>

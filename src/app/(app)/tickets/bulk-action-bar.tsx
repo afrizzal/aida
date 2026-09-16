@@ -1,19 +1,30 @@
 "use client";
 
-import { CircleDot, Loader2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { CircleDot, Flag, Loader2, type LucideIcon, Minus, Plus, UserRound, X } from "lucide-react";
+import { type ReactNode, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Command, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import type { TicketStatus } from "@/generated/prisma/client";
+import type { TicketPriority, TicketStatus } from "@/generated/prisma/client";
+import type { TicketMutationErrorCode } from "@/lib/tickets/mutations";
 import { type BulkUpdateInput, bulkUpdateTickets } from "./bulk-actions";
-import { useTicketSelection } from "./ticket-selection";
+import { MAX_SELECTED_TICKETS, useTicketSelection } from "./ticket-selection";
 
-// The bulk action bar (Phase 11, AIDA-48, D-10, UI-SPEC Surface 3b). It applies one choice to
-// exactly the selected ids through bulkUpdateTickets (all or nothing, audited per ticket).
+// The bulk action bar (Phase 11, AIDA-48, D-08, D-10, UI-SPEC Surface 3b). Each choice applies
+// at once to exactly the selected ids through bulkUpdateTickets: all or nothing, one audit row
+// per ticket. Refusals come back as codes; any other failure rejects the call (11-02's one
+// error contract), and both end in the same inline callout, never in an error boundary.
 
 type BulkOp = BulkUpdateInput["op"];
+type Picker = "assign" | "status" | "priority" | "addTag" | "removeTag";
 
 const STATUSES: { value: TicketStatus; label: string }[] = [
   { value: "NEW", label: "New" },
@@ -23,18 +34,79 @@ const STATUSES: { value: TicketStatus; label: string }[] = [
   { value: "CLOSED", label: "Closed" },
 ];
 
+const PRIORITIES: { value: TicketPriority; label: string }[] = [
+  { value: "LOW", label: "Low" },
+  { value: "NORMAL", label: "Normal" },
+  { value: "HIGH", label: "High" },
+  { value: "URGENT", label: "Urgent" },
+];
+
+/** Remove tag gets a search input above this many entries; Assign and Add tag always have one,
+ * because their lists have no upper bound (UI-SPEC Surface 3b). */
+const SEARCH_THRESHOLD = 8;
+
+const UNKNOWN_ERROR = "The change could not be saved. Wait a moment and try again.";
+
 export interface BulkActionBarTicket {
   id: string;
+  tagIds: string[];
+}
+
+export interface BulkActionBarOption {
+  id: string;
+  name: string;
+}
+
+interface BulkFailure {
+  /** The selection the failure belongs to; a different selection hides the callout. */
+  selectionKey: string;
+  reason: string;
 }
 
 function tickets(count: number): string {
   return count === 1 ? "1 ticket" : `${count} tickets`;
 }
 
-export function BulkActionBar({ loaded }: { loaded: BulkActionBarTicket[] }) {
+function failureReason(code: TicketMutationErrorCode | null, memberName?: string): string {
+  switch (code) {
+    case "TICKET_UNAVAILABLE":
+      return "One of the selected tickets is no longer available. Refresh the list and try again.";
+    case "MEMBER_NOT_ACTIVE":
+      return memberName
+        ? `${memberName} is no longer a member of this workspace. Pick someone else.`
+        : UNKNOWN_ERROR;
+    case "TAG_MISSING":
+      return "That tag no longer exists. Pick another tag.";
+    case "MEMBERSHIP_ENDED":
+      return "Your access to this workspace has ended. Sign out, then sign in again.";
+    default:
+      return UNKNOWN_ERROR;
+  }
+}
+
+/** Matches on the option's label (keywords) only, never on its id value. */
+function matchLabel(_value: string, search: string, keywords?: string[]): number {
+  const needle = search.trim().toLowerCase();
+  if (!needle) return 1;
+  return (keywords ?? []).some((keyword) => keyword.toLowerCase().includes(needle)) ? 1 : 0;
+}
+
+export function BulkActionBar({
+  loaded,
+  members,
+  tags,
+}: {
+  /** The tickets the panel rendered, with their tag ids (for Remove tag). */
+  loaded: BulkActionBarTicket[];
+  /** The active organization's members. */
+  members: BulkActionBarOption[];
+  /** The organization's tags. */
+  tags: BulkActionBarOption[];
+}) {
   const { selectedIds, clear, reportLoaded } = useTicketSelection();
   const [pending, setPending] = useState(false);
-  const [openPicker, setOpenPicker] = useState<"status" | null>(null);
+  const [openPicker, setOpenPicker] = useState<Picker | null>(null);
+  const [failure, setFailure] = useState<BulkFailure | null>(null);
 
   // Report the rendered list so the selection is pruned to tickets on screen (Surface 3a).
   const loadedKey = loaded.map((ticket) => ticket.id).join(",");
@@ -44,17 +116,43 @@ export function BulkActionBar({ loaded }: { loaded: BulkActionBarTicket[] }) {
 
   if (selectedIds.length === 0) return null;
 
-  async function run(op: BulkOp) {
+  const selectionKey = selectedIds.join(",");
+  const visibleFailure = failure?.selectionKey === selectionKey ? failure : null;
+
+  // Remove tag offers only tags present on at least one selected ticket (UI-SPEC Assumption 5).
+  const selected = new Set(selectedIds);
+  const tagIdsOnSelection = new Set(
+    loaded.filter((ticket) => selected.has(ticket.id)).flatMap((ticket) => ticket.tagIds),
+  );
+  const removableTags = tags.filter((tag) => tagIdsOnSelection.has(tag.id));
+
+  async function run(op: BulkOp, memberName?: string) {
     setOpenPicker(null);
+    setFailure(null);
     const ticketIds = [...selectedIds];
+    const key = ticketIds.join(",");
     setPending(true);
     try {
       const result = await bulkUpdateTickets({ ticketIds, op });
-      if (result.ok) toast.success(`Applied to ${tickets(result.count)}.`);
+      if (result.ok) {
+        toast.success(`Applied to ${tickets(result.count)}.`);
+      } else {
+        setFailure({ selectionKey: key, reason: failureReason(result.error, memberName) });
+      }
+    } catch {
+      // Not a service refusal (11-02 rethrows everything else, Codex review C5): the batch did
+      // not commit, so show the unknown row instead of letting the error reach a boundary.
+      setFailure({ selectionKey: key, reason: failureReason(null) });
     } finally {
       setPending(false);
     }
   }
+
+  const pickerProps = (picker: Picker) => ({
+    open: openPicker === picker,
+    onOpenChange: (open: boolean) => setOpenPicker(open ? picker : null),
+    disabled: pending,
+  });
 
   return (
     <section
@@ -84,37 +182,235 @@ export function BulkActionBar({ loaded }: { loaded: BulkActionBarTicket[] }) {
         </Button>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <Popover
-          open={openPicker === "status"}
-          onOpenChange={(open) => setOpenPicker(open ? "status" : null)}
+      {selectedIds.length >= MAX_SELECTED_TICKETS && (
+        <p className="text-[12px] text-muted-foreground">
+          You can select up to 100 tickets at a time.
+        </p>
+      )}
+
+      {visibleFailure && (
+        <div
+          role="alert"
+          className="space-y-1 rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-[13px] text-destructive"
         >
-          <PopoverTrigger asChild>
-            <Button variant="outline" size="sm" className="text-[13px]" disabled={pending}>
-              <CircleDot />
-              Status
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align="start" className="w-[240px] p-0">
-            <Command>
-              <CommandList>
-                <CommandGroup>
-                  {STATUSES.map((status) => (
-                    <CommandItem
-                      key={status.value}
-                      value={status.value}
-                      className="text-[13px]"
-                      onSelect={() => void run({ kind: "status", status: status.value })}
-                    >
-                      {status.label}
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
-              </CommandList>
-            </Command>
-          </PopoverContent>
-        </Popover>
+          <p className="font-semibold">Nothing was changed.</p>
+          <p>{visibleFailure.reason}</p>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        <PickerButton icon={UserRound} label="Assign" {...pickerProps("assign")}>
+          <MemberOptions
+            members={members}
+            onPick={(member) =>
+              void run({ kind: "assign", assigneeId: member?.id ?? null }, member?.name)
+            }
+          />
+        </PickerButton>
+
+        <PickerButton icon={CircleDot} label="Status" {...pickerProps("status")}>
+          <FixedOptions
+            options={STATUSES}
+            onPick={(status) => void run({ kind: "status", status })}
+          />
+        </PickerButton>
+
+        <PickerButton icon={Flag} label="Priority" {...pickerProps("priority")}>
+          <FixedOptions
+            options={PRIORITIES}
+            onPick={(priority) => void run({ kind: "priority", priority })}
+          />
+        </PickerButton>
+
+        <PickerButton icon={Plus} label="Add tag" {...pickerProps("addTag")}>
+          <TagOptions
+            tags={tags}
+            alwaysSearch
+            emptyText="No tags yet. Create tags in Settings → Tags."
+            onPick={(tag) => void run({ kind: "addTag", tagId: tag.id })}
+          />
+        </PickerButton>
+
+        <PickerButton icon={Minus} label="Remove tag" {...pickerProps("removeTag")}>
+          <TagOptions
+            tags={removableTags}
+            emptyText="None of the selected tickets has a tag."
+            onPick={(tag) => void run({ kind: "removeTag", tagId: tag.id })}
+          />
+        </PickerButton>
       </div>
     </section>
+  );
+}
+
+function PickerButton({
+  icon: Icon,
+  label,
+  open,
+  onOpenChange,
+  disabled,
+  children,
+}: {
+  icon: LucideIcon;
+  label: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  disabled: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <Popover open={open && !disabled} onOpenChange={onOpenChange}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="text-[13px]" disabled={disabled}>
+          <Icon />
+          {label}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[240px] p-0">
+        {children}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function OptionLabel({ children }: { children: ReactNode }) {
+  return <span className="min-w-0 flex-1 truncate">{children}</span>;
+}
+
+function FixedOptions<T extends string>({
+  options,
+  onPick,
+}: {
+  options: { value: T; label: string }[];
+  onPick: (value: T) => void;
+}) {
+  return (
+    <Command>
+      <CommandList>
+        <CommandGroup>
+          {options.map((option) => (
+            <CommandItem
+              key={option.value}
+              value={option.value}
+              className="text-[13px]"
+              onSelect={() => onPick(option.value)}
+            >
+              <OptionLabel>{option.label}</OptionLabel>
+            </CommandItem>
+          ))}
+        </CommandGroup>
+      </CommandList>
+    </Command>
+  );
+}
+
+const UNASSIGN_VALUE = "__unassign__";
+
+function MemberOptions({
+  members,
+  onPick,
+}: {
+  members: BulkActionBarOption[];
+  /** null means Unassign. */
+  onPick: (member: BulkActionBarOption | null) => void;
+}) {
+  const [query, setQuery] = useState("");
+
+  // The member list has no upper bound, so it always has the search input (Surface 3b).
+  return (
+    <Command filter={matchLabel}>
+      <CommandInput
+        placeholder="Find a member…"
+        value={query}
+        onValueChange={setQuery}
+        className="text-[13px]"
+      />
+      <CommandList>
+        <CommandEmpty className="px-2 text-[13px] text-muted-foreground">
+          No member matches "{query.trim()}".
+        </CommandEmpty>
+        <CommandGroup>
+          <CommandItem
+            value={UNASSIGN_VALUE}
+            keywords={["Unassign"]}
+            className="text-[13px]"
+            onSelect={() => onPick(null)}
+          >
+            <OptionLabel>Unassign</OptionLabel>
+          </CommandItem>
+          {members.map((member) => (
+            <CommandItem
+              key={member.id}
+              value={member.id}
+              keywords={[member.name]}
+              className="text-[13px]"
+              onSelect={() => onPick(member)}
+            >
+              <OptionLabel>{member.name}</OptionLabel>
+            </CommandItem>
+          ))}
+        </CommandGroup>
+      </CommandList>
+    </Command>
+  );
+}
+
+function TagOptions({
+  tags,
+  emptyText,
+  alwaysSearch = false,
+  onPick,
+}: {
+  tags: BulkActionBarOption[];
+  /** Shown when there is no tag to offer at all. */
+  emptyText: string;
+  alwaysSearch?: boolean;
+  onPick: (tag: BulkActionBarOption) => void;
+}) {
+  const [query, setQuery] = useState("");
+
+  if (tags.length === 0) {
+    return (
+      <Command>
+        <CommandList>
+          <CommandEmpty className="px-2 text-[13px] text-muted-foreground">
+            {emptyText}
+          </CommandEmpty>
+        </CommandList>
+      </Command>
+    );
+  }
+
+  const showSearch = alwaysSearch || tags.length > SEARCH_THRESHOLD;
+
+  return (
+    <Command filter={matchLabel}>
+      {showSearch && (
+        <CommandInput
+          placeholder="Find a tag…"
+          value={query}
+          onValueChange={setQuery}
+          className="text-[13px]"
+        />
+      )}
+      <CommandList>
+        <CommandEmpty className="px-2 text-[13px] text-muted-foreground">
+          No tag matches "{query.trim()}".
+        </CommandEmpty>
+        <CommandGroup>
+          {tags.map((tag) => (
+            <CommandItem
+              key={tag.id}
+              value={tag.id}
+              keywords={[tag.name]}
+              className="text-[13px]"
+              onSelect={() => onPick(tag)}
+            >
+              <OptionLabel>{tag.name}</OptionLabel>
+            </CommandItem>
+          ))}
+        </CommandGroup>
+      </CommandList>
+    </Command>
   );
 }
