@@ -3,7 +3,9 @@
 import { BookOpen, Inbox, Lightbulb, Settings2, Sparkles, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { SidebarViews } from "@/components/sidebar-views";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import type { SidebarViews as SidebarViewLists } from "@/lib/saved-views/ui-state";
 import { cn } from "@/lib/utils";
 
 interface SidebarUser {
@@ -14,6 +16,8 @@ interface SidebarUser {
 interface SidebarProps {
   user: SidebarUser;
   brandName: string;
+  /** Saved views loaded server-side by the (app) layout (AIDA-47, UI-SPEC Surface 1). */
+  views: SidebarViewLists;
 }
 
 const navItems = [
@@ -34,7 +38,7 @@ function getInitials(name: string): string {
     .toUpperCase();
 }
 
-export function Sidebar({ user, brandName }: SidebarProps) {
+export function Sidebar({ user, brandName, views }: SidebarProps) {
   const pathname = usePathname();
 
   return (
@@ -49,33 +53,37 @@ export function Sidebar({ user, brandName }: SidebarProps) {
         </span>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 space-y-0.5 px-2 py-2">
-        {navItems.map(({ href, label, icon: Icon }) => {
-          const isActive = pathname.startsWith(href);
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                "group flex h-9 items-center gap-2.5 rounded-md px-3 text-[14px] transition-colors",
-                isActive
-                  ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
-              )}
-            >
-              <Icon
+      {/* Nav: scrolls when the links plus the Views section exceed the height, so the user
+          footer stays pinned (UI-SPEC Surface 1). */}
+      <nav className="flex-1 overflow-y-auto px-2 py-2">
+        <div className="space-y-0.5">
+          {navItems.map(({ href, label, icon: Icon }) => {
+            const isActive = pathname.startsWith(href);
+            return (
+              <Link
+                key={href}
+                href={href}
                 className={cn(
-                  "size-4 shrink-0 transition-colors",
+                  "group flex h-9 items-center gap-2.5 rounded-md px-3 text-[14px] transition-colors",
                   isActive
-                    ? "text-sidebar-accent-foreground"
-                    : "text-sidebar-foreground/60 group-hover:text-sidebar-foreground",
+                    ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                    : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
                 )}
-              />
-              {label}
-            </Link>
-          );
-        })}
+              >
+                <Icon
+                  className={cn(
+                    "size-4 shrink-0 transition-colors",
+                    isActive
+                      ? "text-sidebar-accent-foreground"
+                      : "text-sidebar-foreground/60 group-hover:text-sidebar-foreground",
+                  )}
+                />
+                {label}
+              </Link>
+            );
+          })}
+        </div>
+        <SidebarViews views={views} />
       </nav>
 
       {/* User */}

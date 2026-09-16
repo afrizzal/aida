@@ -2,6 +2,8 @@ import { Sidebar } from "@/components/sidebar";
 import { TopBar } from "@/components/top-bar";
 import { getBrandingSettings } from "@/lib/branding/settings";
 import { prisma } from "@/lib/db";
+import { listSavedViewsForViewer } from "@/lib/saved-views/service";
+import { sidebarViewsOrEmpty } from "@/lib/saved-views/ui-state";
 import { scopedDb } from "@/lib/scoped-db";
 import { requireSession } from "@/lib/session";
 
@@ -34,9 +36,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   });
   const { workspaceName } = await getBrandingSettings(scopedDb(orgId), org?.name ?? "AIDA");
 
+  // Saved views for the sidebar (AIDA-47, UI-SPEC Surface 1): the viewer's private views and the
+  // organization's shared views, membership-checked by the service (D-01). A failed read, a
+  // removed member included, gives empty lists and one server log line (UI-SPEC E1 error).
+  const actor = { userId: session.user.id, orgId };
+  const views = await sidebarViewsOrEmpty(() => listSavedViewsForViewer(prisma, actor));
+
   return (
     <div className="flex min-h-screen">
-      <Sidebar user={user} brandName={workspaceName} />
+      <Sidebar user={user} brandName={workspaceName} views={views} />
       <div className="flex flex-1 flex-col">
         <TopBar user={user} />
         <main className="flex-1 overflow-auto p-6">{children}</main>
