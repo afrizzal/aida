@@ -139,3 +139,10 @@ None.
 
 - FOUND: src/app/(app)/tickets/ticket-selection.tsx, src/app/(app)/tickets/bulk-action-bar.tsx, tests/e2e/bulk-actions.spec.ts, src/app/(app)/tickets/layout.tsx, src/app/(app)/tickets/ticket-list-row.tsx, src/app/(app)/tickets/ticket-list-panel.tsx
 - FOUND commits: 34b949e, 8cf43e8, 6a053f7
+
+## Follow-up fix (orchestrator)
+
+- **Commit:** b3f8575 `fix(11-06): test: wait out the closing tag picker in the bulk tag case`. This changed the test only. The product is unchanged.
+- **Cause:** The bulk tag case was flaky (found in the 11-07 regression run). The bar keeps a single `openPicker` state, so only one picker is ever logically open. But a picker that was just closed stays mounted with `data-state="closed"` during its 100 ms exit animation. When Remove tag opened inside that window, `getByRole('option', { name: tag.name, exact: true })` matched an option in both popovers and failed Playwright's strict mode. A user only sees the fade-out and cannot act on it.
+- **Fix:** The test now waits for each closed picker's popover to be hidden before it opens the next picker. Option and input locators are scoped to the open popover (`[data-slot="popover-content"][data-state="open"]`). No assertion was loosened.
+- **Runs:** `pnpm typecheck` 0 and `pnpm lint` 0. `pnpm test:e2e tests/e2e/bulk-actions.spec.ts` ran three times in a row: 0, 0, 0 (6 passed each time). The combined run with `inbox`, `saved-views` and `command-palette` exited 1 twice (30 passed, 1 failed). In both runs all six bulk cases passed. The failure was the 11-07 case "Create ticket from another page…", which also fails when `command-palette.spec.ts` runs alone (exit 1, 8 passed, 1 failed). It is recorded in `deferred-items.md`.
