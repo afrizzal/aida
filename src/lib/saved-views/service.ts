@@ -32,6 +32,7 @@
 import type { Prisma, PrismaClient, SavedViewVisibility } from "../../generated/prisma/client";
 import { findActiveMembership } from "../membership";
 import {
+  filtersEqual,
   filtersToSearchParams,
   type InboxFiltersInput,
   parseStoredFilters,
@@ -305,4 +306,189 @@ export async function listSavedViewsForViewer(
     }),
   ]);
   return { private: toListItems(privateRows), shared: toListItems(sharedRows) };
+}
+
+const ADMIN_ROLES = new Set(["owner", "admin"]);
+
+/** Better Auth stores one role, or several separated by commas. */
+function isAdminRole(role: string): boolean {
+  return role.split(",").some((r) => ADMIN_ROLES.has(r.trim()));
+}
+
+/** Ids are cuid strings; anything else cannot name a view. */
+function isPlausibleId(id: unknown): id is string {
+  return typeof id === "string" && id.length > 0 && id.length <= 128;
+}
+
+interface LockedView {
+  id: string;
+  ownerUserId: string;
+  visibility: SavedViewVisibility;
+}
+
+/**
+ * The shared first step of update and delete (Codex review C7), inside their transaction:
+ * the actor's membership, then ONE row lock on the view (SELECT … FOR UPDATE on id and
+ * organizationId), then the permission decision from that locked row only. A transaction that
+ * waited on the lock re-reads the committed row, so a view made private meanwhile is
+ * NOT_FOUND to everyone but its owner.
+ */
+async function lockViewForWrite(
+  tx: Prisma.TransactionClient,
+  actor: SavedViewActor,
+  id: unknown,
+): Promise<{ view: LockedView; isOwner: boolean }> {
+  const membership = await requireMembership(tx, actor);
+  if (!isPlausibleId(id)) throw new SavedViewError("NOT_FOUND");
+  const rows = await tx.$queryRaw<LockedView[]>`
+    SELECT id, "ownerUserId", visibility::text AS visibility
+    FROM "SavedView"
+    WHERE id = ${id} AND "organizationId" = ${actor.orgId}
+    FOR UPDATE
+  `;
+  const view = rows[0];
+  if (!view) throw new SavedViewError("NOT_FOUND");
+  const isOwner = view.ownerUserId === actor.userId;
+  // Another member's private view does not exist for this actor (T-11-12).
+  if (view.visibility === "PRIVATE" && !isOwner) throw new SavedViewError("NOT_FOUND");
+  if (!isOwner && !isAdminRole(membership.role)) throw new SavedViewError("NOT_ALLOWED");
+  return { view, isOwner };
+}
+
+/**
+ * Edits a view's name, visibility and filters in one statement (concurrent edits never mix:
+ * the last commit wins whole). Only the owner changes visibility; a visibility change moves
+ * the view to the next position of its target group. hooks are test seams.
+ */
+export async function updateSavedView(
+  client: WriteClient,
+  actor: SavedViewActor,
+  id: string,
+  input: SavedViewInput,
+  hooks: SavedViewHooks = {},
+): Promise<SavedViewWriteResult> {
+  const target = VISIBILITIES.includes(input?.visibility) ? input.visibility : null;
+  try {
+    return await client.$transaction(async (tx) => {
+      if (hooks.onTransactionStart) await hooks.onTransactionStart(tx);
+      const { view, isOwner } = await lockViewForWrite(tx, actor, id);
+
+      const name = validateName(input?.name);
+      const visibility = validateVisibility(input?.visibility);
+      if (visibility !== view.visibility && !isOwner) throw new SavedViewError("NOT_ALLOWED");
+      const filters = validateFilters(input?.filters);
+      await requireReferences(tx, actor.orgId, filters);
+      const position =
+        visibility === view.visibility
+          ? undefined
+          : await nextPosition(tx, actor.orgId, view.ownerUserId, visibility);
+
+      await tx.savedView.updateMany({
+        where: { id: view.id, organizationId: actor.orgId },
+        data: { name, visibility, filters, ...(position === undefined ? {} : { position }) },
+      });
+
+      if (hooks.beforeCommit) await hooks.beforeCommit(tx);
+      return { ok: true as const, id: view.id, href: savedViewHref(view.id, filters) };
+    }, TRANSACTION_OPTIONS);
+  } catch (err) {
+    if (err instanceof SavedViewError) return { ok: false, error: err.code };
+    if (target !== null && isUniqueViolation(err)) {
+      return { ok: false, error: duplicateCode(target) };
+    }
+    throw err;
+  }
+}
+
+export type SavedViewDeleteResult =
+  | { ok: true; id: string }
+  | { ok: false; error: SavedViewErrorCode };
+
+/** Deletes a view under the same rules and the same locked-row decision as updateSavedView. */
+export async function deleteSavedView(
+  client: WriteClient,
+  actor: SavedViewActor,
+  id: string,
+  hooks: SavedViewHooks = {},
+): Promise<SavedViewDeleteResult> {
+  try {
+    return await client.$transaction(async (tx) => {
+      if (hooks.onTransactionStart) await hooks.onTransactionStart(tx);
+      const { view } = await lockViewForWrite(tx, actor, id);
+      await tx.savedView.deleteMany({ where: { id: view.id, organizationId: actor.orgId } });
+      if (hooks.beforeCommit) await hooks.beforeCommit(tx);
+      return { ok: true as const, id: view.id };
+    }, TRANSACTION_OPTIONS);
+  } catch (err) {
+    if (err instanceof SavedViewError) return { ok: false, error: err.code };
+    throw err;
+  }
+}
+
+export type SavedViewPanel =
+  | { status: "not_available" }
+  | {
+      status: "ok";
+      view: {
+        id: string;
+        name: string;
+        visibility: SavedViewVisibility;
+        canEdit: boolean;
+        isOwner: boolean;
+        filters: StoredViewFilters;
+        href: string;
+      };
+      /** "applied" when the URL filters equal the stored filters, "changed" otherwise. */
+      state: "applied" | "changed";
+      /** Stored references that no longer exist in the organization; the filter is kept (D-05). */
+      missing: { tag: boolean; customField: boolean };
+    };
+
+const NOT_AVAILABLE: SavedViewPanel = { status: "not_available" };
+
+/**
+ * The strip above the list when the URL carries ?sv= (UI-SPEC Surface 2b). An unknown id, a
+ * deleted view, another member's private view and another organization's view all give the
+ * same not_available, so nothing about hidden views is revealed (T-11-12). Throws
+ * SavedViewError("MEMBERSHIP_ENDED") for a removed member.
+ */
+export async function getSavedViewForPanel(
+  client: ReadClient,
+  actor: SavedViewActor,
+  svId: string,
+  urlFilters: InboxFiltersInput,
+): Promise<SavedViewPanel> {
+  const membership = await requireMembership(client, actor);
+  if (!isPlausibleId(svId)) return NOT_AVAILABLE;
+  const row = await client.savedView.findFirst({
+    where: {
+      id: svId,
+      organizationId: actor.orgId,
+      OR: [{ visibility: "SHARED" }, { ownerUserId: actor.userId }],
+    },
+    select: { id: true, name: true, visibility: true, ownerUserId: true, filters: true },
+  });
+  if (!row) return NOT_AVAILABLE;
+  const filters = parseStoredFilters(row.filters);
+  if (!filters) {
+    console.warn(`[saved-views] view ${row.id} not opened: stored filters are not valid`);
+    return NOT_AVAILABLE;
+  }
+  const isOwner = row.ownerUserId === actor.userId;
+  const canEdit = isOwner || (row.visibility === "SHARED" && isAdminRole(membership.role));
+  const missing = await findMissingReferences(client, actor.orgId, filters);
+  return {
+    status: "ok",
+    view: {
+      id: row.id,
+      name: row.name,
+      visibility: row.visibility,
+      canEdit,
+      isOwner,
+      filters,
+      href: savedViewHref(row.id, filters),
+    },
+    state: filtersEqual(urlFilters ?? {}, filters) ? "applied" : "changed",
+    missing,
+  };
 }

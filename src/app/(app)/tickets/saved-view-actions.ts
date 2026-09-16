@@ -4,8 +4,11 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import {
   createSavedView,
+  deleteSavedView,
+  type SavedViewDeleteResult,
   type SavedViewInput,
   type SavedViewWriteResult,
+  updateSavedView,
 } from "@/lib/saved-views/service";
 import { getSessionActor } from "@/lib/session";
 
@@ -18,6 +21,25 @@ import { getSessionActor } from "@/lib/session";
 export async function createSavedViewAction(input: SavedViewInput): Promise<SavedViewWriteResult> {
   const actor = await getSessionActor();
   const result = await createSavedView(prisma, actor, input);
+  if (result.ok) revalidatePath("/", "layout");
+  return result;
+}
+
+/** Edits a view the session user may edit (D-04); only its owner changes visibility. */
+export async function updateSavedViewAction(
+  id: string,
+  input: SavedViewInput,
+): Promise<SavedViewWriteResult> {
+  const actor = await getSessionActor();
+  const result = await updateSavedView(prisma, actor, id, input);
+  if (result.ok) revalidatePath("/", "layout");
+  return result;
+}
+
+/** Deletes a view the session user may edit (D-04). */
+export async function deleteSavedViewAction(id: string): Promise<SavedViewDeleteResult> {
+  const actor = await getSessionActor();
+  const result = await deleteSavedView(prisma, actor, id);
   if (result.ok) revalidatePath("/", "layout");
   return result;
 }
