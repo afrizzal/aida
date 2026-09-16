@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import type { TicketPriority } from "@/generated/prisma/client";
 import { requireOrgAdmin } from "@/lib/authz";
-import { getScopedDb } from "@/lib/session";
+import { prisma } from "@/lib/db";
+import { getScopedDb, getSessionActor } from "@/lib/session";
+import { type AutoCloseSaveResult, saveAutoCloseDays } from "@/lib/tickets/auto-close-settings";
 
 interface SlaTargetInput {
   priority: TicketPriority;
@@ -47,4 +49,17 @@ export async function saveSlaTargets(input: SlaTargetInput[]): Promise<{ ok: boo
 
   revalidatePath("/settings/sla");
   return { ok: true };
+}
+
+/**
+ * Saves the auto-close days setting (Phase 11, AIDA-51, D-15). saveAutoCloseDays checks the
+ * actor's membership (MEMBERSHIP_ENDED, D-01) and role (owners and admins, NOT_ALLOWED) and
+ * validates the value (INVALID); the result is returned unchanged. The page is revalidated only
+ * after a successful save.
+ */
+export async function saveAutoCloseSetting(raw: unknown): Promise<AutoCloseSaveResult> {
+  const actor = await getSessionActor();
+  const result = await saveAutoCloseDays(prisma, actor, raw);
+  if (result.ok) revalidatePath("/settings/sla");
+  return result;
 }

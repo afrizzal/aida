@@ -1,12 +1,16 @@
 import type { TicketPriority } from "@/generated/prisma/client";
+import { getOrgRole } from "@/lib/authz";
+import { prisma } from "@/lib/db";
 import { getScopedDb } from "@/lib/session";
+import { readAutoCloseSettings } from "@/lib/tickets/auto-close-settings";
 import { DEFAULT_SLA_TARGETS } from "@/lib/tickets/sla";
+import { AutoCloseForm } from "./auto-close-form";
 import { SlaForm } from "./sla-form";
 
 const PRIORITY_ORDER: TicketPriority[] = ["URGENT", "HIGH", "NORMAL", "LOW"];
 
 export default async function SlaPoliciesPage() {
-  const { db } = await getScopedDb();
+  const { db, orgId } = await getScopedDb();
   const policies = await db.slaPolicy.findMany();
   const policyMap = new Map(policies.map((p) => [p.priority, p]));
 
@@ -21,10 +25,16 @@ export default async function SlaPoliciesPage() {
     };
   });
 
+  // Auto-close card (Phase 11, AIDA-51): stored values, editable by owners and admins only.
+  const autoClose = await readAutoCloseSettings(prisma, orgId);
+  const role = await getOrgRole();
+  const canEdit = role === "owner" || role === "admin";
+
   return (
     <div className="space-y-6">
       <h1 className="text-[18px] font-semibold">SLA Policies</h1>
       <SlaForm initialRows={rows} />
+      <AutoCloseForm initialDays={autoClose.days} canEdit={canEdit} />
     </div>
   );
 }
