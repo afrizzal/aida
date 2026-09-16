@@ -8,6 +8,15 @@
 // rendered by each route's own children (TicketListPanel, shared by page.tsx and the
 // future tickets/[id]/page.tsx — see 02-08-PLAN.md Task 1), because Next.js layouts don't
 // receive per-route searchParams needed to fetch the list.
+//
+// TicketSelectionProvider (AIDA-48, D-10) lives here so the bulk selection survives moving
+// between /tickets and /tickets/[id], and ends when the user leaves the inbox.
+import { TicketSelectionProvider } from "./ticket-selection";
+
 export default function TicketsLayout({ children }: { children: React.ReactNode }) {
-  return <div className="-m-6 flex h-[calc(100vh-3.5rem)] overflow-hidden">{children}</div>;
+  return (
+    <TicketSelectionProvider>
+      <div className="-m-6 flex h-[calc(100vh-3.5rem)] overflow-hidden">{children}</div>
+    </TicketSelectionProvider>
+  );
 }

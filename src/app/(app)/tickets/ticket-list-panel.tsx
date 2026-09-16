@@ -8,6 +8,7 @@ import { panelOrMembershipEnded, type SavedViewPanelState } from "@/lib/saved-vi
 import { getScopedDb } from "@/lib/session";
 import { MAX_LIST_LIMIT, parseUrlFilters } from "@/lib/tickets/list-filters";
 import { fetchTicketList, parseTicketListFilters } from "@/lib/tickets/list-query";
+import { BulkActionBar } from "./bulk-action-bar";
 import { FilterChipRow } from "./filter-chip-row";
 import { LIST_PANEL_ID, ListPanelFocus } from "./list-panel-focus";
 import { SavedViewStrip } from "./saved-view-strip";
@@ -113,7 +114,7 @@ export async function TicketListPanel({
       ) : (
         <>
           {tickets.map((ticket) => (
-            <TicketListRow key={ticket.id} ticket={ticket} selected={ticket.id === selectedId} />
+            <TicketListRow key={ticket.id} ticket={ticket} isOpen={ticket.id === selectedId} />
           ))}
           {canLoadMore && (
             <div className="flex justify-center py-4">
@@ -129,6 +130,8 @@ export async function TicketListPanel({
           )}
         </>
       )}
+
+      <BulkActionBar loaded={tickets.map((ticket) => ({ id: ticket.id }))} />
     </aside>
   );
 }

@@ -7,6 +7,7 @@ import { TagChip, TagOverflowChip } from "@/components/tickets/tag-chip";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { TicketListItem } from "@/lib/tickets/list-query";
 import { cn } from "@/lib/utils";
+import { SelectableRow } from "./ticket-selection";
 
 const MAX_VISIBLE_TAGS = 2;
 const SKELETON_ROW_COUNT = 6;
@@ -41,65 +42,74 @@ function getActiveDue(ticket: TicketListItem): Date | null {
 
 export function TicketListRow({
   ticket,
-  selected = false,
+  isOpen = false,
 }: {
   ticket: TicketListItem;
-  selected?: boolean;
+  /** The ticket shown in the reading pane (left border and accent background). */
+  isOpen?: boolean;
 }) {
   const activeDue = getActiveDue(ticket);
   const visibleTags = ticket.tags.slice(0, MAX_VISIBLE_TAGS);
   const overflowCount = ticket.tags.length - visibleTags.length;
 
+  // The row container (SelectableRow) carries the border, the state classes and shrink-0.
+  // shrink-0 is required: the row is a flex item inside TicketListPanel's flex-column
+  // <aside overflow-y-auto>. Without it, when the panel's cumulative row content exceeds its
+  // available height, flexbox's default shrink behavior can compress a row below its own
+  // content height (min-h-[80px] alone does not protect a flex item from shrinking) — the
+  // wrapped second line of chips then overflows past the row's box and bleeds into the next
+  // row. The checkbox and the link are siblings (UI-SPEC Surface 3a).
   return (
-    <Link
-      href={`/tickets/${ticket.id}`}
-      className={cn(
-        // shrink-0 is required: this row is a flex item inside TicketListPanel's flex-column
-        // <aside overflow-y-auto>. Without it, when the panel's cumulative row content exceeds
-        // its available height, flexbox's default shrink behavior can compress a row below its
-        // own content height (min-h-[80px] alone does not protect a flex item from shrinking) —
-        // the wrapped second line of chips then overflows past the row's box and visually bleeds
-        // into the next row. Reproduced for real with 07-02's demo dataset (a 5-chip ticket
-        // wraps to 2 lines) — this is a genuine pre-existing layout bug, not a data-specific one.
-        "block min-h-[80px] shrink-0 border-b border-border/70 px-4 py-3",
-        selected ? "border-l-2 border-l-primary bg-accent" : "hover:bg-muted/50",
-      )}
+    <SelectableRow
+      ticketId={ticket.id}
+      ticketNumber={ticket.number}
+      subject={ticket.subject}
+      isOpen={isOpen}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="max-w-[70%] truncate text-[13px] font-medium text-foreground">
-          {ticket.contact.name || ticket.contact.email}
-        </span>
-        <span className="shrink-0 text-[12px] text-muted-foreground">
-          {formatRelativeTime(ticket.updatedAt)}
-        </span>
-      </div>
-
-      <p
-        className={cn(
-          "mt-0.5 truncate text-[14px]",
-          ticket.status === "NEW" ? "font-medium" : "font-normal",
-        )}
+      <Link
+        href={`/tickets/${ticket.id}`}
+        className="block min-h-[80px] min-w-0 flex-1 py-3 pr-4 pl-2 outline-none"
       >
-        {ticket.subject}
-      </p>
-
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-        <StatusChip status={ticket.status} />
-        {(ticket.priority === "HIGH" || ticket.priority === "URGENT") && (
-          <PriorityChip priority={ticket.priority} />
-        )}
-        {activeDue && (
-          <SlaDueChip dueAt={activeDue} isAtRisk={ticket.isAtRisk} isBreached={ticket.isBreached} />
-        )}
-        {visibleTags.map(({ tag }) => (
-          <TagChip key={tag.id} label={tag.name} />
-        ))}
-        {overflowCount > 0 && <TagOverflowChip count={overflowCount} />}
-        <div className="ml-auto">
-          <AssigneeAvatar name={ticket.assignee?.name} />
+        <div className="flex items-center justify-between gap-2">
+          <span className="max-w-[70%] truncate text-[13px] font-medium text-foreground">
+            {ticket.contact.name || ticket.contact.email}
+          </span>
+          <span className="shrink-0 text-[12px] text-muted-foreground">
+            {formatRelativeTime(ticket.updatedAt)}
+          </span>
         </div>
-      </div>
-    </Link>
+
+        <p
+          className={cn(
+            "mt-0.5 truncate text-[14px]",
+            ticket.status === "NEW" ? "font-medium" : "font-normal",
+          )}
+        >
+          {ticket.subject}
+        </p>
+
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <StatusChip status={ticket.status} />
+          {(ticket.priority === "HIGH" || ticket.priority === "URGENT") && (
+            <PriorityChip priority={ticket.priority} />
+          )}
+          {activeDue && (
+            <SlaDueChip
+              dueAt={activeDue}
+              isAtRisk={ticket.isAtRisk}
+              isBreached={ticket.isBreached}
+            />
+          )}
+          {visibleTags.map(({ tag }) => (
+            <TagChip key={tag.id} label={tag.name} />
+          ))}
+          {overflowCount > 0 && <TagOverflowChip count={overflowCount} />}
+          <div className="ml-auto">
+            <AssigneeAvatar name={ticket.assignee?.name} />
+          </div>
+        </div>
+      </Link>
+    </SelectableRow>
   );
 }
 
