@@ -9,6 +9,7 @@ import { getScopedDb } from "@/lib/session";
 import { MAX_LIST_LIMIT, parseUrlFilters } from "@/lib/tickets/list-filters";
 import { fetchTicketList, parseTicketListFilters } from "@/lib/tickets/list-query";
 import { FilterChipRow } from "./filter-chip-row";
+import { LIST_PANEL_ID, ListPanelFocus } from "./list-panel-focus";
 import { SavedViewStrip } from "./saved-view-strip";
 import { TicketListRow } from "./ticket-list-row";
 
@@ -67,7 +68,11 @@ export async function TicketListPanel({
   const reachedCap = pageIsFull && limit >= MAX_LIST_LIMIT;
 
   return (
-    <aside className="flex h-full w-[360px] shrink-0 flex-col overflow-y-auto border-r border-border">
+    <aside
+      id={LIST_PANEL_ID}
+      className="flex h-full w-[360px] shrink-0 flex-col overflow-y-auto border-r border-border"
+    >
+      <ListPanelFocus />
       <FilterChipRow tags={tagOptions} customFieldDefinitions={fieldOptions} />
 
       {savedView?.status === "ok" && (

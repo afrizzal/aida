@@ -125,3 +125,12 @@ None.
 
 - FOUND: src/components/sidebar-views.tsx, src/lib/saved-views/ui-state.ts, src/app/(app)/tickets/save-view-dialog.tsx, src/app/(app)/tickets/saved-view-strip.tsx, src/app/(app)/tickets/delete-view-dialog.tsx, tests/e2e/saved-views.spec.ts, tests/integration/saved-views-ui-state.test.ts
 - FOUND commits: 127abb9, 2abc03f, d58127d
+
+## Follow-up fix (orchestrator)
+
+Closes the UI-SPEC 2d open item above: after a delete, focus now moves to the list panel's first focusable element.
+
+- Commit `fix(11-05): move focus to the list panel after a view is deleted (UI-SPEC 2d)`.
+- The delete dialog sits inside the saved-view strip, which unmounts once `sv` leaves the URL, so it cannot move focus itself. On success it calls `requestListPanelFocus()` and prevents radix's return-to-trigger focus (`onCloseAutoFocus`). A new client component, `ListPanelFocus` in `src/app/(app)/tickets/list-panel-focus.tsx`, is rendered inside the panel's `<aside id="ticket-list-panel">`. Once the URL no longer carries `sv`, it focuses the first focusable descendant. No styling changed.
+- Before the fix, focus landed on the `<aside>` scroll container itself, not on a control. The new E2E assertion in "the admin deletes a view from the strip menu" requires the focused element to be a descendant of the panel, not the panel itself. It failed with the fix disabled (exit 1) and passes with it.
+- Verify: `pnpm typecheck` 0, `pnpm lint` 0, `pnpm test:e2e tests/e2e/saved-views.spec.ts` 0 (10 passed).

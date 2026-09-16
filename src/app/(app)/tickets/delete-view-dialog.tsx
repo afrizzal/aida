@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { SavedViewVisibility } from "@/generated/prisma/client";
+import { requestListPanelFocus } from "./list-panel-focus";
 import { deleteSavedViewAction } from "./saved-view-actions";
 
 // Delete view confirmation (Phase 11, AIDA-47, UI-SPEC Surface 2d), the only destructive action
@@ -33,6 +34,7 @@ export function DeleteViewDialog({ open, onOpenChange, view }: DeleteViewDialogP
   const searchParams = useSearchParams();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deleted, setDeleted] = useState(false);
 
   function changeOpen(next: boolean) {
     if (pending) return;
@@ -50,6 +52,10 @@ export function DeleteViewDialog({ open, onOpenChange, view }: DeleteViewDialogP
       setError(DELETE_ERROR);
       return;
     }
+    // Focus goes to the list panel once the inbox without the view has rendered (UI-SPEC 2d),
+    // not back to the strip's menu trigger, which disappears with the view.
+    setDeleted(true);
+    requestListPanelFocus();
     onOpenChange(false);
     // Back to the inbox with the same filters, minus the deleted view.
     const params = new URLSearchParams(searchParams.toString());
@@ -61,7 +67,12 @@ export function DeleteViewDialog({ open, onOpenChange, view }: DeleteViewDialogP
 
   return (
     <Dialog open={open} onOpenChange={changeOpen}>
-      <DialogContent className="text-[13px]">
+      <DialogContent
+        className="text-[13px]"
+        onCloseAutoFocus={(event) => {
+          if (deleted) event.preventDefault();
+        }}
+      >
         <DialogHeader>
           <DialogTitle className="text-[15px] font-semibold tracking-tight wrap-anywhere">
             {`Delete the view "${view.name}"?`}

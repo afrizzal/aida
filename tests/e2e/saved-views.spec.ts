@@ -317,6 +317,17 @@ test.describe
 
       await expect(page.getByText("View deleted.")).toBeVisible();
       await expect(page).not.toHaveURL(/sv=/);
+      // UI-SPEC 2d: focus lands on a control inside the list panel, not on the page body or on
+      // the panel's own scroll container.
+      await expect
+        .poll(() =>
+          page.evaluate(() => {
+            const active = document.activeElement;
+            const panel = document.getElementById("ticket-list-panel");
+            return Boolean(panel && active && active !== panel && panel.contains(active));
+          }),
+        )
+        .toBe(true);
       await expect(page).toHaveURL(/status=OPEN/);
       await expect(page.getByRole("link", { name })).toHaveCount(0);
       await expect.poll(() => prisma.savedView.count({ where: { id } })).toBe(0);
