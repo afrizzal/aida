@@ -1,3 +1,4 @@
+import { CommandProvider } from "@/components/command-provider";
 import { Sidebar } from "@/components/sidebar";
 import { TopBar } from "@/components/top-bar";
 import { getBrandingSettings } from "@/lib/branding/settings";
@@ -42,13 +43,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const actor = { userId: session.user.id, orgId };
   const views = await sidebarViewsOrEmpty(() => listSavedViewsForViewer(prisma, actor));
 
+  // The command palette (AIDA-49, D-11, D-12) gets the same membership-safe views list, so the
+  // palette never shows another member's private view and a removed member sees no views.
   return (
-    <div className="flex min-h-screen">
-      <Sidebar user={user} brandName={workspaceName} views={views} />
-      <div className="flex flex-1 flex-col">
-        <TopBar user={user} />
-        <main className="flex-1 overflow-auto p-6">{children}</main>
+    <CommandProvider views={views}>
+      <div className="flex min-h-screen">
+        <Sidebar user={user} brandName={workspaceName} views={views} />
+        <div className="flex flex-1 flex-col">
+          <TopBar user={user} />
+          <main className="flex-1 overflow-auto p-6">{children}</main>
+        </div>
       </div>
-    </div>
+    </CommandProvider>
   );
 }
