@@ -41,3 +41,18 @@ export async function getScopedDb() {
   if (!orgId) throw new Error("No active organization on session — cannot scope queries");
   return { db: scopedDb(orgId), session, orgId };
 }
+
+/**
+ * The acting user and organization for a Phase 11 server action or route (D-01).
+ *
+ * Reads the session and its `activeOrganizationId` exactly like getScopedDb (same redirect when
+ * unauthenticated, same error when no organization is active) and returns `{ userId, orgId }`.
+ * It does NOT check membership: every caller passes the actor to a core function that checks
+ * the member row through findActiveMembership (src/lib/membership.ts) itself.
+ */
+export async function getSessionActor(): Promise<{ userId: string; orgId: string }> {
+  const session = await requireSession();
+  const orgId = session.session.activeOrganizationId;
+  if (!orgId) throw new Error("No active organization on session — cannot scope queries");
+  return { userId: session.user.id, orgId };
+}
