@@ -1,6 +1,7 @@
 import type { Job } from "pg-boss";
 import { PgBoss } from "pg-boss";
 import { aiTriageHandler } from "./jobs/ai-triage";
+import { autoCloseHandler } from "./jobs/auto-close";
 import { emailInboundPollHandler } from "./jobs/email-inbound-poll";
 import { emailOutboundSendHandler } from "./jobs/email-outbound-send";
 import { heartbeatHandler } from "./jobs/heartbeat";
@@ -34,6 +35,14 @@ async function main() {
     await slaFlagHandler(job.data);
   });
   await boss.schedule("sla-flag", "*/5 * * * *", {});
+
+  // Auto-close of resolved tickets (Phase 11, AIDA-51): daily, at most 100 per organization per
+  // run, idempotent; sends nothing to customers (D-19).
+  await boss.createQueue("auto-close");
+  await boss.work("auto-close", async ([job]: Job[]) => {
+    await autoCloseHandler(job.data);
+  });
+  await boss.schedule("auto-close", "15 2 * * *", {}); // daily 02:15
 
   await boss.createQueue("rate-limit-cleanup");
   await boss.work("rate-limit-cleanup", async (_jobs: Job[]) => {
