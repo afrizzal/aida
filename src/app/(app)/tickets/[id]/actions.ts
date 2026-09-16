@@ -12,8 +12,24 @@ import { getBoss } from "@/lib/queue/boss-client";
 import type { GenerateDraftResult } from "@/lib/rag/generate-draft";
 import { generateDraftReply as runGenerateDraft } from "@/lib/rag/generate-draft";
 import { getScopedDb, getSessionActor } from "@/lib/session";
-import { runTicketMutation, type TicketMutationErrorCode } from "@/lib/tickets/mutations";
-import { computeDueTimestamps, getSlaTargets } from "@/lib/tickets/sla";
+import {
+  runTicketMutation,
+  type TicketMutationErrorCode,
+  type TicketMutationResult,
+} from "@/lib/tickets/mutations";
+
+type MutationActionResult = { ok: boolean; error?: TicketMutationErrorCode };
+
+/**
+ * The shared tail of the five single-ticket wrappers (D-02): each wrapper calls
+ * runTicketMutation with mode single, and this revalidates the ticket page only after the
+ * service returned success, never inside its transaction (D-08).
+ */
+function afterSingle(ticketId: string, result: TicketMutationResult): MutationActionResult {
+  if (!result.ok) return { ok: false, error: result.error };
+  revalidatePath(`/tickets/${ticketId}`);
+  return { ok: true };
+}
 
 /**
  * Moves a ticket to a new status through the one ticket mutation service (D-02, D-08), which
@@ -23,7 +39,7 @@ import { computeDueTimestamps, getSlaTargets } from "@/lib/tickets/sla";
 export async function changeStatus(
   ticketId: string,
   status: TicketStatus,
-): Promise<{ ok: boolean; error?: TicketMutationErrorCode }> {
+): Promise<MutationActionResult> {
   const actor = await getSessionActor();
   const result = await runTicketMutation({
     actor,
@@ -31,51 +47,27 @@ export async function changeStatus(
     op: { kind: "status", status },
     mode: "single",
   });
-  if (!result.ok) return { ok: false, error: result.error };
-
-  revalidatePath(`/tickets/${ticketId}`);
-  return { ok: true };
+  return afterSingle(ticketId, result);
 }
 
 /**
- * Changes priority and recomputes SLA due timestamps from the ticket's original
- * createdAt. CRITICAL (Pitfall 5): a priority change moves the due timestamps — a
- * downgrade pushes them into the future — and the SLA-flag job never clears flags, only
- * sets them. This same write MUST also reset isAtRisk/isBreached, otherwise a ticket
- * flagged at-risk/breached under the old (higher) priority keeps showing a stale
- * "At risk"/"Overdue" chip even though its new due date is safely in the future.
+ * Changes priority through the one ticket mutation service (D-02, D-08). The service writes the
+ * same seven fields as before (priority, both SLA target minutes from the organization's policy
+ * or the defaults, both due timestamps recomputed from createdAt, and cleared isAtRisk and
+ * isBreached, Pitfall 5) and one TicketAuditEvent. Re-applying the current priority is a no-op.
  */
 export async function changePriority(
   ticketId: string,
   priority: TicketPriority,
-): Promise<{ ok: boolean }> {
-  const { db } = await getScopedDb();
-
-  const ticket = await db.ticket.findFirst({ where: { id: ticketId } });
-  if (!ticket) return { ok: false };
-
-  const targets = await getSlaTargets(db, priority);
-  const { firstResponseDueAt, resolutionDueAt } = computeDueTimestamps(
-    ticket.createdAt,
-    targets.firstResponseMinutes,
-    targets.resolutionMinutes,
-  );
-
-  await db.ticket.update({
-    where: { id: ticketId },
-    data: {
-      priority,
-      firstResponseTargetMinutes: targets.firstResponseMinutes,
-      resolutionTargetMinutes: targets.resolutionMinutes,
-      firstResponseDueAt,
-      resolutionDueAt,
-      isAtRisk: false,
-      isBreached: false,
-    },
+): Promise<MutationActionResult> {
+  const actor = await getSessionActor();
+  const result = await runTicketMutation({
+    actor,
+    ticketIds: [ticketId],
+    op: { kind: "priority", priority },
+    mode: "single",
   });
-
-  revalidatePath(`/tickets/${ticketId}`);
-  return { ok: true };
+  return afterSingle(ticketId, result);
 }
 
 /**
@@ -192,54 +184,50 @@ export async function setTriageLanguage(
   return { ok: true };
 }
 
-/** Assigns (or unassigns, when `assigneeId` is null) a ticket to a workspace member. */
+/**
+ * Assigns (or unassigns, when `assigneeId` is null) a ticket through the one ticket mutation
+ * service. The assignee must be a member of the organization (D-02), checked inside the
+ * service's transaction; otherwise the result is MEMBER_NOT_ACTIVE and nothing changes.
+ */
 export async function assignTicket(
   ticketId: string,
   assigneeId: string | null,
-): Promise<{ ok: boolean }> {
-  const { db } = await getScopedDb();
-
-  await db.ticket.update({ where: { id: ticketId }, data: { assigneeId } });
-
-  revalidatePath(`/tickets/${ticketId}`);
-  return { ok: true };
+): Promise<MutationActionResult> {
+  const actor = await getSessionActor();
+  const result = await runTicketMutation({
+    actor,
+    ticketIds: [ticketId],
+    op: { kind: "assign", assigneeId },
+    mode: "single",
+  });
+  return afterSingle(ticketId, result);
 }
 
 /**
- * Finds-or-creates a Tag by name, then links it via a nested write scoped through the
- * parent Ticket (TicketTag is a pure join table, intentionally excluded from scopedDb's
- * DOMAIN_MODELS — see src/lib/scoped-db.ts).
+ * Adds a tag by name. The service finds or creates the tag inside its own transaction, after
+ * the actor's membership check and before the ticket lock (Codex review C1), so a refused
+ * request never leaves a new tag behind. This wrapper only forwards the raw name.
  */
-export async function addTag(ticketId: string, name: string): Promise<{ ok: boolean }> {
-  const trimmed = name.trim();
-  if (!trimmed) return { ok: false };
-
-  const { db, orgId } = await getScopedDb();
-
-  let tag = await db.tag.findFirst({ where: { name: trimmed } });
-  if (!tag) {
-    tag = await db.tag.create({ data: { organizationId: orgId, name: trimmed } });
-  }
-
-  await db.ticket.update({
-    where: { id: ticketId },
-    data: { tags: { create: { tagId: tag.id } } },
+export async function addTag(ticketId: string, name: string): Promise<MutationActionResult> {
+  const actor = await getSessionActor();
+  const result = await runTicketMutation({
+    actor,
+    ticketIds: [ticketId],
+    op: { kind: "addTagByName", name },
+    mode: "single",
   });
-
-  revalidatePath(`/tickets/${ticketId}`);
-  return { ok: true };
+  return afterSingle(ticketId, result);
 }
 
-export async function removeTag(ticketId: string, tagId: string): Promise<{ ok: boolean }> {
-  const { db } = await getScopedDb();
-
-  await db.ticket.update({
-    where: { id: ticketId },
-    data: { tags: { delete: { ticketId_tagId: { ticketId, tagId } } } },
+export async function removeTag(ticketId: string, tagId: string): Promise<MutationActionResult> {
+  const actor = await getSessionActor();
+  const result = await runTicketMutation({
+    actor,
+    ticketIds: [ticketId],
+    op: { kind: "removeTag", tagId },
+    mode: "single",
   });
-
-  revalidatePath(`/tickets/${ticketId}`);
-  return { ok: true };
+  return afterSingle(ticketId, result);
 }
 
 type CustomFieldWriteValue = string | number | boolean | null;
