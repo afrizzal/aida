@@ -1,0 +1,5 @@
+# Phase 11 — Deferred items (out of scope for the plan that found them)
+
+## Found during 11-07
+
+- **Flaky case in `tests/e2e/bulk-actions.spec.ts`** ("a tag added in bulk is offered by Remove tag, and removing it untags both tickets", line 163). In the combined regression run (`inbox`, `saved-views` and `bulk-actions` specs) it failed once with a Playwright strict-mode violation: `getByRole('option', { name: tag.name, exact: true })` found two options with the same `data-value`. The Add tag picker had not finished its close animation when the Remove tag picker opened, so both popovers listed the tag at the same moment. The bulk bar keeps a single `openPicker` state, so only one picker is logically open at a time. Re-running `bulk-actions.spec.ts` alone passed 6/6. 11-07 does not touch the bulk bar, the selection or this spec. A possible fix: wait for the Add tag listbox to be hidden before clicking Remove tag, or scope the option locator to the open popover. Owner: the phase gate (11-09) or a later fix.
