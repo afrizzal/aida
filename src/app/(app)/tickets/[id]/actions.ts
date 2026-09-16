@@ -11,29 +11,27 @@ import type {
 import { getBoss } from "@/lib/queue/boss-client";
 import type { GenerateDraftResult } from "@/lib/rag/generate-draft";
 import { generateDraftReply as runGenerateDraft } from "@/lib/rag/generate-draft";
-import { getScopedDb } from "@/lib/session";
+import { getScopedDb, getSessionActor } from "@/lib/session";
+import { runTicketMutation, type TicketMutationErrorCode } from "@/lib/tickets/mutations";
 import { computeDueTimestamps, getSlaTargets } from "@/lib/tickets/sla";
 
-const TERMINAL_STATUSES: readonly TicketStatus[] = ["RESOLVED", "CLOSED"];
-
 /**
- * Moves a ticket to a new status. Resolving/closing stamps `resolvedAt` and clears the
- * at-risk/breach flags in the SAME write (the sla-flag worker job is one-directional —
- * it only ever sets these flags, never clears them). Reopening (moving off a terminal
- * status) clears `resolvedAt` so the resolution SLA clock resumes.
+ * Moves a ticket to a new status through the one ticket mutation service (D-02, D-08), which
+ * checks the actor's membership, stamps or clears `resolvedAt` and the SLA flags exactly as
+ * before, and writes one TicketAuditEvent. The page is revalidated only after success.
  */
 export async function changeStatus(
   ticketId: string,
   status: TicketStatus,
-): Promise<{ ok: boolean }> {
-  const { db } = await getScopedDb();
-
-  await db.ticket.update({
-    where: { id: ticketId },
-    data: TERMINAL_STATUSES.includes(status)
-      ? { status, resolvedAt: new Date(), isAtRisk: false, isBreached: false }
-      : { status, resolvedAt: null },
+): Promise<{ ok: boolean; error?: TicketMutationErrorCode }> {
+  const actor = await getSessionActor();
+  const result = await runTicketMutation({
+    actor,
+    ticketIds: [ticketId],
+    op: { kind: "status", status },
+    mode: "single",
   });
+  if (!result.ok) return { ok: false, error: result.error };
 
   revalidatePath(`/tickets/${ticketId}`);
   return { ok: true };
