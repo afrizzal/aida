@@ -122,6 +122,14 @@ Tracer feedback gate: Task 1's `<verify>` (typecheck, lint, the E2E file) passed
 
 - A flaky case in the 11-06 spec `bulk-actions.spec.ts` ("a tag added in bulk is offered by Remove tag…") failed once in the combined regression run and passed on the re-run. While the Add tag picker was still animating closed, the Remove tag picker opened, so the tag appeared as two options and tripped Playwright's strict mode. Nothing in this plan touches the bulk bar. Recorded in `.planning/phases/11-inbox/deferred-items.md`.
 
+## Follow-up fix (orchestrator)
+
+- **Symptom:** E2E case 3 ("Create ticket from another page…") failed every time the spec ran alone and in two combined runs. The palette pushed `/tickets?new=1`, and the page then landed back on `/contacts` with no "New Ticket" dialog.
+- **Root cause (product bug, not the palette):** `ContactSearch` (`src/app/(app)/contacts/contact-search.tsx`) called `router.replace("/contacts")` 300 ms after every mount, even with nothing typed. The /contacts page stays mounted until a navigation away commits, so its timer was not cleared. A navigation started within those 300 ms was overridden by that later replace. A CDP initiator stack confirmed this: the `/tickets?new=1` RSC request came from the palette's `create.ticket` command, and the `/contacts` RSC request came from `ContactSearch.useEffect` through `setTimeout` and `router.replace`. The new-ticket dialog's `?new=1` effect never ran. A real user who chose Create ticket, any palette command, or a sidebar link within 300 ms of opening Contacts was sent back the same way. The 11-07 run passed only because its click came after the timer had fired.
+- **Fix (9eddbd9):** the effect returns early when the trimmed search text equals the URL's `q`. This is the same guard `TicketSearchInput` already uses. The palette, the dialog and the spec are unchanged, and the test still asserts as strictly as before.
+- **Verification:** `pnpm typecheck` 0; `pnpm lint` 0; `pnpm test:e2e tests/e2e/command-palette.spec.ts` three runs in a row, exit 0 each time, 9/9; `command-palette` + `bulk-actions` + `inbox` + `saved-views` together: exit 0, 31 passed; `contacts.spec.ts` + `uat-gaps.spec.ts`: exit 0, 10 passed and 1 skip that was already in the spec.
+- **Residual, not fixed:** if a user types in the contacts search and navigates away within 300 ms, the debounced replace can still override that navigation, because a changed query really does need a replace.
+
 ## Threat model dispositions
 
 - T-11-32: mitigated. The provider receives only the layout's `sidebarViewsOrEmpty(listSavedViewsForViewer)` output: the viewer's own private views and the shared views. 11-05's E2E covers the member case.
