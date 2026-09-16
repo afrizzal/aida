@@ -3,6 +3,7 @@ import Link from "next/link";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { getScopedDb } from "@/lib/session";
+import { MAX_LIST_LIMIT } from "@/lib/tickets/list-filters";
 import { fetchTicketList, parseTicketListFilters } from "@/lib/tickets/list-query";
 import { FilterChipRow } from "./filter-chip-row";
 import { TicketListRow } from "./ticket-list-row";
@@ -34,7 +35,11 @@ export async function TicketListPanel({
   ]);
 
   const limit = filters.limit ?? 50;
-  const canLoadMore = tickets.length === limit;
+  // A full page means more rows may exist. Below the cap, offer "Load more"; at the cap
+  // (D-03, UI-SPEC Assumption 12) show the Load-more cap line instead.
+  const pageIsFull = tickets.length === limit;
+  const canLoadMore = pageIsFull && limit < MAX_LIST_LIMIT;
+  const reachedCap = pageIsFull && limit >= MAX_LIST_LIMIT;
 
   return (
     <aside className="flex h-full w-[360px] shrink-0 flex-col overflow-y-auto border-r border-border">
@@ -72,6 +77,11 @@ export async function TicketListPanel({
               </Button>
             </div>
           )}
+          {reachedCap && (
+            <p className="py-4 text-center text-[12px] text-muted-foreground">
+              Showing the first {MAX_LIST_LIMIT} tickets. Narrow the filters to see others.
+            </p>
+          )}
         </>
       )}
     </aside>
@@ -92,6 +102,6 @@ function buildLoadMoreHref(
       params.set(key, value);
     }
   }
-  params.set("limit", String(limit + LOAD_MORE_STEP));
+  params.set("limit", String(Math.min(limit + LOAD_MORE_STEP, MAX_LIST_LIMIT)));
   return `${basePath}?${params.toString()}`;
 }

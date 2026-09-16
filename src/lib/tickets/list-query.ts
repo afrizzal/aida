@@ -1,11 +1,9 @@
 import type { TicketStatus } from "@/generated/prisma/client";
 import type { scopedDb } from "@/lib/scoped-db";
-import { parseCfParam } from "@/lib/tickets/cf-param";
+import { DEFAULT_TICKET_LIST_LIMIT, parseUrlFilters } from "@/lib/tickets/list-filters";
 import { searchTickets } from "@/lib/tickets/search";
 
-export const DEFAULT_TICKET_LIST_LIMIT = 50;
-
-const VALID_STATUSES: readonly TicketStatus[] = ["NEW", "OPEN", "PENDING", "RESOLVED", "CLOSED"];
+export { DEFAULT_TICKET_LIST_LIMIT };
 
 export interface TicketListFilters {
   view?: "unassigned" | "mine" | "all";
@@ -26,36 +24,22 @@ export interface FetchTicketListCtx {
   userId: string;
 }
 
-function toSingleParam(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
 /**
- * Converts raw Next.js `searchParams` into typed `TicketListFilters` — the single
- * parsing site that must stay in lockstep with FilterChipRow's URL scheme
- * (view/status/tag/cf/q/limit).
+ * Converts raw Next.js `searchParams` into typed `TicketListFilters`. Delegates to the one
+ * inbox filter grammar, parseUrlFilters in list-filters.ts (D-03), which FilterChipRow and
+ * saved views share; `limit` is clamped to 1..MAX_LIST_LIMIT there.
  */
 export function parseTicketListFilters(
   searchParams: Record<string, string | string[] | undefined>,
 ): TicketListFilters {
-  const view = toSingleParam(searchParams.view);
-  const status = toSingleParam(searchParams.status);
-  const tag = toSingleParam(searchParams.tag);
-  const cf = toSingleParam(searchParams.cf);
-  const q = toSingleParam(searchParams.q);
-  const limit = toSingleParam(searchParams.limit);
-
-  const statuses = status
-    ?.split(",")
-    .filter((s): s is TicketStatus => (VALID_STATUSES as string[]).includes(s));
-
+  const { filters, limit } = parseUrlFilters(searchParams);
   return {
-    view: view === "unassigned" || view === "mine" ? view : "all",
-    statuses: statuses && statuses.length > 0 ? statuses : undefined,
-    tagId: tag || undefined,
-    cf: cf ? parseCfParam(cf) : undefined,
-    q: q || undefined,
-    limit: limit ? Number(limit) || DEFAULT_TICKET_LIST_LIMIT : DEFAULT_TICKET_LIST_LIMIT,
+    view: filters.view,
+    statuses: filters.statuses.length > 0 ? [...filters.statuses] : undefined,
+    tagId: filters.tagId,
+    cf: filters.cf,
+    q: filters.q,
+    limit,
   };
 }
 
