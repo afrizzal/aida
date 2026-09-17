@@ -223,6 +223,47 @@ test.describe("Bulk actions", () => {
     expect(await prisma.ticketAuditEvent.count({ where: { ticketId: kept.id } })).toBe(0);
   });
 
+  test("after a bulk action, and after a refused one, keyboard focus is back on the picker's trigger (review IN-04)", async ({
+    page,
+  }) => {
+    const token = tokenFor("focus");
+    const [first, second] = await seedTickets(token, 2);
+    await openInbox(page, `q=${token}`, first.subject);
+
+    // Hold every server-action POST for one second, so the call is still pending when the
+    // picker finishes closing (a fast local server would otherwise hide the lost focus).
+    await page.route(
+      (url) => url.pathname === "/tickets",
+      async (route) => {
+        if (route.request().method() === "POST") {
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+        }
+        await route.fallback();
+      },
+    );
+
+    await rowCheckbox(page, first.subject).click();
+    await rowCheckbox(page, second.subject).click();
+    const bar = bulkBar(page);
+    await expect(bar.getByText("2 tickets selected")).toBeVisible();
+
+    const priority = bar.getByRole("button", { name: "Priority" });
+    await priority.click();
+    await openPickerPopover(page).getByRole("option", { name: "High" }).click();
+    await expect(page.getByText("Applied to 2 tickets.")).toBeVisible();
+    await expect(priority).toBeEnabled();
+    await expect(priority).toBeFocused();
+
+    // A refused batch ends the same way: the alert explains, focus stays on the trigger.
+    await prisma.ticket.delete({ where: { id: second.id } });
+    const status = bar.getByRole("button", { name: "Status" });
+    await status.click();
+    await openPickerPopover(page).getByRole("option", { name: "Pending" }).click();
+    await expect(bar.getByRole("alert")).toContainText("Nothing was changed.");
+    await expect(status).toBeEnabled();
+    await expect(status).toBeFocused();
+  });
+
   test("the selection survives opening a ticket and clears when a filter changes", async ({
     page,
   }) => {

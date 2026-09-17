@@ -1,7 +1,7 @@
 "use client";
 
 import { CircleDot, Flag, Loader2, type LucideIcon, Minus, Plus, UserRound, X } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -107,6 +107,9 @@ export function BulkActionBar({
   const [pending, setPending] = useState(false);
   const [openPicker, setOpenPicker] = useState<Picker | null>(null);
   const [failure, setFailure] = useState<BulkFailure | null>(null);
+  // The picker whose trigger gets focus back once the call ends (review IN-04). While pending
+  // every trigger is disabled (Surface 3b), so radix's return of focus on close lands on <body>.
+  const [refocus, setRefocus] = useState<Picker | null>(null);
 
   // Report the rendered list so the selection is pruned to tickets on screen (Surface 3a).
   const loadedKey = loaded.map((ticket) => ticket.id).join(",");
@@ -127,6 +130,7 @@ export function BulkActionBar({
   const removableTags = tags.filter((tag) => tagIdsOnSelection.has(tag.id));
 
   async function run(op: BulkOp, memberName?: string) {
+    setRefocus(openPicker);
     setOpenPicker(null);
     setFailure(null);
     const ticketIds = [...selectedIds];
@@ -152,6 +156,8 @@ export function BulkActionBar({
     open: openPicker === picker,
     onOpenChange: (open: boolean) => setOpenPicker(open ? picker : null),
     disabled: pending,
+    refocus: !pending && refocus === picker,
+    onRefocused: () => setRefocus(null),
   });
 
   return (
@@ -249,6 +255,8 @@ function PickerButton({
   open,
   onOpenChange,
   disabled,
+  refocus,
+  onRefocused,
   children,
 }: {
   icon: LucideIcon;
@@ -256,12 +264,30 @@ function PickerButton({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   disabled: boolean;
+  /** True once a bulk call started from this picker has ended: focus returns to the trigger. */
+  refocus: boolean;
+  onRefocused: () => void;
   children: ReactNode;
 }) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  // Runs after the commit that re-enabled the trigger, so focus() is not refused.
+  useEffect(() => {
+    if (!refocus) return;
+    triggerRef.current?.focus();
+    onRefocused();
+  }, [refocus, onRefocused]);
+
   return (
     <Popover open={open && !disabled} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="text-[13px]" disabled={disabled}>
+        <Button
+          ref={triggerRef}
+          variant="outline"
+          size="sm"
+          className="text-[13px]"
+          disabled={disabled}
+        >
           <Icon />
           {label}
         </Button>
