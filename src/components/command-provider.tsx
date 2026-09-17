@@ -10,6 +10,9 @@
 // through useRegisterCommands (the inbox's views.save; 11-08's ticket-page and list commands;
 // Phase 16, AIDA-86).
 //
+// The keyboard dispatcher (src/components/keyboard/keyboard-dispatcher.tsx, 11-08) is mounted
+// here once; this provider holds its pending chord and the help modal's open state.
+//
 // The views list comes from the layout, which read it through sidebarViewsOrEmpty
 // (src/lib/saved-views/ui-state.ts): only the viewer's own private views and the organization's
 // shared views reach the client, and a removed member gets empty lists, never a thrown
@@ -26,6 +29,7 @@ import {
   useState,
 } from "react";
 import { CommandPalette } from "@/components/command-palette";
+import { KeyboardDispatcher } from "@/components/keyboard/keyboard-dispatcher";
 import {
   type Command,
   type CommandContext,
@@ -33,6 +37,7 @@ import {
   type CommandRegistry,
   createCommandRegistry,
 } from "@/lib/commands/registry";
+import type { ChordState } from "@/lib/keyboard/dispatch";
 import type { SidebarViews } from "@/lib/saved-views/ui-state";
 
 interface CommandsValue {
@@ -49,6 +54,12 @@ interface CommandsValue {
    * goes to /tickets?new=1 when none is registered (UI-SPEC Assumption 11). Returns unregister.
    */
   registerNewTicketOpener(open: () => void): () => void;
+  /** Whether the keyboard shortcuts help modal is open (11-08, UI-SPEC 5e). */
+  helpOpen: boolean;
+  setHelpOpen(open: boolean): void;
+  openHelp(): void;
+  /** The pending g chord of the keyboard dispatcher, or null (11-08, UI-SPEC 5d). */
+  chord: ChordState | null;
 }
 
 const CommandsContext = createContext<CommandsValue | null>(null);
@@ -144,12 +155,15 @@ export function CommandProvider({ views, children }: CommandProviderProps) {
   const [open, setOpen] = useState(false);
   const [registry] = useState(createCommandRegistry);
   const newTicketOpener = useRef<(() => void) | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [chord, setChord] = useState<ChordState | null>(null);
 
   const context = useMemo(() => buildContext(pathname, query), [pathname, query]);
 
   const openPalette = useCallback(() => setOpen(true), []);
   const closePalette = useCallback(() => setOpen(false), []);
   const togglePalette = useCallback(() => setOpen((current) => !current), []);
+  const openHelp = useCallback(() => setHelpOpen(true), []);
 
   const registerNewTicketOpener = useCallback((openDialog: () => void) => {
     newTicketOpener.current = openDialog;
@@ -225,13 +239,29 @@ export function CommandProvider({ views, children }: CommandProviderProps) {
       registry,
       context,
       registerNewTicketOpener,
+      helpOpen,
+      setHelpOpen,
+      openHelp,
+      chord,
     }),
-    [open, openPalette, closePalette, togglePalette, registry, context, registerNewTicketOpener],
+    [
+      open,
+      openPalette,
+      closePalette,
+      togglePalette,
+      registry,
+      context,
+      registerNewTicketOpener,
+      helpOpen,
+      openHelp,
+      chord,
+    ],
   );
 
   return (
     <CommandsContext.Provider value={value}>
       {children}
+      <KeyboardDispatcher setChord={setChord} openHelp={openHelp} />
       <CommandPalette open={open} onOpenChange={setOpen} registry={registry} context={context} />
     </CommandsContext.Provider>
   );
