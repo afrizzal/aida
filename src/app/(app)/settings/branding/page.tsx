@@ -1,6 +1,7 @@
 import { getOrgRole } from "@/lib/authz";
 import { getBrandingSettings } from "@/lib/branding/settings";
 import { prisma } from "@/lib/db";
+import { isAdminRole } from "@/lib/membership";
 import { getScopedDb } from "@/lib/session";
 import { BrandingForm } from "./branding-form";
 
@@ -16,7 +17,7 @@ export default async function BrandingSettingsPage() {
   });
   const branding = await getBrandingSettings(db, org?.name ?? "AIDA");
   const role = await getOrgRole();
-  const canEdit = role === "owner" || role === "admin";
+  const canEdit = isAdminRole(role);
 
   return (
     <div className="space-y-6">

@@ -1,6 +1,7 @@
 import type { TicketPriority } from "@/generated/prisma/client";
 import { getOrgRole } from "@/lib/authz";
 import { prisma } from "@/lib/db";
+import { isAdminRole } from "@/lib/membership";
 import { getScopedDb } from "@/lib/session";
 import { readAutoCloseSettings } from "@/lib/tickets/auto-close-settings";
 import { DEFAULT_SLA_TARGETS } from "@/lib/tickets/sla";
@@ -28,7 +29,7 @@ export default async function SlaPoliciesPage() {
   // Auto-close card (Phase 11, AIDA-51): stored values, editable by owners and admins only.
   const autoClose = await readAutoCloseSettings(prisma, orgId);
   const role = await getOrgRole();
-  const canEdit = role === "owner" || role === "admin";
+  const canEdit = isAdminRole(role);
 
   return (
     <div className="space-y-6">

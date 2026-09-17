@@ -30,7 +30,7 @@
 // Every read uses an explicit organizationId predicate (T-11-13). Relative imports only and no
 // Next.js import: cache revalidation belongs to the server actions.
 import type { Prisma, PrismaClient, SavedViewVisibility } from "../../generated/prisma/client";
-import { findActiveMembership } from "../membership";
+import { findActiveMembership, isAdminRole } from "../membership";
 import {
   filtersEqual,
   filtersToSearchParams,
@@ -306,13 +306,6 @@ export async function listSavedViewsForViewer(
     }),
   ]);
   return { private: toListItems(privateRows), shared: toListItems(sharedRows) };
-}
-
-const ADMIN_ROLES = new Set(["owner", "admin"]);
-
-/** Better Auth stores one role, or several separated by commas. */
-function isAdminRole(role: string): boolean {
-  return role.split(",").some((r) => ADMIN_ROLES.has(r.trim()));
 }
 
 /** Ids are cuid strings; anything else cannot name a view. */

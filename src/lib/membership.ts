@@ -37,3 +37,15 @@ export async function findActiveMembership(
   });
   return row ? { id: row.id, role: row.role } : null;
 }
+
+const ADMIN_ROLES = new Set(["owner", "admin"]);
+
+/**
+ * The one owner/admin rule (review IN-05). Better Auth stores one role, or several separated by
+ * commas ("member,admin"); a member is an admin when any of them is "owner" or "admin". Every
+ * admin check (settings pages and actions, auto-close, shared saved views) goes through here.
+ */
+export function isAdminRole(role: string | null | undefined): boolean {
+  if (!role) return false;
+  return role.split(",").some((r) => ADMIN_ROLES.has(r.trim()));
+}

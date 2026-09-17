@@ -22,7 +22,7 @@
 // passes the unscoped client. Relative imports only: the worker bundles this module.
 import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "../../generated/prisma/client";
-import { findActiveMembership } from "../membership";
+import { findActiveMembership, isAdminRole } from "../membership";
 import { parseAutoCloseDays } from "./auto-close-days";
 
 export const AUTO_CLOSE_DAYS_KEY = "autoCloseResolvedAfterDays";
@@ -151,8 +151,6 @@ export interface AutoCloseSaveOptions {
 /** Needs $transaction and the member delegate: the global prisma client. */
 type SaveClient = Pick<PrismaClient, "$transaction" | "member">;
 
-const EDITOR_ROLES = new Set(["owner", "admin"]);
-
 /**
  * Saves the days setting for the actor's organization (owners and admins only, D-15, D-01).
  * Stores the canonical decimal ("007" → "7") and sets, keeps or clears autoCloseEnabledAt.
@@ -169,7 +167,7 @@ export async function saveAutoCloseDays(
 
   const membership = await findActiveMembership(client, actor?.userId, actor?.orgId);
   if (!membership) return { ok: false, error: "MEMBERSHIP_ENDED" };
-  if (!EDITOR_ROLES.has(membership.role)) return { ok: false, error: "NOT_ALLOWED" };
+  if (!isAdminRole(membership.role)) return { ok: false, error: "NOT_ALLOWED" };
   const parsed = parseAutoCloseDays(raw);
   if (!parsed.ok) return { ok: false, error: "INVALID" };
 

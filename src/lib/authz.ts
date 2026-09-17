@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { isAdminRole } from "@/lib/membership";
 import { requireSession } from "@/lib/session";
 
 /**
@@ -17,11 +18,11 @@ export async function getOrgRole(): Promise<string | null> {
 
 /**
  * Server-side admin gate. Throws unless the current user's role in the active organization
- * is "owner" or "admin". Every mutating Settings Server Action must call this first
+ * includes "owner" or "admin" (isAdminRole, the one rule for every admin check). Every mutating Settings Server Action must call this first
  * (SECURITY.md: server-side authz on every mutating route, not just hidden UI).
  */
 export async function requireOrgAdmin(): Promise<string> {
   const role = await getOrgRole();
-  if (role !== "owner" && role !== "admin") throw new Error("Forbidden: admin role required");
+  if (!role || !isAdminRole(role)) throw new Error("Forbidden: admin role required");
   return role;
 }
