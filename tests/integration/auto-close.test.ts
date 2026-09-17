@@ -11,6 +11,7 @@ import {
 } from "@/lib/tickets/auto-close-settings";
 import {
   type AutoCloseHandlerOptions,
+  AutoCloseRunError,
   autoCloseHandler,
   closeResolvedTicketIfQuiet,
 } from "@/lib/worker/jobs/auto-close";
@@ -166,6 +167,70 @@ describe("saveAutoCloseDays (D-15, D-01)", () => {
       error: "MEMBERSHIP_ENDED",
     });
     expect(await storedSettings(orgId)).toEqual({ days: null, enabledAt: null });
+  });
+});
+
+describe("autoCloseHandler isolates each organization (review WR-02)", () => {
+  it("a failing organization is logged by error code, later organizations still close, and the run rejects", async () => {
+    const now = new Date();
+    const a = await seedAdminOrg();
+    const b = await seedAdminOrg();
+    // Organizations run in id order: make the failing one the first of the two.
+    const [failing, healthy] = a.orgId < b.orgId ? [a, b] : [b, a];
+    await setAutoClose(failing.orgId, "7", daysAgo(now, 30));
+    await setAutoClose(healthy.orgId, "7", daysAgo(now, 30));
+    const broken = await resolvedTicket(failing.orgId, daysAgo(now, 10));
+    const quiet = await resolvedTicket(healthy.orgId, daysAgo(now, 10));
+    const subject = (
+      await prisma.ticket.findUniqueOrThrow({ where: { id: broken.id }, select: { subject: true } })
+    ).subject;
+
+    const lines: string[] = [];
+    const outcome = await autoCloseHandler(undefined, {
+      now,
+      log: (line) => lines.push(line),
+      onCloseTransaction(_tx, ticketId) {
+        if (ticketId !== broken.id) return;
+        // A database-style error whose message carries ticket text: only the code may be logged.
+        throw Object.assign(new Error(`deadlock while closing "${subject}"`), { code: "40P01" });
+      },
+    }).then(
+      () => null,
+      (err: unknown) => err,
+    );
+
+    // The failing organization's ticket is untouched; the later organization still ran.
+    expect((await ticketState(broken.id)).status).toBe("RESOLVED");
+    expect(await autoClosedRows(broken.id)).toHaveLength(0);
+    expect((await ticketState(quiet.id)).status).toBe("CLOSED");
+    expect(await autoClosedRows(quiet.id)).toHaveLength(1);
+
+    expect(outcome).toBeInstanceOf(AutoCloseRunError);
+    const result = (outcome as AutoCloseRunError).result;
+    expect(result.failedOrganizations).toContainEqual({
+      orgId: failing.orgId,
+      code: "40P01",
+      closed: 0,
+    });
+    expect(result.organizations.find((o) => o.orgId === failing.orgId)).toBeUndefined();
+    expect(result.organizations.find((o) => o.orgId === healthy.orgId)).toMatchObject({
+      closed: 1,
+      skippedWithoutResolvedAt: 0,
+      stoppedOff: false,
+    });
+
+    expect(lines.filter((l) => l.includes(`org=${failing.orgId}`))).toEqual([
+      `[auto-close] org=${failing.orgId} failed code=40P01 closed=0`,
+    ]);
+    expect(lines.filter((l) => l.includes(`org=${healthy.orgId}`))).toEqual([
+      `[auto-close] org=${healthy.orgId} closed=1 skippedWithoutResolvedAt=0`,
+    ]);
+    expect(lines.join("\n")).not.toContain(subject);
+
+    // The run is idempotent: once the fault is gone, the next run closes the skipped ticket.
+    const retry = await runJob(failing.orgId, now);
+    expect(retry.org?.closed).toBe(1);
+    expect((await ticketState(broken.id)).status).toBe("CLOSED");
   });
 });
 

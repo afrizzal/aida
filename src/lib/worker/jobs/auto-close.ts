@@ -16,7 +16,12 @@
 // longer RESOLVED; replies from the team, internal notes and automatic mail do not restart it.
 //
 // Nothing is sent to anyone (D-19, owner item O-2): no outbound queue, no mail, no AI call. The
-// log line carries the organization id and counts only, never ticket text.
+// log line carries the organization id, counts and, on a failure, the error code only, never
+// ticket text.
+//
+// Each organization is isolated (review WR-02): an error in one is logged and the run continues
+// with the next, so one tenant's fault never starves the others. A run with a failed
+// organization ends by throwing AutoCloseRunError, so pg-boss records it as failed and retries.
 //
 // Relative imports only: the worker bundles this module.
 import type { Prisma } from "../../../generated/prisma/client";
@@ -103,19 +108,67 @@ export interface AutoCloseOrgResult {
   stoppedOff: boolean;
 }
 
+export interface AutoCloseFailedOrg {
+  orgId: string;
+  /** The error's code (a Prisma or Postgres code) or its class name; never its message. */
+  code: string;
+  /** Tickets this run had already closed (and committed) in the organization before the error. */
+  closed: number;
+}
+
 export interface AutoCloseRunResult {
   organizations: AutoCloseOrgResult[];
   invalidOrganizations: string[];
+  /** Organizations whose run stopped on an error; the other organizations still ran. */
+  failedOrganizations: AutoCloseFailedOrg[];
 }
 
-/** The daily job (D-18). Returns what it did; the log line per organization says the same. */
+/**
+ * Thrown at the end of a run in which at least one organization failed, after every other
+ * organization was processed (review WR-02), so pg-boss records the job as failed and retries
+ * it. The run is idempotent: a retry closes only what is still due. result says what was done.
+ */
+export class AutoCloseRunError extends Error {
+  readonly result: AutoCloseRunResult;
+
+  constructor(result: AutoCloseRunResult) {
+    super(`auto-close failed for ${result.failedOrganizations.length} organization(s)`);
+    this.name = "AutoCloseRunError";
+    this.result = result;
+  }
+}
+
+const SAFE_CODE = /^[A-Za-z0-9_]{1,64}$/;
+
+/**
+ * A loggable identifier for an error: its code (Prisma "P2034", Postgres "40P01") or its class
+ * name. The message is never used, because a database error can quote ticket text.
+ */
+function errorCode(err: unknown): string {
+  if (err && typeof err === "object") {
+    const { code, name } = err as { code?: unknown; name?: unknown };
+    if (typeof code === "string" && SAFE_CODE.test(code)) return code;
+    if (typeof name === "string" && SAFE_CODE.test(name)) return name;
+  }
+  return "unknown";
+}
+
+/**
+ * The daily job (D-18). Returns what it did; the log line per organization says the same. Each
+ * organization runs on its own: an error in one is logged by code and the run goes on with the
+ * next (review WR-02); if any organization failed, the run then throws AutoCloseRunError.
+ */
 export async function autoCloseHandler(
   _data?: unknown,
   opts: AutoCloseHandlerOptions = {},
 ): Promise<AutoCloseRunResult> {
   const now = opts.now ?? new Date();
   const log = opts.log ?? ((line: string) => console.log(line));
-  const result: AutoCloseRunResult = { organizations: [], invalidOrganizations: [] };
+  const result: AutoCloseRunResult = {
+    organizations: [],
+    invalidOrganizations: [],
+    failedOrganizations: [],
+  };
 
   const orgRows = await prisma.setting.findMany({
     where: { key: AUTO_CLOSE_DAYS_KEY },
@@ -124,51 +177,71 @@ export async function autoCloseHandler(
   });
 
   for (const { organizationId: orgId } of orgRows) {
-    const settings = await readAutoCloseSettings(prisma, orgId);
-    if (settings.invalid) {
-      result.invalidOrganizations.push(orgId);
-      log(`[auto-close] org=${orgId} setting invalid, treated as off`);
-      continue;
+    const progress = { closed: 0 };
+    try {
+      await autoCloseOrganization(orgId, now, opts, log, result, progress);
+    } catch (err) {
+      const code = errorCode(err);
+      result.failedOrganizations.push({ orgId, code, closed: progress.closed });
+      log(`[auto-close] org=${orgId} failed code=${code} closed=${progress.closed}`);
     }
-    if (settings.days === 0 || !settings.enabledAt) continue;
-
-    const cutoff = new Date(now.getTime() - settings.days * DAY_MS);
-    const enabledAt = settings.enabledAt;
-
-    const skippedWithoutResolvedAt = await prisma.ticket.count({
-      where: { organizationId: orgId, status: "RESOLVED", resolvedAt: null },
-    });
-
-    const candidates = await prisma.$queryRaw<{ id: string }[]>`
-      SELECT "id" FROM "Ticket"
-      WHERE "organizationId" = ${orgId}
-        AND "status" = 'RESOLVED'
-        AND "resolvedAt" IS NOT NULL
-        AND GREATEST("resolvedAt", ${enabledAt}) <= ${cutoff}
-      ORDER BY GREATEST("resolvedAt", ${enabledAt}) ASC, "id" ASC
-      LIMIT ${MAX_AUTO_CLOSE_PER_ORG}
-    `;
-
-    let closed = 0;
-    let stoppedOff = false;
-    for (const { id: ticketId } of candidates) {
-      const outcome = await prisma.$transaction(async (tx) => {
-        if (opts.onCloseTransaction) await opts.onCloseTransaction(tx, ticketId);
-        return closeResolvedTicketIfQuiet(tx, { orgId, ticketId, now });
-      }, TRANSACTION_OPTIONS);
-      if (outcome.off) {
-        stoppedOff = true;
-        break;
-      }
-      if (outcome.closed) closed += 1;
-    }
-
-    result.organizations.push({ orgId, closed, skippedWithoutResolvedAt, stoppedOff });
-    log(
-      `[auto-close] org=${orgId} closed=${closed} skippedWithoutResolvedAt=${skippedWithoutResolvedAt}` +
-        (stoppedOff ? " stopped=setting-off" : ""),
-    );
   }
 
+  if (result.failedOrganizations.length > 0) throw new AutoCloseRunError(result);
   return result;
+}
+
+/** One organization's run; pushes its result and log line. Throws on any error. */
+async function autoCloseOrganization(
+  orgId: string,
+  now: Date,
+  opts: AutoCloseHandlerOptions,
+  log: (line: string) => void,
+  result: AutoCloseRunResult,
+  progress: { closed: number },
+): Promise<void> {
+  const settings = await readAutoCloseSettings(prisma, orgId);
+  if (settings.invalid) {
+    result.invalidOrganizations.push(orgId);
+    log(`[auto-close] org=${orgId} setting invalid, treated as off`);
+    return;
+  }
+  if (settings.days === 0 || !settings.enabledAt) return;
+
+  const cutoff = new Date(now.getTime() - settings.days * DAY_MS);
+  const enabledAt = settings.enabledAt;
+
+  const skippedWithoutResolvedAt = await prisma.ticket.count({
+    where: { organizationId: orgId, status: "RESOLVED", resolvedAt: null },
+  });
+
+  const candidates = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT "id" FROM "Ticket"
+    WHERE "organizationId" = ${orgId}
+      AND "status" = 'RESOLVED'
+      AND "resolvedAt" IS NOT NULL
+      AND GREATEST("resolvedAt", ${enabledAt}) <= ${cutoff}
+    ORDER BY GREATEST("resolvedAt", ${enabledAt}) ASC, "id" ASC
+    LIMIT ${MAX_AUTO_CLOSE_PER_ORG}
+  `;
+
+  let stoppedOff = false;
+  for (const { id: ticketId } of candidates) {
+    const outcome = await prisma.$transaction(async (tx) => {
+      if (opts.onCloseTransaction) await opts.onCloseTransaction(tx, ticketId);
+      return closeResolvedTicketIfQuiet(tx, { orgId, ticketId, now });
+    }, TRANSACTION_OPTIONS);
+    if (outcome.off) {
+      stoppedOff = true;
+      break;
+    }
+    if (outcome.closed) progress.closed += 1;
+  }
+
+  const closed = progress.closed;
+  result.organizations.push({ orgId, closed, skippedWithoutResolvedAt, stoppedOff });
+  log(
+    `[auto-close] org=${orgId} closed=${closed} skippedWithoutResolvedAt=${skippedWithoutResolvedAt}` +
+      (stoppedOff ? " stopped=setting-off" : ""),
+  );
 }
