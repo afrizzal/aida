@@ -7,6 +7,7 @@ import { useCommands } from "@/components/command-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { UserMenu } from "@/components/user-menu";
+import { isApplePlatform, subscribeNever } from "@/lib/keyboard/platform";
 
 interface TopBarUser {
   name: string;
@@ -29,16 +30,6 @@ function getPageTitle(pathname: string): string {
     if (pathname.startsWith(prefix)) return title;
   }
   return "AIDA";
-}
-
-function isApplePlatform(): boolean {
-  const data = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData;
-  const platform = data?.platform || navigator.platform || navigator.userAgent;
-  return /mac|iphone|ipad|ipod/i.test(platform);
-}
-
-function subscribeNever(): () => void {
-  return () => {};
 }
 
 /**

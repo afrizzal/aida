@@ -8,6 +8,7 @@
 // to MAX_LIST_LIMIT, and never stored in a saved view. `mine` always means the viewer; the
 // grammar stores the word, never a user id.
 import { z } from "zod/v4";
+import { cut } from "../text/cut";
 import { parseCfParam, serializeCfParam } from "./cf-param";
 
 /** Ticket statuses in enum order (prisma/schema.prisma TicketStatus). */
@@ -62,14 +63,6 @@ function readParam(source: SearchParamsLike, key: string): string | undefined {
   }
   const value = (source as Record<string, string | string[] | undefined>)[key];
   return Array.isArray(value) ? value[0] : value;
-}
-
-/** Cuts to max UTF-16 units without leaving a lone high surrogate at the end. */
-function cut(text: string, max: number): string {
-  if (text.length <= max) return text;
-  const sliced = text.slice(0, max);
-  const last = sliced.charCodeAt(sliced.length - 1);
-  return last >= 0xd800 && last <= 0xdbff ? sliced.slice(0, -1) : sliced;
 }
 
 function orderStatuses(list: readonly string[]): InboxTicketStatus[] {

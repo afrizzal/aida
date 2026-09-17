@@ -5,27 +5,22 @@
 // its caps with a 12px muted "then" between the steps.
 import { Fragment, useSyncExternalStore } from "react";
 import { type KeymapEntry, keyCaps } from "@/lib/keyboard/keymap";
+import { isApplePlatform, subscribeNever } from "@/lib/keyboard/platform";
 import { cn } from "@/lib/utils";
 
 export const KEY_CAP_CLASS =
   "inline-flex h-5 min-w-5 items-center justify-center rounded border border-border bg-muted px-1 font-mono text-[12px] text-foreground";
-
-function isApplePlatform(): boolean {
-  const data = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData;
-  const platform = data?.platform || navigator.platform || navigator.userAgent;
-  return /mac|iphone|ipad|ipod/i.test(platform);
-}
-
-function subscribeNever(): () => void {
-  return () => {};
-}
 
 /**
  * Whether to show ⌘ (Apple) or Ctrl. Decided on the client only (the server snapshot is false),
  * so it is settled by the time a dialog opens.
  */
 export function useApplePlatform(): boolean {
-  return useSyncExternalStore(subscribeNever, isApplePlatform, () => false);
+  return useSyncExternalStore(
+    subscribeNever,
+    () => isApplePlatform(),
+    () => false,
+  );
 }
 
 export function KeyCap({ children, className }: { children: string; className?: string }) {

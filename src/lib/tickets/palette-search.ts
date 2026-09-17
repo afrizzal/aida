@@ -9,6 +9,7 @@
 //
 // Relative imports only and no Next.js import.
 import { findActiveMembership, type MembershipClient } from "../membership";
+import { cut } from "../text/cut";
 import { searchTickets, type TicketSearchRow } from "./search";
 
 export const PALETTE_RESULT_LIMIT = 10;
@@ -41,14 +42,6 @@ const DEFAULT_DEPS: PaletteSearchDeps = {
   search: (orgId, queryText, limit = PALETTE_RESULT_LIMIT) =>
     searchTickets(orgId, queryText, limit),
 };
-
-/** Cuts to max UTF-16 units without leaving a lone high surrogate at the end. */
-function cut(text: string, max: number): string {
-  if (text.length <= max) return text;
-  const sliced = text.slice(0, max);
-  const last = sliced.charCodeAt(sliced.length - 1);
-  return last >= 0xd800 && last <= 0xdbff ? sliced.slice(0, -1) : sliced;
-}
 
 export async function searchTicketsForPalette(
   client: MembershipClient,
