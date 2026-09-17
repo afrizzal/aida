@@ -48,6 +48,7 @@ const TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: 30_000 } as const;
 export type SavedViewErrorCode =
   | "INVALID_NAME"
   | "INVALID_FILTERS"
+  | "INVALID_VISIBILITY"
   | "DUPLICATE_PRIVATE_NAME"
   | "DUPLICATE_SHARED_NAME"
   | "MISSING_REFERENCE"
@@ -126,9 +127,10 @@ function validateName(raw: unknown): string {
   return name;
 }
 
+/** PRIVATE or SHARED; anything else is refused with its own code (review IN-06). */
 function validateVisibility(raw: unknown): SavedViewVisibility {
   if (!VISIBILITIES.includes(raw as SavedViewVisibility)) {
-    throw new SavedViewError("INVALID_FILTERS");
+    throw new SavedViewError("INVALID_VISIBILITY");
   }
   return raw as SavedViewVisibility;
 }

@@ -378,6 +378,30 @@ describe("saved views: edit, delete and permissions (D-04)", () => {
     const id = await makeView(orgId, users[0].id, "With limit", "PRIVATE", { limit: 100 } as never);
     expect((await viewRow(id))?.filters).toEqual({ version: 1, view: "all", statuses: [] });
   });
+
+  it("refuses an unknown visibility with its own code, on create and on update (review IN-06)", async () => {
+    const { orgId, users } = await seedOrgWithMembers(prisma, ["member"]);
+    const actor = actorOf(orgId, users[0].id);
+    for (const visibility of ["PUBLIC", "", null, "shared"]) {
+      expect(
+        await createSavedView(prisma, actor, {
+          name: "Bad visibility",
+          visibility: visibility as never,
+          filters: {},
+        }),
+      ).toEqual({ ok: false, error: "INVALID_VISIBILITY" });
+    }
+    const id = await makeView(orgId, users[0].id, "Mine", "PRIVATE", {});
+    expect(
+      await updateSavedView(prisma, actor, id, {
+        name: "Mine",
+        visibility: "PUBLIC" as never,
+        filters: {},
+      }),
+    ).toEqual({ ok: false, error: "INVALID_VISIBILITY" });
+    expect(await viewRow(id)).toMatchObject({ name: "Mine", visibility: "PRIVATE" });
+    expect(await prisma.savedView.count({ where: { organizationId: orgId } })).toBe(1);
+  });
 });
 
 describe("saved views: references (D-05)", () => {
