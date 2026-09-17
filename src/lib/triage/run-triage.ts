@@ -3,6 +3,7 @@
 // manual-override race guard (Pitfall 5), and records a redacted AuditEvent (D-17).
 //
 // Relative imports only (no `@/`) — bundled into the worker by the ai-triage job (04-05).
+import type { Prisma } from "../../generated/prisma/client";
 import { recordAuditEvent } from "../audit/record-audit-event";
 import { prisma } from "../db";
 import { complete } from "../llm/complete";
@@ -17,7 +18,14 @@ export async function runTriage(ticketId: string): Promise<void> {
   const bare = await prisma.ticket.findUnique({ where: { id: ticketId } });
   if (!bare) return;
 
-  const db = scopedDb(bare.organizationId);
+  const orgId = bare.organizationId;
+  const db = scopedDb(orgId);
+
+  // Priority decisions an agent recorded so far. Read BEFORE the ticket, so an agent's choice
+  // that commits after this point is always seen below. Since Phase 11 re-applying the current
+  // priority is a no-op on the ticket row (D-08) and does not move updatedAt, but it still
+  // writes one PRIORITY_CHANGED audit row; counting those rows catches it (review IN-01).
+  const priorityDecisionsBefore = await countPriorityDecisions(prisma, orgId, ticketId);
 
   const loaded = await db.ticket.findFirst({
     where: { id: ticketId },
@@ -51,36 +59,50 @@ export async function runTriage(ticketId: string): Promise<void> {
       targets.resolutionMinutes,
     );
 
-    const guarded = await db.ticket.updateMany({
-      where: { id: ticketId, updatedAt: loaded.updatedAt }, // optimistic token
-      data: {
-        triageCategory: output.category,
-        triageSentiment: output.sentiment,
-        triageLanguage: output.language,
-        triageStatus: "COMPLETED",
-        priority: output.priority,
-        firstResponseTargetMinutes: targets.firstResponseMinutes,
-        resolutionTargetMinutes: targets.resolutionMinutes,
-        firstResponseDueAt,
-        resolutionDueAt,
-        isAtRisk: false,
-        isBreached: false,
-      },
-    });
+    const classification = {
+      triageCategory: output.category,
+      triageSentiment: output.sentiment,
+      triageLanguage: output.language,
+      triageStatus: "COMPLETED" as const,
+    };
 
-    if (guarded.count === 0) {
-      // Agent edited during the LLM call — respect their priority; still attach the
-      // non-conflicting classification.
-      await db.ticket.update({
-        where: { id: ticketId },
-        data: {
-          triageCategory: output.category,
-          triageSentiment: output.sentiment,
-          triageLanguage: output.language,
-          triageStatus: "COMPLETED",
-        },
-      });
-    }
+    await prisma.$transaction(async (tx) => {
+      // The ticket row lock first: the mutation service holds it from its lock until its commit,
+      // audit row included, so after this wait the count below sees every committed decision.
+      await tx.$queryRaw`
+        SELECT "id" FROM "Ticket"
+        WHERE "id" = ${ticketId} AND "organizationId" = ${orgId}
+        FOR UPDATE
+      `;
+      const agentDecided =
+        (await countPriorityDecisions(tx, orgId, ticketId)) !== priorityDecisionsBefore;
+
+      const guarded = agentDecided
+        ? { count: 0 }
+        : await tx.ticket.updateMany({
+            // optimistic token: any other write to the ticket during the LLM call
+            where: { id: ticketId, organizationId: orgId, updatedAt: loaded.updatedAt },
+            data: {
+              ...classification,
+              priority: output.priority,
+              firstResponseTargetMinutes: targets.firstResponseMinutes,
+              resolutionTargetMinutes: targets.resolutionMinutes,
+              firstResponseDueAt,
+              resolutionDueAt,
+              isAtRisk: false,
+              isBreached: false,
+            },
+          });
+
+      if (guarded.count === 0) {
+        // Agent edited during the LLM call — respect their priority; still attach the
+        // non-conflicting classification.
+        await tx.ticket.update({
+          where: { id: ticketId, organizationId: orgId },
+          data: classification,
+        });
+      }
+    });
 
     await recordAuditEvent(db, {
       actionType: "TRIAGE",
@@ -94,4 +116,15 @@ export async function runTriage(ticketId: string): Promise<void> {
     await db.ticket.update({ where: { id: ticketId }, data: { triageStatus: "FAILED" } });
     throw err; // pg-boss retries — mirrors email-outbound-send
   }
+}
+
+/** PRIORITY_CHANGED audit rows of one ticket (USER rows only; triage writes none). */
+function countPriorityDecisions(
+  client: Pick<Prisma.TransactionClient, "ticketAuditEvent">,
+  orgId: string,
+  ticketId: string,
+): Promise<number> {
+  return client.ticketAuditEvent.count({
+    where: { organizationId: orgId, ticketId, action: "PRIORITY_CHANGED" },
+  });
 }
