@@ -4,11 +4,13 @@ import { Lock, Paperclip } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useRegisterCommands } from "@/components/command-provider";
 import { AttachmentChip, formatBytes } from "@/components/tickets/attachment-chip";
 import { type ComposerMode, ComposerToggle } from "@/components/tickets/composer-toggle";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ALLOWED_MIME, MAX_BYTES } from "@/lib/attachments/constants";
+import type { Command } from "@/lib/commands/registry";
 import { cn } from "@/lib/utils";
 
 interface ComposerProps {
@@ -31,8 +33,47 @@ export function Composer({ ticketId, insertedText, onInsertedConsumed }: Compose
   // DRAFT_APPROVED audit event. Never set for a manually-typed reply.
   const [fromDraft, setFromDraft] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const isInternal = mode === "internal";
+
+  /**
+   * The r and n keys and the palette's This ticket items (11-08, UI-SPEC 5c): switch the mode
+   * exactly as a ComposerToggle click does, then focus the textarea with the caret at the end.
+   * The text already typed is kept.
+   */
+  function focusComposer(next: ComposerMode) {
+    setMode(next);
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.focus();
+    const end = textarea.value.length;
+    textarea.setSelectionRange(end, end);
+  }
+
+  const composerCommands: Command[] = [
+    {
+      id: "ticket.reply",
+      label: "Reply to the customer",
+      group: "this-ticket",
+      keywords: ["reply", "respond", "public"],
+      order: 3,
+      icon: "reply",
+      when: (context) => context.ticketId !== null,
+      run: () => focusComposer("public"),
+    },
+    {
+      id: "ticket.note",
+      label: "Write an internal note",
+      group: "this-ticket",
+      keywords: ["note", "internal", "private"],
+      order: 4,
+      icon: "sticky-note",
+      when: (context) => context.ticketId !== null,
+      run: () => focusComposer("internal"),
+    },
+  ];
+  useRegisterCommands(composerCommands, [ticketId]);
 
   // A draft is always a customer-facing reply — loading one switches mode to "public" (even if
   // the agent happened to be on the Internal Note toggle) and marks the send as draft-originated.
@@ -104,6 +145,7 @@ export function Composer({ ticketId, insertedText, onInsertedConsumed }: Compose
 
       <div className={cn(isInternal && "rounded-lg border border-warning/30 bg-warning/5 p-2")}>
         <Textarea
+          ref={textareaRef}
           value={body}
           onChange={(event) => setBody(event.target.value)}
           placeholder={isInternal ? "Write an internal note…" : "Write a reply…"}

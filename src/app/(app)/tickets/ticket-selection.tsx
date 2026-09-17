@@ -1,8 +1,18 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useRegisterCommands } from "@/components/command-provider";
 import { Checkbox } from "@/components/ui/checkbox";
+import type { Command, CommandContext } from "@/lib/commands/registry";
 import { filtersToSearchParams, parseUrlFilters } from "@/lib/tickets/list-filters";
 import { cn } from "@/lib/utils";
 
@@ -14,6 +24,13 @@ import { cn } from "@/lib/utils";
 // The selection clears whenever the filters or the open saved view (sv) change; `limit` is page
 // size, not a filter, so "Load more" keeps it. Each time the list panel reports the ids it has
 // loaded, the selection is pruned to them, so it never covers a ticket that is not on screen.
+//
+// Keyboard (11-08, AIDA-50, UI-SPEC Surface 5b): the provider registers list.next, list.prev,
+// list.toggle and list.clearSelection as hidden commands (bound to j, k, x and Esc; the palette
+// never lists them). The cursor row is the loaded row whose link or checkbox holds focus. With no
+// cursor, j and k start at the open ticket's row when it is loaded, otherwise at the first row.
+// They move real focus to the row link (id ticket-row-{id}), so Enter opens it through the
+// browser's own link activation; there is no wrap, and nothing ever triggers "Load more".
 
 /** The most tickets one bulk action may change (D-08); the server refuses more. */
 export const MAX_SELECTED_TICKETS = 100;
@@ -41,6 +58,40 @@ export interface TicketSelection {
 }
 
 const TicketSelectionContext = createContext<TicketSelection | null>(null);
+
+/** The row link of a loaded ticket (TicketListRow gives it this id). */
+function rowLink(ticketId: string): HTMLElement | null {
+  return document.getElementById(`ticket-row-${ticketId}`);
+}
+
+/** The index of the loaded row whose link or checkbox holds focus, or -1. */
+function cursorIndex(loadedIds: readonly string[]): number {
+  const active = document.activeElement;
+  if (!active) return -1;
+  return loadedIds.findIndex((id) => rowLink(id)?.parentElement?.contains(active) ?? false);
+}
+
+/** Moves the cursor by one loaded row (j: +1, k: -1); no wrap, nothing with no rows. */
+function moveCursor(loadedIds: readonly string[], openTicketId: string | null, step: 1 | -1) {
+  if (loadedIds.length === 0) return;
+  const current = cursorIndex(loadedIds);
+  let next: number;
+  if (current === -1) {
+    const open = openTicketId === null ? -1 : loadedIds.indexOf(openTicketId);
+    next = open === -1 ? 0 : open;
+  } else {
+    next = current + step;
+    if (next < 0 || next >= loadedIds.length) return;
+  }
+  const link = rowLink(loadedIds[next]);
+  if (!link) return;
+  link.focus();
+  link.scrollIntoView({ block: "nearest" });
+}
+
+function onInboxRoute(context: CommandContext): boolean {
+  return context.pathname === "/tickets" || context.pathname.startsWith("/tickets/");
+}
 
 /** Filters plus sv, without limit: the selection belongs to one list, not to one page size. */
 function selectionKey(searchParams: URLSearchParams | null): string {
@@ -91,6 +142,59 @@ export function TicketSelectionProvider({ children }: { children: ReactNode }) {
       };
     });
   }, []);
+
+  // The key-bound list commands read the latest loaded ids and handlers.
+  const latest = useRef({ loadedIds: state.loadedIds, toggle, clear });
+  latest.current = { loadedIds: state.loadedIds, toggle, clear };
+
+  const listCommands: Command[] = [
+    {
+      id: "list.next",
+      label: "Move to the next ticket",
+      group: "tickets",
+      keywords: [],
+      order: 0,
+      hidden: true,
+      when: onInboxRoute,
+      run: (context) => moveCursor(latest.current.loadedIds, context.ticketId, 1),
+    },
+    {
+      id: "list.prev",
+      label: "Move to the previous ticket",
+      group: "tickets",
+      keywords: [],
+      order: 1,
+      hidden: true,
+      when: onInboxRoute,
+      run: (context) => moveCursor(latest.current.loadedIds, context.ticketId, -1),
+    },
+    {
+      id: "list.toggle",
+      label: "Select or unselect the highlighted ticket",
+      group: "tickets",
+      keywords: [],
+      order: 2,
+      hidden: true,
+      when: onInboxRoute,
+      run: () => {
+        // Toggling respects the 100 cap (toggle does nothing when checking at the cap).
+        const { loadedIds } = latest.current;
+        const index = cursorIndex(loadedIds);
+        if (index !== -1) latest.current.toggle(loadedIds[index]);
+      },
+    },
+    {
+      id: "list.clearSelection",
+      label: "Clear selection",
+      group: "tickets",
+      keywords: [],
+      order: 3,
+      hidden: true,
+      when: onInboxRoute,
+      run: () => latest.current.clear(),
+    },
+  ];
+  useRegisterCommands(listCommands, []);
 
   const value = useMemo<TicketSelection>(() => {
     const selected = new Set(ids);

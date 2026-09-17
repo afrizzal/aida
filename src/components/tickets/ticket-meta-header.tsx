@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown, Plus } from "lucide-react";
-import { useState, useTransition } from "react";
+import { type RefObject, useCallback, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
   addTag,
@@ -14,6 +14,7 @@ import {
   setTriageLanguage,
   setTriageSentiment,
 } from "@/app/(app)/tickets/[id]/actions";
+import { useRegisterCommands } from "@/components/command-provider";
 import { AssigneeAvatar } from "@/components/tickets/assignee-avatar";
 import {
   CustomFieldInput,
@@ -53,6 +54,7 @@ import type {
   TriageSentiment,
   TriageStatus,
 } from "@/generated/prisma/client";
+import type { Command as RegistryCommand } from "@/lib/commands/registry";
 
 const STATUSES: { value: TicketStatus; label: string }[] = [
   { value: "NEW", label: "New" },
@@ -128,6 +130,19 @@ interface TicketMetaHeaderProps {
   customFields: TicketMetaHeaderCustomField[];
 }
 
+/**
+ * When a menu was opened by its key or palette command (11-08, UI-SPEC 5c), focus goes to the
+ * current value as soon as the menu content mounts. Radix's own open focus then sees focus
+ * already inside the menu and leaves it there. A menu opened by a click keeps Radix's own focus.
+ */
+function focusCurrentValue(content: HTMLElement | null, requested: RefObject<boolean>) {
+  if (!content || !requested.current) return;
+  requested.current = false;
+  content
+    .querySelector<HTMLElement>('[role="menuitemradio"][aria-checked="true"]')
+    ?.focus({ preventScroll: true });
+}
+
 /** Which SLA timer is still "live" — mirrors ticket-list-row.tsx's identical helper. */
 function getActiveDue(ticket: TicketMetaHeaderTicket): Date | string | null {
   if (!ticket.firstRespondedAt) return ticket.firstResponseDueAt;
@@ -146,6 +161,62 @@ export function TicketMetaHeader({
   const [, startTransition] = useTransition();
   const [tagPopoverOpen, setTagPopoverOpen] = useState(false);
   const [languagePopoverOpen, setLanguagePopoverOpen] = useState(false);
+  // Controlled so the a and s keys (and the palette's This ticket group) can open them (11-08).
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
+  const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false);
+  const focusStatusValue = useRef(false);
+  const focusAssigneeValue = useRef(false);
+  const statusMenuRef = useCallback(
+    (node: HTMLDivElement | null) => focusCurrentValue(node, focusStatusValue),
+    [],
+  );
+  const assigneeMenuRef = useCallback(
+    (node: HTMLDivElement | null) => focusCurrentValue(node, focusAssigneeValue),
+    [],
+  );
+
+  // The This ticket commands (AIDA-49, AIDA-50, UI-SPEC 4c and 5c): the a, s and t keys run the
+  // same handlers as the palette items.
+  const ticketCommands: RegistryCommand[] = [
+    {
+      id: "ticket.assign",
+      label: "Assign this ticket",
+      group: "this-ticket",
+      keywords: ["assignee", "owner"],
+      order: 0,
+      icon: "user-plus",
+      when: (context) => context.ticketId !== null,
+      run: () => {
+        focusAssigneeValue.current = true;
+        setAssigneeMenuOpen(true);
+      },
+    },
+    {
+      id: "ticket.status",
+      label: "Change status",
+      group: "this-ticket",
+      keywords: ["status", "resolve", "close"],
+      order: 1,
+      icon: "circle-dot",
+      when: (context) => context.ticketId !== null,
+      run: () => {
+        focusStatusValue.current = true;
+        setStatusMenuOpen(true);
+      },
+    },
+    {
+      id: "ticket.tag",
+      label: "Add a tag",
+      group: "this-ticket",
+      keywords: ["tag", "label"],
+      order: 2,
+      icon: "tag",
+      when: (context) => context.ticketId !== null,
+      // The popover moves focus into its search input when it opens.
+      run: () => setTagPopoverOpen(true),
+    },
+  ];
+  useRegisterCommands(ticketCommands, [ticket.id]);
 
   const activeDue = getActiveDue(ticket);
   const untaggedAvailable = availableTags.filter((t) => !tags.some((tg) => tg.id === t.id));
@@ -227,13 +298,13 @@ export function TicketMetaHeader({
         <h1 className="truncate text-[18px] font-semibold">{ticket.subject}</h1>
 
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          <DropdownMenu>
+          <DropdownMenu open={statusMenuOpen} onOpenChange={setStatusMenuOpen}>
             <DropdownMenuTrigger asChild>
               <button type="button" aria-label="Change status">
                 <StatusChip status={ticket.status} />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent>
+            <DropdownMenuContent ref={statusMenuRef}>
               <DropdownMenuRadioGroup
                 value={ticket.status}
                 onValueChange={(value) => handleStatusChange(value as TicketStatus)}
@@ -267,7 +338,7 @@ export function TicketMetaHeader({
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <DropdownMenu>
+          <DropdownMenu open={assigneeMenuOpen} onOpenChange={setAssigneeMenuOpen}>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm" className="gap-1.5">
                 <AssigneeAvatar name={assigneeName} />
@@ -277,7 +348,7 @@ export function TicketMetaHeader({
                 <ChevronDown className="size-3.5" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent>
+            <DropdownMenuContent ref={assigneeMenuRef}>
               <DropdownMenuRadioGroup
                 value={ticket.assigneeId ?? UNASSIGNED_VALUE}
                 onValueChange={handleAssigneeChange}

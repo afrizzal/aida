@@ -12,7 +12,15 @@
 // label and keywords), grouped in COMMAND_GROUP_ORDER; a group with nothing to show is hidden.
 // Item values are command ids (ticket ids for search rows), never labels, so two commands with
 // the same label are two items that each run their own handler. The palette closes before a
-// command runs, so a command that opens a dialog never stacks two modals.
+// command runs, so a command that opens a dialog never stacks two modals; after a chosen command
+// the palette does not move focus back to where it was, so a command that focuses something (the
+// composer, a menu's current value) keeps that focus.
+//
+// Keys (11-08, UI-SPEC 4b): an item whose command id is named by the key table shows its key caps
+// at the right; the footer points to the help modal ("? for all shortcuts"). The cmdk root has
+// vimBindings off: cmdk would otherwise treat Ctrl+K as "previous item" and call preventDefault,
+// and the keyboard dispatcher, which ignores handled events (Codex review C4), would then never
+// close the palette with Ctrl+K. Arrow keys, Home, End and Enter keep working.
 import {
   BookmarkPlus,
   BookOpen,
@@ -33,10 +41,11 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { flushSync } from "react-dom";
+import { KeyCap, KeyCaps, useApplePlatform } from "@/components/keyboard/key-caps";
 import { StatusChip } from "@/components/tickets/status-chip";
 import {
   Command,
-  CommandDialog,
   CommandEmpty,
   CommandGroup,
   CommandInput,
@@ -44,6 +53,13 @@ import {
   CommandList,
   CommandShortcut,
 } from "@/components/ui/command";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import type { TicketStatus } from "@/generated/prisma/client";
 import {
   COMMAND_GROUP_ORDER,
@@ -53,6 +69,7 @@ import {
   type CommandRegistry,
   type Command as PaletteCommand,
 } from "@/lib/commands/registry";
+import { keymapEntryForCommand } from "@/lib/keyboard/keymap";
 
 export const PALETTE_SEARCH_DEBOUNCE_MS = 300;
 export const PALETTE_MIN_QUERY = 2;
@@ -177,7 +194,14 @@ interface CommandPaletteProps {
 
 export function CommandPalette({ open, onOpenChange, registry, context }: CommandPaletteProps) {
   const router = useRouter();
+  const apple = useApplePlatform();
   const [input, setInput] = useState("");
+  // Set when a chosen command runs, so closing does not pull focus back from what it focused.
+  const keepFocusOnClose = useRef(false);
+
+  // Closed from outside (⌘K / Ctrl+K through the provider): start empty next time, as a close
+  // through handleOpenChange does.
+  if (!open && input !== "") setInput("");
   const query = input.trim();
   const ticketSearch = useTicketSearch(query);
   const showTickets = query.length >= PALETTE_MIN_QUERY;
@@ -199,14 +223,21 @@ export function CommandPalette({ open, onOpenChange, registry, context }: Comman
     onOpenChange(next);
   }
 
-  /** The palette closes before anything runs, so a dialog opened by a command never stacks. */
+  /**
+   * The palette closes before anything runs, so a dialog opened by a command never stacks. The
+   * close is committed synchronously (flushSync), so the palette's focus trap is released before
+   * the command runs and a command that moves focus (the composer, 11-08) keeps it.
+   */
   function choose(run: () => void) {
-    handleOpenChange(false);
+    keepFocusOnClose.current = true;
+    flushSync(() => handleOpenChange(false));
     run();
   }
 
   function renderCommand(command: PaletteCommand) {
     const Icon = command.icon ? ICONS[command.icon] : null;
+    // Key caps from the key table (KEYMAP) for navigation, ticket-page and help commands.
+    const keys = keymapEntryForCommand(command.id);
     return (
       <CommandItem
         key={command.id}
@@ -219,6 +250,13 @@ export function CommandPalette({ open, onOpenChange, registry, context }: Comman
         {command.hint && (
           <CommandShortcut className="shrink-0 text-[12px] tracking-normal">
             {command.hint}
+          </CommandShortcut>
+        )}
+        {keys && (
+          // Decorative, as on the top-bar trigger: the item's accessible name stays its label, and
+          // the help modal lists every key as text.
+          <CommandShortcut aria-hidden className="flex shrink-0 items-center gap-1 tracking-normal">
+            <KeyCaps entry={keys} apple={apple} />
           </CommandShortcut>
         )}
       </CommandItem>
@@ -267,42 +305,57 @@ export function CommandPalette({ open, onOpenChange, registry, context }: Comman
   }
 
   return (
-    <CommandDialog
-      open={open}
-      onOpenChange={handleOpenChange}
-      title="Command palette"
-      description="Search tickets, open a view, go to a page, or run a command."
-      className="sm:max-w-[560px]"
-    >
-      <Command shouldFilter={false} className="p-0" data-command-palette="">
-        <CommandInput
-          value={input}
-          onValueChange={setInput}
-          placeholder="Search tickets or type a command…"
-          className="text-[15px]"
-        />
-        <CommandList>
-          {nothingMatches && (
-            <CommandEmpty className="py-8 text-[13px] text-muted-foreground">
-              Nothing matches "{query}".
-            </CommandEmpty>
-          )}
-          {COMMAND_GROUP_ORDER.map((group) => {
-            const items = byGroup.get(group) ?? [];
-            const withSearch = group === "tickets" && showTickets;
-            if (items.length === 0 && !withSearch) return null;
-            return (
-              <CommandGroup key={group} heading={GROUP_HEADINGS[group]} className={GROUP_CLASS}>
-                {withSearch && renderTicketRows()}
-                {items.map(renderCommand)}
-              </CommandGroup>
-            );
-          })}
-        </CommandList>
-        <div className="flex items-center justify-between border-t border-border/70 px-4 py-2 text-[12px] text-muted-foreground">
-          <span>↑ ↓ to move, Enter to run, Esc to close</span>
-        </div>
-      </Command>
-    </CommandDialog>
+    // CommandDialog's markup, with onCloseAutoFocus on the content (see keepFocusOnClose).
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogHeader className="sr-only">
+        <DialogTitle>Command palette</DialogTitle>
+        <DialogDescription>
+          Search tickets, open a view, go to a page, or run a command.
+        </DialogDescription>
+      </DialogHeader>
+      <DialogContent
+        className="top-1/3 translate-y-0 overflow-hidden rounded-xl! p-0 sm:max-w-[560px]"
+        showCloseButton={false}
+        onCloseAutoFocus={(event) => {
+          if (!keepFocusOnClose.current) return;
+          keepFocusOnClose.current = false;
+          event.preventDefault();
+        }}
+      >
+        <Command shouldFilter={false} vimBindings={false} className="p-0" data-command-palette="">
+          <CommandInput
+            value={input}
+            onValueChange={setInput}
+            placeholder="Search tickets or type a command…"
+            className="text-[15px]"
+          />
+          <CommandList>
+            {nothingMatches && (
+              <CommandEmpty className="py-8 text-[13px] text-muted-foreground">
+                Nothing matches "{query}".
+              </CommandEmpty>
+            )}
+            {COMMAND_GROUP_ORDER.map((group) => {
+              const items = byGroup.get(group) ?? [];
+              const withSearch = group === "tickets" && showTickets;
+              if (items.length === 0 && !withSearch) return null;
+              return (
+                <CommandGroup key={group} heading={GROUP_HEADINGS[group]} className={GROUP_CLASS}>
+                  {withSearch && renderTicketRows()}
+                  {items.map(renderCommand)}
+                </CommandGroup>
+              );
+            })}
+          </CommandList>
+          <div className="flex items-center justify-between border-t border-border/70 px-4 py-2 text-[12px] text-muted-foreground">
+            <span>↑ ↓ to move, Enter to run, Esc to close</span>
+            <span className="flex items-center gap-1">
+              <KeyCap>?</KeyCap>
+              for all shortcuts
+            </span>
+          </div>
+        </Command>
+      </DialogContent>
+    </Dialog>
   );
 }
