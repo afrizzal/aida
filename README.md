@@ -34,6 +34,7 @@ Most helpdesk software treats AI as a paywalled add-on with per-resolution fees,
 | | |
 |---|---|
 | 🎟️ **Modern ticketing** | Shared inbox with views, filters and full-text search. Ticket lifecycle NEW → OPEN → PENDING → RESOLVED → CLOSED. Contacts with full history, tags, custom fields, assignment, internal notes vs public replies, SLA first-response/resolution timers with at-risk/breached states. |
+| ⌨️ **Inbox workflow** | Saved views (private, or shared with the workspace), bulk actions on up to 100 tickets with one audit entry per ticket, a command palette (⌘K / Ctrl+K) and keyboard shortcuts for the list and the ticket page ([`docs/KEYBOARD.md`](docs/KEYBOARD.md)). Optional auto-close of resolved tickets after a quiet period you choose (off by default; customers are not notified). Replies from your team and automatic emails do not restart the count; a customer reply reopens the ticket. |
 | 🌐 **Public portal** | A public web intake form plus a tokenised ticket-status page with follow-up replies and CSAT capture — no login required for your customers. |
 | 📧 **Email channel** | Inbound email threading and outbound SMTP replies, alongside the web form and portal. |
 | 🧠 **AI auto-triage** | Every incoming ticket is classified — category, priority, sentiment, language — with agent override, and every AI action is written to an append-only audit log. |
@@ -134,6 +135,7 @@ easy to run, easy to read.
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — backups, upgrades, logs, full env reference
 - [`docs/SECURITY.md`](docs/SECURITY.md) — privacy and security model
 - [`docs/BRIEF.md`](docs/BRIEF.md) — positioning and product brief
+- [`docs/KEYBOARD.md`](docs/KEYBOARD.md) — keyboard shortcuts and the command palette
 
 ## Status
 

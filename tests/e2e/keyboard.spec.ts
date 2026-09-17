@@ -250,15 +250,19 @@ test("j and k move focus through the loaded rows without wrapping, x selects, Es
 
   // The row container holds the row link and its checkbox side by side.
   const firstCheckbox = rows.nth(0).locator("xpath=..").getByRole("checkbox");
+  const bulkBar = page.getByRole("region", { name: "Bulk actions" });
   await page.keyboard.press("x");
   await expect(firstCheckbox).toBeChecked();
   await expect(page.getByText("1 ticket selected")).toBeVisible();
+  await expect(bulkBar).toContainText("1 ticket selected");
   await page.keyboard.press("Escape");
   await expect(firstCheckbox).not.toBeChecked();
   await expect(page.getByText("1 ticket selected")).toHaveCount(0);
+  await expect(bulkBar).toHaveCount(0);
 
+  // Esc cleared the selection only; the cursor row keeps focus and Enter opens it.
+  await expect(rows.nth(0)).toBeFocused();
   const firstId = ((await rows.nth(0).getAttribute("id")) ?? "").replace("ticket-row-", "");
-  await rows.nth(0).focus();
   await page.keyboard.press("Enter");
   await expect.poll(() => pathnameOf(page)).toBe(`/tickets/${firstId}`);
 });
@@ -288,6 +292,7 @@ test("on the ticket page s, a and t open their controls, and r and n focus the c
   const current = page.getByRole("menuitemradio", { name: "New", exact: true });
   await expect(current).toBeFocused();
   await expect(current).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("menuitemradio", { name: "Pending", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("menu")).toHaveCount(0);
 
@@ -347,4 +352,84 @@ test("the palette's This ticket group runs the same handlers as the keys", async
   await expect(note).toBeFocused();
   await page.waitForTimeout(500);
   await expect(note).toBeFocused();
+});
+
+// Plan 11-09 (D-23): the cases below complete the phase's keyboard evidence. The cases above
+// (from 11-08) are reused as they stand, with two assertions added in 11-09: the Bulk actions
+// region in the list case and the "Pending" item in the ticket-page case.
+
+test("j and k on an empty list focus nothing", async ({ page }) => {
+  await openRoute(page, `/tickets?q=keysnomatch${ts}zz`);
+  await expect(page.getByPlaceholder("Search tickets…")).toHaveValue(`keysnomatch${ts}zz`);
+  await waitForShortcuts(page);
+  await blurFocus(page);
+
+  await page.keyboard.press("j");
+  await page.keyboard.press("k");
+  // Give a wrongly moved focus time to land before asserting it never did.
+  await page.waitForTimeout(300);
+  await expect(rowLinks(page)).toHaveCount(0);
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+});
+
+test("letters typed into the internal-note composer stay in it", async ({ page }) => {
+  const { token, seeded } = await seedTickets("type", 1);
+  await openList(page, `/tickets/${seeded[0].id}?q=${token}`, 1);
+  await waitForShortcuts(page);
+  await blurFocus(page);
+
+  await page.keyboard.press("n");
+  const note = page.getByPlaceholder("Write an internal note…");
+  await expect(note).toBeFocused();
+  await page.keyboard.type("s");
+  await page.waitForTimeout(300);
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(note).toBeFocused();
+  await expect(note).toHaveValue(/s$/);
+});
+
+test("? typed into the inbox search input opens no dialog", async ({ page }) => {
+  await openRoute(page, "/tickets");
+  await waitForShortcuts(page);
+
+  const search = page.getByPlaceholder("Search tickets…");
+  await search.click();
+  await expect(search).toBeFocused();
+  await page.keyboard.type("?");
+  await expect(search).toHaveValue(/\?/);
+  // Give a wrongly opened dialog time to appear before asserting it never did.
+  await page.waitForTimeout(500);
+  await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toHaveCount(0);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+test("the palette's Change status opens the status menu, and Show keyboard shortcuts opens help", async ({
+  page,
+}) => {
+  const { token, seeded } = await seedTickets("status", 1);
+  await openList(page, `/tickets/${seeded[0].id}?q=${token}`, 1);
+  await waitForShortcuts(page);
+
+  await page.keyboard.press("Meta+k");
+  await expect(palette(page)).toBeVisible();
+  await palette(page)
+    .getByRole("group", { name: "This ticket" })
+    .getByRole("option", { name: "Change status", exact: true })
+    .click();
+  await expect(palette(page)).toBeHidden();
+  await expect(page.getByRole("menuitemradio", { name: "Pending", exact: true })).toBeVisible();
+
+  // Meta+k does nothing inside an open menu (Codex C4), so the menu is closed first.
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+
+  await page.keyboard.press("Meta+k");
+  await expect(palette(page)).toBeVisible();
+  await palette(page)
+    .getByRole("group", { name: "Help" })
+    .getByRole("option", { name: "Show keyboard shortcuts", exact: true })
+    .click();
+  await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeVisible();
+  await expect(palette(page)).toBeHidden();
+  await expect(page.getByRole("dialog")).toHaveCount(1);
 });
