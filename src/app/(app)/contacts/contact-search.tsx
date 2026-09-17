@@ -2,7 +2,7 @@
 
 import { Search } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 
 interface ContactSearchProps {
@@ -14,17 +14,31 @@ export function ContactSearch({ defaultValue = "" }: ContactSearchProps) {
   const pathname = usePathname();
   const currentQuery = useSearchParams().get("q") ?? "";
   const [value, setValue] = useState(defaultValue);
+  // Queries this box sent to the URL that have not landed yet. A URL change that is not one of
+  // them came from outside (the sidebar link, a palette command, back/forward).
+  const requested = useRef(new Set<string>());
+
+  useEffect(() => {
+    // The URL is the source of truth when it changes from outside: adopt it, so the debounced
+    // replace below does not navigate back to the old text (review WR-01). The page stays
+    // mounted across a same-route navigation, so the typed text would otherwise survive it.
+    if (requested.current.delete(currentQuery)) return;
+    requested.current.clear();
+    setValue(currentQuery);
+  }, [currentQuery]);
 
   useEffect(() => {
     // Navigate only when the search text differs from the URL. The /contacts page stays
     // mounted until a navigation away commits, so an unconditional replace 300 ms after mount
     // overrode a navigation started in that window (the palette's Create ticket landed back
     // on /contacts).
-    if (value.trim() === currentQuery) return;
+    const next = value.trim();
+    if (next === currentQuery) return;
     const handle = setTimeout(() => {
       const params = new URLSearchParams();
-      if (value.trim()) params.set("q", value.trim());
+      if (next) params.set("q", next);
       const query = params.toString();
+      requested.current.add(next);
       router.replace(query ? `${pathname}?${query}` : pathname);
     }, 300);
 

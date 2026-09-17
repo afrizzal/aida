@@ -48,6 +48,31 @@ test.describe("Contacts", () => {
     await expect(page.getByRole("link", { name: new RegExp(SUBJECT_TWO) })).toBeVisible();
   });
 
+  test("a navigation that clears the search is not reverted by the search box (review WR-01)", async ({
+    page,
+  }) => {
+    await page.goto("/contacts");
+    const search = page.getByLabel("Search contacts");
+    // Typing reaches the URL through the client router, which also proves hydration, so the
+    // sidebar click below is a client-side navigation that keeps ContactSearch mounted.
+    await search.fill(EMAIL_LOWER);
+    await expect(page).toHaveURL(/\/contacts\?q=/);
+
+    await page.locator("aside").getByRole("link", { name: "Contacts", exact: true }).click();
+    await expect(page).toHaveURL(/\/contacts$/);
+    await expect(search).toHaveValue("");
+
+    // The debounced replace runs 300 ms after a change; wait well past it and check that the
+    // old query did not come back.
+    await page.waitForTimeout(900);
+    await expect(page).toHaveURL(/\/contacts$/);
+    await expect(search).toHaveValue("");
+
+    // Typing still drives the URL after the outside navigation.
+    await search.fill("case variant");
+    await expect(page).toHaveURL(/\/contacts\?q=case\+variant$/);
+  });
+
   test("notes autosave on blur and survive reload", async ({ page }) => {
     const contact = await prisma.contact.findFirstOrThrow({
       where: { organizationId: orgId, email: { equals: EMAIL_LOWER, mode: "insensitive" } },
