@@ -288,3 +288,17 @@ _Depth: deep_
 ### Orchestrator follow-up (IN-05)
 
 The IN-05 fix (`36b1e9b`) unified every admin check but accepted comma-separated roles (`member,admin`), which widened the v1 `requireOrgAdmin` gate. AIDA never assigns combined roles and role management belongs to the parked Phase 10, so the rule was made exact (`owner` or `admin` only) everywhere, including shared saved views; tests now refuse combined roles. Commit recorded in `run-loop/RUN-LOG.md`.
+
+## Codex critique of the phase diff (round 1)
+
+Question `run-loop/codex/fase11-diff-tanya.md` (commit `5c8c13e`); answer `run-loop/codex/fase11-diff-jawab.md`. Log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Codex: fit for verification once the HIGH is fixed. Every claim below was re-checked in the code.
+
+| ID | Severity | Finding (short) | Orchestrator check | Disposition |
+|---|---|---|---|---|
+| D1 | HIGH | `ticket-list-panel.tsx` reads every member of the session's organization through `getScopedDb` (no membership check) and sends names and emails to the bulk bar, so a removed member with a stale session receives the new roster | Verified: `ticket-list-panel.tsx:33-64` | fix: check `findActiveMembership` before loading the roster (and the other new panel data); a removed member gets no roster; test with a deleted member row |
+| D2 | MEDIUM | The bulk bar shows "Nothing was changed." for every rejection, including a failure after commit or a lost response | Verified: `bulk-actions.ts:40`, `bulk-action-bar.tsx:139` | fix: a service refusal (definite rollback) keeps that message; an unknown outcome says the result is uncertain and asks for a refresh; test |
+| D3 | MEDIUM | Re-selecting the same priority is now a no-op, while the old action recomputed SLA targets and cleared flags | Verified: `mutations.ts:336`; recorded as a deviation in `11-02-SUMMARY.md` | not changed (run-loop K30): D-08 makes a same-value change a no-op with one audit row; refreshing SLA after a policy change is not part of AIDA-48 |
+| D4 | MEDIUM | Typing in the contacts search and navigating within 300 ms can still be overridden by the debounce | Verified: `contact-search.tsx:30`; listed in `deferred-items.md` | fix if a robust cancel exists (pending search invalidated when a navigation starts), with a test; otherwise record why not |
+| D5 | MEDIUM | The full gate evidence is for `9523eac`, not for the code after the review fixes | Verified: `11-GATE.md`, `11-REVIEW.md` | step 8 reruns the allowed gate on the final commit |
+| D6 | LOW | The stale-response palette test can pass because the old request is aborted, without exercising the stale-response guard | Verified: `command-palette.spec.ts:292`, `command-palette.tsx:158-175` | fix the test so the old response resolves after the new one |
+| D7 | LOW | A pending `g` chord is not cancelled by a query-only navigation on the same pathname | Verified: `keyboard-dispatcher.tsx:159-161` | fix: also watch search params; test |

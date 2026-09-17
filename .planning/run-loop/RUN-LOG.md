@@ -708,3 +708,13 @@ Code fixer selesai. Diperbaiki, satu commit per temuan, masing-masing dengan tes
 Berikutnya: kritik Codex atas diff fase (`codex/fase11-diff-tanya.md`).
 
 Dicek orkestrator: IN-05 (`36b1e9b`) menyatukan semua cek admin ke `isAdminRole`, tetapi melonggarkannya dengan menerima peran gabungan seperti `member,admin`. Akibatnya gerbang v1 `requireOrgAdmin`, yang dulu hanya menerima `owner` atau `admin` persis, ikut melonggar. AIDA tidak pernah membuat peran gabungan, dan pengelolaan peran adalah wilayah Fase 10 yang diparkir. Untuk otorisasi diambil opsi konservatif (aturan keputusan 4): `isAdminRole` kini mencocokkan persis, di semua jalur termasuk saved views, dan kedua test diubah untuk menolak peran gabungan. Exit code: `typecheck` 0, `lint` 0, `pnpm test` 0 (229), `auto-close.test.ts` + `saved-views.test.ts` dengan socket Colima 0 (42).
+
+Kritik Codex atas diff Fase 11: pertanyaan `codex/fase11-diff-tanya.md` (`5c8c13e`). Ekspor dari `5c8c13e` di bawah `TMPDIR`: akar hanya memuat `.env.example`; string mirip kunci hanya dummy test (satu `sk-test-DUMMYKEY` baru dari test triage); password dev tidak ada di ekspor. Log Codex: `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Berjalan di latar.
+
+Kritik Codex atas diff Fase 11 selesai (18.32 sampai 18.34), 717 kata: 1 HIGH, 4 MEDIUM, 2 LOW, dan penilaian "layak masuk verifikasi setelah HIGH diperbaiki". Log tetap `gpt-6.1-terra`, `xhigh`. Semua klaim dicek ke kode dan cocok. D1 (HIGH): panel daftar membaca seluruh anggota organisasi lewat `getScopedDb` tanpa cek keanggotaan, lalu meneruskan nama dan email ke bar aksi massal; anggota yang dikeluarkan dengan sesi lama tetap menerimanya. Disposisi dicatat di `11-REVIEW.md`.
+
+| No | Pertanyaan | Opsi | Pendapat Codex | Keputusan | Alasan |
+|---|---|---|---|---|---|
+| K30 | Memilih ulang prioritas yang sama: no-op atau perilaku lama (hitung ulang SLA dan reset flag) | no-op dengan audit; kembalikan perilaku lama | Sepakati dulu; kalau perilaku lama dipertahankan, hitung ulang dan tetap tulis audit no-op | Tetap no-op | D-08 menetapkan nilai yang sama sebagai no-op dengan satu baris audit, dan itu sudah tertulis sebagai deviasi di plan dan SUMMARY. Menyegarkan SLA sesudah kebijakan berubah bukan bagian AIDA-48, dan mereset flag lewat pilih ulang adalah efek samping, bukan fitur |
+
+Perbaikan D1, D2, D4, D6, dan D7 dijalankan code fixer di latar. D5 ditangani di langkah 8 (gerbang penuh diulang di commit terakhir). Sesudahnya, kritik Codex putaran 2 atas perbaikan.
