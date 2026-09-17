@@ -232,33 +232,33 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 4. The inbox and ticket page work by keyboard, keystrokes are ignored inside inputs, and `?` lists the keys.
 5. Resolved tickets close after the configured quiet period, and a value of 0 turns this off.
 
-**Plans:** 0/9 plans complete
+**Plans:** 9/9 plans complete
 **Wave 1**
 
-- [ ] 11-01-PLAN.md — Lay the data and parsing foundation: SavedView and TicketAuditEvent in one migration, the membership helper, the filter schema and the auto-close days parser (Wave 1)
+- [x] 11-01-PLAN.md — Lay the data and parsing foundation: SavedView and TicketAuditEvent in one migration, the membership helper, the filter schema and the auto-close days parser (Wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 11-02-PLAN.md — Build the one ticket mutation service, route the single-ticket actions through it, and add the all-or-nothing bulk action with audit (AIDA-48) (Wave 2)
-- [ ] 11-03-PLAN.md — Build the saved-views service and actions (AIDA-47) and the membership-checked palette ticket search (Wave 2)
-- [ ] 11-04-PLAN.md — Ship auto-close (AIDA-51): settings, the daily audited job, the race fix in both customer-reply paths, and the SLA card (Wave 2)
+- [x] 11-02-PLAN.md — Build the one ticket mutation service, route the single-ticket actions through it, and add the all-or-nothing bulk action with audit (AIDA-48) (Wave 2)
+- [x] 11-03-PLAN.md — Build the saved-views service and actions (AIDA-47) and the membership-checked palette ticket search (Wave 2)
+- [x] 11-04-PLAN.md — Ship auto-close (AIDA-51): settings, the daily audited job, the race fix in both customer-reply paths, and the SLA card (Wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 11-05-PLAN.md — Give saved views their interface: sidebar Views, Save view dialog and the saved-view strip (AIDA-47) (Wave 3)
+- [x] 11-05-PLAN.md — Give saved views their interface: sidebar Views, Save view dialog and the saved-view strip (AIDA-47) (Wave 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 11-06-PLAN.md — Give bulk actions their interface: row checkboxes, selection and the bulk action bar (AIDA-48) (Wave 4)
-- [ ] 11-07-PLAN.md — Build the command palette and its registry (AIDA-49) (Wave 4)
+- [x] 11-06-PLAN.md — Give bulk actions their interface: row checkboxes, selection and the bulk action bar (AIDA-48) (Wave 4)
+- [x] 11-07-PLAN.md — Build the command palette and its registry (AIDA-49) (Wave 4)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 11-08-PLAN.md — Make the inbox and ticket page work by keyboard, with ⌘K/Ctrl+K, the help modal and docs/KEYBOARD.md (AIDA-50) (Wave 5)
+- [x] 11-08-PLAN.md — Make the inbox and ticket page work by keyboard, with ⌘K/Ctrl+K, the help modal and docs/KEYBOARD.md (AIDA-50) (Wave 5)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 11-09-PLAN.md — Run the keyboard E2E, the phase gate and the §9 design checklist, and record evidence per requirement (Wave 6)
+- [x] 11-09-PLAN.md — Run the keyboard E2E, the phase gate and the §9 design checklist, and record evidence per requirement (Wave 6)
 
 ### Phase 12: Ticket Lifecycle
 
@@ -411,7 +411,7 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 | 8. Security Hardening | v2.0 | 0/23 | Parked (Codex plan review cycle 3 left HIGH findings; owner decision) | - |
 | 9. Operations | v2.0 | 0/11 | Parked (Codex plan review cycle 3 left a HIGH finding; owner decision) | - |
 | 10. Team | v2.0 | 0/16 | Parked (Codex plan review cycle 3 left HIGH findings; owner decision) | - |
-| 11. Inbox | v2.0 | 0/9 | Planned (plan review converged; execution next) | - |
+| 11. Inbox | v2.0 | 9/9 | Executed (code review and verification next) | - |
 | 12. Ticket Lifecycle | v2.0 | 0/0 | Not started | - |
 | 13. Integrations | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
 | 14. Projects Foundation | v2.0 | 0/0 | Not started | - |

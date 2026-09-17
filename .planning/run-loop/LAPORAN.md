@@ -17,7 +17,7 @@ Milestone v2.0 sudah dibuka (0b) dan daftar fitur Projects sudah dicek ke demo p
 | 08 | Keamanan (AIDA-25 sampai 32) | diparkir | CONTEXT; 23 plan; tiga siklus review Codex; siklus 3 menyisakan 4 HIGH (diterima, belum dimasukkan ke plan). Belum ada kode yang dieksekusi | `8abbc6c`, `6238af7`, `ded5f56`, `99721fd`, `96d7c8f` |
 | 09 | Operasional (AIDA-33 sampai 41) | diparkir | CONTEXT, UI-SPEC disetujui, 11 plan, tiga siklus review Codex. Siklus 3 menyisakan 1 HIGH (K25). Belum ada kode yang dieksekusi | `5ebef8b`, `f4b5dfc` |
 | 10 | Tim (AIDA-42 sampai 46) | diparkir | CONTEXT (D-01 sampai D-29), UI-SPEC disetujui, 16 plan dalam 6 wave, tiga siklus review Codex (12, lalu 6, lalu 4 temuan). Siklus 3 menyisakan 2 HIGH, keduanya kontradiksi skrip E2E di 10-13 (K27). Belum ada kode yang dieksekusi | `fcd034e`, `0706c49`, `f188b06`, `eed405e`, `05570ee`, `1e11185`, `2730d11` |
-| 11 | Inbox (AIDA-47 sampai 51) | berjalan (siap eksekusi) | CONTEXT D-01 sampai D-24 (K28; D-16 dan D-17 diamandemen); UI-SPEC disetujui; 9 plan dalam 6 wave. Review Codex konvergen di siklus 2: 9 temuan, lalu 3 tanpa HIGH, semuanya masuk plan (K29). Belum ada kode | `ff2dbab`, `bf0bd35`, `7fb2721`, `514d871`, `7652196`, `b5e0d3e` |
+| 11 | Inbox (AIDA-47 sampai 51) | berjalan (dieksekusi; code review berikutnya) | 9/9 plan dieksekusi dengan tiga perbaikan; gerbang di `9523eac`: lint, typecheck, test (222), integration tanpa egress (129), E2E penuh (111 lolos), dan build exit 0; audit sama dengan baseline; egress blocked (O-1). Visual dan pembaca layar menunggu manusia | `7fb2721`..`6e3b76e`, `468c138`, `b3f8575`, `9eddbd9` |
 | 12 | Siklus tiket (AIDA-18, 52 sampai 57, 97) | belum disentuh | | |
 | 13 | Integrasi (AIDA-58 sampai 63) | diparkir (bergantung pada Fase 10) | | |
 | 14 | Fondasi Projects (AIDA-64 sampai 71, 100 sampai 105) | belum disentuh | | |
@@ -76,6 +76,14 @@ Baris bertanda baseline berasal dari persiapan (`1ea4281`). Baris 0a dijalankan 
 | `pnpm test:integration` | 1 | butir 0a, dengan socket Colima: 11 dari 12 berkas lolos, 26 test lolos, 4 di-skip; satu-satunya yang gagal `egress-isolation.test.ts` (ikut terjaring `include`), sebab sama dengan baris egress |
 | `pnpm test:e2e` | 1 | butir 0a, dengan socket Colima: 63 lolos, 1 di-skip, 2 gagal di `honesty-invariants.spec.ts` (a, b). Dijalankan sendirian: exit 0, 2/2 lolos. Flake; teardown memakai `taskkill` khusus Windows |
 | `pnpm test:egress` | 1 | butir 0a2: `docker compose up --build` dihentikan batas 480 detik; build macet di `@prisma/engines postinstall` karena `binaries.prisma.sh` mengirim 0 byte pada `GET`. 4 test di-skip, tidak ada yang lolos |
+| `pnpm lint` (Fase 11) | 0 | 330 berkas, gerbang 11-09 di `9523eac` |
+| `pnpm typecheck` (Fase 11) | 0 | bersih |
+| `pnpm test` (Fase 11) | 0 | 21 berkas, 222 test |
+| `pnpm test:integration --exclude tests/integration/egress-isolation.test.ts` (Fase 11) | 0 | 18 berkas, 129 test, dengan socket Colima; pertama kali hijau di Mac ini |
+| `pnpm test:e2e` penuh (Fase 11) | 0 | 111 lolos, 1 skip lama, 0 gagal; pertama kali exit 0 di Mac ini. Satu run hijau belum membuktikan flake `honesty-invariants` hilang |
+| `pnpm build` (Fase 11) | 0 | peringatan NFT lama |
+| `pnpm audit --prod` (Fase 11) | 1 | 7 critical, 52 high, 69 moderate, 13 low; sama dengan baseline, tanpa perubahan dependensi |
+| `pnpm test:integration` penuh dan `pnpm test:egress` (Fase 11) | blocked | O-1 (K26), tidak dijalankan |
 
 ## 7. Package baru
 
@@ -92,7 +100,7 @@ Dicek 2026-11-08 14.09 WIB:
 ## 9. Yang belum terbukti
 
 - Perbaikan AIDA-37 dari putaran 3 belum diperiksa Codex (batas 3 putaran). Review plan Fase 9 akan memeriksanya.
-- `pnpm test:egress` belum pernah lolos di Mac ini: percobaan pertama gagal karena host Prisma macet, lalu suite ini blocked (O-1). `pnpm test:integration` dan `pnpm test:e2e` belum pernah exit 0 dalam satu run penuh: yang pertama hanya karena berkas egress, yang kedua karena dua flake.
+- `pnpm test:egress` belum pernah lolos di Mac ini: percobaan pertama gagal karena host Prisma macet, lalu suite ini blocked (O-1). `pnpm test:e2e` penuh dan integration tanpa egress sudah exit 0 di gerbang Fase 11. `pnpm test:integration` dan `pnpm test:e2e` belum pernah exit 0 dalam satu run penuh: yang pertama hanya karena berkas egress, yang kedua karena dua flake.
 - `docker compose -p aida up -d --build` belum pernah dijalankan di Mac ini.
 - AIDA-100 sampai AIDA-114 (dari butir 0c) belum dikritik Codex. Codex akan memeriksanya saat CONTEXT dan review plan Fase 14 dan 16.
 - Penelusuran demo hanya mencakup yang bisa diklik dari halaman utama. Drag and drop, isi dialog Share, dan halaman detail proyek dari sidebar tidak dibuka.
