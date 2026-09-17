@@ -284,3 +284,7 @@ Verification after the last fix (`e4a0db4`), main checkout, one process at a tim
 _Reviewed: 2026-11-08T11:14:37Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: deep_
+
+### Orchestrator follow-up (IN-05)
+
+The IN-05 fix (`36b1e9b`) unified every admin check but accepted comma-separated roles (`member,admin`), which widened the v1 `requireOrgAdmin` gate. AIDA never assigns combined roles and role management belongs to the parked Phase 10, so the rule was made exact (`owner` or `admin` only) everywhere, including shared saved views; tests now refuse combined roles. Commit recorded in `run-loop/RUN-LOG.md`.
