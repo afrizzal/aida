@@ -169,21 +169,19 @@ describe("saveAutoCloseDays (D-15, D-01)", () => {
     expect(await storedSettings(orgId)).toEqual({ days: null, enabledAt: null });
   });
 
-  it("allows a member whose roles include admin, as the saved-view rules do (review IN-05)", async () => {
+  it("refuses a combined role such as member,admin, like every other admin check (review IN-05)", async () => {
     const { orgId, member, admin, adminMemberId } = await seedAdminOrg();
     await prisma.member.update({ where: { id: adminMemberId }, data: { role: "member,admin" } });
-    const t1 = new Date("2026-10-01T10:00:00.000Z");
-    expect(await saveAutoCloseDays(prisma, admin, "7", { now: t1 })).toEqual({
-      ok: true,
-      days: 7,
-      enabledAt: t1,
+    expect(await saveAutoCloseDays(prisma, admin, "7")).toEqual({
+      ok: false,
+      error: "NOT_ALLOWED",
     });
-    // A plain member is still refused.
+    // A plain member is refused too.
     expect(await saveAutoCloseDays(prisma, member, "9")).toEqual({
       ok: false,
       error: "NOT_ALLOWED",
     });
-    expect(await storedSettings(orgId)).toEqual({ days: "7", enabledAt: t1.toISOString() });
+    expect(await storedSettings(orgId)).toEqual({ days: null, enabledAt: null });
   });
 });
 

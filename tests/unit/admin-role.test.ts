@@ -1,12 +1,19 @@
-// Review IN-05 (Phase 11): one owner/admin rule for every check. Better Auth stores one role or
-// several separated by commas; a member whose roles include owner or admin is an admin.
+// Review IN-05 (Phase 11): one owner/admin rule for every check. The role must be exactly owner or
+// admin; AIDA never assigns combined roles, so a comma-separated value is refused (conservative,
+// keeps the v1 requireOrgAdmin gate unchanged).
 import { describe, expect, it } from "vitest";
 import { isAdminRole } from "@/lib/membership";
 
 describe("isAdminRole", () => {
-  it("accepts owner and admin, alone or among other roles", () => {
-    for (const role of ["owner", "admin", "member,admin", "admin,member", " member , owner "]) {
+  it("accepts exactly owner and admin", () => {
+    for (const role of ["owner", "admin"]) {
       expect(isAdminRole(role)).toBe(true);
+    }
+  });
+
+  it("refuses combined roles, even when one of them is owner or admin", () => {
+    for (const role of ["member,admin", "admin,member", " member , owner ", "owner ", " admin"]) {
+      expect(isAdminRole(role)).toBe(false);
     }
   });
 

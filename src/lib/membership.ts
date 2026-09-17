@@ -41,11 +41,13 @@ export async function findActiveMembership(
 const ADMIN_ROLES = new Set(["owner", "admin"]);
 
 /**
- * The one owner/admin rule (review IN-05). Better Auth stores one role, or several separated by
- * commas ("member,admin"); a member is an admin when any of them is "owner" or "admin". Every
- * admin check (settings pages and actions, auto-close, shared saved views) goes through here.
+ * The one owner/admin rule (review IN-05). Every admin check (settings pages and actions,
+ * auto-close, shared saved views) goes through here. The role must be exactly "owner" or
+ * "admin": AIDA never assigns combined roles, so a comma-separated value such as "member,admin"
+ * is refused. This keeps the v1 gate in requireOrgAdmin unchanged (the conservative reading for
+ * an authorization rule); role management belongs to Phase 10.
  */
 export function isAdminRole(role: string | null | undefined): boolean {
   if (!role) return false;
-  return role.split(",").some((r) => ADMIN_ROLES.has(r.trim()));
+  return ADMIN_ROLES.has(role);
 }
