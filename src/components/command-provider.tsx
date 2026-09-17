@@ -29,7 +29,9 @@ import {
   useState,
 } from "react";
 import { CommandPalette } from "@/components/command-palette";
+import { ChordHint } from "@/components/keyboard/chord-hint";
 import { KeyboardDispatcher } from "@/components/keyboard/keyboard-dispatcher";
+import { KeyboardHelpDialog } from "@/components/keyboard/keyboard-help-dialog";
 import {
   type Command,
   type CommandContext,
@@ -172,7 +174,7 @@ export function CommandProvider({ views, children }: CommandProviderProps) {
     };
   }, []);
 
-  // Go to and Create: registered for the life of the shell.
+  // Go to, Create and Help: registered for the life of the shell.
   useEffect(() => {
     const commands: Command[] = NAVIGATION.map((item, index) => ({
       id: item.id,
@@ -198,6 +200,17 @@ export function CommandProvider({ views, children }: CommandProviderProps) {
         if (openDialog) openDialog();
         else router.push("/tickets?new=1");
       },
+    });
+    // Help: the palette closes before a command runs, so the help modal never stacks on it.
+    commands.push({
+      id: "help.shortcuts",
+      label: "Show keyboard shortcuts",
+      group: "help",
+      keywords: ["keyboard", "shortcuts", "keys", "help"],
+      order: 0,
+      icon: "keyboard",
+      when: () => true,
+      run: () => setHelpOpen(true),
     });
     const unregister = commands.map((command) => registry.register(command));
     return () => {
@@ -263,6 +276,8 @@ export function CommandProvider({ views, children }: CommandProviderProps) {
       {children}
       <KeyboardDispatcher setChord={setChord} openHelp={openHelp} />
       <CommandPalette open={open} onOpenChange={setOpen} registry={registry} context={context} />
+      <KeyboardHelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
+      <ChordHint pending={chord !== null} />
     </CommandsContext.Provider>
   );
 }

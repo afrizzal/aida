@@ -218,3 +218,15 @@ export function commandEntryFor(key: string): KeymapEntry | undefined {
       entry.commandId !== undefined,
   );
 }
+
+/** The help modal's sections: every entry once, in KEYMAP_SECTIONS order, then table order. */
+export function keymapBySection(): {
+  id: KeymapSection;
+  heading: string;
+  entries: KeymapEntry[];
+}[] {
+  return KEYMAP_SECTIONS.map((section) => ({
+    ...section,
+    entries: KEYMAP.filter((entry) => entry.section === section.id),
+  }));
+}
