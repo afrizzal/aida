@@ -31,6 +31,7 @@ export const DOMAIN_MODELS = [
   "CsatResponse",
   "SavedView",
   "TicketAuditEvent",
+  "TicketRelation",
 ] as const;
 
 const isDomain = (model?: string): boolean =>

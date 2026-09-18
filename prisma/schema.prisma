@@ -119,6 +119,7 @@ model organization {
   csatResponses    CsatResponse[]
   savedViews        SavedView[]
   ticketAuditEvents TicketAuditEvent[]
+  ticketRelations   TicketRelation[]
 }
 
 model member {
@@ -277,6 +278,10 @@ model Ticket {
   triageSentiment            TriageSentiment?
   triageLanguage             String?        // ISO 639-1 code, e.g. "en"
   triageStatus               TriageStatus?  // null = never enqueued (AI off); else PENDING/COMPLETED/FAILED
+  snoozedUntil               DateTime?      // Phase 12 (D-12): UTC deadline; null = not snoozed
+  mergedIntoTicketId         String?        // Phase 12 (D-08): set on a merged source
+  mergedAt                   DateTime?      // Phase 12 (D-08): displayed merge date
+  mergeMessageSeq            BigInt?        // Phase 12 (D-09 amended): Message.seq marker drawn under the merge row locks
   createdAt                  DateTime       @default(now())
   updatedAt                  DateTime       @updatedAt
   organization      organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -287,11 +292,17 @@ model Ticket {
   customFieldValues CustomFieldValue[]
   ticketEmbeddings TicketEmbedding[]
   csatResponse     CsatResponse?
+  mergedInto       Ticket?            @relation("TicketMerge", fields: [mergedIntoTicketId], references: [id], onDelete: Restrict)
+  mergedFrom       Ticket[]           @relation("TicketMerge")
+  relationsFrom    TicketRelation[]   @relation("RelationFrom")
+  relationsTo      TicketRelation[]   @relation("RelationTo")
 
   @@unique([organizationId, number])
   @@index([organizationId])
   @@index([organizationId, status])
   @@index([contactId])
+  @@index([snoozedUntil])
+  @@index([organizationId, mergedIntoTicketId])
 }
 
 model TicketCounter {
@@ -333,6 +344,8 @@ model Message {
   emailInReplyTo  String?
   emailReferences String[]               @default([])
   deliveryStatus  MessageDeliveryStatus?
+  mergedFromTicketId String?             // Phase 12 (D-08): source ticket of a moved message; no relation, provenance survives
+  seq             BigInt            @default(autoincrement()) // Phase 12 (D-09 amended): drawn at insert, under the ticket row lock
   createdAt       DateTime          @default(now())
   organization  organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   ticket        Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
@@ -343,6 +356,7 @@ model Message {
   @@index([ticketId])
   @@index([organizationId])
   @@index([organizationId, emailMessageId])
+  @@index([ticketId, seq])
 }
 
 model Tag {
@@ -599,6 +613,12 @@ enum TicketAuditAction {
   TAG_ADDED
   TAG_REMOVED
   AUTO_CLOSED
+  RELATION_ADDED
+  RELATION_REMOVED
+  MERGED_INTO
+  MERGED_FROM
+  SNOOZED
+  WOKEN
 }
 
 // The two partial unique name indexes (SavedView_private_name_key per owner among PRIVATE
@@ -645,4 +665,39 @@ model TicketAuditEvent {
 
   @@index([organizationId, ticketId])
   @@index([organizationId, batchId])
+}
+
+// ---------------------------------------------------------------------------
+// Domain models (Phase 12 — Ticket lifecycle: relations, merge, snooze)
+// ---------------------------------------------------------------------------
+
+enum TicketRelationType {
+  DUPLICATE_OF
+  RELATED_TO
+  CHILD_OF
+}
+
+// Hand-written objects that live ONLY in migration 20261109100000_ticket_lifecycle, because
+// Prisma cannot express them: the unique expression index TicketRelation_pair_key (one relation
+// per unordered pair: organizationId, LEAST and GREATEST of the two ticket ids), the CHECK
+// TicketRelation_no_self_check (no self-link) and the partial unique index
+// TicketRelation_one_parent_key (one CHILD_OF parent per child). The same migration also adds the
+// CHECK Ticket_merge_fields_check on Ticket. Any migration Prisma generates after that one must
+// keep them (delete any DROP statement for them by hand).
+// CHILD_OF: from is the child, to is the parent. createdById carries no relation on purpose:
+// history survives user removal.
+model TicketRelation {
+  id             String             @id @default(cuid())
+  organizationId String
+  type           TicketRelationType
+  fromTicketId   String
+  toTicketId     String
+  createdById    String
+  createdAt      DateTime           @default(now())
+  organization   organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  fromTicket     Ticket             @relation("RelationFrom", fields: [fromTicketId], references: [id], onDelete: Cascade)
+  toTicket       Ticket             @relation("RelationTo", fields: [toTicketId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, fromTicketId])
+  @@index([organizationId, toTicketId])
 }
