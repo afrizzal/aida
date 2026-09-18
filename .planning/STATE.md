@@ -5,13 +5,13 @@ milestone_name: Helpdesk & Projects
 current_phase: 12
 current_phase_name: ticket-lifecycle
 status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phase 11 verified human_needed; Phase 12 (split into 12, 12.1, 12.2; K32) context and UI-SPEC approved, planning next
-stopped_at: Phase 12 UI-SPEC approved; planning next
-last_updated: "2026-11-08T06:10:53.391Z"
+stopped_at: context exhaustion at 75% (2026-11-08)
+last_updated: "2026-11-08T13:01:10.052Z"
 last_activity: 2026-11-08
 last_activity_desc: Phase 12 split (K32); context D-01 to D-23 and UI design contract approved; planning next
-state_head: f188b063c618bd61f127ecd7aa91560d8ecababb
+state_head: b428a11e8e5f70243c6d9f3f77234075fe960c6c
 progress:
-  total_phases: 10
+  total_phases: 12
   completed_phases: 0
   total_plans: 59
   completed_plans: 9
@@ -106,8 +106,8 @@ Also open (not audit items): `milestones/v1.0.0-phases/07-launch-readiness/defer
 
 ## Session Continuity
 
-**Last session:** 2026-11-08T06:10:29.859Z
-**Stopped at:** Phase 11 verified human_needed; Phase 12 step 1 next (2026-11-08)
+**Last session:** 2026-11-08T13:01:10.024Z
+**Stopped at:** context exhaustion at 75% (2026-11-08)
 **Resume file:** .planning/run-loop/ANTREAN.md
 
 **Last action (2026-11-08):** Phase 10 parked after the third Codex plan review (2 HIGH findings accepted, not yet incorporated). No tag, nothing pushed.
