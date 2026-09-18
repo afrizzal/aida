@@ -12,7 +12,7 @@ Status: `belum`, `berjalan`, `selesai`, `menunggu manusia`, `diparkir`.
 | 09 | Operasional | diparkir | CONTEXT `5ebef8b`, UI-SPEC disetujui, 11 plan (`f4b5dfc`), tiga siklus review Codex. Siklus 3 menyisakan 1 HIGH: recovery `demo-partial` menghapus data demo, bertentangan dengan AIDA-37 (K25). Belum ada kode yang dieksekusi. Menunggu keputusan owner |
 | 10 | Tim | diparkir | CONTEXT `fcd034e`, UI-SPEC disetujui `0706c49`, 16 plan (`2730d11`), tiga siklus review Codex (`eed405e`, `1e11185`, siklus 3 di `10-REVIEWS.md`). Siklus 3 (terakhir) menyisakan 2 HIGH: dua skrip E2E di 10-13 bertentangan dengan perilaku yang ditetapkan plan sebelumnya (K27). Belum ada kode yang dieksekusi. Menunggu keputusan owner |
 | 11 | Inbox | menunggu manusia | Langkah 1 sampai 10 selesai. Review plan konvergen di siklus 2 (K29); 9/9 plan dieksekusi; code review dan tiga putaran kritik Codex atas diff, semua perbaikan masuk (K30, K31); gerbang final di `47fc015` hijau kecuali audit (baseline), egress blocked (O-1); verifikasi `human_needed` tanpa celah kode; AIDA-47 sampai 51 terverifikasi. Menunggu manusia: visual dan mode gelap, cek 360px, cek pembaca layar D-14 (STATE, Deferred Items) |
-| 12 | Siklus tiket | berjalan | Langkah 1: membaca sumber (AIDA-18, 52 sampai 57, 97; SEED-003, SEED-004; risiko lintas fase dari Fase 11) dan memverifikasi fakta kode |
+| 12 | Siklus tiket | berjalan | Langkah 1 selesai (sumber dan fakta kode). Langkah 2: brainstorm Codex (`codex/fase12-tanya.md`) |
 | 13 | Integrasi | diparkir | Ikut diparkir karena bergantung pada Fase 10 (rantai piagam) |
 | 14 | Fondasi Projects | belum | |
 | 15 | Tampilan kerja | belum | |
