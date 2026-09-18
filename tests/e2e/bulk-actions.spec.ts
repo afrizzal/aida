@@ -378,6 +378,79 @@ test.describe("Bulk actions", () => {
     await expect(page.getByText("The result is not known.")).toHaveCount(0);
   });
 
+  test("opening a ticket while a bulk call is pending keeps the bar locked until that call ends (Codex diff critique round 3, F1)", async ({
+    page,
+  }) => {
+    const token = tokenFor("pendingremount");
+    const [first, second, third] = await seedTickets(token, 3);
+    await openInbox(page, `q=${token}`, first.subject);
+
+    // Every bulk server-action POST is counted; the first one is held until the test lets it go.
+    let bulkPosts = 0;
+    let release: () => void = () => {};
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(
+      (url) => url.pathname.startsWith("/tickets"),
+      async (route) => {
+        const request = route.request();
+        if (request.method() !== "POST" || !(request.postData() ?? "").includes("ticketIds")) {
+          return route.fallback();
+        }
+        bulkPosts++;
+        if (bulkPosts === 1) await released;
+        await route.fallback();
+      },
+    );
+
+    await rowCheckbox(page, first.subject).click();
+    await rowCheckbox(page, second.subject).click();
+    const bar = bulkBar(page);
+    await expect(bar.getByText("2 tickets selected")).toBeVisible();
+    await bar.getByRole("button", { name: "Priority" }).click();
+    await openPickerPopover(page).getByRole("option", { name: "Urgent" }).click();
+    await expect(bar.getByText("Updating 2 tickets…")).toBeVisible();
+    await expect.poll(() => bulkPosts).toBe(1);
+
+    // Opening a ticket mounts a new list panel and bar while the first call is still pending.
+    await page.locator(`#ticket-row-${third.id}`).click();
+    await expect(page).toHaveURL(new RegExp(`/tickets/${third.id}\\?`), { timeout: 15_000 });
+
+    // The new bar still shows the call as pending, with every button off (UI-SPEC Surface 3b).
+    await expect(bar.getByText("Updating 2 tickets…")).toBeVisible();
+    for (const name of [
+      "Clear selection",
+      "Assign",
+      "Status",
+      "Priority",
+      "Add tag",
+      "Remove tag",
+    ]) {
+      await expect(bar.getByRole("button", { name, exact: true })).toBeDisabled();
+    }
+    // A second action cannot start: the trigger opens no picker and no second call is sent.
+    await bar.getByRole("button", { name: "Status", exact: true }).click({ force: true });
+    await expect(openPickerPopover(page)).toHaveCount(0);
+    expect(bulkPosts).toBe(1);
+
+    // Once the first call ends, its outcome shows and the bar works again.
+    release();
+    await expect(page.getByText("Applied to 2 tickets.")).toBeVisible();
+    await expect(bar.getByText("2 tickets selected")).toBeVisible();
+    await expect(bar.getByRole("button", { name: "Priority" })).toBeEnabled();
+    expect(bulkPosts).toBe(1);
+    await expect
+      .poll(async () => {
+        const rows = await prisma.ticket.findMany({
+          where: { id: { in: [first.id, second.id, third.id] } },
+          select: { id: true, priority: true },
+        });
+        return Object.fromEntries(rows.map((row) => [row.id, row.priority]));
+      })
+      .toEqual({ [first.id]: "URGENT", [second.id]: "URGENT", [third.id]: "NORMAL" });
+  });
+
   test("after a bulk action, and after a refused one, keyboard focus is back on the picker's trigger (review IN-04)", async ({
     page,
   }) => {

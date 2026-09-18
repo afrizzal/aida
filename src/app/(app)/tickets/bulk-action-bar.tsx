@@ -66,12 +66,26 @@ const OUTCOME_UNKNOWN_CONTINUE =
 // The unknown-outcome flag (E3). Set only by a rejected bulk call in the browser; the server
 // never sets it, and its server snapshot is always false.
 let outcomeUnknown = false;
+// The pending flag and call guard (Codex diff critique round 3, F1). It lives here for the same
+// reason as the flag above: opening a ticket remounts the bar while a call may still be pending,
+// and the new bar must stay locked until that call ends (success, refusal or unknown outcome).
+let callPending = false;
 const outcomeListeners = new Set<() => void>();
+
+function notifyListeners() {
+  for (const listener of outcomeListeners) listener();
+}
 
 function setOutcomeUnknown(value: boolean) {
   if (outcomeUnknown === value) return;
   outcomeUnknown = value;
-  for (const listener of outcomeListeners) listener();
+  notifyListeners();
+}
+
+function setCallPending(value: boolean) {
+  if (callPending === value) return;
+  callPending = value;
+  notifyListeners();
 }
 
 function subscribeOutcome(listener: () => void) {
@@ -85,6 +99,14 @@ function useOutcomeUnknown(): boolean {
   return useSyncExternalStore(
     subscribeOutcome,
     () => outcomeUnknown,
+    () => false,
+  );
+}
+
+function useCallPending(): boolean {
+  return useSyncExternalStore(
+    subscribeOutcome,
+    () => callPending,
     () => false,
   );
 }
@@ -147,7 +169,7 @@ export function BulkActionBar({
   tags: BulkActionBarOption[];
 }) {
   const { selectedIds, clear, reportLoaded } = useTicketSelection();
-  const [pending, setPending] = useState(false);
+  const pending = useCallPending();
   const [openPicker, setOpenPicker] = useState<Picker | null>(null);
   const [failure, setFailure] = useState<BulkFailure | null>(null);
   // The picker whose trigger gets focus back once the call ends (review IN-04). While pending
@@ -194,14 +216,15 @@ export function BulkActionBar({
   const removableTags = tags.filter((tag) => tagIdsOnSelection.has(tag.id));
 
   async function run(op: BulkOp, memberName?: string) {
-    // No retry while an earlier call's outcome is unknown (E3); the triggers are disabled too.
-    if (outcomeUnknown) return;
+    // No retry while an earlier call's outcome is unknown (E3), and no second call while one is
+    // pending, even from a remounted bar (F1); the triggers are disabled too.
+    if (outcomeUnknown || callPending) return;
     setRefocus(openPicker);
     setOpenPicker(null);
     setFailure(null);
     const ticketIds = [...selectedIds];
     const key = ticketIds.join(",");
-    setPending(true);
+    setCallPending(true);
     try {
       const result = await bulkUpdateTickets({ ticketIds, op });
       if (result.ok) {
@@ -218,7 +241,7 @@ export function BulkActionBar({
       setFocusDismiss(true);
       setOutcomeUnknown(true);
     } finally {
-      setPending(false);
+      setCallPending(false);
     }
   }
 
