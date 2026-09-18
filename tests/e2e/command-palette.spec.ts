@@ -292,50 +292,89 @@ test.describe("Command palette", () => {
   test("discards the response of an older query", async ({ page }) => {
     const stale = `palstale${ts}`;
     const fresh = `palfresh${ts}`;
-    let releaseStale: () => void = () => {};
-    const staleHeld = new Promise<void>((resolve) => {
-      releaseStale = resolve;
-    });
-    let markStaleRequested: () => void = () => {};
-    const staleRequested = new Promise<void>((resolve) => {
-      markStaleRequested = resolve;
-    });
-    let markStaleSettled: () => void = () => {};
-    const staleSettled = new Promise<void>((resolve) => {
-      markStaleSettled = resolve;
-    });
 
-    await page.route(isPaletteSearch, async (route) => {
-      const q = new URL(route.request().url()).searchParams.get("q");
-      if (q === stale) {
-        markStaleRequested();
-        await staleHeld;
-        await route
-          .fulfill({
-            json: {
-              results: [
-                { id: "stale-ticket", number: 99999, subject: `Stale ${stale}`, status: "OPEN" },
-              ],
-            },
-          })
-          .catch(() => undefined);
-        markStaleSettled();
-        return;
-      }
-      await route.fulfill({ json: { results: [] } });
-    });
+    // A controlled fetch for the palette search endpoint (Codex diff critique D6). It ignores the
+    // AbortSignal, so the older request is NOT cancelled when the query changes: its response
+    // resolves after the newer one, only when the test releases it, and only the stale-response
+    // guard in useTicketSearch can keep it off the screen. Every other request uses the real
+    // fetch.
+    await page.addInitScript(
+      ({ staleQuery }) => {
+        const realFetch = window.fetch.bind(window);
+        const w = window as unknown as {
+          __staleRequested: boolean;
+          __releaseStale: () => void;
+          __staleProcessed: Promise<void>;
+        };
+        w.__staleRequested = false;
+        let release: () => void = () => {};
+        const held = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        w.__releaseStale = release;
+        let markProcessed: () => void = () => {};
+        w.__staleProcessed = new Promise<void>((resolve) => {
+          markProcessed = resolve;
+        });
+        window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = new URL(
+            typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+            location.href,
+          );
+          if (url.pathname !== "/api/palette/tickets") return realFetch(input, init);
+          const q = url.searchParams.get("q");
+          if (q !== staleQuery) {
+            return new Response(JSON.stringify({ results: [] }), {
+              headers: { "content-type": "application/json" },
+            });
+          }
+          w.__staleRequested = true;
+          await held;
+          const body = {
+            results: [{ id: "stale-ticket", number: 99999, subject: `Stale ${q}`, status: "OPEN" }],
+          };
+          const response = new Response(JSON.stringify(body), {
+            headers: { "content-type": "application/json" },
+          });
+          const json = response.json.bind(response);
+          // The palette's code after `await response.json()` (results check, stale guard,
+          // setSearch) runs before this timer, so the promise marks it as processed.
+          response.json = async () => {
+            const value = await json();
+            setTimeout(markProcessed, 0);
+            return value;
+          };
+          return response;
+        };
+      },
+      { staleQuery: stale },
+    );
 
     await openRoute(page, "/tickets");
     await openPalette(page);
     await paletteInput(page).fill(stale);
-    await staleRequested;
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as unknown as { __staleRequested: boolean }).__staleRequested),
+      )
+      .toBe(true);
     await paletteInput(page).fill(fresh);
     await expect(palette(page).getByText(`No tickets match "${fresh}".`)).toBeVisible();
 
-    releaseStale();
-    await staleSettled;
-    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 100)));
+    // The older response now resolves, after the newer one. Wait until the palette processed it
+    // and React had time to commit any update it caused, then check the screen.
+    await page.evaluate(async () => {
+      const w = window as unknown as {
+        __releaseStale: () => void;
+        __staleProcessed: Promise<void>;
+      };
+      w.__releaseStale();
+      await w.__staleProcessed;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
     await expect(palette(page).getByText(`Stale ${stale}`)).toHaveCount(0);
+    await expect(palette(page).getByText("Searching tickets…")).toHaveCount(0);
     await expect(palette(page).getByText(`No tickets match "${fresh}".`)).toBeVisible();
   });
 });
