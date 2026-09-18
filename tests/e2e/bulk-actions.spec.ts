@@ -58,23 +58,53 @@ function rowCheckbox(page: Page, subject: string) {
   return page.getByRole("checkbox", { name: new RegExp(`: ${subject}$`) });
 }
 
+/** How often openInbox retries the first-hit 404 that next dev answers while compiling. */
+const COMPILE_404_ATTEMPTS = 10;
+
 /**
- * Opens the inbox filtered by the token; polls past a first-hit 404 while the route compiles.
- * The list panel streams in a Suspense boundary, and React 19.2 may reveal a streamed boundary up
- * to ~300 ms after the load event that page.goto waits for, so each attempt gives the row a short
- * moment to appear before counting (otherwise every attempt can count the fallback skeleton).
+ * Opens the inbox filtered by the token. Only the expected first-hit 404 (next dev compiles the
+ * route on demand) is retried, a bounded number of times; any other status fails at once. Then
+ * the row must appear on that ONE successful navigation, without navigating again (Codex diff
+ * critique round 2, E4): the list panel streams in a Suspense boundary, and React 19.2 may reveal
+ * it after the load event that page.goto waits for, so the wait is for the fallback to turn into
+ * the list, never for a later navigation that happens to render it.
  */
-async function openInbox(page: Page, query: string, firstSubject: string) {
-  await expect
-    .poll(async () => {
-      await page.goto(`/tickets?${query}`);
-      await rowCheckbox(page, firstSubject)
-        .waitFor({ timeout: 2_000 })
-        .catch(() => undefined);
-      return rowCheckbox(page, firstSubject).count();
-    })
-    .toBe(1);
+async function openInbox(page: Page, query: string, firstSubject: string, rowTimeout = 15_000) {
+  let status = 0;
+  for (let attempt = 1; attempt <= COMPILE_404_ATTEMPTS; attempt++) {
+    status = (await page.goto(`/tickets?${query}`))?.status() ?? 0;
+    if (status !== 404) break;
+    await page.waitForTimeout(500);
+  }
+  expect(status).toBe(200);
+  await expect(rowCheckbox(page, firstSubject)).toBeVisible({ timeout: rowTimeout });
+  await expect(rowCheckbox(page, firstSubject)).toHaveCount(1);
 }
+
+test.describe("openInbox", () => {
+  test("a first successful visit that never shows the list fails, a later visit does not hide it (Codex diff critique round 2, E4)", async ({
+    page,
+  }) => {
+    const token = tokenFor("helper");
+    const [first] = await seedTickets(token, 1);
+    // Warm the route, so the first visit below is a successful one, not a compile 404.
+    await expect.poll(async () => (await page.request.get("/tickets")).status()).toBe(200);
+
+    // The first document answers 200 but never renders the list; later visits are real.
+    let stalled = 0;
+    await page.route(
+      (url) => url.pathname === "/tickets",
+      async (route) => {
+        if (route.request().resourceType() !== "document" || stalled > 0) return route.fallback();
+        stalled++;
+        await route.fulfill({ status: 200, contentType: "text/html", body: "<p>stalled</p>" });
+      },
+    );
+
+    await expect(openInbox(page, `q=${token}`, first.subject, 3_000)).rejects.toThrow();
+    expect(stalled).toBe(1);
+  });
+});
 
 test.describe("Bulk actions", () => {
   test("a bulk status change updates exactly the selected tickets with one audit row each in one batch", async ({
