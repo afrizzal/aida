@@ -354,3 +354,13 @@ Verification after `5262b15`, main checkout, one process at a time, exit codes r
 - `pnpm test` 0 (23 files, 229 tests)
 - Integration with Testcontainers (Colima variables): `ticket-detail-data`, `create-agent-ticket` and `list-panel-data` exit 0 (3 files, 7 tests)
 - E2E: `inbox` (6), `reading-pane` (3), `saved-views` (10), `bulk-actions` (10), `command-palette` (9), `keyboard` (19) and `contacts` (4) exit 0 (61 passed)
+
+## Codex critique of the phase diff (round 3, last)
+
+Question `run-loop/codex/fase11-diff-r3-tanya.md` (commit `b7becf9`); answer `run-loop/codex/fase11-diff-r3-jawab.md`. Log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Codex: E1 to E4 closed in code; no HIGH left on the paths checked; the old paths without a membership check remain the open AIDA-43 and were not made worse; **fit for verification** (based on reading the code, not on runtime proof).
+
+| ID | Severity | Finding (short) | Orchestrator check | Disposition |
+|---|---|---|---|---|
+| F1 | MEDIUM | The bulk bar's `pending` flag is component state, so a remount while the first response is still pending (opening a ticket) re-enables the bar and allows a second action before the first outcome is known, contrary to UI-SPEC (buttons disabled while pending) | Verified: `bulk-action-bar.tsx:150` (component state) against the module-level unknown-outcome state; UI-SPEC Surface 3b | fix: keep the pending flag and the call guard in the same store that survives remounts; E2E with the response held, a ticket opened, and the second action still locked |
+
+Not raised by Codex as blocking: a member removal that commits after the membership read but while a render is in progress is a separate window (no row lock on reads); recorded, not changed.
