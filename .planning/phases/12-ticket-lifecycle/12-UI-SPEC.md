@@ -358,6 +358,7 @@ All copy is English, written fresh for AIDA, and final; the executor uses it ver
 | Link error: self | A ticket can't be linked to itself. |
 | Link error: parent exists | #{child} already has a parent ticket. A ticket can have only one parent. |
 | Link error: cycle | This link would make a ticket its own parent or ancestor. Pick another ticket. |
+| Link error: hierarchy too deep | This ticket is already deep in a chain of parent tickets. Link it to a ticket higher up instead. |
 | Link error: merge link | Created by a merge. This link can't be removed. |
 | Link error: already removed | This link was already removed. Refresh the page to see the current links. |
 | Link error: ticket unavailable | That ticket is no longer available. Pick another ticket. |
@@ -562,3 +563,5 @@ Token-only colours (no oklch/hex in new files; no new token); no new page-level 
 - [ ] Dimension 7 Inventory Provenance: PASS
 
 **Approval:** pending
+
+*Amended 2026-11-08 after Codex plan review cycle 1 (C5) and the round 1 plan check:* the server code `HIERARCHY_TOO_DEEP` (the ancestor walk reached its bound) has its own copy row, "Link error: hierarchy too deep".
