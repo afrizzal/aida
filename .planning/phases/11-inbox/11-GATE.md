@@ -96,3 +96,20 @@ None of these is claimed as passed.
    - The AIDA-49 registry and the AIDA-47 saved-view model now exist, so AIDA-86 (palette and shortcuts for Projects) and AIDA-80 (its view store) can build on them once AIDA-49 and AIDA-47 are closed.
 10. Baseline debt, unchanged and not worsened by Phase 11: `pnpm audit --prod` 7 critical and 52 high; the Windows-only `taskkill` E2E teardown; the honesty-invariants flakes (green in this run, not claimed fixed); the Turbopack NFT build warning; the 1 skipped `uat-gaps` case.
 11. The residual from the 11-07 follow-up fix: typing in the contacts search and then leaving within 300 ms can still be overridden by its debounced replace.
+
+## Rerun on `a2d50bc` (after the code review and the Codex diff critique fixes)
+
+Run by the orchestrator on 2026-11-08 18.51 to 18.55 WIB, one command at a time, each to its own log, exit codes read without a pipe, Colima socket variables set, `pgrep -f 'artisan test'` empty before every command. This closes Codex diff finding D5 (the evidence above was for `9523eac`).
+
+| Command | Exit | Result |
+|---|---|---|
+| `pnpm lint` | 0 | 339 files |
+| `pnpm typecheck` | 0 | clean |
+| `pnpm test` | 0 | 23 files, 229 tests |
+| `pnpm test:integration --exclude tests/integration/egress-isolation.test.ts` | 0 | 20 files, 137 tests |
+| `pnpm test:e2e` (full) | 0 | 116 passed, 1 skipped (the pre-existing `uat-gaps` skip), 0 failed |
+| `pnpm build` | 0 | one Turbopack warning, the NFT warning known since v1 |
+| `pnpm audit --prod` | 1 | 7 critical, 52 high, 69 moderate, 13 low: identical to the baseline; no dependency changed |
+| `pnpm test:integration` (full), `pnpm test:egress` | blocked | owner item O-1 (run-loop K26); not run |
+
+Nothing is worse than the baseline. The manual items listed above (visual and dark-mode approval, the D-14 screen-reader check, the 360px checks) remain open.
