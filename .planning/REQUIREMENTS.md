@@ -143,7 +143,7 @@ Clean-room rule for this and every later section: `PIAGAM.md` → Clean-room. So
 
 | Requirement | Phase | Status |
 |---|---|---|
-| AIDA-18 | Phase 12 | Pending |
+| AIDA-18 | Phase 12.2 | Pending |
 | AIDA-25 | Phase 8 | Pending |
 | AIDA-26 | Phase 8 | Pending |
 | AIDA-27 | Phase 8 | Pending |
@@ -175,9 +175,9 @@ Clean-room rule for this and every later section: `PIAGAM.md` → Clean-room. So
 | AIDA-53 | Phase 12 | Pending |
 | AIDA-54 | Phase 12 | Pending |
 | AIDA-55 | Phase 12 | Pending |
-| AIDA-56 | Phase 12 | Pending |
-| AIDA-57 | Phase 12 | Pending |
-| AIDA-97 | Phase 12 | Pending |
+| AIDA-56 | Phase 12.1 | Pending |
+| AIDA-57 | Phase 12.1 | Pending |
+| AIDA-97 | Phase 12.1 | Pending |
 | AIDA-58 | Phase 13 | Pending |
 | AIDA-59 | Phase 13 | Pending |
 | AIDA-60 | Phase 13 | Pending |

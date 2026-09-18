@@ -260,20 +260,43 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 - [x] 11-09-PLAN.md — Run the keyboard E2E, the phase gate and the §9 design checklist, and record evidence per requirement (Wave 6)
 
-### Phase 12: Ticket Lifecycle
+### Phase 12: Ticket Lifecycle — relations, merge, snooze and activity
 
 **Depends on:** Nothing beyond run order
-**Requirements:** AIDA-18, AIDA-52, AIDA-53, AIDA-54, AIDA-55, AIDA-56, AIDA-57, AIDA-97
+**Requirements:** AIDA-52, AIDA-53, AIDA-54, AIDA-55
 **UI hint**: yes
-**Goal:** Tickets model real support work: duplicates, waiting, a team's own states, and knowledge that grows from resolved work.
+**Goal:** Tickets model duplicates and waiting: links between tickets, safe merges, snooze, and an activity feed.
+**Split (run-loop K32, 2026-11-08):** the original Phase 12 is carried out as three phases in order, with no scope removed: Phase 12 (this one), Phase 12.1 (custom states and SLA pause) and Phase 12.2 (KB proposals). The six original success criteria are kept and divided among them.
 **Success Criteria (what must be TRUE):**
 
 1. Tickets link in all three relation types, and links show from both sides.
 2. A merge moves the thread, closes the source as a duplicate, and leaves a full audit event, and no status link exposes one contact's messages to another.
 3. A snoozed ticket wakes by date or by customer reply, and auto-close skips it.
-4. Custom states migrate existing data without loss, admins can manage them, and every reader of status, including the `sla-flag` worker, reasons about the group.
-5. Each SLA due time moves by exactly the paused time across repeated pauses, and the real SLA worker raises no flag while a ticket is paused.
-6. An admin can review a proposed KB article from resolved tickets, and nothing publishes without that review.
+
+**Plans:** 0 plans
+
+### Phase 12.1: Ticket Lifecycle — custom states and SLA pause
+
+**Depends on:** Phase 12 (run order; the state migration must cover snooze and merge)
+**Requirements:** AIDA-56, AIDA-97, AIDA-57
+**UI hint**: yes
+**Goal:** A team's own states, with every status reader reasoning about the group and SLA timers that pause correctly.
+**Success Criteria (what must be TRUE):**
+
+1. Custom states migrate existing data without loss, admins can manage them, and every reader of status, including the `sla-flag` worker, reasons about the group.
+2. Each SLA due time moves by exactly the paused time across repeated pauses, and the real SLA worker raises no flag while a ticket is paused.
+
+**Plans:** 0 plans
+
+### Phase 12.2: Ticket Lifecycle — knowledge from resolved work
+
+**Depends on:** Nothing beyond run order
+**Requirements:** AIDA-18
+**UI hint**: yes
+**Goal:** Knowledge grows from resolved work under human review.
+**Success Criteria (what must be TRUE):**
+
+1. An admin can review a proposed KB article from resolved tickets, and nothing publishes without that review.
 
 **Plans:** 0 plans
 
@@ -412,7 +435,9 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 | 9. Operations | v2.0 | 0/11 | Parked (Codex plan review cycle 3 left a HIGH finding; owner decision) | - |
 | 10. Team | v2.0 | 0/16 | Parked (Codex plan review cycle 3 left HIGH findings; owner decision) | - |
 | 11. Inbox | v2.0 | 9/9 | Verified: human_needed (visual, dark mode, 360px and screen-reader checks open) | - |
-| 12. Ticket Lifecycle | v2.0 | 0/0 | Not started | - |
+| 12. Ticket Lifecycle (relations, merge, snooze, activity) | v2.0 | 0/0 | In progress (context) | - |
+| 12.1. Ticket Lifecycle (custom states, SLA pause) | v2.0 | 0/0 | Not started | - |
+| 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 0/0 | Not started | - |
 | 13. Integrations | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
 | 14. Projects Foundation | v2.0 | 0/0 | Not started | - |
 | 15. Work Views | v2.0 | 0/0 | Not started | - |
