@@ -113,3 +113,18 @@ Run by the orchestrator on 2026-11-08 18.51 to 18.55 WIB, one command at a time,
 | `pnpm test:integration` (full), `pnpm test:egress` | blocked | owner item O-1 (run-loop K26); not run |
 
 Nothing is worse than the baseline. The manual items listed above (visual and dark-mode approval, the D-14 screen-reader check, the 360px checks) remain open.
+
+## Rerun on `32d165b` (after the Codex diff critique round 2 fixes)
+
+Same procedure as the rerun above, 2026-11-08 19.15 to 19.18 WIB.
+
+| Command | Exit | Result |
+|---|---|---|
+| `pnpm lint` | 0 | 343 files |
+| `pnpm typecheck` | 0 | clean |
+| `pnpm test` | 0 | 23 files, 229 tests |
+| `pnpm test:integration --exclude tests/integration/egress-isolation.test.ts` | 0 | 22 files, 142 tests |
+| `pnpm test:e2e` (full) | 0 | 120 passed, 1 skipped (pre-existing), 0 failed |
+| `pnpm build` | 0 | the known NFT warning |
+| `pnpm audit --prod` | 1 | 7 critical, 52 high, 69 moderate, 13 low: identical to the baseline |
+| `pnpm test:integration` (full), `pnpm test:egress` | blocked | O-1; not run |
