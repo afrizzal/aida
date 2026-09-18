@@ -139,3 +139,14 @@ None.
 
 - FOUND: tests/e2e/keyboard.spec.ts, README.md, .planning/phases/11-inbox/11-GATE.md
 - FOUND commits: 9523eac, ae68345, f65b883
+
+## Follow-up fixes (orchestrator)
+
+Codex diff critique round 2 (11-REVIEW.md, "Fix status (round 2)"):
+
+- **E1** (`6af1c09`, run-loop K31): the ticket page and the agent New Ticket action now check the member row first (`loadTicketDetailData`, `createAgentTicket`); a removed member gets the access-ended state or a `MEMBERSHIP_ENDED` refusal, and the membership-ended list panel hides the filter row. Only these two old paths changed: every other pre-Phase-11 page and action still lacks the check, and **AIDA-43 stays open**.
+- **E2** (`9d60b47`): a pending `g` chord is cancelled when a navigation starts, not only when it commits.
+- **E3** (`9aea86f`): the unknown-outcome bulk warning stays until a refresh or Dismiss and blocks bulk actions meanwhile.
+- **E4** (`5262b15`): the bulk-actions `openInbox` helper retries only the compile 404 and waits for rows on one navigation.
+
+Gate after `5262b15`: typecheck, lint and unit tests exit 0; integration `ticket-detail-data`, `create-agent-ticket`, `list-panel-data` exit 0; E2E inbox, reading-pane, saved-views, bulk-actions, command-palette, keyboard and contacts exit 0 (61 passed).
