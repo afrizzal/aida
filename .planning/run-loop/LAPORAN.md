@@ -81,7 +81,7 @@ Baris bertanda baseline berasal dari persiapan (`1ea4281`). Baris 0a dijalankan 
 | `pnpm typecheck` (Fase 11, final) | 0 | bersih |
 | `pnpm test` (Fase 11, final) | 0 | 23 berkas, 229 test |
 | `pnpm test:integration --exclude tests/integration/egress-isolation.test.ts` (Fase 11, final) | 0 | 22 berkas, 142 test, dengan socket Colima |
-| `pnpm test:e2e` penuh (Fase 11, final) | 0 | 121 lolos, 1 skip lama, 0 gagal; lima run E2E penuh berturut-turut hari ini hijau, tetapi flake lama `honesty-invariants` tidak diklaim hilang |
+| `pnpm test:e2e` penuh (Fase 11, final) | 0 | 121 lolos, 1 skip lama, 0 gagal; empat run E2E penuh hari ini hijau (`9523eac`, `a2d50bc`, `32d165b`, `47fc015`), tetapi flake lama `honesty-invariants` tidak diklaim hilang |
 | `pnpm build` (Fase 11, final) | 0 | peringatan NFT lama |
 | `pnpm audit --prod` (Fase 11, final) | 1 | 7 critical, 52 high, 69 moderate, 13 low; sama dengan baseline, tanpa perubahan dependensi |
 | `pnpm test:integration` penuh dan `pnpm test:egress` (Fase 11) | blocked | O-1 (K26), tidak dijalankan |
