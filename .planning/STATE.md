@@ -5,10 +5,10 @@ milestone_name: Helpdesk & Projects
 current_phase: 12
 current_phase_name: ticket-lifecycle
 status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phase 11 verified human_needed; Phase 12 (split into 12, 12.1, 12.2; K32) planned with 9 plans, plan checker passed; Codex plan review next
-stopped_at: Phase 12 replanned from Codex cycle 1; Codex cycle 2 next
+stopped_at: Phase 12 replanned from Codex cycle 2; Codex cycle 3 (last) next
 last_updated: "2026-11-08T13:45:38.260Z"
 last_activity: 2026-11-08
-last_activity_desc: Phase 12 replanned from Codex cycle 1 (10 findings in plans, new 12-10, D-09 amended), plan checks passed; Codex cycle 2 next
+last_activity_desc: Phase 12 replanned from Codex cycle 2 (1 HIGH and 2 MEDIUM in plans), plan checker passed; Codex cycle 3 (last) next
 state_head: 14c06108b33d35080312db6a9ba46c6799c41136
 progress:
   total_phases: 12
