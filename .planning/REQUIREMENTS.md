@@ -40,11 +40,11 @@ IDs continue at AIDA-25. AIDA-18 keeps its v1 ID.
 
 ## Inbox productivity
 
-- [ ] **AIDA-47** `v2` — An agent can save the current inbox filters as a private or shared view. [Charter, SEED-005] Accept: filters are validated against the existing filter schema; shared views are org-scoped with an unmocked isolation test; views appear in the sidebar using `sidebar-*` tokens.
-- [ ] **AIDA-48** `v2` — An agent can select many tickets and assign, change status, change priority, or add and remove a tag in one action. [Charter, SEED-005] Accept: one transaction, one audit entry per ticket, and a test proves a failure rolls back the batch.
-- [ ] **AIDA-49** `v2` — A command palette opens with `⌘K` and `Ctrl+K`, with context-aware commands for navigation, ticket search, ticket creation and switching views. [Charter, SEED-006] Accept: E2E covers each command group; the registry can accept commands from other modules.
-- [ ] **AIDA-50** `v2` — The inbox and ticket page can be driven by keyboard. [Charter, SEED-006] Accept: shortcuts, chords with a timeout, and a `?` help modal work; keystrokes are ignored inside inputs and editors; a docs page lists the keys.
-- [ ] **AIDA-51** `v2` — Resolved tickets close automatically after a configurable quiet period. [Charter, SEED-009] Accept: an org setting with 0 meaning off; a pg-boss cron job closes qualifying tickets with an audit event; any customer notice is a fixed template, off by default, with no AI text.
+- [x] **AIDA-47** `v2` — An agent can save the current inbox filters as a private or shared view. [Charter, SEED-005] Accept: filters are validated against the existing filter schema; shared views are org-scoped with an unmocked isolation test; views appear in the sidebar using `sidebar-*` tokens.
+- [x] **AIDA-48** `v2` — An agent can select many tickets and assign, change status, change priority, or add and remove a tag in one action. [Charter, SEED-005] Accept: one transaction, one audit entry per ticket, and a test proves a failure rolls back the batch.
+- [x] **AIDA-49** `v2` — A command palette opens with `⌘K` and `Ctrl+K`, with context-aware commands for navigation, ticket search, ticket creation and switching views. [Charter, SEED-006] Accept: E2E covers each command group; the registry can accept commands from other modules.
+- [x] **AIDA-50** `v2` — The inbox and ticket page can be driven by keyboard. [Charter, SEED-006] Accept: shortcuts, chords with a timeout, and a `?` help modal work; keystrokes are ignored inside inputs and editors; a docs page lists the keys.
+- [x] **AIDA-51** `v2` — Resolved tickets close automatically after a configurable quiet period. [Charter, SEED-009] Accept: an org setting with 0 meaning off; a pg-boss cron job closes qualifying tickets with an audit event; any customer notice is a fixed template, off by default, with no AI text.
 
 ## Ticket lifecycle
 
@@ -166,11 +166,11 @@ Clean-room rule for this and every later section: `PIAGAM.md` → Clean-room. So
 | AIDA-44 | Phase 10 | Pending |
 | AIDA-45 | Phase 10 | Pending |
 | AIDA-46 | Phase 10 | Pending |
-| AIDA-47 | Phase 11 | Pending |
-| AIDA-48 | Phase 11 | Pending |
-| AIDA-49 | Phase 11 | Pending |
-| AIDA-50 | Phase 11 | Pending |
-| AIDA-51 | Phase 11 | Pending |
+| AIDA-47 | Phase 11 | Complete (acceptance verified, `11-VERIFICATION.md`; phase visual sign-off pending) |
+| AIDA-48 | Phase 11 | Complete (acceptance verified, `11-VERIFICATION.md`; phase visual sign-off pending) |
+| AIDA-49 | Phase 11 | Complete (acceptance verified, `11-VERIFICATION.md`; phase visual sign-off pending) |
+| AIDA-50 | Phase 11 | Complete (acceptance verified, `11-VERIFICATION.md`; phase visual sign-off pending) |
+| AIDA-51 | Phase 11 | Complete (acceptance verified; no customer notice built, D-19, owner item O-2 open; phase visual sign-off pending) |
 | AIDA-52 | Phase 12 | Pending |
 | AIDA-53 | Phase 12 | Pending |
 | AIDA-54 | Phase 12 | Pending |

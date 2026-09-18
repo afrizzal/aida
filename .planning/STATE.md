@@ -2,13 +2,13 @@
 gsd_state_version: "1.0"
 milestone: v2.0
 milestone_name: Helpdesk & Projects
-current_phase: 11
-current_phase_name: inbox
-status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phase 11 executed (9/9 plans, gate green except audit at baseline); code review next
-stopped_at: Phase 11 executed; code review next
+current_phase: 12
+current_phase_name: ticket-lifecycle
+status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phase 11 verified human_needed (AIDA-47 to 51 verified; visual and screen-reader checks open); Phase 12 next
+stopped_at: Phase 11 verified human_needed; Phase 12 step 1 next
 last_updated: "2026-11-08T06:10:53.391Z"
 last_activity: 2026-11-08
-last_activity_desc: Phase 11 executed, 9/9 plans; gate lint, typecheck, test, integration without egress, full E2E and build exit 0, audit at baseline; code review next
+last_activity_desc: Phase 11 reviewed (code review and three Codex diff rounds, all fixes in), final gate green except audit at baseline, verification human_needed; Phase 12 next
 state_head: f188b063c618bd61f127ecd7aa91560d8ecababb
 progress:
   total_phases: 10
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-11-07, v2.0 opened)
 
 ## Current Position
 
-Phase: 11 (inbox), 9/9 plans executed; gate green except audit (baseline); code review next. Phases 08, 09 and 10 are PARKED (owner decision); Phases 13, 16 and 17 are parked by dependency on Phase 10.
+Phase: 12 (ticket lifecycle), not started. Phase 11 (inbox) is verified human_needed: AIDA-47 to 51 verified with evidence; visual, dark mode, 360px and screen-reader checks wait for a human. Phases 08, 09 and 10 are PARKED (owner decision); 13, 16 and 17 are parked by dependency on Phase 10. Phases 08, 09 and 10 are PARKED (owner decision); Phases 13, 16 and 17 are parked by dependency on Phase 10.
 Plan: —
 Status: Milestone v2.0 opened by hand on 2026-11-07. `REQUIREMENTS.md` (91 requirements) and `ROADMAP.md` (Phases 8–17) are written and were revised over three Codex critique rounds (queue item 0b done). The public demo was walked under the clean-room rules and added AIDA-100 to AIDA-114 (item 0c done). Phase 8 context is committed (`08-CONTEXT.md`, `8abbc6c`) and the phase is planned: 23 plans in 14 waves; three Codex review cycles; parked after cycle 3 (owner decision, `run-loop/LAPORAN.md`). No Phase 8 code has been executed. Baseline 0a is done: build passes; integration passes except the egress file; E2E passes 63 with two honesty-invariants flakes that pass alone (fixed by plan 08-17). The egress baseline (0a2) was parked while `binaries.prisma.sh` sent no bytes on GET (07.45 to 09.09); the host recovered and the test waits for the Rekriva regression to finish.
 Last activity: 2026-11-08 — Phase 10 parked after its third Codex plan review (K27); Phases 8 and 9 were parked the same way (K24, K25). v1.0.0 stays complete and archived; its archives are `milestones/v1.0.0-*`.
@@ -56,6 +56,12 @@ The full v1 decision log (~160 dated, per-plan entries) lives in `milestones/v1.
 - **Repeated `pnpm test:e2e` runs** can leave `.next/dev/types/*.d.ts` truncated and break `tsc`/`pnpm build` — delete the gitignored `.next/` and rebuild.
 
 ### Deferred Items
+
+Items deferred during v2.0 (run loop):
+
+| Category | Item | Status |
+|----------|------|--------|
+| verification_gap | Phase 11 — `11-VERIFICATION.md` (2026-11-08) | `human_needed` — no code gap; AIDA-47 to 51 verified. Open for a human: visual approval and dark mode of the Phase 11 screens, the 360px and long-text backstops (11-04 to 11-08), the 11-06 backstop of a bulk status change moving tickets out of the filter, and the D-14 screen-reader check of single-letter keys. Also open: full `pnpm test:integration` and `pnpm test:egress` (blocked, O-1); owner item O-2 (auto-close customer notice) |
 
 Items acknowledged and deferred at milestone close on 2026-09-13 (override closeout; 23 items reported by `gsd-tools query audit-open`, plus AIDA-18):
 
@@ -101,7 +107,7 @@ Also open (not audit items): `milestones/v1.0.0-phases/07-launch-readiness/defer
 ## Session Continuity
 
 **Last session:** 2026-11-08T06:10:29.859Z
-**Stopped at:** Phase 11 planned; Codex plan review next (2026-11-08)
+**Stopped at:** Phase 11 verified human_needed; Phase 12 step 1 next (2026-11-08)
 **Resume file:** .planning/run-loop/ANTREAN.md
 
 **Last action (2026-11-08):** Phase 10 parked after the third Codex plan review (2 HIGH findings accepted, not yet incorporated). No tag, nothing pushed.

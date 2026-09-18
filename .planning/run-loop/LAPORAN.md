@@ -1,10 +1,10 @@
 # Laporan run loop AIDA
 
-Keadaan per 2026-11-08 14.20 WIB, putaran 31.
+Keadaan per 2026-11-08 19.35 WIB, putaran 37.
 
 ## 1. Ringkasan
 
-Milestone v2.0 sudah dibuka (0b) dan daftar fitur Projects sudah dicek ke demo publik (0c). Baseline 0a selesai di Mac ini: build lolos, integration lolos kecuali test egress, dan E2E lolos 63 dengan 2 flake. Baseline egress (0a2) menunggu owner, karena suite itu membuat dan membongkar container project `aida-egress-test` (O-1, bagian 3). **Fase 08 (Keamanan), 09 (Operasional), dan 10 (Tim) diparkir.** Ketiganya punya CONTEXT dan plan lengkap dan sudah direview Codex tiga siklus, tetapi siklus 3 masih menyisakan HIGH, jadi piagam memarkirnya. Fase 13, 16, dan 17 ikut diparkir karena bergantung pada Fase 10. Lanjut atau tidaknya keputusan owner (bagian 3, butir 1). Fase 11 (Inbox) lolos review plan di siklus 2 dan siap dieksekusi; sesudahnya 12, 14, dan 15. Belum ada kode produk yang diubah. Dokumen di `.planning/` aman ditinjau.
+Milestone v2.0 sudah dibuka (0b) dan daftar fitur Projects sudah dicek ke demo publik (0c). Baseline 0a selesai di Mac ini: build lolos, integration lolos kecuali test egress, dan E2E lolos 63 dengan 2 flake. Baseline egress (0a2) menunggu owner, karena suite itu membuat dan membongkar container project `aida-egress-test` (O-1, bagian 3). **Fase 08 (Keamanan), 09 (Operasional), dan 10 (Tim) diparkir.** Ketiganya punya CONTEXT dan plan lengkap dan sudah direview Codex tiga siklus, tetapi siklus 3 masih menyisakan HIGH, jadi piagam memarkirnya. Fase 13, 16, dan 17 ikut diparkir karena bergantung pada Fase 10. Lanjut atau tidaknya keputusan owner (bagian 3, butir 1). **Fase 11 (Inbox) selesai sampai verifikasi**: 9/9 plan dieksekusi, code review dan tiga putaran kritik Codex atas diff (semua perbaikan masuk), gerbang final hijau kecuali audit (sama dengan baseline), dan verifikasi `human_needed` tanpa celah kode. AIDA-47 sampai 51 terverifikasi; tampilan dan pembaca layar menunggu manusia. Run berlanjut ke Fase 12, lalu 14 dan 15. Kode produk Fase 11 ada di branch ini (commit lokal, tanpa push) dan aman ditinjau; dokumen ada di `.planning/`.
 
 ## 2. Fase dan requirement
 
@@ -17,7 +17,7 @@ Milestone v2.0 sudah dibuka (0b) dan daftar fitur Projects sudah dicek ke demo p
 | 08 | Keamanan (AIDA-25 sampai 32) | diparkir | CONTEXT; 23 plan; tiga siklus review Codex; siklus 3 menyisakan 4 HIGH (diterima, belum dimasukkan ke plan). Belum ada kode yang dieksekusi | `8abbc6c`, `6238af7`, `ded5f56`, `99721fd`, `96d7c8f` |
 | 09 | Operasional (AIDA-33 sampai 41) | diparkir | CONTEXT, UI-SPEC disetujui, 11 plan, tiga siklus review Codex. Siklus 3 menyisakan 1 HIGH (K25). Belum ada kode yang dieksekusi | `5ebef8b`, `f4b5dfc` |
 | 10 | Tim (AIDA-42 sampai 46) | diparkir | CONTEXT (D-01 sampai D-29), UI-SPEC disetujui, 16 plan dalam 6 wave, tiga siklus review Codex (12, lalu 6, lalu 4 temuan). Siklus 3 menyisakan 2 HIGH, keduanya kontradiksi skrip E2E di 10-13 (K27). Belum ada kode yang dieksekusi | `fcd034e`, `0706c49`, `f188b06`, `eed405e`, `05570ee`, `1e11185`, `2730d11` |
-| 11 | Inbox (AIDA-47 sampai 51) | berjalan (dieksekusi; code review berikutnya) | 9/9 plan dieksekusi dengan tiga perbaikan; gerbang di `9523eac`: lint, typecheck, test (222), integration tanpa egress (129), E2E penuh (111 lolos), dan build exit 0; audit sama dengan baseline; egress blocked (O-1). Visual dan pembaca layar menunggu manusia | `7fb2721`..`6e3b76e`, `468c138`, `b3f8575`, `9eddbd9` |
+| 11 | Inbox (AIDA-47 sampai 51) | selesai, menunggu manusia | 9/9 plan; code review (0 critical) dan tiga putaran kritik Codex atas diff, semua perbaikan masuk; gerbang final di `47fc015`: lint, typecheck, unit (229), integration tanpa egress (142), E2E penuh (121 lolos), dan build exit 0, audit sama dengan baseline, egress blocked (O-1); verifikasi `human_needed` tanpa celah kode. Menunggu manusia: visual, mode gelap, 360px, pembaca layar | `7fb2721`..`866b1ed` |
 | 12 | Siklus tiket (AIDA-18, 52 sampai 57, 97) | belum disentuh | | |
 | 13 | Integrasi (AIDA-58 sampai 63) | diparkir (bergantung pada Fase 10) | | |
 | 14 | Fondasi Projects (AIDA-64 sampai 71, 100 sampai 105) | belum disentuh | | |
@@ -60,6 +60,7 @@ Rincian ada di `RUN-LOG.md` putaran 1 dan 2. Jawaban Codex disimpan di `codex/ro
 - Putaran 7: draf CONTEXT dari putaran 6 salah membaca F-11 (`addTag` sudah memvalidasi sebelum gerbang, bukan sebaliknya). Diperbaiki sebelum commit.
 - Fase 10 (putaran 23 sampai 31): undangan dikelola AIDA di atas tabel `invitation` plugin, dan endpoint plugin organization serta admin ditutup lewat HTTP; cek keanggotaan dari database di setiap jalur; tanpa peran ketiga. Review plan Codex tiga siklus: 12, lalu 6, lalu 4 temuan, semuanya diterima. Saya tidak sependapat dengan Codex soal C1 pada awalnya (test egress dengan pengaman sudah cukup), lalu ikut tafsiran konservatif (aturan keputusan 4). Sesudah siklus 3 fase diparkir (K27), dan Codex juga menyimpulkan begitu. Kesalahan saya: satu perbaikan kecil sesudah plan-checker, tanpa review, membuka cacat baru (R3-3).
 - 0a2 (putaran 29): saya sempat menjalankan `pnpm test:egress` walau putaran 27 sudah memutuskan suite itu "blocked (O-1)". Test dihentikan di tahap build, sebelum ada container, network, atau volume (K26).
+- Fase 11 (putaran 32 sampai 37): review plan konvergen di siklus 2 tanpa HIGH, jadi siklus 3 tidak diperlukan (K29). Kritik diff memakai tiga putaran: putaran 1 dan 2 masing-masing menemukan satu HIGH soal anggota yang dikeluarkan (roster di panel, lalu detail tiket dan buat tiket), keduanya diperbaiki; putaran 3 tanpa HIGH. K30: memilih ulang prioritas yang sama tetap no-op (Codex menerima). K31: jalur lama detail tiket dan buat tiket ditutup untuk anggota yang dikeluarkan karena palette Fase 11 mengarah ke sana (opsi konservatif; AIDA-43 tetap terbuka). Saya juga membalik satu perbaikan code fixer yang melonggarkan gerbang admin v1 (peran gabungan `member,admin`) menjadi pencocokan persis. Bug lama v1 yang ditemukan dan diperbaiki: kotak pencarian kontak menimpa navigasi pengguna dalam 300 ms pertama.
 - Koreksi kejujuran: AIDA-10 di v1 tercatat selesai, padahal alur undangan tidak pernah ada (F-16). Centang v1 tidak diubah. Celahnya dicatat di `PROJECT.md` dan ditutup oleh AIDA-42.
 
 ## 6. Hasil test dan audit
@@ -76,13 +77,13 @@ Baris bertanda baseline berasal dari persiapan (`1ea4281`). Baris 0a dijalankan 
 | `pnpm test:integration` | 1 | butir 0a, dengan socket Colima: 11 dari 12 berkas lolos, 26 test lolos, 4 di-skip; satu-satunya yang gagal `egress-isolation.test.ts` (ikut terjaring `include`), sebab sama dengan baris egress |
 | `pnpm test:e2e` | 1 | butir 0a, dengan socket Colima: 63 lolos, 1 di-skip, 2 gagal di `honesty-invariants.spec.ts` (a, b). Dijalankan sendirian: exit 0, 2/2 lolos. Flake; teardown memakai `taskkill` khusus Windows |
 | `pnpm test:egress` | 1 | butir 0a2: `docker compose up --build` dihentikan batas 480 detik; build macet di `@prisma/engines postinstall` karena `binaries.prisma.sh` mengirim 0 byte pada `GET`. 4 test di-skip, tidak ada yang lolos |
-| `pnpm lint` (Fase 11) | 0 | 330 berkas, gerbang 11-09 di `9523eac` |
-| `pnpm typecheck` (Fase 11) | 0 | bersih |
-| `pnpm test` (Fase 11) | 0 | 21 berkas, 222 test |
-| `pnpm test:integration --exclude tests/integration/egress-isolation.test.ts` (Fase 11) | 0 | 18 berkas, 129 test, dengan socket Colima; pertama kali hijau di Mac ini |
-| `pnpm test:e2e` penuh (Fase 11) | 0 | 111 lolos, 1 skip lama, 0 gagal; pertama kali exit 0 di Mac ini. Satu run hijau belum membuktikan flake `honesty-invariants` hilang |
-| `pnpm build` (Fase 11) | 0 | peringatan NFT lama |
-| `pnpm audit --prod` (Fase 11) | 1 | 7 critical, 52 high, 69 moderate, 13 low; sama dengan baseline, tanpa perubahan dependensi |
+| `pnpm lint` (Fase 11, final `47fc015`) | 0 | 343 berkas |
+| `pnpm typecheck` (Fase 11, final) | 0 | bersih |
+| `pnpm test` (Fase 11, final) | 0 | 23 berkas, 229 test |
+| `pnpm test:integration --exclude tests/integration/egress-isolation.test.ts` (Fase 11, final) | 0 | 22 berkas, 142 test, dengan socket Colima |
+| `pnpm test:e2e` penuh (Fase 11, final) | 0 | 121 lolos, 1 skip lama, 0 gagal; lima run E2E penuh berturut-turut hari ini hijau, tetapi flake lama `honesty-invariants` tidak diklaim hilang |
+| `pnpm build` (Fase 11, final) | 0 | peringatan NFT lama |
+| `pnpm audit --prod` (Fase 11, final) | 1 | 7 critical, 52 high, 69 moderate, 13 low; sama dengan baseline, tanpa perubahan dependensi |
 | `pnpm test:integration` penuh dan `pnpm test:egress` (Fase 11) | blocked | O-1 (K26), tidak dijalankan |
 
 ## 7. Package baru
@@ -91,7 +92,7 @@ Belum ada.
 
 ## 8. Bukti tidak ada push
 
-Dicek 2026-11-08 14.09 WIB:
+Dicek 2026-11-08 18.08 WIB:
 
 - `git ls-remote origin refs/heads/master`: `1ea4281ab7bc72955514847837b5efffa5bc837d`
 - `git remote get-url --push origin`: `no-push-run-loop`
