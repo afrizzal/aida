@@ -58,11 +58,19 @@ function rowCheckbox(page: Page, subject: string) {
   return page.getByRole("checkbox", { name: new RegExp(`: ${subject}$`) });
 }
 
-/** Opens the inbox filtered by the token; polls past a first-hit 404 while the route compiles. */
+/**
+ * Opens the inbox filtered by the token; polls past a first-hit 404 while the route compiles.
+ * The list panel streams in a Suspense boundary, and React 19.2 may reveal a streamed boundary up
+ * to ~300 ms after the load event that page.goto waits for, so each attempt gives the row a short
+ * moment to appear before counting (otherwise every attempt can count the fallback skeleton).
+ */
 async function openInbox(page: Page, query: string, firstSubject: string) {
   await expect
     .poll(async () => {
       await page.goto(`/tickets?${query}`);
+      await rowCheckbox(page, firstSubject)
+        .waitFor({ timeout: 2_000 })
+        .catch(() => undefined);
       return rowCheckbox(page, firstSubject).count();
     })
     .toBe(1);
@@ -216,11 +224,56 @@ test.describe("Bulk actions", () => {
     await expect(alert).toContainText(
       "One of the selected tickets is no longer available. Refresh the list and try again.",
     );
+    // A refusal is a definite rollback, so it never shows the unknown-outcome copy (D2).
+    await expect(alert).not.toContainText("The result is not known.");
     await expect(bar.getByText("2 tickets selected")).toBeVisible();
 
     const after = await prisma.ticket.findUniqueOrThrow({ where: { id: kept.id } });
     expect(after.priority).toBe("NORMAL");
     expect(await prisma.ticketAuditEvent.count({ where: { ticketId: kept.id } })).toBe(0);
+  });
+
+  test("a lost response after the commit says the result is not known, never that nothing changed (Codex diff critique D2)", async ({
+    page,
+  }) => {
+    const token = tokenFor("lost");
+    const [first, second] = await seedTickets(token, 2);
+    await openInbox(page, `q=${token}`, first.subject);
+
+    await rowCheckbox(page, first.subject).click();
+    await rowCheckbox(page, second.subject).click();
+    const bar = bulkBar(page);
+    await expect(bar.getByText("2 tickets selected")).toBeVisible();
+
+    // The server action reaches the server and commits; its response never reaches the page.
+    let forwarded = false;
+    await page.route(
+      (url) => url.pathname === "/tickets",
+      async (route) => {
+        if (route.request().method() !== "POST" || forwarded) return route.fallback();
+        forwarded = true;
+        await route.fetch();
+        await route.abort("connectionfailed");
+      },
+    );
+
+    await bar.getByRole("button", { name: "Priority" }).click();
+    await openPickerPopover(page).getByRole("option", { name: "Urgent" }).click();
+
+    const alert = bar.getByRole("alert");
+    await expect(alert).toContainText("The result is not known.");
+    await expect(alert).toContainText(
+      "The change may have been saved. Refresh the page to check before you try again.",
+    );
+    await expect(alert).not.toContainText("Nothing was changed.");
+    expect(forwarded).toBe(true);
+    await expect(bar.getByText("2 tickets selected")).toBeVisible();
+
+    // The batch did commit, which is why "Nothing was changed." would have been false.
+    for (const ticket of [first, second]) {
+      const row = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+      expect(row.priority).toBe("URGENT");
+    }
   });
 
   test("after a bulk action, and after a refused one, keyboard focus is back on the picker's trigger (review IN-04)", async ({

@@ -21,7 +21,9 @@ import { MAX_SELECTED_TICKETS, useTicketSelection } from "./ticket-selection";
 // The bulk action bar (Phase 11, AIDA-48, D-08, D-10, UI-SPEC Surface 3b). Each choice applies
 // at once to exactly the selected ids through bulkUpdateTickets: all or nothing, one audit row
 // per ticket. Refusals come back as codes; any other failure rejects the call (11-02's one
-// error contract), and both end in the same inline callout, never in an error boundary.
+// error contract). Both end in an inline callout, never in an error boundary, but only a
+// refusal is a known rollback: a rejected call (a failure after commit, a lost response) has an
+// unknown outcome and says so (Codex diff critique D2).
 
 type BulkOp = BulkUpdateInput["op"];
 type Picker = "assign" | "status" | "priority" | "addTag" | "removeTag";
@@ -47,6 +49,12 @@ const SEARCH_THRESHOLD = 8;
 
 const UNKNOWN_ERROR = "The change could not be saved. Wait a moment and try again.";
 
+/** A refusal is a definite rollback; a rejected call may or may not have committed (D2). */
+const REFUSED_PREFIX = "Nothing was changed.";
+const OUTCOME_UNKNOWN_PREFIX = "The result is not known.";
+const OUTCOME_UNKNOWN_REASON =
+  "The change may have been saved. Refresh the page to check before you try again.";
+
 export interface BulkActionBarTicket {
   id: string;
   tagIds: string[];
@@ -60,6 +68,8 @@ export interface BulkActionBarOption {
 interface BulkFailure {
   /** The selection the failure belongs to; a different selection hides the callout. */
   selectionKey: string;
+  /** refused: the service rolled back. unknown: the call rejected, so it may have committed. */
+  kind: "refused" | "unknown";
   reason: string;
 }
 
@@ -141,12 +151,17 @@ export function BulkActionBar({
       if (result.ok) {
         toast.success(`Applied to ${tickets(result.count)}.`);
       } else {
-        setFailure({ selectionKey: key, reason: failureReason(result.error, memberName) });
+        setFailure({
+          selectionKey: key,
+          kind: "refused",
+          reason: failureReason(result.error, memberName),
+        });
       }
     } catch {
-      // Not a service refusal (11-02 rethrows everything else, Codex review C5): the batch did
-      // not commit, so show the unknown row instead of letting the error reach a boundary.
-      setFailure({ selectionKey: key, reason: failureReason(null) });
+      // Not a service refusal (11-02 rethrows everything else, Codex review C5). The call may
+      // have failed after the commit, or its response may have been lost, so nothing proves a
+      // rollback: say the result is not known and ask for a refresh (Codex diff critique D2).
+      setFailure({ selectionKey: key, kind: "unknown", reason: OUTCOME_UNKNOWN_REASON });
     } finally {
       setPending(false);
     }
@@ -199,7 +214,9 @@ export function BulkActionBar({
           role="alert"
           className="space-y-1 rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-[13px] text-destructive"
         >
-          <p className="font-semibold">Nothing was changed.</p>
+          <p className="font-semibold">
+            {visibleFailure.kind === "refused" ? REFUSED_PREFIX : OUTCOME_UNKNOWN_PREFIX}
+          </p>
           <p>{visibleFailure.reason}</p>
         </div>
       )}
