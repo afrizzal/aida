@@ -9,7 +9,8 @@
 //
 // The pending g chord lives in CommandProvider (the chord hint reads it). This component owns
 // the one chord timer (Codex review C9): it starts with a newly pending g and stops when the
-// chord completes, is cancelled or dropped, on Esc, on window blur, on navigation and on unmount;
+// chord completes, is cancelled or dropped, on Esc, on window blur, when a navigation starts or
+// commits, and on unmount;
 // its expiry clears the chord state, and with it the hint.
 //
 // A command runs only while it is registered and its when(context) holds. No inline script
@@ -24,6 +25,7 @@ import {
   type KeyAction,
   type KeySnapshot,
 } from "@/lib/keyboard/dispatch";
+import { onNavigationStart } from "@/lib/navigation/navigation-start";
 
 /** Radix wraps popovers, dropdown menus and selects in this element. */
 const POPPER_WRAPPER = "[data-radix-popper-content-wrapper]";
@@ -163,6 +165,14 @@ export function KeyboardDispatcher({ setChord, openHelp }: KeyboardDispatcherPro
   useEffect(() => {
     if (routeKey) updateChord(null);
   }, [routeKey, updateChord]);
+
+  // ...and it does so when the navigation STARTS, not only once it commits: a letter pressed
+  // while a slow destination is still loading must not complete the old chord (Codex diff
+  // critique round 2, E2). The start event comes from src/instrumentation-client.ts. Next.js
+  // fires it inside the router's startTransition, and a state update made there would wait for
+  // the navigation to commit (the hint would stay on screen), so the cancel runs in a microtask,
+  // outside the transition and before any later key event.
+  useEffect(() => onNavigationStart(() => queueMicrotask(() => updateChord(null))), [updateChord]);
 
   return null;
 }

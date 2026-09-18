@@ -207,6 +207,48 @@ test("a filter navigation on the same page cancels a pending g, so the next lett
   expect(pathnameOf(page)).toBe("/tickets");
 });
 
+test("a navigation that has started but not finished cancels a pending g, so a letter pressed meanwhile does nothing (Codex diff critique round 2, E2)", async ({
+  page,
+}) => {
+  await warmRoute(page, "/contacts");
+  await warmRoute(page, "/tickets?view=unassigned");
+  await openRoute(page, "/tickets");
+  await waitForShortcuts(page);
+  await blurFocus(page);
+
+  // Hold the destination's requests for 1.5 s: the filter navigation has started but has not
+  // committed, so the inbox without the filter stays on screen.
+  let held = 0;
+  await page.route(
+    (url) => url.pathname === "/tickets" && url.searchParams.get("view") === "unassigned",
+    async (route) => {
+      held++;
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      await route.fallback();
+    },
+  );
+
+  const hint = page.getByText("then a letter");
+  await page.keyboard.press("g");
+  const chordStartedAt = Date.now();
+  await expect(hint).toBeVisible();
+
+  await page.getByRole("button", { name: "Unassigned", exact: true }).click();
+  // The hint goes while the navigation is still held (the URL has not changed yet) and inside
+  // the chord's one second, so only the start of the navigation can have ended the chord.
+  await expect(hint).toBeHidden({ timeout: 500 });
+  expect(Date.now() - chordStartedAt).toBeLessThan(1_000);
+  expect(new URL(page.url()).search).toBe("");
+
+  // A letter pressed during the navigation completes nothing: the held filter navigation lands
+  // and the browser never goes to Contacts.
+  await page.keyboard.press("c");
+  await expect(page).toHaveURL(/\/tickets\?view=unassigned$/, { timeout: 15_000 });
+  expect(held).toBeGreaterThan(0);
+  await page.waitForTimeout(500);
+  expect(pathnameOf(page)).toBe("/tickets");
+});
+
 test("Control+k inside the open palette closes it", async ({ page }) => {
   await openRoute(page, "/tickets");
   await waitForShortcuts(page);
