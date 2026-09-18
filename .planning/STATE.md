@@ -4,11 +4,11 @@ milestone: v2.0
 milestone_name: Helpdesk & Projects
 current_phase: 12
 current_phase_name: ticket-lifecycle
-status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phase 11 verified human_needed (AIDA-47 to 51 verified; visual and screen-reader checks open); Phase 12 next
-stopped_at: Phase 11 verified human_needed; Phase 12 step 1 next
+status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phase 11 verified human_needed; Phase 12 (split into 12, 12.1, 12.2; K32) context and UI-SPEC approved, planning next
+stopped_at: Phase 12 UI-SPEC approved; planning next
 last_updated: "2026-11-08T06:10:53.391Z"
 last_activity: 2026-11-08
-last_activity_desc: Phase 11 reviewed (code review and three Codex diff rounds, all fixes in), final gate green except audit at baseline, verification human_needed; Phase 12 next
+last_activity_desc: Phase 12 split (K32); context D-01 to D-23 and UI design contract approved; planning next
 state_head: f188b063c618bd61f127ecd7aa91560d8ecababb
 progress:
   total_phases: 10
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-11-07, v2.0 opened)
 
 ## Current Position
 
-Phase: 12 (ticket lifecycle), not started. Phase 11 (inbox) is verified human_needed: AIDA-47 to 51 verified with evidence; visual, dark mode, 360px and screen-reader checks wait for a human. Phases 08, 09 and 10 are PARKED (owner decision); 13, 16 and 17 are parked by dependency on Phase 10. Phases 08, 09 and 10 are PARKED (owner decision); Phases 13, 16 and 17 are parked by dependency on Phase 10.
+Phase: 12 (ticket lifecycle: relations, merge, snooze, feed), context and UI-SPEC approved; planning next. Phases 12.1 and 12.2 follow. Phase 11 (inbox) is verified human_needed: AIDA-47 to 51 verified with evidence; visual, dark mode, 360px and screen-reader checks wait for a human. Phases 08, 09 and 10 are PARKED (owner decision); 13, 16 and 17 are parked by dependency on Phase 10. Phases 08, 09 and 10 are PARKED (owner decision); Phases 13, 16 and 17 are parked by dependency on Phase 10.
 Plan: —
 Status: Milestone v2.0 opened by hand on 2026-11-07. `REQUIREMENTS.md` (91 requirements) and `ROADMAP.md` (Phases 8–17) are written and were revised over three Codex critique rounds (queue item 0b done). The public demo was walked under the clean-room rules and added AIDA-100 to AIDA-114 (item 0c done). Phase 8 context is committed (`08-CONTEXT.md`, `8abbc6c`) and the phase is planned: 23 plans in 14 waves; three Codex review cycles; parked after cycle 3 (owner decision, `run-loop/LAPORAN.md`). No Phase 8 code has been executed. Baseline 0a is done: build passes; integration passes except the egress file; E2E passes 63 with two honesty-invariants flakes that pass alone (fixed by plan 08-17). The egress baseline (0a2) was parked while `binaries.prisma.sh` sent no bytes on GET (07.45 to 09.09); the host recovered and the test waits for the Rekriva regression to finish.
 Last activity: 2026-11-08 — Phase 10 parked after its third Codex plan review (K27); Phases 8 and 9 were parked the same way (K24, K25). v1.0.0 stays complete and archived; its archives are `milestones/v1.0.0-*`.

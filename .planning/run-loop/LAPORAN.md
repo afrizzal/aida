@@ -18,7 +18,9 @@ Milestone v2.0 sudah dibuka (0b) dan daftar fitur Projects sudah dicek ke demo p
 | 09 | Operasional (AIDA-33 sampai 41) | diparkir | CONTEXT, UI-SPEC disetujui, 11 plan, tiga siklus review Codex. Siklus 3 menyisakan 1 HIGH (K25). Belum ada kode yang dieksekusi | `5ebef8b`, `f4b5dfc` |
 | 10 | Tim (AIDA-42 sampai 46) | diparkir | CONTEXT (D-01 sampai D-29), UI-SPEC disetujui, 16 plan dalam 6 wave, tiga siklus review Codex (12, lalu 6, lalu 4 temuan). Siklus 3 menyisakan 2 HIGH, keduanya kontradiksi skrip E2E di 10-13 (K27). Belum ada kode yang dieksekusi | `fcd034e`, `0706c49`, `f188b06`, `eed405e`, `05570ee`, `1e11185`, `2730d11` |
 | 11 | Inbox (AIDA-47 sampai 51) | selesai, menunggu manusia | 9/9 plan; code review (0 critical) dan tiga putaran kritik Codex atas diff, semua perbaikan masuk; gerbang final di `47fc015`: lint, typecheck, unit (229), integration tanpa egress (142), E2E penuh (121 lolos), dan build exit 0, audit sama dengan baseline, egress blocked (O-1); verifikasi `human_needed` tanpa celah kode. Menunggu manusia: visual, mode gelap, 360px, pembaca layar | `7fb2721`..`866b1ed` |
-| 12 | Siklus tiket (AIDA-18, 52 sampai 57, 97) | belum disentuh | | |
+| 12 | Siklus tiket: relasi, merge, snooze, feed (AIDA-52 sampai 55) | berjalan (CONTEXT, UI-SPEC) | Fase 12 dipecah menjadi 12, 12.1 (AIDA-56, 97, 57), dan 12.2 (AIDA-18) tanpa membuang cakupan (K32); merge menolak kontak berbeda dan memakai provenance per link (K33); bunyi audit AIDA-53 menunggu owner (12-o1) | `3da126f`, `51227d9` |
+| 12.1 | Siklus tiket: status kustom, jeda SLA (AIDA-56, 97, 57) | belum disentuh | | |
+| 12.2 | Siklus tiket: usulan KB (AIDA-18) | belum disentuh | | |
 | 13 | Integrasi (AIDA-58 sampai 63) | diparkir (bergantung pada Fase 10) | | |
 | 14 | Fondasi Projects (AIDA-64 sampai 71, 100 sampai 105) | belum disentuh | | |
 | 15 | Tampilan kerja (AIDA-72 sampai 80, 106) | belum disentuh | | |
