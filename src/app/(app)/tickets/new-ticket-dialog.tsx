@@ -29,6 +29,9 @@ import { createTicketAction } from "./new-ticket-action";
 
 const PRIORITIES: TicketPriority[] = ["LOW", "NORMAL", "HIGH", "URGENT"];
 
+/** The membership-ended copy every Phase 11 surface shows (UI-SPEC Copywriting). */
+const MEMBERSHIP_ENDED = "Your access to this workspace has ended. Sign out, then sign in again.";
+
 const EMPTY_FORM = {
   subject: "",
   contactEmail: "",
@@ -47,6 +50,8 @@ export function NewTicketDialog() {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [isSaving, setIsSaving] = useState(false);
+  // A refusal the action returned (Codex diff critique round 2, E1): shown inside the dialog.
+  const [refusal, setRefusal] = useState<string | null>(null);
 
   // The palette's "Create ticket" (AIDA-49, D-12) opens this dialog over the current page while
   // it is mounted (both inbox routes).
@@ -54,6 +59,7 @@ export function NewTicketDialog() {
     () =>
       registerNewTicketOpener(() => {
         setForm(EMPTY_FORM);
+        setRefusal(null);
         setOpen(true);
       }),
     [registerNewTicketOpener],
@@ -65,6 +71,7 @@ export function NewTicketDialog() {
   useEffect(() => {
     if (!wantsNew) return;
     setForm(EMPTY_FORM);
+    setRefusal(null);
     setOpen(true);
     const params = new URLSearchParams(searchParams.toString());
     params.delete("new");
@@ -79,12 +86,14 @@ export function NewTicketDialog() {
 
   function openDialog() {
     setForm(EMPTY_FORM);
+    setRefusal(null);
     setOpen(true);
   }
 
   async function handleSubmit() {
     if (!isValid) return;
     setIsSaving(true);
+    setRefusal(null);
 
     const result = await createTicketAction({
       subject: form.subject.trim(),
@@ -96,6 +105,11 @@ export function NewTicketDialog() {
 
     setIsSaving(false);
 
+    if (result && !result.ok) {
+      // MEMBERSHIP_ENDED, the action's one refusal: nothing was written.
+      setRefusal(MEMBERSHIP_ENDED);
+      return;
+    }
     if (!result?.id) {
       toast.error("Couldn't create the ticket. Try again.");
       return;
@@ -188,6 +202,12 @@ export function NewTicketDialog() {
               />
             </div>
           </div>
+
+          {refusal && (
+            <p role="alert" className="text-[13px] text-destructive">
+              {refusal}
+            </p>
+          )}
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>

@@ -59,7 +59,11 @@ export async function TicketListPanel({
       className="flex h-full w-[360px] shrink-0 flex-col overflow-y-auto border-r border-border"
     >
       <ListPanelFocus />
-      <FilterChipRow tags={tagOptions} customFieldDefinitions={fieldOptions} />
+      {/* A removed member gets no filter row: no search, no Save view and no New Ticket
+          control (Codex diff critique round 2, E1). Only the membership-ended line shows. */}
+      {membershipActive && (
+        <FilterChipRow tags={tagOptions} customFieldDefinitions={fieldOptions} />
+      )}
 
       {savedView?.status === "ok" && (
         <SavedViewStrip

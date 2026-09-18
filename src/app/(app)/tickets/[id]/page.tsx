@@ -1,4 +1,4 @@
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, ShieldOff } from "lucide-react";
 import { Fragment } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { AiActivitySection } from "@/components/tickets/ai-activity-section";
@@ -8,7 +8,8 @@ import { ThreadSystemEvent } from "@/components/tickets/thread-system-event";
 import { TicketMetaHeader } from "@/components/tickets/ticket-meta-header";
 import { TicketReplyArea } from "@/components/tickets/ticket-reply-area";
 import { prisma } from "@/lib/db";
-import { getScopedDb } from "@/lib/session";
+import { getSessionActor } from "@/lib/session";
+import { loadTicketDetailData } from "@/lib/tickets/ticket-detail-data";
 import { TicketListPanel } from "../ticket-list-panel";
 
 interface TicketDetailPageProps {
@@ -19,23 +20,29 @@ interface TicketDetailPageProps {
 export default async function TicketDetailPage({ params, searchParams }: TicketDetailPageProps) {
   const { id } = await params;
   const sp = await searchParams;
-  const { db, orgId } = await getScopedDb();
+  const actor = await getSessionActor();
 
-  const ticket = await db.ticket.findFirst({
-    where: { id },
-    include: {
-      contact: true,
-      assignee: true,
-      tags: { include: { tag: true } },
-      messages: {
-        include: { authorUser: true, authorContact: true, attachments: true },
-        orderBy: { createdAt: "asc" },
-      },
-      customFieldValues: { include: { definition: true } },
-    },
-  });
+  // The actor's member row is checked before the ticket is read (D-01, Codex diff critique
+  // round 2 E1). A removed member with a still-valid session gets the access-ended state: no
+  // ticket, message or roster data, and no throw, so no error boundary (Phase 10 review C6).
+  const detail = await loadTicketDetailData(prisma, actor, id);
 
-  if (!ticket) {
+  if (detail.status === "membership_ended") {
+    return (
+      <>
+        <TicketListPanel searchParams={sp} selectedId={id} basePath={`/tickets/${id}`} />
+        <div className="flex flex-1 items-center justify-center overflow-y-auto">
+          <EmptyState
+            icon={ShieldOff}
+            heading="Your access to this workspace has ended."
+            body="Sign out, then sign in again."
+          />
+        </div>
+      </>
+    );
+  }
+
+  if (detail.status === "not_found") {
     return (
       <>
         <TicketListPanel searchParams={sp} selectedId={id} basePath={`/tickets/${id}`} />
@@ -50,15 +57,7 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
     );
   }
 
-  // Better Auth's `member` model is excluded from scopedDb's DOMAIN_MODELS allowlist —
-  // bare prisma + explicit organizationId filter, same idiom as src/lib/authz.ts.
-  const [members, definitions, availableTags, auditEvents, draftableKbCount] = await Promise.all([
-    prisma.member.findMany({ where: { organizationId: orgId }, include: { user: true } }),
-    db.customFieldDefinition.findMany({ orderBy: { position: "asc" } }),
-    db.tag.findMany({ orderBy: { name: "asc" } }),
-    db.auditEvent.findMany({ where: { ticketId: id }, orderBy: { createdAt: "desc" }, take: 20 }),
-    db.kbArticle.count({ where: { embeddingStatus: "COMPLETED" } }),
-  ]);
+  const { ticket, members, definitions, availableTags, auditEvents, draftableKbCount } = detail;
 
   const customFields = definitions.map((definition) => {
     const inputDefinition: CustomFieldInputDefinition = {
