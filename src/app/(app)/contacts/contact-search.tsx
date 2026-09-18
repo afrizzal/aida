@@ -4,6 +4,7 @@ import { Search } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
+import { onNavigationStart } from "@/lib/navigation/navigation-start";
 
 interface ContactSearchProps {
   defaultValue?: string;
@@ -41,8 +42,16 @@ export function ContactSearch({ defaultValue = "" }: ContactSearchProps) {
       requested.current.add(next);
       router.replace(query ? `${pathname}?${query}` : pathname);
     }, 300);
+    // Any navigation that starts inside the 300 ms window wins: drop the pending search, so it
+    // cannot replace the URL while the page stays mounted until that navigation commits (Codex
+    // diff critique D4). The search's own replace also starts a navigation, but only after the
+    // timer has fired, so clearing it then is a no-op.
+    const stop = onNavigationStart(() => clearTimeout(handle));
 
-    return () => clearTimeout(handle);
+    return () => {
+      clearTimeout(handle);
+      stop();
+    };
   }, [value, currentQuery, pathname, router]);
 
   return (

@@ -73,6 +73,38 @@ test.describe("Contacts", () => {
     await expect(page).toHaveURL(/\/contacts\?q=case\+variant$/);
   });
 
+  test("a navigation started inside the 300 ms debounce is not overridden by the search (Codex diff critique D4)", async ({
+    page,
+  }) => {
+    await page.goto("/contacts");
+    const search = page.getByLabel("Search contacts");
+    // Typing reaches the URL through the client router, which proves hydration.
+    await search.fill(EMAIL_LOWER);
+    await expect(page).toHaveURL(/\/contacts\?q=/);
+
+    // Hold the destination's requests for one second, well past the debounce: /contacts stays
+    // mounted (the navigation has not committed) when the pending search would fire.
+    let held = 0;
+    await page.route(
+      (url) => url.pathname === "/tickets",
+      async (route) => {
+        held++;
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        await route.fallback();
+      },
+    );
+
+    await search.fill(`late ${ts}`);
+    await page.locator("aside").getByRole("link", { name: "Tickets", exact: true }).click();
+    await expect(page).toHaveURL(/\/tickets$/, { timeout: 15_000 });
+    expect(held).toBeGreaterThan(0);
+
+    // Wait well past the debounce: the typed text must not send the browser back to Contacts.
+    await page.waitForTimeout(900);
+    await expect(page).toHaveURL(/\/tickets$/);
+    await expect(page.getByLabel("Search contacts")).toHaveCount(0);
+  });
+
   test("notes autosave on blur and survive reload", async ({ page }) => {
     const contact = await prisma.contact.findFirstOrThrow({
       where: { organizationId: orgId, email: { equals: EMAIL_LOWER, mode: "insensitive" } },
