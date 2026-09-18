@@ -33,7 +33,9 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 - [ ] **Phase 9: Operations** — Backup schedule, logo upload, password encoding, single `<h1>`, seed guard, permanent regression tests, repo health
 - [ ] **Phase 10: Team** — Invitations and roles, notifications and mentions
 - [ ] **Phase 11: Inbox** — Saved views, bulk actions, command palette, keyboard inbox, auto-close
-- [ ] **Phase 12: Ticket Lifecycle** — Relations, merge, snooze, custom states with SLA pause, KB article proposals
+- [ ] **Phase 12: Ticket Lifecycle** — Relations, merge, snooze and the activity feed (split K32)
+- [ ] **Phase 12.1: Ticket Lifecycle** — Custom states with SLA pause
+- [ ] **Phase 12.2: Ticket Lifecycle** — KB article proposals from resolved tickets
 - [ ] **Phase 13: Integrations** — Public API, tokens, signed webhooks, GitHub Issues and Plane adapters
 - [ ] **Phase 14: Projects Foundation** — Schema, tenancy and logic for projects, tasks, teams and privacy
 - [ ] **Phase 15: Work Views** — Project pages, task detail, List, Board, Table, Calendar, Timeline, Files, saved views
