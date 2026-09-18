@@ -302,3 +302,25 @@ Question `run-loop/codex/fase11-diff-tanya.md` (commit `5c8c13e`); answer `run-l
 | D5 | MEDIUM | The full gate evidence is for `9523eac`, not for the code after the review fixes | Verified: `11-GATE.md`, `11-REVIEW.md` | step 8 reruns the allowed gate on the final commit |
 | D6 | LOW | The stale-response palette test can pass because the old request is aborted, without exercising the stale-response guard | Verified: `command-palette.spec.ts:292`, `command-palette.tsx:158-175` | fix the test so the old response resolves after the new one |
 | D7 | LOW | A pending `g` chord is not cancelled by a query-only navigation on the same pathname | Verified: `keyboard-dispatcher.tsx:159-161` | fix: also watch search params; test |
+
+### Fix status (round 1)
+
+Fixed on 2026-11-08 by gsd-code-fixer in the main checkout (`workflow.use_worktrees` is `false`), on branch `v2/run-loop`. Every fix has a test that failed before it and passes after it; no existing assertion was loosened.
+
+| Finding | Outcome | Commit | Test (failed before, passes after) |
+|---------|---------|--------|-------------------------------------|
+| D1 | fixed: the panel data now comes from `loadTicketListPanelData` (`src/lib/tickets/list-panel-data.ts`), which calls `findActiveMembership` before any read. A removed member gets no roster, tickets, tags or custom fields, and the `membership_ended` strip line. The ticket page's own member read (`tickets/[id]/page.tsx`) predates Phase 11 (the AIDA-43 gap) and is unchanged | `cbcf367` | integration `list-panel-data.test.ts`: the member row is deleted for a still-valid actor, and the roster (ids, names, emails) does not reach the panel data (before: roster and tickets returned) |
+| D2 | fixed: a refusal returned by the service keeps "Nothing was changed."; a rejected call shows "The result is not known." and "The change may have been saved. Refresh the page to check before you try again." Copy added to `11-UI-SPEC.md` (Surface 3b note and Copywriting rows, dated 2026-11-08) | `237c7c4` | E2E `bulk-actions.spec.ts` "a lost response after the commit says the result is not known…": the POST is forwarded and commits, then its response is aborted, and the database shows the change (before: "Nothing was changed."). The refused case also asserts the unknown copy is absent. The same commit makes `openInbox` wait for the streamed row: React 19.2 can reveal the list's Suspense boundary after the load event, which made the existing cases flaky |
+| D3 | not changed (decision K30) | — | — |
+| D4 | fixed: Next.js 16's documented `onRouterTransitionStart` export in `src/instrumentation-client.ts` fires when a Link click, `router.push`/`replace` or back/forward starts. It re-broadcasts a window event, and `ContactSearch` clears its pending replace on it. `deferred-items.md` updated | `157e215` | E2E `contacts.spec.ts` "a navigation started inside the 300 ms debounce…": the destination is held for 1 s (before: the browser ended on `/contacts?q=…`) |
+| D5 | not touched (the gate rerun belongs to step 8) | — | — |
+| D6 | fixed (test only): a controlled fetch for the palette search ignores the AbortSignal, so the older response resolves after the newer one. The test waits until the palette has processed it before it checks the screen | `6049438` | E2E `command-palette.spec.ts` "discards the response of an older query": with the guard line removed the test fails ("Searching tickets…" shown); with the guard it passes |
+| D7 | fixed: the chord-cancel effect watches the pathname and the search params | `3b5161d` | E2E `keyboard.spec.ts` "a filter navigation on the same page cancels a pending g…": the steps are `g`, the Unassigned filter, then `c` within the chord's second (before: the hint stayed until the timer ran out) |
+
+Verification after `3b5161d`, main checkout, one process at a time, exit codes read without a pipe:
+
+- `pnpm typecheck` 0
+- `pnpm lint` 0
+- `pnpm test` 0 (23 files, 229 tests)
+- Integration with Testcontainers (Colima variables): `list-panel-data` and `saved-views-ui-state` exit 0 (2 files, 5 tests)
+- E2E: `inbox`, `saved-views`, `bulk-actions`, `command-palette`, `keyboard` and `contacts` exit 0 (55 passed)
