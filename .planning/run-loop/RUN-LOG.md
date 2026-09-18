@@ -724,3 +724,13 @@ Perbaikan atas kritik diff (satu commit per temuan, setiap test baru gagal sebel
 Berikutnya: langkah 8, gerbang penuh diulang di commit terakhir (D5), lalu kritik Codex putaran 2 atas perbaikan.
 
 Langkah 8: gerbang penuh diulang oleh orkestrator di `a2d50bc` (18.51 sampai 18.55), satu perintah pada satu waktu dengan socket Colima, log per perintah, exit code dibaca tanpa pipe. `lint` 0 (339 berkas), `typecheck` 0, `pnpm test` 0 (23 berkas, 229), integration tanpa egress 0 (20 berkas, 137), `pnpm test:e2e` penuh 0 (116 lolos, 1 skip lama), `build` 0 (peringatan NFT lama), `audit --prod` 1 (7 critical, 52 high, 69 moderate, 13 low; sama dengan baseline). Integration penuh dan `test:egress`: blocked (O-1). Hasil ditambahkan ke `11-GATE.md`; D5 tertutup. Berikutnya: kritik Codex putaran 2 atas perbaikan, lalu verifikasi fase.
+
+Kritik diff putaran 2: pertanyaan `codex/fase11-diff-r2-tanya.md` (`623b875`). Ekspor dari `623b875` di bawah `TMPDIR`: akar hanya memuat `.env.example`; string mirip kunci hanya dummy test; password dev tidak ada. Log Codex: `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Berjalan di latar.
+
+Kritik diff putaran 2 selesai (18.55 sampai 18.57), 565 kata: 1 HIGH, 2 MEDIUM, 1 LOW. Log tetap `gpt-6.1-terra`, `xhigh`. Semua klaim dicek ke kode dan cocok. E1 (HIGH): anggota yang dikeluarkan masih bisa membaca detail tiket (`tickets/[id]/page.tsx`) dan membuat tiket (`new-ticket-action.ts`), karena keduanya memakai `getScopedDb` tanpa cek keanggotaan. Ini jalur lama yang ditunda D-01, tetapi palette Fase 11 kini mengarahkan pengguna ke sana.
+
+| No | Pertanyaan | Opsi | Pendapat Codex | Keputusan | Alasan |
+|---|---|---|---|---|---|
+| K31 | Tutup jalur lama detail tiket dan buat tiket di Fase 11, atau biarkan untuk Fase 10 sesuai D-01 | (a) tutup kedua jalur itu sekarang dengan keadaan "akses berakhir" yang terdefinisi; (b) biarkan dan catat | Tutup: periksa keanggotaan sebelum membaca detail dan sebelum membuat tiket, dan sembunyikan kontrol buat tiket saat akses berakhir | (a) | Urusan otorisasi, jadi diambil opsi paling konservatif (aturan keputusan 4). Palette Fase 11 mengarahkan pengguna ke kedua jalur itu. Halaman detail merender keadaan terdefinisi tanpa melempar error, sehingga jebakan C6 Fase 10 tidak terulang. AIDA-43 tetap terbuka untuk jalur lama lain |
+
+E2 sampai E4 juga diterima. Code fixer berjalan di latar; sesudahnya gerbang penuh diulang dan kritik putaran 3 (terakhir) dijalankan.

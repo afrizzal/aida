@@ -324,3 +324,14 @@ Verification after `3b5161d`, main checkout, one process at a time, exit codes r
 - `pnpm test` 0 (23 files, 229 tests)
 - Integration with Testcontainers (Colima variables): `list-panel-data` and `saved-views-ui-state` exit 0 (2 files, 5 tests)
 - E2E: `inbox`, `saved-views`, `bulk-actions`, `command-palette`, `keyboard` and `contacts` exit 0 (55 passed)
+
+## Codex critique of the phase diff (round 2)
+
+Question `run-loop/codex/fase11-diff-r2-tanya.md` (commit `623b875`); answer `run-loop/codex/fase11-diff-r2-jawab.md`. Log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Codex: D1 closed for the panel loader, D2 closed for the false rollback claim, D4 and D6 verified in code, K30 reasonable; the instrumentation file only sends a local event. Not yet fit for verification because of E1.
+
+| ID | Severity | Finding (short) | Orchestrator check | Disposition |
+|---|---|---|---|---|
+| E1 | HIGH | A removed member with a still-valid session can read a ticket's detail (messages, roster) through `tickets/[id]/page.tsx` and create a ticket through `new-ticket-action.ts`; both use `getScopedDb` without a membership check. These are pre-Phase-11 paths deferred by D-01, but Phase 11's palette (Create ticket, search results that open a ticket) routes users to them, and the membership-ended panel still renders the filter row | Verified: `tickets/[id]/page.tsx`, `new-ticket-action.ts`, `ticket-list-panel.tsx` | fix (run-loop K31): the detail page checks `findActiveMembership` and renders a defined access-ended state (no throw, no data); the create action refuses; the membership-ended panel hides the filter row and create controls; tests with a deleted member row. AIDA-43 stays open for the other old paths |
+| E2 | MEDIUM | D7 cancels a chord only after the navigation completes, not when it starts; a key pressed during a slow navigation can still complete the old chord | Verified: `keyboard-dispatcher.tsx:161`; the D7 test waits for the URL first | fix: subscribe to the existing navigation-start event; test with the destination held |
+| E3 | MEDIUM | The unknown-outcome bulk warning disappears as soon as the selection changes, so the agent can retry without seeing it | Verified: `bulk-action-bar.tsx:142` | fix: keep the warning until a refresh or an explicit dismissal; test |
+| E4 | LOW | The `openInbox` E2E helper re-navigates on every poll, which could hide a first-visit streaming failure | Verified: `bulk-actions.spec.ts:67` | fix: bounded retry only for the expected compile-time 404, then wait for rows on one successful navigation |
