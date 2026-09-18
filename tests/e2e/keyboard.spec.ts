@@ -181,6 +181,32 @@ test("the chord hint shows after g and disappears on its own, and a late c does 
   expect(pathnameOf(page)).toBe("/tickets");
 });
 
+test("a filter navigation on the same page cancels a pending g, so the next letter does not navigate (Codex diff critique D7)", async ({
+  page,
+}) => {
+  await warmRoute(page, "/contacts");
+  await warmRoute(page, "/tickets?view=unassigned");
+  await openRoute(page, "/tickets");
+  await waitForShortcuts(page);
+  await blurFocus(page);
+
+  const hint = page.getByText("then a letter");
+  await page.keyboard.press("g");
+  const chordStartedAt = Date.now();
+  await expect(hint).toBeVisible();
+
+  // A query-only navigation: same pathname, new search params.
+  await page.getByRole("button", { name: "Unassigned", exact: true }).click();
+  await expect(page).toHaveURL(/\/tickets\?view=unassigned$/);
+  // The hint goes at once, still inside the chord's one second, so only the navigation can
+  // have ended the chord (its own timer would end it one second after g).
+  await expect(hint).toBeHidden({ timeout: 500 });
+  expect(Date.now() - chordStartedAt).toBeLessThan(1_000);
+  await page.keyboard.press("c");
+  await page.waitForTimeout(500);
+  expect(pathnameOf(page)).toBe("/tickets");
+});
+
 test("Control+k inside the open palette closes it", async ({ page }) => {
   await openRoute(page, "/tickets");
   await waitForShortcuts(page);

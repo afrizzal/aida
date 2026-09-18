@@ -14,7 +14,7 @@
 //
 // A command runs only while it is registered and its when(context) holds. No inline script
 // (D-20): this is a client module in the app shell.
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useCommands } from "@/components/command-provider";
 import {
@@ -64,6 +64,8 @@ interface KeyboardDispatcherProps {
 export function KeyboardDispatcher({ setChord, openHelp }: KeyboardDispatcherProps) {
   const router = useRouter();
   const pathname = usePathname();
+  // Pathname and query string: a filter or saved-view change on /tickets keeps the pathname.
+  const routeKey = `${pathname}?${useSearchParams().toString()}`;
   const { open: paletteOpen, togglePalette, registry, context } = useCommands();
 
   // The latest values, read by the one window listener.
@@ -156,10 +158,11 @@ export function KeyboardDispatcher({ setChord, openHelp }: KeyboardDispatcherPro
     };
   }, [timer, updateChord]);
 
-  // Navigation cancels a pending chord.
+  // Navigation cancels a pending chord (D-13), including a query-only navigation on the same
+  // pathname, such as a filter or saved-view change in the inbox (Codex diff critique D7).
   useEffect(() => {
-    if (pathname) updateChord(null);
-  }, [pathname, updateChord]);
+    if (routeKey) updateChord(null);
+  }, [routeKey, updateChord]);
 
   return null;
 }
