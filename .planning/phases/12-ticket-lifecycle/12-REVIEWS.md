@@ -53,3 +53,18 @@ Codex confirms as planned: the saved-view filter stays at version 1, auto-close 
 - **R2-1:** every multi-waiter race test waits on the exact waiter PID and the exact holder it is blocked by, as `pg_blocking_pids` reports it, so a legitimate queue cannot time out.
 - **R2-2:** the demo seed either inserts messages only on tickets it creates in the same transaction or takes the row lock, and the plan states which with a check.
 - **R2-3:** a failed or partial attachment save is cleaned up too, with a test that leaves no file after a mid-save failure.
+
+### Cycle 3 (last)
+
+- Question: `run-loop/codex/fase12-plan-r3-tanya.md` (commit `0e7b463`); answer: `run-loop/codex/fase12-plan-r3-jawab.md`. Log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`.
+- Codex verdict: ready to execute with notes (0 HIGH, 2 MEDIUM, 1 LOW). R2-1 is closed in 12-10 Task 2, R2-2 is closed for reply inserts and R2-3 for partial saves whose deletes succeed. No HIGH that should park the phase and no definite cross-link leak found in the parts read. Nothing was executed, so runtime correctness and the full set of interleavings are unverified.
+
+| ID | Severity | Finding (short) | Orchestrator check | Disposition |
+|---|---|---|---|---|
+| R3-1 | MEDIUM | The demo seed can still change a merged source's status: step 4e updates the ticket with no lock and no merge check | Verified: `src/lib/demo/seed-demo-data.ts:250` creates the ticket through `createTicket` (its own committed transaction) and `:310-315` then runs `prisma.ticket.update` with `status: spec.status` through the global client, no row lock and no `mergedIntoTicketId` check; 12-03 Task 2 (R2-2) locked only the reply insert of step 4i. A merge committed between the two can turn a CLOSED source back to the fixture status. An actual interleaving is unverified | accept |
+| R3-2 | MEDIUM | Cleanup on a failed delete is best-effort while the plan states the outcome as absolute | Verified: 12-03 Task 3 action has `discard()` and the save-failure path log and continue when a delete fails, yet the C7 truth, the Task 3 done and fails_when, and 12-04's C7 truth state that no file remains; the unit failed-delete case asserts only that the other keys are deleted. An actual filesystem refusal is unverified | accept |
+| R3-3 | LOW | The general race rule (second run starts after the first signals from `beforeCommit`) contradicts seed case (a), which holds in `afterLock`; the seed hooks have no `beforeCommit` | Verified: 12-03 Task 2 action (race rule) against the R2-2 behavior case (a) and the seed hooks shape `{ onTransactionStart, afterLock }` | accept |
+
+### Outcome
+
+The last cycle left no HIGH, so the phase is not parked. The three accepted findings go into the plans before execution (12-03 for R3-1, R3-2 and R3-3; 12-04's C7 truth for R3-2), each recorded in a `### Round 3 — cycle 3` ledger block. No further Codex plan cycle runs: the charter allows at most three.

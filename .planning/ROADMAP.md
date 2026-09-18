@@ -448,7 +448,7 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 | 9. Operations | v2.0 | 0/11 | Parked (Codex plan review cycle 3 left a HIGH finding; owner decision) | - |
 | 10. Team | v2.0 | 0/16 | Parked (Codex plan review cycle 3 left HIGH findings; owner decision) | - |
 | 11. Inbox | v2.0 | 9/9 | Verified: human_needed (visual, dark mode, 360px and screen-reader checks open) | - |
-| 12. Ticket Lifecycle (relations, merge, snooze, activity) | v2.0 | 0/10 | Planned (Codex plan review cycle 2 next) | - |
+| 12. Ticket Lifecycle (relations, merge, snooze, activity) | v2.0 | 0/10 | Planned (plan review done after 3 cycles, no HIGH left; execution next) | - |
 | 12.1. Ticket Lifecycle (custom states, SLA pause) | v2.0 | 0/0 | Not started | - |
 | 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 0/0 | Not started | - |
 | 13. Integrations | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
