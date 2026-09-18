@@ -257,6 +257,7 @@ Rendered at the bottom of the list panel while at least one ticket is selected: 
 - **Success:** `toast.success` with the Copywriting "Bulk applied" text; the list refreshes; the selection is kept (pruned per 3a) so the agent can run a second action on the same tickets [RL].
 - **Failure (whole batch rolled back, D-08):** a destructive callout between line 1 and line 2, `role="alert"`, starting with the Copywriting "Bulk error prefix" then the matching reason row. It clears on the next action or when the selection changes. The selection is kept.
 - *Amended 2026-11-08 after the Codex diff critique, D2:* "Bulk error prefix" ("Nothing was changed.") is shown only for a refusal the service returned, which is a definite rollback; "Bulk error: unknown" stays for a returned code without its own row. When the call itself rejects (a failure after the commit, or a response lost on the way back), nothing proves a rollback, so the same callout starts with "Bulk outcome unknown prefix" followed by "Bulk outcome unknown reason". It clears and keeps the selection exactly like a refusal.
+- *Amended 2026-11-08 after the Codex diff critique round 2, E3 (replaces "It clears … exactly like a refusal" in the D2 note above for the unknown outcome only; a refusal is unchanged):* the unknown-outcome callout stays until the agent refreshes the page or presses its "Dismiss" button. A changed or cleared selection, a filter change and moving between `/tickets` and `/tickets/[id]` keep it; with nothing selected the bar shows only this callout. While it shows, the five bulk triggers are disabled, so the agent cannot retry without seeing it. After the third line, Copywriting "Bulk outcome unknown continue", it ends with an outline `sm` `Button` "Dismiss" (`text-[13px]`), which takes focus when the rejected call ends (the triggers are disabled, so focus cannot return to them as IN-04 does for the other outcomes). Dismiss removes the callout and turns the triggers back on; a refresh starts without it.
 - Cap note at 100: a 12px muted line under line 1, Copywriting "Selection cap".
 
 ---
@@ -443,6 +444,8 @@ All copy is English, written for AIDA, and final; the executor uses it verbatim.
 | Bulk error: unknown | The change could not be saved. Wait a moment and try again. |
 | Bulk outcome unknown prefix *(added 2026-11-08, Codex diff critique D2)* | The result is not known. |
 | Bulk outcome unknown reason *(added 2026-11-08, Codex diff critique D2)* | The change may have been saved. Refresh the page to check before you try again. |
+| Bulk outcome unknown continue *(added 2026-11-08, Codex diff critique round 2, E3)* | Bulk actions stay off until you refresh the page or dismiss this message. |
+| Bulk outcome unknown dismiss *(added 2026-11-08, Codex diff critique round 2, E3)* | Dismiss |
 | Selection cap | You can select up to 100 tickets at a time. |
 | Load-more cap | Showing the first {cap} tickets. Narrow the filters to see others. |
 | Palette trigger | Search |

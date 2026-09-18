@@ -1,7 +1,7 @@
 "use client";
 
 import { CircleDot, Flag, Loader2, type LucideIcon, Minus, Plus, UserRound, X } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,6 +24,12 @@ import { MAX_SELECTED_TICKETS, useTicketSelection } from "./ticket-selection";
 // error contract). Both end in an inline callout, never in an error boundary, but only a
 // refusal is a known rollback: a rejected call (a failure after commit, a lost response) has an
 // unknown outcome and says so (Codex diff critique D2).
+//
+// The unknown-outcome warning stays until the agent refreshes the page or dismisses it (Codex
+// diff critique round 2, E3): a changed or cleared selection, a filter change and moving between
+// /tickets and /tickets/[id] all keep it, and bulk actions stay off while it shows, so the agent
+// cannot retry without seeing it. It lives in this module rather than in component state, so a
+// remount of the list panel keeps it and only a full page load (a refresh) starts without it.
 
 type BulkOp = BulkUpdateInput["op"];
 type Picker = "assign" | "status" | "priority" | "addTag" | "removeTag";
@@ -54,6 +60,34 @@ const REFUSED_PREFIX = "Nothing was changed.";
 const OUTCOME_UNKNOWN_PREFIX = "The result is not known.";
 const OUTCOME_UNKNOWN_REASON =
   "The change may have been saved. Refresh the page to check before you try again.";
+const OUTCOME_UNKNOWN_CONTINUE =
+  "Bulk actions stay off until you refresh the page or dismiss this message.";
+
+// The unknown-outcome flag (E3). Set only by a rejected bulk call in the browser; the server
+// never sets it, and its server snapshot is always false.
+let outcomeUnknown = false;
+const outcomeListeners = new Set<() => void>();
+
+function setOutcomeUnknown(value: boolean) {
+  if (outcomeUnknown === value) return;
+  outcomeUnknown = value;
+  for (const listener of outcomeListeners) listener();
+}
+
+function subscribeOutcome(listener: () => void) {
+  outcomeListeners.add(listener);
+  return () => {
+    outcomeListeners.delete(listener);
+  };
+}
+
+function useOutcomeUnknown(): boolean {
+  return useSyncExternalStore(
+    subscribeOutcome,
+    () => outcomeUnknown,
+    () => false,
+  );
+}
 
 export interface BulkActionBarTicket {
   id: string;
@@ -65,11 +99,10 @@ export interface BulkActionBarOption {
   name: string;
 }
 
+/** A refusal the service returned: a definite rollback. A rejected call is the module flag. */
 interface BulkFailure {
   /** The selection the failure belongs to; a different selection hides the callout. */
   selectionKey: string;
-  /** refused: the service rolled back. unknown: the call rejected, so it may have committed. */
-  kind: "refused" | "unknown";
   reason: string;
 }
 
@@ -120,6 +153,9 @@ export function BulkActionBar({
   // The picker whose trigger gets focus back once the call ends (review IN-04). While pending
   // every trigger is disabled (Surface 3b), so radix's return of focus on close lands on <body>.
   const [refocus, setRefocus] = useState<Picker | null>(null);
+  const unknown = useOutcomeUnknown();
+  // A rejected call ends with the triggers disabled, so focus goes to Dismiss instead (IN-04).
+  const [focusDismiss, setFocusDismiss] = useState(false);
 
   // Report the rendered list so the selection is pruned to tickets on screen (Surface 3a).
   const loadedKey = loaded.map((ticket) => ticket.id).join(",");
@@ -127,7 +163,25 @@ export function BulkActionBar({
     reportLoaded(loadedKey === "" ? [] : loadedKey.split(","));
   }, [loadedKey, reportLoaded]);
 
-  if (selectedIds.length === 0) return null;
+  const unknownCallout = unknown && (
+    <OutcomeUnknownCallout
+      takeFocus={focusDismiss && !pending}
+      onFocused={() => setFocusDismiss(false)}
+    />
+  );
+
+  if (selectedIds.length === 0) {
+    // With nothing selected the bar shows only a pending unknown-outcome warning (E3).
+    if (!unknownCallout) return null;
+    return (
+      <section
+        aria-label="Bulk actions"
+        className="sticky bottom-0 z-10 mt-auto border-t border-border/70 bg-background/95 px-4 py-2 backdrop-blur-sm"
+      >
+        {unknownCallout}
+      </section>
+    );
+  }
 
   const selectionKey = selectedIds.join(",");
   const visibleFailure = failure?.selectionKey === selectionKey ? failure : null;
@@ -140,6 +194,8 @@ export function BulkActionBar({
   const removableTags = tags.filter((tag) => tagIdsOnSelection.has(tag.id));
 
   async function run(op: BulkOp, memberName?: string) {
+    // No retry while an earlier call's outcome is unknown (E3); the triggers are disabled too.
+    if (outcomeUnknown) return;
     setRefocus(openPicker);
     setOpenPicker(null);
     setFailure(null);
@@ -151,17 +207,16 @@ export function BulkActionBar({
       if (result.ok) {
         toast.success(`Applied to ${tickets(result.count)}.`);
       } else {
-        setFailure({
-          selectionKey: key,
-          kind: "refused",
-          reason: failureReason(result.error, memberName),
-        });
+        setFailure({ selectionKey: key, reason: failureReason(result.error, memberName) });
       }
     } catch {
       // Not a service refusal (11-02 rethrows everything else, Codex review C5). The call may
       // have failed after the commit, or its response may have been lost, so nothing proves a
       // rollback: say the result is not known and ask for a refresh (Codex diff critique D2).
-      setFailure({ selectionKey: key, kind: "unknown", reason: OUTCOME_UNKNOWN_REASON });
+      // The warning stays until a refresh or Dismiss (E3).
+      setRefocus(null);
+      setFocusDismiss(true);
+      setOutcomeUnknown(true);
     } finally {
       setPending(false);
     }
@@ -170,7 +225,7 @@ export function BulkActionBar({
   const pickerProps = (picker: Picker) => ({
     open: openPicker === picker,
     onOpenChange: (open: boolean) => setOpenPicker(open ? picker : null),
-    disabled: pending,
+    disabled: pending || unknown,
     refocus: !pending && refocus === picker,
     onRefocused: () => setRefocus(null),
   });
@@ -209,14 +264,14 @@ export function BulkActionBar({
         </p>
       )}
 
-      {visibleFailure && (
+      {unknownCallout}
+
+      {visibleFailure && !unknown && (
         <div
           role="alert"
           className="space-y-1 rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-[13px] text-destructive"
         >
-          <p className="font-semibold">
-            {visibleFailure.kind === "refused" ? REFUSED_PREFIX : OUTCOME_UNKNOWN_PREFIX}
-          </p>
+          <p className="font-semibold">{REFUSED_PREFIX}</p>
           <p>{visibleFailure.reason}</p>
         </div>
       )}
@@ -263,6 +318,44 @@ export function BulkActionBar({
         </PickerButton>
       </div>
     </section>
+  );
+}
+
+/** The unknown-outcome warning (D2) with its way to continue (E3). */
+function OutcomeUnknownCallout({
+  takeFocus,
+  onFocused,
+}: {
+  /** True once the rejected call has ended: focus moves to Dismiss. */
+  takeFocus: boolean;
+  onFocused: () => void;
+}) {
+  const dismissRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!takeFocus) return;
+    dismissRef.current?.focus();
+    onFocused();
+  }, [takeFocus, onFocused]);
+
+  return (
+    <div
+      role="alert"
+      className="space-y-1 rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-[13px] text-destructive"
+    >
+      <p className="font-semibold">{OUTCOME_UNKNOWN_PREFIX}</p>
+      <p>{OUTCOME_UNKNOWN_REASON}</p>
+      <p>{OUTCOME_UNKNOWN_CONTINUE}</p>
+      <Button
+        ref={dismissRef}
+        variant="outline"
+        size="sm"
+        className="mt-1 text-[13px]"
+        onClick={() => setOutcomeUnknown(false)}
+      >
+        Dismiss
+      </Button>
+    </div>
   );
 }
 

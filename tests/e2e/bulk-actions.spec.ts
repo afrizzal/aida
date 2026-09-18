@@ -276,6 +276,78 @@ test.describe("Bulk actions", () => {
     }
   });
 
+  test("the unknown-outcome warning stays through selection changes and opening a ticket, blocks bulk actions, and ends only on Dismiss or a refresh (Codex diff critique round 2, E3)", async ({
+    page,
+  }) => {
+    const token = tokenFor("unknownstays");
+    const [first, second, third] = await seedTickets(token, 3);
+    await openInbox(page, `q=${token}`, first.subject);
+
+    // Every bulk server-action POST reaches the server and commits; its response is lost.
+    let lost = 0;
+    await page.route(
+      (url) => url.pathname.startsWith("/tickets"),
+      async (route) => {
+        if (route.request().method() !== "POST") return route.fallback();
+        lost++;
+        await route.fetch();
+        await route.abort("connectionfailed");
+      },
+    );
+
+    await rowCheckbox(page, first.subject).click();
+    await rowCheckbox(page, second.subject).click();
+    const bar = bulkBar(page);
+    const priority = bar.getByRole("button", { name: "Priority" });
+    await priority.click();
+    await openPickerPopover(page).getByRole("option", { name: "Urgent" }).click();
+
+    const alert = bar.getByRole("alert");
+    const dismiss = bar.getByRole("button", { name: "Dismiss" });
+    await expect(alert).toContainText("The result is not known.");
+    await expect(alert).toContainText(
+      "Bulk actions stay off until you refresh the page or dismiss this message.",
+    );
+    expect(lost).toBe(1);
+    // The triggers are off, so focus goes to Dismiss (review IN-04).
+    await expect(priority).toBeDisabled();
+    await expect(dismiss).toBeFocused();
+
+    // A changed selection keeps the warning and keeps bulk actions off.
+    await rowCheckbox(page, second.subject).click();
+    await expect(bar.getByText("1 ticket selected")).toBeVisible();
+    await expect(alert).toContainText("The result is not known.");
+    await rowCheckbox(page, third.subject).click();
+    await expect(bar.getByText("2 tickets selected")).toBeVisible();
+    await expect(alert).toContainText("The result is not known.");
+    await expect(priority).toBeDisabled();
+
+    // A cleared selection still shows the warning.
+    await bar.getByRole("button", { name: "Clear selection" }).click();
+    await expect(bar.getByText(/selected$/)).toHaveCount(0);
+    await expect(alert).toContainText("The result is not known.");
+
+    // Opening a ticket mounts a new list panel; the warning is still there.
+    await page.locator(`#ticket-row-${first.id}`).click();
+    await expect(page).toHaveURL(new RegExp(`/tickets/${first.id}\\?`), { timeout: 15_000 });
+    await expect(alert).toContainText("The result is not known.");
+
+    // Dismiss ends it: bulk actions work again.
+    await dismiss.click();
+    await expect(alert).toHaveCount(0);
+    await rowCheckbox(page, third.subject).click();
+    await expect(priority).toBeEnabled();
+
+    // A second lost response shows it again; a refresh ends it.
+    await priority.click();
+    await openPickerPopover(page).getByRole("option", { name: "Low" }).click();
+    await expect(alert).toContainText("The result is not known.");
+    expect(lost).toBe(2);
+    await page.reload();
+    await expect(rowCheckbox(page, first.subject)).toBeVisible();
+    await expect(page.getByText("The result is not known.")).toHaveCount(0);
+  });
+
   test("after a bulk action, and after a refused one, keyboard focus is back on the picker's trigger (review IN-04)", async ({
     page,
   }) => {
