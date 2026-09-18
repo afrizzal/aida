@@ -3,11 +3,10 @@ import Link from "next/link";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { prisma } from "@/lib/db";
-import { getSavedViewForPanel } from "@/lib/saved-views/service";
-import { panelOrMembershipEnded, type SavedViewPanelState } from "@/lib/saved-views/ui-state";
 import { getScopedDb } from "@/lib/session";
-import { MAX_LIST_LIMIT, parseUrlFilters } from "@/lib/tickets/list-filters";
-import { fetchTicketList, parseTicketListFilters } from "@/lib/tickets/list-query";
+import { MAX_LIST_LIMIT } from "@/lib/tickets/list-filters";
+import { loadTicketListPanelData } from "@/lib/tickets/list-panel-data";
+import { parseTicketListFilters } from "@/lib/tickets/list-query";
 import { BulkActionBar } from "./bulk-action-bar";
 import { FilterChipRow } from "./filter-chip-row";
 import { LIST_PANEL_ID, ListPanelFocus } from "./list-panel-focus";
@@ -30,44 +29,22 @@ export async function TicketListPanel({
   selectedId,
   basePath = "/tickets",
 }: TicketListPanelProps) {
-  const { db, orgId, session } = await getScopedDb();
+  const { orgId, session } = await getScopedDb();
+  // The actor's membership is checked before any panel data is read (D-01, Codex diff critique
+  // D1): a removed member with a still-valid session gets no roster, no tickets and no tags,
+  // only the "membership ended" line below.
+  const {
+    membershipActive,
+    tickets,
+    totalTicketCount,
+    tagOptions,
+    fieldOptions,
+    memberOptions,
+    savedView,
+  } = await loadTicketListPanelData(prisma, { userId: session.user.id, orgId }, searchParams);
   const filters = parseTicketListFilters(searchParams);
 
-  // Better Auth's `member` model is excluded from scopedDb's DOMAIN_MODELS allowlist — bare
-  // prisma with an explicit organizationId filter, as on the ticket page. Only the active
-  // organization's members reach the bulk bar's Assign picker (T-11-30).
-  const [tickets, totalTicketCount, tags, customFieldDefinitions, members] = await Promise.all([
-    fetchTicketList(filters, { db, orgId, userId: session.user.id }),
-    db.ticket.count(),
-    db.tag.findMany({ orderBy: { name: "asc" } }),
-    db.customFieldDefinition.findMany({ orderBy: { position: "asc" } }),
-    prisma.member.findMany({ where: { organizationId: orgId }, include: { user: true } }),
-  ]);
-
-  // Saved view in the URL (AIDA-47, UI-SPEC Surface 2b): the service decides the strip state and
-  // whether the viewer may edit. The list below always runs with the URL filters, so a broken
-  // reference is never dropped (D-05). A removed member gets a defined line, not an error page.
-  const svId = firstParam(searchParams.sv);
-  const savedView: SavedViewPanelState | null = svId
-    ? await panelOrMembershipEnded(() =>
-        getSavedViewForPanel(
-          prisma,
-          { userId: session.user.id, orgId },
-          svId,
-          parseUrlFilters(searchParams).filters,
-        ),
-      )
-    : null;
-  const tagOptions = tags.map((tag) => ({ id: tag.id, name: tag.name }));
-  const memberOptions = members
-    .map((member) => ({ id: member.user.id, name: member.user.name || member.user.email }))
-    .sort((a, b) => a.name.localeCompare(b.name));
   const listQuery = buildListQuery(searchParams);
-  const fieldOptions = customFieldDefinitions.map((def) => ({
-    id: def.id,
-    label: def.label,
-    type: def.type,
-  }));
 
   const limit = filters.limit ?? 50;
   // A full page means more rows may exist. Below the cap, offer "Load more"; at the cap
@@ -106,7 +83,7 @@ export async function TicketListPanel({
         </div>
       )}
 
-      {totalTicketCount === 0 ? (
+      {!membershipActive ? null : totalTicketCount === 0 ? (
         <EmptyState
           icon={Inbox}
           heading="Your inbox is empty"
@@ -154,10 +131,6 @@ export async function TicketListPanel({
       />
     </aside>
   );
-}
-
-function firstParam(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
 }
 
 function toSearchParams(searchParams: Record<string, string | string[] | undefined>) {
