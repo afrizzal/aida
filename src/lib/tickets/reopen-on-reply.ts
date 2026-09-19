@@ -18,6 +18,8 @@
 //
 // Relative imports only: the worker bundles the ingest path.
 
+import { lockTicketsInIdOrder } from "./merge";
+
 /** Any transaction client that runs tagged raw SQL: prisma, scopedDb or their tx clients. */
 export interface ReopenTx {
   $queryRaw<T = unknown>(query: TemplateStringsArray, ...values: unknown[]): PromiseLike<T>;
@@ -32,15 +34,145 @@ export interface ReopenInput {
 
 type ReopenObserver = (tx: ReopenTx, ticket: { orgId: string; ticketId: string }) => unknown;
 
-let observer: ReopenObserver | null = null;
+/**
+ * The 11-04 reopen observer, extended for 12-04 (test seam, never set in production). Every
+ * callback is awaited with the reply's transaction client, so a race test records that
+ * transaction's PID (backendPid(tx)) and can hold it at a defined point.
+ */
+export interface ReplyObserverHooks {
+  /** 11-04: right before the reply transaction's first ticket row lock. */
+  beforeLock?: ReopenObserver;
+  /** 12-04: first step of resolveReplyTicket, before its unlocked read (12-10 holds here). */
+  onResolveStart?(tx: ReopenTx, ticket: { orgId: string; ticketId: string }): unknown;
+  /** 12-04: after the savepoint relock, before the second re-check (12-10 forces C10 here). */
+  afterRelock?(tx: ReopenTx, ticket: { orgId: string; ticketId: string }): unknown;
+  /** 12-04: after resolveReplyTicket holds the effective ticket's row lock, before any write. */
+  afterResolve?(tx: ReopenTx, effectiveTicketId: string): unknown;
+}
+
+let observer: ReplyObserverHooks | null = null;
+// Transactions whose beforeLock already ran in resolveReplyTicket (reopen must not run it twice).
+const observedBeforeLock = new WeakSet<object>();
 
 /**
- * Test seam only (Codex review C6): awaited with the reply's transaction client right before
- * the row lock, so a race test can record that transaction's PID. null clears it. Production
- * code never calls this.
+ * Test seam only (Codex review C6, 12-04 review C10): a function is the 11-04 beforeLock
+ * observer; an object sets any of the hooks above. null clears it. Production code never calls
+ * this.
  */
-export function setReopenObserverForTests(fn: ReopenObserver | null): void {
-  observer = fn;
+export function setReopenObserverForTests(fn: ReopenObserver | ReplyObserverHooks | null): void {
+  observer = typeof fn === "function" ? { beforeLock: fn } : fn;
+}
+
+/** Any transaction client that also runs a raw statement string (SAVEPOINT). */
+export interface ResolveTx extends ReopenTx {
+  $executeRawUnsafe(query: string, ...values: unknown[]): PromiseLike<number>;
+}
+
+export type ResolveReplyResult =
+  | { ok: true; ticketId: string }
+  | { ok: false; error: "TICKET_UNAVAILABLE" };
+
+/**
+ * The token's ticket changed twice while the reply waited on its row (D-10). Unreachable under
+ * D-07 (mergedIntoTicketId is write-once; chains are refused). Thrown before anything is
+ * written, so the whole reply transaction rolls back; the follow-up route answers 409
+ * { error: "TICKET_CHANGED" } and ingest lets it propagate.
+ */
+export class ReplyTicketChangedError extends Error {
+  readonly code = "TICKET_CHANGED";
+  constructor() {
+    super("ticket changed while the reply waited on its row lock");
+    this.name = "ReplyTicketChangedError";
+  }
+}
+
+async function readMergedInto(
+  tx: ReopenTx,
+  orgId: string,
+  ticketId: string,
+): Promise<{ mergedIntoTicketId: string | null } | null> {
+  const rows = await tx.$queryRaw<{ mergedIntoTicketId: string | null }[]>`
+    SELECT "mergedIntoTicketId" FROM "Ticket"
+    WHERE "id" = ${ticketId} AND "organizationId" = ${orgId}
+  `;
+  return rows[0] ?? null;
+}
+
+/**
+ * Decides, inside the reply's transaction and under the row lock, which ticket a customer reply
+ * lands on (D-09, D-10). Returns the effective ticket (the token's ticket, or its merge target)
+ * with its row locked, or TICKET_UNAVAILABLE. Callers write nothing before it returns, so every
+ * reply insert draws its Message.seq under the effective ticket's row lock (review C1).
+ *
+ * Order (no lock cycle with mergeTickets can form):
+ *   1. SAVEPOINT reply_resolve
+ *   2. an unlocked read of the token ticket's mergedIntoTicketId (organization predicate)
+ *   3. lockTicketsInIdOrder (12-03, the one ascending-id statement mergeTickets uses): the
+ *      token ticket alone when unmerged, the token ticket and its target when merged
+ *   4. re-check on the locked row; when a merge committed while this waited, ROLLBACK TO
+ *      SAVEPOINT (releases the lock taken after it), lock the token ticket and its new target
+ *      through the same helper, and re-check once more with a fresh read. This relock is the
+ *      only retry; a second mismatch throws ReplyTicketChangedError.
+ */
+export async function resolveReplyTicket(
+  tx: ResolveTx,
+  orgId: string,
+  tokenTicketId: string,
+): Promise<ResolveReplyResult> {
+  const hooks = observer;
+  const ref = { orgId, ticketId: tokenTicketId };
+  await tx.$executeRawUnsafe("SAVEPOINT reply_resolve");
+  if (hooks?.beforeLock) {
+    observedBeforeLock.add(tx);
+    await hooks.beforeLock(tx, ref);
+  }
+  if (hooks?.onResolveStart) await hooks.onResolveStart(tx, ref);
+
+  const read = await readMergedInto(tx, orgId, tokenTicketId);
+  if (!read) return { ok: false, error: "TICKET_UNAVAILABLE" };
+  const seen = read.mergedIntoTicketId;
+
+  const locked = await lockTicketsInIdOrder(
+    tx,
+    orgId,
+    seen === null ? [tokenTicketId] : [tokenTicketId, seen],
+  );
+  const tokenRow = locked.find((row) => row.id === tokenTicketId);
+  if (!tokenRow) return { ok: false, error: "TICKET_UNAVAILABLE" };
+
+  if (tokenRow.mergedIntoTicketId === seen) {
+    if (seen !== null && !locked.some((row) => row.id === seen)) {
+      return { ok: false, error: "TICKET_UNAVAILABLE" };
+    }
+    return finish(tx, seen ?? tokenTicketId);
+  }
+
+  // A merge committed while this transaction waited on the token row: relock once.
+  const next = tokenRow.mergedIntoTicketId;
+  await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT reply_resolve");
+  const relocked = await lockTicketsInIdOrder(
+    tx,
+    orgId,
+    next === null ? [tokenTicketId] : [tokenTicketId, next],
+  );
+  if (hooks?.afterRelock) await hooks.afterRelock(tx, ref);
+  const again = await readMergedInto(tx, orgId, tokenTicketId);
+  if (!again || !relocked.some((row) => row.id === tokenTicketId)) {
+    return { ok: false, error: "TICKET_UNAVAILABLE" };
+  }
+  if (again.mergedIntoTicketId !== next) throw new ReplyTicketChangedError();
+  if (next !== null && !relocked.some((row) => row.id === next)) {
+    return { ok: false, error: "TICKET_UNAVAILABLE" };
+  }
+  return finish(tx, next ?? tokenTicketId);
+}
+
+async function finish(tx: ResolveTx, ticketId: string): Promise<ResolveReplyResult> {
+  // Releasing the savepoint keeps every row lock taken after it until the transaction ends.
+  await tx.$executeRawUnsafe("RELEASE SAVEPOINT reply_resolve");
+  const hooks = observer;
+  if (hooks?.afterResolve) await hooks.afterResolve(tx, ticketId);
+  return { ok: true, ticketId };
 }
 
 /** Reopens a RESOLVED or CLOSED ticket for a customer reply. Returns whether it reopened. */
@@ -49,7 +181,9 @@ export async function reopenOnCustomerReply(
   { orgId, ticketId, isAutoGenerated }: ReopenInput,
 ): Promise<boolean> {
   if (isAutoGenerated) return false;
-  if (observer) await observer(tx, { orgId, ticketId });
+  if (observer?.beforeLock && !observedBeforeLock.has(tx)) {
+    await observer.beforeLock(tx, { orgId, ticketId });
+  }
 
   await tx.$queryRaw`
     SELECT 1 FROM "Ticket"
