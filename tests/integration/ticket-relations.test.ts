@@ -122,7 +122,7 @@ describe("addRelation: refusals change nothing", () => {
     expect(await counts(orgId)).toEqual(before);
   });
 
-  it("TICKET_UNAVAILABLE for another organization's ticket and for an unknown id", async () => {
+  it("TICKET_UNAVAILABLE for another organization's ticket", async () => {
     const { orgId, actor } = await seedActor();
     const other = await seedActor();
     const [a] = await tickets(orgId, 1);
@@ -133,12 +133,19 @@ describe("addRelation: refusals change nothing", () => {
       ok: false,
       error: "TICKET_UNAVAILABLE",
     });
+    expect(await counts(orgId)).toEqual(before);
+    expect(await counts(other.orgId)).toEqual(otherBefore);
+  });
+
+  it("TICKET_UNAVAILABLE for an unknown ticket id", async () => {
+    const { orgId, actor } = await seedActor();
+    const [a] = await tickets(orgId, 1);
+    const before = await counts(orgId);
     expect(await link(actor, a.id, "no-such-ticket", "is related to")).toEqual({
       ok: false,
       error: "TICKET_UNAVAILABLE",
     });
     expect(await counts(orgId)).toEqual(before);
-    expect(await counts(other.orgId)).toEqual(otherBefore);
   });
 
   it("MEMBERSHIP_ENDED when the actor's member row was deleted", async () => {
