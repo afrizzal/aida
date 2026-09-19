@@ -6,6 +6,8 @@
 //   3. select at most 100 candidates (D-18): RESOLVED, resolvedAt set, quiet start
 //      GREATEST(resolvedAt, autoCloseEnabledAt) at or before now minus the days, ordered by quiet
 //      start then id
+//   (both the candidate query and the final UPDATE skip snoozed tickets, "snoozedUntil" IS NULL,
+//   Phase 12 D-15, so a snooze that commits between the two is respected)
 //   4. close each candidate in its own transaction through closeResolvedTicketIfQuiet, which
 //      re-reads the settings under FOR SHARE on the days row (Codex review C8) and runs one
 //      conditional UPDATE that re-checks everything in SQL (D-17); the AUTO_CLOSED audit row is
@@ -77,6 +79,7 @@ export async function closeResolvedTicketIfQuiet(
       AND "organizationId" = ${orgId}
       AND "status" = 'RESOLVED'
       AND "resolvedAt" IS NOT NULL
+      AND "snoozedUntil" IS NULL
       AND GREATEST("resolvedAt", ${enabledAt}) <= ${cutoff}
     RETURNING "id"
   `;
@@ -220,6 +223,7 @@ async function autoCloseOrganization(
     WHERE "organizationId" = ${orgId}
       AND "status" = 'RESOLVED'
       AND "resolvedAt" IS NOT NULL
+      AND "snoozedUntil" IS NULL
       AND GREATEST("resolvedAt", ${enabledAt}) <= ${cutoff}
     ORDER BY GREATEST("resolvedAt", ${enabledAt}) ASC, "id" ASC
     LIMIT ${MAX_AUTO_CLOSE_PER_ORG}
