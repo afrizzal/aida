@@ -9,6 +9,7 @@ import { insightRunHandler } from "./jobs/insight-run";
 import { kbEmbedArticleHandler } from "./jobs/kb-embed-article";
 import { rateLimitCleanupHandler } from "./jobs/rate-limit-cleanup";
 import { slaFlagHandler } from "./jobs/sla-flag";
+import { snoozeWakeHandler } from "./jobs/snooze-wake";
 
 async function main() {
   const connectionString = process.env.DATABASE_URL;
@@ -43,6 +44,14 @@ async function main() {
     await autoCloseHandler(job.data);
   });
   await boss.schedule("auto-close", "15 2 * * *", {}); // daily 02:15
+
+  // Snooze wake (Phase 12, AIDA-54, D-13): every minute, at most 500 due tickets per run,
+  // idempotent; sends nothing to anyone.
+  await boss.createQueue("snooze-wake");
+  await boss.work("snooze-wake", async ([job]: Job[]) => {
+    await snoozeWakeHandler(job.data);
+  });
+  await boss.schedule("snooze-wake", "* * * * *", {});
 
   await boss.createQueue("rate-limit-cleanup");
   await boss.work("rate-limit-cleanup", async (_jobs: Job[]) => {
