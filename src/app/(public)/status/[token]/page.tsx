@@ -6,6 +6,7 @@ import { ThreadSystemEvent } from "@/components/tickets/thread-system-event";
 import { Button } from "@/components/ui/button";
 import { BRANDING_SETTING_KEYS } from "@/lib/branding/settings";
 import { prisma } from "@/lib/db";
+import { loadStatusPageData } from "@/lib/tickets/status-page-data";
 import { CsatForm } from "./csat-form";
 import { FollowUpForm } from "./follow-up-form";
 
@@ -31,22 +32,11 @@ export default async function StatusPage({ params }: StatusPageProps) {
     : null;
   const brandName = (row?.value ?? "").trim() || org?.name || "AIDA";
 
-  // Unauthenticated bearer-token flow — the token IS the authorization, so this uses
-  // bare `prisma`, never scopedDb (no session/org context exists here). The
-  // `where: { visibility: "PUBLIC" }` filter is mandatory and server-side: internal
-  // notes must NEVER be fetched for this route (D-21), let alone filtered client-side.
-  const ticket = await prisma.ticket.findUnique({
-    where: { statusToken: token },
-    include: {
-      contact: true,
-      csatResponse: true,
-      messages: {
-        where: { visibility: "PUBLIC" },
-        include: { attachments: true, authorUser: true, authorContact: true },
-        orderBy: { createdAt: "asc" },
-      },
-    },
-  });
+  // Unauthenticated bearer-token flow — the token IS the authorization. Everything the page
+  // shows comes from the one loader: messages are filtered server-side by the shared
+  // provenance predicate (INTERNAL notes are never fetched, D-21; per-token provenance after a
+  // merge, D-09), and a merged source never exposes its target's number, subject or status.
+  const ticket = await loadStatusPageData(token);
 
   if (!ticket) {
     return (
@@ -88,15 +78,9 @@ export default async function StatusPage({ params }: StatusPageProps) {
                 authorContactId: message.authorContactId,
                 bodyHtml: message.bodyHtml,
                 createdAt: message.createdAt,
-                authorUser: message.authorUser ? { name: message.authorUser.name } : null,
-                authorContact: message.authorContact
-                  ? { name: message.authorContact.name, email: message.authorContact.email }
-                  : null,
-                attachments: message.attachments.map((attachment) => ({
-                  id: attachment.id,
-                  originalFilename: attachment.originalFilename,
-                  sizeBytes: attachment.sizeBytes,
-                })),
+                authorUser: message.authorUser,
+                authorContact: message.authorContact,
+                attachments: message.attachments,
               }}
               attachmentHrefBase={`/api/public/status/${token}/attachments`}
             />
@@ -118,8 +102,8 @@ export default async function StatusPage({ params }: StatusPageProps) {
           <h2 className="mb-2 text-[14px] font-semibold">How did we do?</h2>
           <CsatForm
             token={token}
-            existingScore={ticket.csatResponse?.score ?? null}
-            existingComment={ticket.csatResponse?.comment ?? null}
+            existingScore={ticket.csat?.score ?? null}
+            existingComment={ticket.csat?.comment ?? null}
           />
         </div>
       )}
