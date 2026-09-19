@@ -11,6 +11,8 @@ export interface TicketListFilters {
   tagId?: string;
   cf?: { definitionId: string; value: string };
   q?: string;
+  /** Phase 12 D-16: true lists only snoozed tickets; absent lists only unsnoozed ones. */
+  snoozed?: true;
   limit?: number;
 }
 
@@ -39,6 +41,7 @@ export function parseTicketListFilters(
     tagId: filters.tagId,
     cf: filters.cf,
     q: filters.q,
+    snoozed: filters.snoozed,
     limit,
   };
 }
@@ -63,6 +66,10 @@ export async function fetchTicketList(filters: TicketListFilters, ctx: FetchTick
     where.assigneeId = ctx.userId;
   }
   // "all" (or unset) — no assignee filter.
+
+  // D-16: every view hides snoozed tickets by default; the snoozed filter shows only them. The
+  // rows carry snoozedUntil (every scalar column is returned) for the snoozed chip.
+  where.snoozedUntil = filters.snoozed === true ? { not: null } : null;
 
   if (filters.statuses && filters.statuses.length > 0) {
     where.status = { in: filters.statuses };

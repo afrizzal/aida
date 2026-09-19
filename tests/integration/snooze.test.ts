@@ -10,7 +10,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { POST as followUpPost } from "@/app/api/public/status/[token]/follow-up/route";
 import { deriveEmailMessageId, ingestMessage } from "@/lib/channels/email/ingest-message";
 import { prisma } from "@/lib/db";
+import { scopedDb } from "@/lib/scoped-db";
 import { AUTO_CLOSE_DAYS_KEY, AUTO_CLOSE_ENABLED_AT_KEY } from "@/lib/tickets/auto-close-settings";
+import { fetchTicketList, type TicketListFilters } from "@/lib/tickets/list-query";
 import { mergeTickets } from "@/lib/tickets/merge";
 import { runTicketMutation } from "@/lib/tickets/mutations";
 import {
@@ -475,5 +477,44 @@ describe("customer replies wake a snoozed ticket (D-14)", () => {
         after: { snoozedUntil: null },
       },
     ]);
+  });
+});
+
+describe("the snoozed filter in the list query (D-16)", () => {
+  it("default views hide snoozed tickets; snoozed true shows only them, combined with other filters", async () => {
+    const { orgId, owner } = await seedOrg();
+    const later = new Date(Date.now() + 2 * 60 * MIN);
+    const word = `snzword${randomUUID().slice(0, 8)}`;
+    const mineAwake = await seedTicket(orgId, { assigneeId: owner.userId });
+    const mineSnoozed = await seedTicket(orgId, { assigneeId: owner.userId, status: "PENDING" });
+    const freeAwake = await seedTicket(orgId);
+    const freeSnoozed = await seedTicket(orgId);
+    await setDeadline(mineSnoozed.id, later);
+    await setDeadline(freeSnoozed.id, later);
+    for (const id of [mineAwake.id, mineSnoozed.id]) {
+      await prisma.ticket.update({ where: { id }, data: { subject: `Printer ${word}` } });
+    }
+
+    const ctx = { db: scopedDb(orgId), orgId, userId: owner.userId };
+    const ids = async (filters: TicketListFilters) =>
+      (await fetchTicketList(filters, ctx)).map((row) => row.id).sort();
+    const sorted = (...list: string[]) => [...list].sort();
+
+    expect(await ids({ view: "all" })).toEqual(sorted(mineAwake.id, freeAwake.id));
+    expect(await ids({ view: "unassigned" })).toEqual([freeAwake.id]);
+    expect(await ids({ view: "mine" })).toEqual([mineAwake.id]);
+    expect(await ids({ view: "all", snoozed: true })).toEqual(
+      sorted(mineSnoozed.id, freeSnoozed.id),
+    );
+    expect(await ids({ view: "mine", snoozed: true })).toEqual([mineSnoozed.id]);
+    expect(await ids({ view: "unassigned", snoozed: true })).toEqual([freeSnoozed.id]);
+    expect(await ids({ view: "all", snoozed: true, statuses: ["PENDING"] })).toEqual([
+      mineSnoozed.id,
+    ]);
+    expect(await ids({ view: "all", snoozed: true, q: word })).toEqual([mineSnoozed.id]);
+    expect(await ids({ view: "all", q: word })).toEqual([mineAwake.id]);
+
+    const rows = await fetchTicketList({ view: "all", snoozed: true }, ctx);
+    for (const row of rows) expect(row.snoozedUntil?.toISOString()).toBe(later.toISOString());
   });
 });

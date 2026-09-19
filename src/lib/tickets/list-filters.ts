@@ -39,6 +39,11 @@ const filterShape = {
     })
     .optional(),
   q: z.string().min(1).max(MAX_TEXT_LENGTH).optional(),
+  /**
+   * Phase 12 D-16: true shows only snoozed tickets; absent (the default) hides them. Only the
+   * literal true is valid, so every stored version 1 view without the field parses unchanged.
+   */
+  snoozed: z.literal(true).optional(),
 };
 
 /** Inbox filters as used by the URL and the list query. Unknown keys (including limit) are refused. */
@@ -92,6 +97,7 @@ export function parseUrlFilters(source: SearchParamsLike): {
   const tag = readParam(source, "tag");
   const cfRaw = readParam(source, "cf");
   const q = readParam(source, "q");
+  const snoozed = readParam(source, "snoozed");
 
   const candidate: Record<string, unknown> = {
     view: view === "unassigned" || view === "mine" ? view : "all",
@@ -105,13 +111,17 @@ export function parseUrlFilters(source: SearchParamsLike): {
     }
   }
   if (q) candidate.q = cut(q, MAX_TEXT_LENGTH);
+  if (snoozed === "1") candidate.snoozed = true;
 
   const parsed = ticketListFiltersSchema.safeParse(candidate);
   const filters: InboxFilters = parsed.success ? parsed.data : { view: "all", statuses: [] };
   return { filters, limit: parseLimit(readParam(source, "limit")) };
 }
 
-/** Canonical URL form: view (only when not all), status (enum order), tag, cf, q. Never limit. */
+/**
+ * Canonical URL form: view (only when not all), status (enum order), tag, cf, q, then snoozed=1
+ * only when true. Never limit.
+ */
 export function filtersToSearchParams(filters: InboxFiltersInput): URLSearchParams {
   const params = new URLSearchParams();
   const view = filters.view ?? "all";
@@ -121,6 +131,7 @@ export function filtersToSearchParams(filters: InboxFiltersInput): URLSearchPara
   if (filters.tagId) params.set("tag", filters.tagId);
   if (filters.cf) params.set("cf", serializeCfParam(filters.cf.definitionId, filters.cf.value));
   if (filters.q) params.set("q", filters.q);
+  if (filters.snoozed === true) params.set("snoozed", "1");
   return params;
 }
 
@@ -135,7 +146,8 @@ export function hasAnyFilter(filters: InboxFiltersInput): boolean {
 }
 
 /**
- * The stored JSON shape: exactly { version: 1, view, statuses, and tagId, cf, q only when set }.
+ * The stored JSON shape: exactly { version: 1, view, statuses, and tagId, cf, q, snoozed only
+ * when set }.
  * Throws a ZodError when the filters do not satisfy ticketListFiltersSchema.
  */
 export function toStoredFilters(filters: InboxFiltersInput): StoredViewFilters {
@@ -145,6 +157,7 @@ export function toStoredFilters(filters: InboxFiltersInput): StoredViewFilters {
   if (parsed.tagId !== undefined) stored.tagId = parsed.tagId;
   if (parsed.cf !== undefined) stored.cf = parsed.cf;
   if (parsed.q !== undefined) stored.q = parsed.q;
+  if (parsed.snoozed === true) stored.snoozed = true;
   return stored;
 }
 
