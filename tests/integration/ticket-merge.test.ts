@@ -1,7 +1,10 @@
 // Phase 12, plan 12-03: the merge service (AIDA-53, D-07 to D-10) on a real Postgres through
 // Testcontainers. Nothing is mocked.
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import {
@@ -11,7 +14,12 @@ import {
   insertDemoReplies,
   seedDemoData,
 } from "@/lib/demo/seed-demo-data";
-import { type MergeActor, type MergeHooks, mergeTickets } from "@/lib/tickets/merge";
+import {
+  type MergeActor,
+  type MergeHooks,
+  mergeTickets,
+  setAgentMessageObserverForTests,
+} from "@/lib/tickets/merge";
 import {
   seedContactTicket,
   seedMessage,
@@ -19,6 +27,36 @@ import {
   seedRelation,
 } from "../support/lifecycle-fixtures";
 import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
+
+// Task 3: the messages route reads its session through getScopedDb and enqueues through
+// getBoss; both are replaced by test doubles bound to the case's actor. Everything else is real.
+const routeEnv = vi.hoisted(() => ({
+  actor: null as null | { orgId: string; userId: string },
+  sends: [] as unknown[][],
+}));
+
+vi.mock("@/lib/session", async () => {
+  const { scopedDb } = await import("@/lib/scoped-db");
+  return {
+    getScopedDb: async () => {
+      if (!routeEnv.actor) throw new Error("no session");
+      return {
+        db: scopedDb(routeEnv.actor.orgId),
+        orgId: routeEnv.actor.orgId,
+        session: { user: { id: routeEnv.actor.userId } },
+      };
+    },
+  };
+});
+
+vi.mock("@/lib/queue/boss-client", () => ({
+  getBoss: async () => ({
+    send: async (...args: unknown[]) => {
+      routeEnv.sends.push(args);
+      return "job";
+    },
+  }),
+}));
 
 async function seedActor() {
   const { orgId, users } = await seedOrgWithMembers(prisma, ["admin"]);
@@ -730,5 +768,166 @@ describe("demo seed writes under the ticket row lock (reviews R2-2, R3-1)", () =
     for (const [status, count] of Object.entries(summary.byStatus)) {
       expect(byStatus[status] ?? 0).toBe(count);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Task 3: agents cannot write to a merged source; a refused agent message leaves no stored file.
+
+describe("POST /api/tickets/{id}/messages on a merged source (review C1, C7, R3-2)", () => {
+  let uploadsDir = "";
+  let previousUploads: string | undefined;
+  let POST: typeof import("@/app/api/tickets/[id]/messages/route")["POST"];
+  let localFileStorage: typeof import("@/lib/attachments/local-file-storage")["localFileStorage"];
+
+  beforeAll(async () => {
+    uploadsDir = await mkdtemp(path.join(os.tmpdir(), "aida-merge-uploads-"));
+    previousUploads = process.env.UPLOADS_DIR;
+    process.env.UPLOADS_DIR = uploadsDir;
+    ({ POST } = await import("@/app/api/tickets/[id]/messages/route"));
+    ({ localFileStorage } = await import("@/lib/attachments/local-file-storage"));
+  });
+
+  afterAll(async () => {
+    if (previousUploads === undefined) delete process.env.UPLOADS_DIR;
+    else process.env.UPLOADS_DIR = previousUploads;
+    await rm(uploadsDir, { recursive: true, force: true });
+  });
+
+  afterEach(() => {
+    setAgentMessageObserverForTests(null);
+    routeEnv.actor = null;
+    routeEnv.sends = [];
+    vi.restoreAllMocks();
+  });
+
+  /** Every file stored for the organization under the temporary upload directory. */
+  async function storedFiles(orgId: string): Promise<string[]> {
+    const dir = path.join(uploadsDir, orgId);
+    try {
+      const entries = await readdir(dir, { withFileTypes: true, recursive: true });
+      return entries.filter((e) => e.isFile()).map((e) => e.name);
+    } catch (err) {
+      if ((err as { code?: string }).code === "ENOENT") return [];
+      throw err;
+    }
+  }
+
+  const pdf = (name: string, marker = "fixture") =>
+    new File([Buffer.from(`%PDF-1.4\n% ${marker}\n1 0 obj << >> endobj\n%%EOF\n`)], name, {
+      type: "application/pdf",
+    });
+
+  function post(ticketId: string, mode: "public" | "internal", body: string, files: File[]) {
+    const form = new FormData();
+    form.set("mode", mode);
+    form.set("body", body);
+    for (const file of files) form.append("file", file);
+    const request = new Request(`http://localhost/api/tickets/${ticketId}/messages`, {
+      method: "POST",
+      body: form,
+    });
+    return POST(request, { params: Promise.resolve({ id: ticketId }) });
+  }
+
+  async function mergedPair() {
+    const { orgId, actor } = await seedActor();
+    const { s, t } = await samePair(orgId);
+    await prisma.setting.create({
+      data: { organizationId: orgId, key: "email:enabled", value: "true" },
+    });
+    routeEnv.actor = actor;
+    routeEnv.sends = [];
+    return { orgId, actor, s, t };
+  }
+
+  it("refuses a public reply and an internal note with 409 MERGED_SOURCE, writes and stores nothing; the target accepts", async () => {
+    const { orgId, actor, s, t } = await mergedPair();
+    expect((await merge(actor, s.id, t.id)).ok).toBe(true);
+    const before = await snapshot(orgId);
+
+    const reply = await post(s.id, "public", "Reply to merged source", [
+      pdf("a.pdf"),
+      pdf("b.pdf"),
+    ]);
+    expect(reply.status).toBe(409);
+    expect(await reply.json()).toEqual({ error: "MERGED_SOURCE" });
+    const note = await post(s.id, "internal", "Note on merged source", []);
+    expect(note.status).toBe(409);
+    expect(await note.json()).toEqual({ error: "MERGED_SOURCE" });
+    expect(await snapshot(orgId)).toEqual(before);
+    expect(routeEnv.sends).toEqual([]);
+    expect(await storedFiles(orgId)).toEqual([]);
+
+    const ok = await post(t.id, "public", "Reply to target", [pdf("c.pdf")]);
+    expect(ok.status).toBe(200);
+    const created = await prisma.message.findFirstOrThrow({
+      where: { ticketId: t.id, bodyMarkdown: "Reply to target" },
+      include: { attachments: true },
+    });
+    expect(created.attachments).toHaveLength(1);
+    expect(await storedFiles(orgId)).toEqual([created.attachments[0].storageKey]);
+    expect(routeEnv.sends).toEqual([["email-outbound-send", { messageId: created.id }]]);
+  });
+
+  it("forced order: a reply observed blocked by a held merge is refused after the merge commits", async () => {
+    const { orgId, actor, s, t } = await mergedPair();
+    const first = heldMerge(actor, s.id, t.id);
+    await first.held;
+    const replyPid = deferred<number>();
+    setAgentMessageObserverForTests({
+      onTransactionStart: async (tx) => replyPid.resolve(await backendPid(tx)),
+    });
+    const reply = post(s.id, "public", "Raced reply", [pdf("raced.pdf")]);
+    reply.catch(() => {});
+    await waitForBlockedBy(prisma, await first.pid, [await replyPid.promise]);
+    first.release();
+    expect((await first.run).ok).toBe(true);
+    const response = await reply;
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "MERGED_SOURCE" });
+    expect(
+      await prisma.message.count({
+        where: { ticketId: { in: [s.id, t.id] }, bodyMarkdown: "Raced reply" },
+      }),
+    ).toBe(0);
+    expect(routeEnv.sends).toEqual([]);
+    expect(await storedFiles(orgId)).toEqual([]);
+  });
+
+  it("a transaction rolled back by a sentinel rethrows it and leaves no message and no file", async () => {
+    const { orgId, s } = await mergedPair();
+    const before = await snapshot(orgId);
+    const sentinel = new Error("route rollback sentinel");
+    setAgentMessageObserverForTests({
+      afterLock: () => {
+        throw sentinel;
+      },
+    });
+    await expect(post(s.id, "public", "Rolled back", [pdf("r.pdf")])).rejects.toBe(sentinel);
+    expect(await snapshot(orgId)).toEqual(before);
+    expect(await storedFiles(orgId)).toEqual([]);
+  });
+
+  it("an EACCES delete keeps the 409, is logged by key and code without content, and leaves that one file", async () => {
+    const { orgId, actor, s, t } = await mergedPair();
+    expect((await merge(actor, s.id, t.id)).ok).toBe(true);
+    const marker = `CONTENT-MARKER-${randomUUID()}`;
+    vi.spyOn(localFileStorage, "delete").mockRejectedValue(
+      Object.assign(new Error("permission denied"), { code: "EACCES" }),
+    );
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const response = await post(s.id, "public", "Refused with EACCES", [pdf("e.pdf", marker)]);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "MERGED_SOURCE" });
+    const remaining = await storedFiles(orgId);
+    expect(remaining).toHaveLength(1);
+    const logged = errorSpy.mock.calls.map((args) =>
+      args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "),
+    );
+    expect(logged.some((line) => line.includes(remaining[0]) && line.includes("EACCES"))).toBe(
+      true,
+    );
+    for (const line of logged) expect(line).not.toContain(marker);
   });
 });

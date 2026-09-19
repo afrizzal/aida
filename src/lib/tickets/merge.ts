@@ -331,3 +331,47 @@ export async function mergeTickets(
     throw err;
   }
 }
+
+export type AgentWriteLockResult =
+  | { ok: true }
+  | { ok: false; error: "MERGED_SOURCE" | "TICKET_UNAVAILABLE" };
+
+/**
+ * Locks one ticket FOR UPDATE (through lockTicketsInIdOrder, so the lock-order contract holds)
+ * before an agent message is inserted on it, and refuses a merged source (MERGED_SOURCE) or a
+ * ticket not in the organization (TICKET_UNAVAILABLE). Every agent message insert, and the seq
+ * it draws, therefore happens under the ticket row lock (D-09 amended, review C1).
+ */
+export async function lockTicketForAgentWrite(
+  tx: LockClient,
+  orgId: string,
+  ticketId: string,
+): Promise<AgentWriteLockResult> {
+  const [row] = await lockTicketsInIdOrder(tx, orgId, [ticketId]);
+  if (!row || row.id !== ticketId) return { ok: false, error: "TICKET_UNAVAILABLE" };
+  if (row.mergedIntoTicketId !== null) return { ok: false, error: "MERGED_SOURCE" };
+  return { ok: true };
+}
+
+/** Test seams of the agent messages route (POST /api/tickets/{id}/messages). */
+export interface AgentMessageObserver {
+  /** Awaited first inside the route's transaction, before lockTicketForAgentWrite. */
+  onTransactionStart?(tx: LockClient): Promise<void> | void;
+  /** Awaited right after lockTicketForAgentWrite. */
+  afterLock?(tx: LockClient): Promise<void> | void;
+}
+
+let agentMessageObserver: AgentMessageObserver | null = null;
+
+/**
+ * Test seam only (as setReopenObserverForTests, 11-04): lets a race test record the route
+ * transaction's PID or hold it. null clears it. Production code never calls this.
+ */
+export function setAgentMessageObserverForTests(observer: AgentMessageObserver | null): void {
+  agentMessageObserver = observer;
+}
+
+/** The observer the messages route awaits; null outside tests. */
+export function getAgentMessageObserver(): AgentMessageObserver | null {
+  return agentMessageObserver;
+}
