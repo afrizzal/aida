@@ -295,6 +295,13 @@ export async function removeRelation(
       const membership = await findActiveMembership(tx, userId, orgId);
       if (!membership) throw new RelationError("MEMBERSHIP_ENDED");
 
+      // The ticket the agent acts from must be one of the actor's organization.
+      const own = await tx.ticket.findFirst({
+        where: { id: ticketId, organizationId: orgId },
+        select: { id: true },
+      });
+      if (!own) throw new RelationError("TICKET_UNAVAILABLE");
+
       // Only to learn the two ticket ids to lock; nothing is decided from this read.
       const first = await tx.ticketRelation.findFirst({
         where: { id: relationId, organizationId: orgId },
