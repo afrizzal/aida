@@ -10,7 +10,12 @@ export type RelationType = (typeof RELATION_TYPES)[number];
 /** Which end of a stored relation the viewing ticket is. */
 export type RelationSide = "from" | "to";
 
-export type RelationLabel = "Duplicate of" | "Has duplicate" | "Child of" | "Parent of" | "Related to";
+export type RelationLabel =
+  | "Duplicate of"
+  | "Has duplicate"
+  | "Child of"
+  | "Parent of"
+  | "Related to";
 
 /** The label a ticket shows for a relation, from its own side (UI-SPEC "Relation labels"). */
 export function relationLabel(type: RelationType, side: RelationSide): RelationLabel {

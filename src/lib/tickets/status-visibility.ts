@@ -61,7 +61,10 @@ export function statusMessageWhere(ticket: StatusTokenTicket): StatusMessageWher
   return {
     ticketId: merge.targetId,
     visibility: "PUBLIC",
-    OR: [{ mergedFromTicketId: ticket.id }, { mergedFromTicketId: null, seq: { gt: merge.marker } }],
+    OR: [
+      { mergedFromTicketId: ticket.id },
+      { mergedFromTicketId: null, seq: { gt: merge.marker } },
+    ],
   };
 }
 

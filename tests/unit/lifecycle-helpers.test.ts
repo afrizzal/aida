@@ -47,11 +47,26 @@ describe("LINK_CHOICES", () => {
       "is a child of",
       "is the parent of",
     ]);
-    expect(byLabel("is a duplicate of")).toMatchObject({ type: "DUPLICATE_OF", direction: "this-to-other" });
-    expect(byLabel("has a duplicate")).toMatchObject({ type: "DUPLICATE_OF", direction: "other-to-this" });
-    expect(byLabel("is related to")).toMatchObject({ type: "RELATED_TO", direction: "this-to-other" });
-    expect(byLabel("is a child of")).toMatchObject({ type: "CHILD_OF", direction: "this-to-other" });
-    expect(byLabel("is the parent of")).toMatchObject({ type: "CHILD_OF", direction: "other-to-this" });
+    expect(byLabel("is a duplicate of")).toMatchObject({
+      type: "DUPLICATE_OF",
+      direction: "this-to-other",
+    });
+    expect(byLabel("has a duplicate")).toMatchObject({
+      type: "DUPLICATE_OF",
+      direction: "other-to-this",
+    });
+    expect(byLabel("is related to")).toMatchObject({
+      type: "RELATED_TO",
+      direction: "this-to-other",
+    });
+    expect(byLabel("is a child of")).toMatchObject({
+      type: "CHILD_OF",
+      direction: "this-to-other",
+    });
+    expect(byLabel("is the parent of")).toMatchObject({
+      type: "CHILD_OF",
+      direction: "other-to-this",
+    });
   });
   it("defaults to is related to", () => {
     expect(DEFAULT_LINK_CHOICE.label).toBe("is related to");
