@@ -2,7 +2,20 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { scopedDb } from "@/lib/scoped-db";
-import { seedContactTicket, seedOrgWithMembers, seedRelation } from "../support/lifecycle-fixtures";
+import { isMessageVisibleForToken, statusMessageWhere } from "@/lib/tickets/status-visibility";
+import {
+  seedContactTicket,
+  seedMessage,
+  seedOrgWithMembers,
+  seedRelation,
+} from "../support/lifecycle-fixtures";
+
+/** Draws one value from the Message seq sequence, as the merge does under the row locks. */
+async function drawMergeMarker(): Promise<bigint> {
+  const rows = await prisma.$queryRaw<{ v: bigint }[]>`
+    SELECT nextval(pg_get_serial_sequence('"Message"', 'seq')) AS v`;
+  return BigInt(rows[0].v);
+}
 
 /** Full text of a Prisma or pg adapter error, including meta and the cause chain. */
 function errorText(err: unknown): string {
@@ -102,5 +115,90 @@ describe("Phase 12 schema: TicketRelation", () => {
     const rows = await prisma.$queryRaw<{ seq: string | null }[]>`
       SELECT pg_get_serial_sequence('"Message"', 'seq') AS seq`;
     expect(rows[0]?.seq).not.toBeNull();
+  });
+});
+
+describe("Phase 12 provenance predicate on real rows (D-09 amended, review C1)", () => {
+  it("statusMessageWhere returns exactly what isMessageVisibleForToken accepts, for S and T", async () => {
+    const { orgId, a: src, b: tgt } = await twoTickets("provenance");
+    const other = await seedContactTicket(orgId, { contactEmail: `lc-c-${randomUUID()}@example.test` });
+
+    // Pre-merge rows: on S (to be moved), on T, and on another ticket C (moved from C later).
+    const sPub = await seedMessage(prisma, src.id, { visibility: "PUBLIC", direction: "INBOUND", withAttachment: true });
+    const sInt = await seedMessage(prisma, src.id, { visibility: "INTERNAL", direction: "OUTBOUND" });
+    const tPre = await seedMessage(prisma, tgt.id, { visibility: "PUBLIC", direction: "OUTBOUND" });
+    const tPreTie = await seedMessage(prisma, tgt.id, { visibility: "PUBLIC", direction: "INBOUND" });
+    const tPreInt = await seedMessage(prisma, tgt.id, { visibility: "INTERNAL", direction: "OUTBOUND" });
+    const cPub = await seedMessage(prisma, other.id, { visibility: "PUBLIC", direction: "INBOUND" });
+
+    // Stage the merge: marker drawn from the sequence, moved rows, merge fields on S.
+    const marker = await drawMergeMarker();
+    const mergedAt = new Date(Date.now() + 60_000);
+    await prisma.message.updateMany({
+      where: { id: { in: [sPub.id, sInt.id] } },
+      data: { ticketId: tgt.id, mergedFromTicketId: src.id },
+    });
+    await prisma.message.update({
+      where: { id: cPub.id },
+      data: { ticketId: tgt.id, mergedFromTicketId: other.id },
+    });
+    await prisma.ticket.update({
+      where: { id: src.id },
+      data: { mergedIntoTicketId: tgt.id, mergedAt, mergeMessageSeq: marker, status: "CLOSED" },
+    });
+    // A pre-merge T row whose createdAt equals the merge time: still below the marker.
+    await prisma.message.update({ where: { id: tPreTie.id }, data: { createdAt: mergedAt } });
+
+    // Post-merge rows; one carries a createdAt before the merge (a transaction that began earlier).
+    const tPost = await seedMessage(prisma, tgt.id, {
+      visibility: "PUBLIC",
+      direction: "OUTBOUND",
+      createdAt: new Date(mergedAt.getTime() - 3_600_000),
+    });
+    const tPostInt = await seedMessage(prisma, tgt.id, { visibility: "INTERNAL", direction: "OUTBOUND" });
+    expect(tPost.seq > marker).toBe(true);
+    expect(tPreTie.seq < marker).toBe(true);
+
+    const sTicket = await prisma.ticket.findUniqueOrThrow({
+      where: { id: src.id },
+      select: { id: true, mergedIntoTicketId: true, mergeMessageSeq: true },
+    });
+    const tTicket = await prisma.ticket.findUniqueOrThrow({
+      where: { id: tgt.id },
+      select: { id: true, mergedIntoTicketId: true, mergeMessageSeq: true },
+    });
+
+    const all = await prisma.message.findMany({
+      where: { ticketId: { in: [src.id, tgt.id, other.id] } },
+      select: { id: true, ticketId: true, visibility: true, mergedFromTicketId: true, seq: true },
+    });
+    const ids = (rows: { id: string }[]) => rows.map((r) => r.id).sort();
+
+    for (const ticket of [sTicket, tTicket]) {
+      const viaWhere = await prisma.message.findMany({
+        where: statusMessageWhere(ticket),
+        select: { id: true },
+      });
+      const viaPredicate = all.filter((m) => isMessageVisibleForToken(ticket, m));
+      expect(ids(viaWhere)).toEqual(ids(viaPredicate));
+    }
+
+    const sSees = ids(await prisma.message.findMany({ where: statusMessageWhere(sTicket), select: { id: true } }));
+    const tSees = ids(await prisma.message.findMany({ where: statusMessageWhere(tTicket), select: { id: true } }));
+    expect(sSees).toEqual([sPub.id, tPost.id].sort());
+    expect(tSees).toContain(tPre.id);
+    expect(tSees).toContain(tPreTie.id);
+    expect(tSees).toContain(tPost.id);
+    for (const hidden of [sPub.id, sInt.id, cPub.id, tPreInt.id, tPostInt.id]) {
+      expect(tSees).not.toContain(hidden);
+    }
+    for (const hidden of [tPre.id, tPreTie.id, sInt.id, cPub.id, tPreInt.id, tPostInt.id]) {
+      expect(sSees).not.toContain(hidden);
+    }
+    // A moved message keeps its createdAt and its seq; only ticketId and mergedFromTicketId change.
+    const moved = await prisma.message.findUniqueOrThrow({ where: { id: sPub.id } });
+    expect(moved.seq).toBe(sPub.seq);
+    expect(moved.createdAt.getTime()).toBe(sPub.createdAt.getTime());
+    expect(moved.ticketId).toBe(tgt.id);
   });
 });
