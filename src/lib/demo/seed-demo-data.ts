@@ -22,7 +22,12 @@
 //    Without an embedding provider configured this is TRUTHFUL — the
 //    chunks genuinely are not embedded — never faked as "COMPLETED".
 // ---------------------------------------------------------------------------
-import type { Prisma, TicketPriority } from "@/generated/prisma/client";
+import type {
+  MessageDirection,
+  MessageVisibility,
+  Prisma,
+  TicketPriority,
+} from "@/generated/prisma/client";
 import { recordAuditEvent } from "@/lib/audit/record-audit-event";
 import { prisma } from "@/lib/db";
 import {
@@ -145,6 +150,109 @@ function computeTagVolumeRows(
       return { key, count, previousCount, delta: count - previousCount };
     })
     .sort((a, b) => b.count - a.count);
+}
+
+// ---------------------------------------------------------------------------
+// Writes on an existing ticket take that ticket's row lock (Phase 12, reviews R2-2 and R3-1).
+// createTicket commits its own transaction, so a merge can land between it and the seed's
+// later writes. Every reply insert and the step-4e status write therefore run in one
+// transaction that first locks the ticket row FOR UPDATE and refuses a merged or missing ticket
+// (DemoSeedTicketMergedError): the seed refuses, it never skips silently, and it never writes a
+// Message or a status onto a merged source.
+// ---------------------------------------------------------------------------
+
+/** Thrown when a demo seed write targets a merged ticket or a ticket not in the organization. */
+export class DemoSeedTicketMergedError extends Error {
+  readonly ticketId: string;
+
+  constructor(ticketId: string) {
+    super(`Demo seed refused: ticket ${ticketId} is merged or unavailable`);
+    this.name = "DemoSeedTicketMergedError";
+    this.ticketId = ticketId;
+  }
+}
+
+export interface DemoReplyInput {
+  direction: MessageDirection;
+  visibility: MessageVisibility;
+  authorUserId: string | null;
+  authorContactId: string | null;
+  bodyMarkdown: string;
+  createdAt: Date;
+}
+
+/** Test seams. The seed itself never passes them. */
+export interface DemoSeedLockHooks {
+  onTransactionStart?(tx: Prisma.TransactionClient): Promise<void> | void;
+  afterLock?(tx: Prisma.TransactionClient): Promise<void> | void;
+}
+
+const DEMO_LOCK_TX_OPTIONS = { maxWait: 10_000, timeout: 30_000 } as const;
+
+async function lockDemoTicket(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+  ticketId: string,
+): Promise<void> {
+  const rows = await tx.$queryRaw<{ id: string; mergedIntoTicketId: string | null }[]>`
+    SELECT id, "mergedIntoTicketId" FROM "Ticket"
+    WHERE id = ${ticketId} AND "organizationId" = ${orgId}
+    FOR UPDATE
+  `;
+  if (rows.length === 0 || rows[0].mergedIntoTicketId !== null) {
+    throw new DemoSeedTicketMergedError(ticketId);
+  }
+}
+
+/**
+ * Inserts one ticket's demo replies, in order, under that ticket's row lock. Returns the created
+ * message ids in the same order.
+ */
+export async function insertDemoReplies(
+  orgId: string,
+  ticketId: string,
+  replies: readonly DemoReplyInput[],
+  hooks: DemoSeedLockHooks = {},
+): Promise<string[]> {
+  return prisma.$transaction(async (tx) => {
+    if (hooks.onTransactionStart) await hooks.onTransactionStart(tx);
+    await lockDemoTicket(tx, orgId, ticketId);
+    if (hooks.afterLock) await hooks.afterLock(tx);
+    const ids: string[] = [];
+    for (const reply of replies) {
+      const created = await tx.message.create({
+        data: {
+          organizationId: orgId,
+          ticketId,
+          direction: reply.direction,
+          visibility: reply.visibility,
+          authorUserId: reply.authorUserId,
+          authorContactId: reply.authorContactId,
+          bodyMarkdown: reply.bodyMarkdown,
+          bodyHtml: renderMarkdown(reply.bodyMarkdown),
+          createdAt: reply.createdAt,
+        },
+        select: { id: true },
+      });
+      ids.push(created.id);
+    }
+    return ids;
+  }, DEMO_LOCK_TX_OPTIONS);
+}
+
+/** Applies the seed's step-4e fields to one ticket under its row lock (review R3-1). */
+export async function finalizeDemoTicket(
+  orgId: string,
+  ticketId: string,
+  data: Prisma.TicketUncheckedUpdateInput,
+  hooks: DemoSeedLockHooks = {},
+): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    if (hooks.onTransactionStart) await hooks.onTransactionStart(tx);
+    await lockDemoTicket(tx, orgId, ticketId);
+    if (hooks.afterLock) await hooks.afterLock(tx);
+    await tx.ticket.update({ where: { id: ticketId }, data, select: { id: true } });
+  }, DEMO_LOCK_TX_OPTIONS);
 }
 
 export interface SeedDemoDataOptions {
@@ -307,28 +415,26 @@ export async function seedDemoData(opts: SeedDemoDataOptions): Promise<SeedDemoS
 
     // 4e. Single update applying every backdated/derived field, including triage columns
     // (left null on every column when spec.triage is null -- "never triaged, AI was off").
-    await prisma.ticket.update({
-      where: { id: created.id },
-      data: {
-        createdAt,
-        updatedAt,
-        status: spec.status,
-        assigneeId,
-        firstResponseDueAt,
-        resolutionDueAt,
-        firstRespondedAt,
-        resolvedAt,
-        isAtRisk,
-        isBreached,
-        ...(spec.triage
-          ? {
-              triageCategory: spec.triage.category,
-              triageSentiment: spec.triage.sentiment,
-              triageLanguage: spec.triage.language,
-              triageStatus: spec.triage.status,
-            }
-          : {}),
-      },
+    // Under the ticket row lock, refusing a merged ticket (review R3-1).
+    await finalizeDemoTicket(orgId, created.id, {
+      createdAt,
+      updatedAt,
+      status: spec.status,
+      assigneeId,
+      firstResponseDueAt,
+      resolutionDueAt,
+      firstRespondedAt,
+      resolvedAt,
+      isAtRisk,
+      isBreached,
+      ...(spec.triage
+        ? {
+            triageCategory: spec.triage.category,
+            triageSentiment: spec.triage.sentiment,
+            triageLanguage: spec.triage.language,
+            triageStatus: spec.triage.status,
+          }
+        : {}),
     });
 
     // One TRIAGE AuditEvent per COMPLETED triage (D-13 shape: category/priority/sentiment/
@@ -384,31 +490,20 @@ export async function seedDemoData(opts: SeedDemoDataOptions): Promise<SeedDemoS
       )({ data: valueData });
     }
 
-    // 4i. Replies — the ONE Markdown->HTML authority (renderMarkdown), never raw HTML.
-    for (const reply of spec.replies) {
-      const replyCreatedAt = new Date(createdAt.getTime() + reply.offsetHours * HOUR_MS);
-      const direction = reply.author === "contact" ? "INBOUND" : "OUTBOUND";
-      const authorUserId =
-        reply.author === "admin" ? adminUserId : reply.author === "agent" ? agentUserId : null;
-      const authorContactId = reply.author === "contact" ? contactId : null;
-
-      const createdReply = await (
-        prisma.message.create as unknown as (a: {
-          data: Record<string, unknown>;
-        }) => Promise<{ id: string }>
-      )({
-        data: {
-          organizationId: orgId,
-          ticketId: created.id,
-          direction,
-          visibility: reply.visibility,
-          authorUserId,
-          authorContactId,
-          bodyMarkdown: reply.body,
-          bodyHtml: renderMarkdown(reply.body),
-          createdAt: replyCreatedAt,
-        },
-      });
+    // 4i. Replies — the ONE Markdown->HTML authority (renderMarkdown), never raw HTML. All of a
+    // ticket's replies go in through insertDemoReplies: one transaction holding the ticket row
+    // lock, refusing a merged ticket (review R2-2).
+    const replyInputs: DemoReplyInput[] = spec.replies.map((reply) => ({
+      direction: reply.author === "contact" ? "INBOUND" : "OUTBOUND",
+      visibility: reply.visibility,
+      authorUserId:
+        reply.author === "admin" ? adminUserId : reply.author === "agent" ? agentUserId : null,
+      authorContactId: reply.author === "contact" ? contactId : null,
+      bodyMarkdown: reply.body,
+      createdAt: new Date(createdAt.getTime() + reply.offsetHours * HOUR_MS),
+    }));
+    const replyIds = await insertDemoReplies(orgId, created.id, replyInputs);
+    spec.replies.forEach((reply, index) => {
       messageCount += 1;
       if (reply.visibility === "INTERNAL") internalNoteCount += 1;
       if (
@@ -416,9 +511,9 @@ export async function seedDemoData(opts: SeedDemoDataOptions): Promise<SeedDemoS
         (reply.author === "admin" || reply.author === "agent") &&
         !firstPublicAgentMessageIdByTicketId.has(created.id)
       ) {
-        firstPublicAgentMessageIdByTicketId.set(created.id, createdReply.id);
+        firstPublicAgentMessageIdByTicketId.set(created.id, replyIds[index]);
       }
-    }
+    });
 
     // 4j. Keep the real id/number/subject/createdAt around for the Insight/audit artifacts below.
     seededTickets.push({
