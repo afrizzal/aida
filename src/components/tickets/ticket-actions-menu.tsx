@@ -7,6 +7,7 @@
 import { Ellipsis, Link2, Merge } from "lucide-react";
 import { useState } from "react";
 import { LinkTicketDialog } from "@/components/tickets/link-ticket-dialog";
+import { MergeTicketDialog } from "@/components/tickets/merge-ticket-dialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -23,6 +24,8 @@ export interface TicketActionsMenuProps {
   ticketStatus: TicketStatus;
   mergedSource: boolean;
   hasReceivedMerges: boolean;
+  /** The current link label from this side, per other ticket id ("Merge replaces link"). */
+  linkLabels: Record<string, string>;
 }
 
 /** The Copywriting "Merge unavailable" reason, or null when Merge is offered. */
@@ -37,10 +40,14 @@ export function mergeUnavailableReason(mergedSource: boolean, hasReceivedMerges:
 export function TicketActionsMenu({
   ticketId,
   ticketNumber,
+  ticketSubject,
+  ticketStatus,
   mergedSource,
   hasReceivedMerges,
+  linkLabels,
 }: TicketActionsMenuProps) {
   const [linkOpen, setLinkOpen] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
   const mergeReason = mergeUnavailableReason(mergedSource, hasReceivedMerges);
 
   return (
@@ -58,6 +65,7 @@ export function TicketActionsMenu({
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={mergeReason !== null}
+            onSelect={() => setMergeOpen(true)}
             className="items-start gap-2 text-[13px]"
           >
             <Merge className="size-4" />
@@ -76,6 +84,18 @@ export function TicketActionsMenu({
         ticketNumber={ticketNumber}
         open={linkOpen}
         onOpenChange={setLinkOpen}
+      />
+
+      <MergeTicketDialog
+        source={{
+          id: ticketId,
+          number: ticketNumber,
+          subject: ticketSubject,
+          status: ticketStatus,
+        }}
+        linkLabels={linkLabels}
+        open={mergeOpen}
+        onOpenChange={setMergeOpen}
       />
     </>
   );

@@ -401,6 +401,7 @@ export function TicketMetaHeader({
             ticketStatus={ticket.status}
             mergedSource={mergedSource}
             hasReceivedMerges={hasReceivedMerges}
+            linkLabels={Object.fromEntries(relations.map((r) => [r.otherTicketId, r.label]))}
           />
         </div>
       </div>
