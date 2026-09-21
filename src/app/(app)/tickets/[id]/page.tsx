@@ -1,12 +1,10 @@
 import { MessageSquare, ShieldOff } from "lucide-react";
-import { Fragment } from "react";
 import { EmptyState } from "@/components/empty-state";
+import { ActivityFeed } from "@/components/tickets/activity-feed";
 import { AiActivitySection } from "@/components/tickets/ai-activity-section";
 import type { CustomFieldInputDefinition } from "@/components/tickets/custom-field-input";
 import { MergedComposerLine, MergedSourceBanner } from "@/components/tickets/merged-source-banner";
 import { SnoozeControl } from "@/components/tickets/snooze-control";
-import { ThreadMessage } from "@/components/tickets/thread-message";
-import { ThreadSystemEvent } from "@/components/tickets/thread-system-event";
 import { TicketMetaHeader } from "@/components/tickets/ticket-meta-header";
 import { TicketReplyArea } from "@/components/tickets/ticket-reply-area";
 import { prisma } from "@/lib/db";
@@ -70,6 +68,8 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
     hasReceivedMerges,
     mergeTarget,
     movedFromSources,
+    feed,
+    feedReferences,
   } = detail;
   const isMergedSource = ticket.mergedIntoTicketId !== null;
 
@@ -150,44 +150,12 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
 
         {isMergedSource && <MergedSourceBanner target={mergeTarget} mergedAt={ticket.mergedAt} />}
 
-        <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
-          {ticket.messages.map((message) => (
-            // Immediately after any message with triggeredReopen === true, render the
-            // reopen system-event row — this is the actual consumer of the marker plan
-            // 12 sets (never inferred from ticket.status/timestamps).
-            <Fragment key={message.id}>
-              <ThreadMessage
-                message={{
-                  id: message.id,
-                  visibility: message.visibility,
-                  authorContactId: message.authorContactId,
-                  bodyHtml: message.bodyHtml,
-                  createdAt: message.createdAt,
-                  authorUser: message.authorUser ? { name: message.authorUser.name } : null,
-                  authorContact: message.authorContact
-                    ? { name: message.authorContact.name, email: message.authorContact.email }
-                    : null,
-                  attachments: message.attachments.map((attachment) => ({
-                    id: attachment.id,
-                    originalFilename: attachment.originalFilename,
-                    sizeBytes: attachment.sizeBytes,
-                  })),
-                  deliveryStatus: message.deliveryStatus,
-                }}
-                movedFrom={
-                  message.mergedFromTicketId
-                    ? (movedFromSources[message.mergedFromTicketId] ?? null)
-                    : null
-                }
-              />
-              {message.triggeredReopen && (
-                <ThreadSystemEvent
-                  text={`Ticket reopened — new reply from ${ticket.contact.name ?? ticket.contact.email}.`}
-                />
-              )}
-            </Fragment>
-          ))}
-        </div>
+        <ActivityFeed
+          feed={feed}
+          references={feedReferences}
+          movedFromSources={movedFromSources}
+          reopenText={`Ticket reopened — new reply from ${ticket.contact.name ?? ticket.contact.email}.`}
+        />
 
         <AiActivitySection
           events={auditEvents.map((event) => ({

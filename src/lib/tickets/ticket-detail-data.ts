@@ -10,6 +10,7 @@
 import type { PrismaClient } from "@/generated/prisma/client";
 import { findActiveMembership } from "@/lib/membership";
 import { scopedDb } from "@/lib/scoped-db";
+import { buildActivityFeed, type FeedItem, referencedIds } from "@/lib/tickets/activity-feed";
 import { listRelationsForTicket, type RelationChip } from "@/lib/tickets/relations";
 
 export interface TicketDetailActor {
@@ -53,6 +54,36 @@ async function findRelated(
   return { members, definitions, availableTags, auditEvents, draftableKbCount };
 }
 
+/** One audit row as the feed reads it: ids, enum values and timestamps only (D-21). */
+export interface FeedAuditEvent {
+  id: string;
+  createdAt: Date;
+  action: string;
+  actorType: "USER" | "SYSTEM";
+  actorUserId: string | null;
+  batchId: string | null;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+}
+
+/**
+ * Names and numbers the feed may show, each resolved inside the ticket's organization (D-18):
+ * tickets and tags through scopedDb, users only among the organization's current members. An id
+ * missing here renders as its marker ("a ticket that is no longer available", "a deleted tag",
+ * "A former member").
+ */
+export interface FeedReferences {
+  tickets: Record<string, { id: string; number: number }>;
+  tags: Record<string, string>;
+  members: Record<string, string>;
+}
+
+function asSnapshot(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
 export type TicketDetailData =
   | { status: "membership_ended" }
   | { status: "not_found" }
@@ -67,6 +98,9 @@ export type TicketDetailData =
       mergeTarget: { id: string; number: number } | null;
       /** Source ticket number per mergedFromTicketId on this ticket's messages (UI-SPEC 3d); an unreadable source is absent. */
       movedFromSources: Record<string, { id: string; number: number }>;
+      /** Messages and TicketAuditEvent rows in one stable order (D-18, AIDA-55). */
+      feed: FeedItem<TicketDetail["messages"][number], FeedAuditEvent>[];
+      feedReferences: FeedReferences;
     } & Awaited<ReturnType<typeof findRelated>>);
 
 export async function loadTicketDetailData(
@@ -117,10 +151,54 @@ export async function loadTicketDetailData(
       : [];
   const movedFromSources = Object.fromEntries(sources.map((source) => [source.id, source]));
 
+  // D-18: the feed's audit rows are read through scopedDb after the membership check, so
+  // another organization's rows never appear, even with the same ticketId.
+  const auditRows = await db.ticketAuditEvent.findMany({
+    where: { ticketId },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  });
+  const events: FeedAuditEvent[] = auditRows.map((row) => ({
+    id: row.id,
+    createdAt: row.createdAt,
+    action: row.action,
+    actorType: row.actorType,
+    actorUserId: row.actorUserId,
+    batchId: row.batchId,
+    before: asSnapshot(row.before),
+    after: asSnapshot(row.after),
+  }));
+  const refs = referencedIds(events);
+  const [refTickets, refTags] = await Promise.all([
+    refs.ticketIds.length > 0
+      ? db.ticket.findMany({
+          where: { id: { in: refs.ticketIds } },
+          select: { id: true, number: true },
+        })
+      : Promise.resolve([]),
+    refs.tagIds.length > 0
+      ? db.tag.findMany({ where: { id: { in: refs.tagIds } }, select: { id: true, name: true } })
+      : Promise.resolve([]),
+  ]);
+  // Users are named only when they are members of this organization now (D-18); the roster
+  // came from the organization-filtered member query above.
+  const wantedUsers = new Set<string>(refs.userIds);
+  for (const event of events) if (event.actorUserId) wantedUsers.add(event.actorUserId);
+  const members: Record<string, string> = {};
+  for (const member of related.members) {
+    if (wantedUsers.has(member.user.id)) members[member.user.id] = member.user.name;
+  }
+  const feedReferences: FeedReferences = {
+    tickets: Object.fromEntries(refTickets.map((t) => [t.id, { id: t.id, number: t.number }])),
+    tags: Object.fromEntries(refTags.map((t) => [t.id, t.name])),
+    members,
+  };
+
   return {
     status: "ok",
     ticket,
     movedFromSources,
+    feed: buildActivityFeed(ticket.messages, events),
+    feedReferences,
     relations: relationList.relations,
     hasReceivedMerges: receivedMerges > 0,
     mergeTarget,
