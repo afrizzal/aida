@@ -3,6 +3,7 @@ import { Fragment } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { AiActivitySection } from "@/components/tickets/ai-activity-section";
 import type { CustomFieldInputDefinition } from "@/components/tickets/custom-field-input";
+import { MergedComposerLine, MergedSourceBanner } from "@/components/tickets/merged-source-banner";
 import { ThreadMessage } from "@/components/tickets/thread-message";
 import { ThreadSystemEvent } from "@/components/tickets/thread-system-event";
 import { TicketMetaHeader } from "@/components/tickets/ticket-meta-header";
@@ -66,7 +67,9 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
     draftableKbCount,
     relations,
     hasReceivedMerges,
+    mergeTarget,
   } = detail;
+  const isMergedSource = ticket.mergedIntoTicketId !== null;
 
   const customFields = definitions.map((definition) => {
     const inputDefinition: CustomFieldInputDefinition = {
@@ -131,9 +134,11 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
             subject: relation.subject,
             locked: relation.locked,
           }))}
-          mergedSource={ticket.mergedIntoTicketId !== null}
+          mergedSource={isMergedSource}
           hasReceivedMerges={hasReceivedMerges}
         />
+
+        {isMergedSource && <MergedSourceBanner target={mergeTarget} mergedAt={ticket.mergedAt} />}
 
         <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
           {ticket.messages.map((message) => (
@@ -180,7 +185,13 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
           }))}
         />
 
-        <TicketReplyArea ticketId={ticket.id} canDraft={draftableKbCount > 0} />
+        {/* UI-SPEC 3c: "Replies go on #" the target; the agent messages route refuses a merged
+            source too (409 MERGED_SOURCE, 12-03). */}
+        {isMergedSource ? (
+          <MergedComposerLine target={mergeTarget} />
+        ) : (
+          <TicketReplyArea ticketId={ticket.id} canDraft={draftableKbCount > 0} />
+        )}
       </div>
     </>
   );

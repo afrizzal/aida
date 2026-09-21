@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
+import { mergeTickets } from "../../src/lib/tickets/merge";
 import { addRelation } from "../../src/lib/tickets/relations";
 import { ADMIN_EMAIL } from "./global-setup";
 import { createTicket, orgId, prisma } from "./support/db";
@@ -138,5 +139,32 @@ test.describe("Ticket merge", () => {
     await expect(dialog).toBeHidden();
     const after = await prisma.ticket.findUniqueOrThrow({ where: { id: source.id } });
     expect(after.mergedIntoTicketId).toBeNull();
+  });
+
+  test("a merged source shows the banner and no composer", async ({ page }) => {
+    const source = await seedTicket("banner-source", "banner");
+    const target = await seedTicket("banner-target", "banner");
+    const admin = await prisma.user.findFirstOrThrow({ where: { email: ADMIN_EMAIL } });
+    const merged = await mergeTickets(
+      prisma,
+      { userId: admin.id, orgId },
+      { sourceTicketId: source.id, targetTicketId: target.id },
+    );
+    expect(merged.ok).toBe(true);
+
+    await openTicket(page, source.id);
+    const banner = page.getByRole("note");
+    await expect(banner).toContainText(`This ticket was merged into #${target.number} on`);
+    await expect(banner).toContainText("Its conversation continues there.");
+    await expect(banner.getByRole("link", { name: `Open #${target.number}` })).toBeVisible();
+    await expect(
+      page.getByText(`Replies go on #${target.number}, where this conversation continues.`),
+    ).toBeVisible();
+    await expect(page.getByRole("textbox", { name: /reply/i })).toHaveCount(0);
+    await expect(page.locator("textarea")).toHaveCount(0);
+
+    await openTicket(page, target.id);
+    await expect(page.getByRole("note")).toHaveCount(0);
+    await expect(page.locator("textarea").first()).toBeVisible();
   });
 });

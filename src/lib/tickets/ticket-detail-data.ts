@@ -63,6 +63,8 @@ export type TicketDetailData =
       relations: RelationChip[];
       /** True when at least one other ticket was merged into this one (D-07). */
       hasReceivedMerges: boolean;
+      /** The merge target of a merged source, resolved through scopedDb; null when unreadable or not merged (UI-SPEC 3b). */
+      mergeTarget: { id: string; number: number } | null;
     } & Awaited<ReturnType<typeof findRelated>>);
 
 export async function loadTicketDetailData(
@@ -90,11 +92,19 @@ export async function loadTicketDetailData(
   ]);
   if (!relationList.ok) return { status: "membership_ended" };
 
+  const mergeTarget = ticket.mergedIntoTicketId
+    ? await db.ticket.findFirst({
+        where: { id: ticket.mergedIntoTicketId },
+        select: { id: true, number: true },
+      })
+    : null;
+
   return {
     status: "ok",
     ticket,
     relations: relationList.relations,
     hasReceivedMerges: receivedMerges > 0,
+    mergeTarget,
     ...related,
   };
 }
