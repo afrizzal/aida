@@ -97,7 +97,10 @@ export async function TicketListPanel({
         <div className="flex flex-col items-center gap-2 py-12 text-center">
           <CheckCircle2 className="size-4 text-muted-foreground" />
           <p className="text-[13px] text-muted-foreground">
-            Nothing here — no tickets match this view.
+            {/* UI-SPEC Surface 5: the Snoozed filter has its own no-match line. */}
+            {filters.snoozed === true
+              ? "No snoozed tickets match these filters."
+              : "Nothing here — no tickets match this view."}
           </p>
         </div>
       ) : (
@@ -151,7 +154,7 @@ function toSearchParams(searchParams: Record<string, string | string[] | undefin
 }
 
 /** The list parameters a row link keeps (D-10): the filters, the open view and the page size. */
-const LIST_QUERY_KEYS = ["view", "status", "tag", "cf", "q", "sv", "limit"] as const;
+const LIST_QUERY_KEYS = ["view", "status", "tag", "cf", "q", "snoozed", "sv", "limit"] as const;
 
 function buildListQuery(searchParams: Record<string, string | string[] | undefined>): string {
   const source = toSearchParams(searchParams);

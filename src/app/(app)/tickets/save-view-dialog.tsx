@@ -211,6 +211,8 @@ function SaveViewForm(
       ...(draft.tagId ? { tagId: draft.tagId } : {}),
       ...(draft.cf ? { cf: draft.cf } : {}),
       ...(draft.q ? { q: draft.q } : {}),
+      // D-16: the Snoozed toggle is part of the stored filters.
+      ...(draft.snoozed === true ? { snoozed: true as const } : {}),
     };
     const input = { name: trimmed, visibility, filters };
     const result = await (isEdit
@@ -342,6 +344,9 @@ function SaveViewForm(
               </SummaryRow>
             )}
             {draft.q && <SummaryRow label="Search">{`"${draft.q}"`}</SummaryRow>}
+            {draft.snoozed === true && (
+              <SummaryRow label="Snoozed">Only snoozed tickets</SummaryRow>
+            )}
           </dl>
           {isEdit && props.replacing && (
             <p className="text-[12px] text-muted-foreground">{COPY.replacingNote}</p>

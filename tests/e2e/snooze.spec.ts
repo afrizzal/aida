@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
 import { snoozeWakeHandler } from "../../src/lib/worker/jobs/snooze-wake";
+import { ADMIN_EMAIL } from "./global-setup";
 import { createTicket, orgId, prisma } from "./support/db";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -174,5 +175,102 @@ test.describe("Snooze", () => {
     });
     expect(woken).toHaveLength(1);
     expect(woken[0]?.actorType).toBe("USER");
+  });
+});
+
+// UI-SPEC Surface 5 (D-16): the Snoozed toggle in the filter row, its saved views and its
+// empty line.
+test.describe("Snoozed filter", () => {
+  const word = `Sfilter${ts}`;
+
+  async function seedFilterTicket(label: string, snoozed: boolean) {
+    const subject = `E2E ${word} ${label}`;
+    const ticket = await createTicket(orgId, {
+      subject,
+      priority: "NORMAL",
+      body: `Seed body for ${label}`,
+      contact: { email: `snooze-filter-${label}-${ts}@example.com` },
+      direction: "INBOUND",
+    });
+    await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: {
+        status: "OPEN",
+        snoozedUntil: snoozed ? new Date(Date.now() + 3 * 3600_000) : null,
+      },
+    });
+    return { id: ticket.id, subject };
+  }
+
+  function toggle(page: Page) {
+    return page.getByRole("button", { name: "Snoozed", exact: true });
+  }
+
+  test("the toggle shows only snoozed tickets and saves as a view that reopens with it on", async ({
+    page,
+  }) => {
+    const asleep = await seedFilterTicket("asleep", true);
+    const awake = await seedFilterTicket("awake", false);
+    const name = `E2E snoozed view ${ts}`;
+
+    await open(page, `/tickets?q=${encodeURIComponent(word)}`);
+    await expect(row(page, awake.id)).toBeVisible();
+    await expect(row(page, asleep.id)).toHaveCount(0);
+    await expect(toggle(page)).toHaveAttribute("aria-pressed", "false");
+
+    await toggle(page).click();
+    await expect(page).toHaveURL(/[?&]snoozed=1/);
+    await expect(toggle(page)).toHaveAttribute("aria-pressed", "true");
+    await expect(row(page, asleep.id)).toBeVisible();
+    await expect(row(page, asleep.id)).toContainText("Snoozed until");
+    await expect(row(page, awake.id)).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Save these filters as a view" }).click();
+    const dialog = page.getByRole("dialog", { name: "Save view" });
+    await expect(
+      dialog.locator("dl > div").filter({ has: page.locator("dt", { hasText: "Snoozed" }) }),
+    ).toContainText("Only snoozed tickets");
+    await dialog.getByLabel("Name", { exact: true }).fill(name);
+    await dialog.getByRole("button", { name: "Save view" }).click();
+    await expect(page.getByText("View saved.")).toBeVisible();
+
+    await open(page, "/tickets");
+    await expect(toggle(page)).toHaveAttribute("aria-pressed", "false");
+    await page.getByRole("list", { name: "Private" }).getByRole("link", { name }).click();
+    await expect(page).toHaveURL(/[?&]snoozed=1/);
+    await expect(toggle(page)).toHaveAttribute("aria-pressed", "true");
+    await expect(row(page, asleep.id)).toBeVisible();
+    await expect(row(page, awake.id)).toHaveCount(0);
+  });
+
+  test("a stored view without the snoozed field still opens unchanged", async ({ page }) => {
+    const awake = await seedFilterTicket("legacy", false);
+    const admin = await prisma.user.findFirstOrThrow({ where: { email: ADMIN_EMAIL } });
+    const name = `E2E legacy view ${ts}`;
+    await prisma.savedView.create({
+      data: {
+        organizationId: orgId,
+        ownerUserId: admin.id,
+        name,
+        visibility: "PRIVATE",
+        filters: { version: 1, view: "all", statuses: ["OPEN"], q: word },
+        position: 0,
+      },
+    });
+
+    await open(page, "/tickets");
+    await page.getByRole("list", { name: "Private" }).getByRole("link", { name }).click();
+    await expect(page).toHaveURL(/status=OPEN/);
+    await expect(page).not.toHaveURL(/snoozed=/);
+    await expect(toggle(page)).toHaveAttribute("aria-pressed", "false");
+    await expect(row(page, awake.id)).toBeVisible();
+  });
+
+  test("a filtered empty list with the toggle on shows the snoozed empty line", async ({
+    page,
+  }) => {
+    await open(page, `/tickets?q=${encodeURIComponent(`Nomatch${ts}`)}&snoozed=1`);
+    await expect(page.getByText("No snoozed tickets match these filters.")).toBeVisible();
+    await expect(page.getByText("Nothing here — no tickets match this view.")).toHaveCount(0);
   });
 });

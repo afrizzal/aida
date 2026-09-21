@@ -1,6 +1,13 @@
 "use client";
 
-import { BookmarkPlus, Filter, SlidersHorizontal, Tag as TagIcon, X } from "lucide-react";
+import {
+  AlarmClock,
+  BookmarkPlus,
+  Filter,
+  SlidersHorizontal,
+  Tag as TagIcon,
+  X,
+} from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { useRegisterCommands } from "@/components/command-provider";
@@ -85,7 +92,10 @@ export function FilterChipRow({ tags, customFieldDefinitions }: FilterChipRowPro
   const [cfDraftValue, setCfDraftValue] = useState("");
   const [saveViewOpen, setSaveViewOpen] = useState(false);
   // Save view (AIDA-47, UI-SPEC Surface 2a): only when at least one filter is on screen.
-  const canSaveView = hasAnyFilter(parseUrlFilters(searchParams).filters);
+  const urlFilters = parseUrlFilters(searchParams).filters;
+  const canSaveView = hasAnyFilter(urlFilters);
+  // UI-SPEC Surface 5 (D-16): on shows only snoozed tickets (snoozed=1); off is the default.
+  const snoozedOn = urlFilters.snoozed === true;
 
   // The palette's "Save these filters as a view…" (AIDA-49, D-12, UI-SPEC 4c): listed only while
   // this row is mounted (the two inbox routes) and only when Save view is enabled; it opens the
@@ -181,7 +191,7 @@ export function FilterChipRow({ tags, customFieldDefinitions }: FilterChipRowPro
         </div>
       </div>
 
-      <div className="flex items-center gap-1.5 border-t border-border/70 px-4 py-2">
+      <div className="flex flex-wrap items-center gap-1.5 gap-y-2 border-t border-border/70 px-4 py-2">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -310,6 +320,17 @@ export function FilterChipRow({ tags, customFieldDefinitions }: FilterChipRowPro
             </div>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <Button
+          variant="outline"
+          size="sm"
+          aria-pressed={snoozedOn}
+          className={cn(snoozedOn && "border-primary/40 text-primary-emphasis")}
+          onClick={() => updateParams({ snoozed: snoozedOn ? null : "1" })}
+        >
+          <AlarmClock className="size-3.5" />
+          Snoozed
+        </Button>
 
         <TooltipProvider>
           <Tooltip>
