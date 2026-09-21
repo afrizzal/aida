@@ -1,7 +1,14 @@
 "use client";
 
 import { ChevronDown, Plus } from "lucide-react";
-import { type RefObject, useCallback, useRef, useState, useTransition } from "react";
+import {
+  type ReactNode,
+  type RefObject,
+  useCallback,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { toast } from "sonner";
 import {
   addTag,
@@ -26,6 +33,7 @@ import { PriorityChip } from "@/components/tickets/priority-chip";
 import { SlaDueChip } from "@/components/tickets/sla-due-chip";
 import { StatusChip } from "@/components/tickets/status-chip";
 import { TagChip } from "@/components/tickets/tag-chip";
+import { TicketActionsMenu } from "@/components/tickets/ticket-actions-menu";
 import { TriageCategoryChip } from "@/components/tickets/triage-category-chip";
 import { TriageSentimentChip } from "@/components/tickets/triage-sentiment-chip";
 import { TriageStatusChip } from "@/components/tickets/triage-status-chip";
@@ -135,6 +143,8 @@ interface TicketMetaHeaderProps {
   mergedSource?: boolean;
   /** Other tickets were merged into this one (D-07). */
   hasReceivedMerges?: boolean;
+  /** Slot for the snooze control (12-07), rendered before the actions menu (UI-SPEC Surface 1). */
+  snoozeControl?: ReactNode;
 }
 
 /**
@@ -165,6 +175,9 @@ export function TicketMetaHeader({
   availableTags,
   customFields,
   relations = [],
+  mergedSource = false,
+  hasReceivedMerges = false,
+  snoozeControl,
 }: TicketMetaHeaderProps) {
   const [, startTransition] = useTransition();
   const [tagPopoverOpen, setTagPopoverOpen] = useState(false);
@@ -378,6 +391,17 @@ export function TicketMetaHeader({
               isBreached={ticket.isBreached}
             />
           )}
+
+          {snoozeControl}
+
+          <TicketActionsMenu
+            ticketId={ticket.id}
+            ticketNumber={ticket.number}
+            ticketSubject={ticket.subject}
+            ticketStatus={ticket.status}
+            mergedSource={mergedSource}
+            hasReceivedMerges={hasReceivedMerges}
+          />
         </div>
       </div>
 
