@@ -10,6 +10,7 @@
 import type { PrismaClient } from "@/generated/prisma/client";
 import { findActiveMembership } from "@/lib/membership";
 import { scopedDb } from "@/lib/scoped-db";
+import { listRelationsForTicket, type RelationChip } from "@/lib/tickets/relations";
 
 export interface TicketDetailActor {
   userId: string;
@@ -55,7 +56,14 @@ async function findRelated(
 export type TicketDetailData =
   | { status: "membership_ended" }
   | { status: "not_found" }
-  | ({ status: "ok"; ticket: TicketDetail } & Awaited<ReturnType<typeof findRelated>>);
+  | ({
+      status: "ok";
+      ticket: TicketDetail;
+      /** The ticket's relations from its own side, sorted for the chip row (12-06, D-04). */
+      relations: RelationChip[];
+      /** True when at least one other ticket was merged into this one (D-07). */
+      hasReceivedMerges: boolean;
+    } & Awaited<ReturnType<typeof findRelated>>);
 
 export async function loadTicketDetailData(
   client: PrismaClient,
@@ -73,5 +81,20 @@ export async function loadTicketDetailData(
   const ticket = await findTicket(db, ticketId);
   if (!ticket) return { status: "not_found" };
 
-  return { status: "ok", ticket, ...(await findRelated(client, db, orgId, ticketId)) };
+  // Relations go through the 12-02 service, which checks membership again and resolves the
+  // other tickets through scopedDb; an unreadable other ticket is left out (UI-SPEC 2a).
+  const [related, relationList, receivedMerges] = await Promise.all([
+    findRelated(client, db, orgId, ticketId),
+    listRelationsForTicket(client, actor, ticketId),
+    db.ticket.count({ where: { mergedIntoTicketId: ticketId } }),
+  ]);
+  if (!relationList.ok) return { status: "membership_ended" };
+
+  return {
+    status: "ok",
+    ticket,
+    relations: relationList.relations,
+    hasReceivedMerges: receivedMerges > 0,
+    ...related,
+  };
 }

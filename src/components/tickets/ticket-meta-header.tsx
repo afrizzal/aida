@@ -21,6 +21,7 @@ import {
   type CustomFieldInputDefinition,
   type CustomFieldValue as CustomFieldInputValue,
 } from "@/components/tickets/custom-field-input";
+import { type LinkedTicketChip, LinkedTicketsRow } from "@/components/tickets/linked-tickets-row";
 import { PriorityChip } from "@/components/tickets/priority-chip";
 import { SlaDueChip } from "@/components/tickets/sla-due-chip";
 import { StatusChip } from "@/components/tickets/status-chip";
@@ -128,6 +129,12 @@ interface TicketMetaHeaderProps {
   tags: TicketMetaHeaderTag[];
   availableTags: TicketMetaHeaderTag[];
   customFields: TicketMetaHeaderCustomField[];
+  /** Relations from this ticket's side, sorted (12-06, UI-SPEC 2a). */
+  relations?: LinkedTicketChip[];
+  /** The ticket was merged into another one (D-07). */
+  mergedSource?: boolean;
+  /** Other tickets were merged into this one (D-07). */
+  hasReceivedMerges?: boolean;
 }
 
 /**
@@ -157,6 +164,7 @@ export function TicketMetaHeader({
   tags,
   availableTags,
   customFields,
+  relations = [],
 }: TicketMetaHeaderProps) {
   const [, startTransition] = useTransition();
   const [tagPopoverOpen, setTagPopoverOpen] = useState(false);
@@ -496,6 +504,8 @@ export function TicketMetaHeader({
           </div>
         ))}
       </div>
+
+      {relations.length > 0 && <LinkedTicketsRow ticketId={ticket.id} relations={relations} />}
     </div>
   );
 }

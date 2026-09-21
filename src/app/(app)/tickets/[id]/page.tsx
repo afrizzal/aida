@@ -57,7 +57,16 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
     );
   }
 
-  const { ticket, members, definitions, availableTags, auditEvents, draftableKbCount } = detail;
+  const {
+    ticket,
+    members,
+    definitions,
+    availableTags,
+    auditEvents,
+    draftableKbCount,
+    relations,
+    hasReceivedMerges,
+  } = detail;
 
   const customFields = definitions.map((definition) => {
     const inputDefinition: CustomFieldInputDefinition = {
@@ -114,6 +123,16 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
           tags={ticket.tags.map((t) => ({ id: t.tag.id, name: t.tag.name }))}
           availableTags={availableTags.map((tag) => ({ id: tag.id, name: tag.name }))}
           customFields={customFields}
+          relations={relations.map((relation) => ({
+            relationId: relation.relationId,
+            label: relation.label,
+            otherTicketId: relation.otherTicketId,
+            number: relation.number,
+            subject: relation.subject,
+            locked: relation.locked,
+          }))}
+          mergedSource={ticket.mergedIntoTicketId !== null}
+          hasReceivedMerges={hasReceivedMerges}
         />
 
         <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
