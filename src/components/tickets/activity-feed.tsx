@@ -1,6 +1,8 @@
 import { Fragment } from "react";
+import { ActivityEventRow } from "@/components/tickets/activity-event-row";
 import { ThreadMessage } from "@/components/tickets/thread-message";
 import { ThreadSystemEvent } from "@/components/tickets/thread-system-event";
+import { describeEvent, FEED_EMPTY } from "@/lib/tickets/activity-copy";
 import type { FeedItem } from "@/lib/tickets/activity-feed";
 import type {
   FeedAuditEvent,
@@ -13,27 +15,36 @@ import type {
 // this component.
 export function ActivityFeed({
   feed,
-  references: _references,
+  ticketId,
+  references,
   movedFromSources,
   reopenText,
 }: {
   feed: FeedItem<TicketDetail["messages"][number], FeedAuditEvent>[];
+  ticketId: string;
   references: FeedReferences;
   movedFromSources: Record<string, { id: string; number: number }>;
   /** The existing reopen system-event copy shown after a message that reopened the ticket. */
   reopenText: string;
 }) {
+  if (feed.length === 0) {
+    return (
+      <div className="flex-1 overflow-y-auto px-6 py-4">
+        <p className="py-8 text-center text-[13px] text-muted-foreground">{FEED_EMPTY}</p>
+      </div>
+    );
+  }
+  const context = { ticketId, ...references };
   return (
     <ol aria-label="Ticket activity" className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
       {feed.map((item) => {
         if (item.kind === "event") {
           return (
-            <li
+            <ActivityEventRow
               key={`event-${item.id}`}
-              className="flex items-center justify-center gap-2 py-1 text-center text-[12px] text-muted-foreground"
-            >
-              {item.event.action}
-            </li>
+              described={describeEvent(item.event, context)}
+              createdAt={item.createdAt}
+            />
           );
         }
         const message = item.message;

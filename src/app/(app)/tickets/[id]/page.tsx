@@ -152,6 +152,7 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
 
         <ActivityFeed
           feed={feed}
+          ticketId={ticket.id}
           references={feedReferences}
           movedFromSources={movedFromSources}
           reopenText={`Ticket reopened — new reply from ${ticket.contact.name ?? ticket.contact.email}.`}

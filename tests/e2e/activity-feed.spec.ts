@@ -61,7 +61,7 @@ async function sendReply(page: Page, ticketId: string, reply: string) {
   expect(posted.status()).toBe(200);
 }
 
-const STATUS_EVENT = "STATUS_CHANGED";
+const STATUS_EVENT = "changed the status from Open to Pending.";
 
 test.describe("Activity feed", () => {
   test("the feed lists the customer message, the status change and the reply in that order", async ({
