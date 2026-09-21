@@ -4,6 +4,7 @@ import { EmptyState } from "@/components/empty-state";
 import { AiActivitySection } from "@/components/tickets/ai-activity-section";
 import type { CustomFieldInputDefinition } from "@/components/tickets/custom-field-input";
 import { MergedComposerLine, MergedSourceBanner } from "@/components/tickets/merged-source-banner";
+import { SnoozeControl } from "@/components/tickets/snooze-control";
 import { ThreadMessage } from "@/components/tickets/thread-message";
 import { ThreadSystemEvent } from "@/components/tickets/thread-system-event";
 import { TicketMetaHeader } from "@/components/tickets/ticket-meta-header";
@@ -137,6 +138,14 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
           }))}
           mergedSource={isMergedSource}
           hasReceivedMerges={hasReceivedMerges}
+          snoozeControl={
+            <SnoozeControl
+              ticketId={ticket.id}
+              status={ticket.status}
+              snoozedUntil={ticket.snoozedUntil ? ticket.snoozedUntil.toISOString() : null}
+              mergedSource={isMergedSource}
+            />
+          }
         />
 
         {isMergedSource && <MergedSourceBanner target={mergeTarget} mergedAt={ticket.mergedAt} />}

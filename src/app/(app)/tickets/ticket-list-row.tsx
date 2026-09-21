@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AssigneeAvatar } from "@/components/tickets/assignee-avatar";
 import { PriorityChip } from "@/components/tickets/priority-chip";
 import { SlaDueChip } from "@/components/tickets/sla-due-chip";
+import { SnoozedChip } from "@/components/tickets/snooze-control";
 import { StatusChip } from "@/components/tickets/status-chip";
 import { TagChip, TagOverflowChip } from "@/components/tickets/tag-chip";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -98,6 +99,7 @@ export function TicketListRow({
           {(ticket.priority === "HIGH" || ticket.priority === "URGENT") && (
             <PriorityChip priority={ticket.priority} />
           )}
+          {ticket.snoozedUntil && <SnoozedChip until={ticket.snoozedUntil} />}
           {activeDue && (
             <SlaDueChip
               dueAt={activeDue}
