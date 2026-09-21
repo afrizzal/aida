@@ -478,3 +478,299 @@ describe("review C1: provenance is decided by seq under the lock, never by times
     ]).toEqual([200, 200]);
   });
 });
+
+/** Every TicketAuditEvent row of the tickets, counted per ticket, action and actor. */
+async function auditTally(ticketIds: readonly string[]): Promise<Record<string, number>> {
+  const rows = await prisma.ticketAuditEvent.findMany({
+    where: { ticketId: { in: [...ticketIds] } },
+    select: { ticketId: true, action: true, actorUserId: true },
+  });
+  const tally: Record<string, number> = {};
+  for (const row of rows) {
+    const key = `${row.ticketId} ${row.action} ${row.actorUserId ?? "system"}`;
+    tally[key] = (tally[key] ?? 0) + 1;
+  }
+  return tally;
+}
+
+/** The tally with exactly the listed rows added (ticket, action, actor). */
+function plus(
+  before: Record<string, number>,
+  rows: readonly (readonly [string, string, string])[],
+): Record<string, number> {
+  const tally = { ...before };
+  for (const [ticketId, action, actor] of rows) {
+    const key = `${ticketId} ${action} ${actor}`;
+    tally[key] = (tally[key] ?? 0) + 1;
+  }
+  return tally;
+}
+
+/** The audit rows one completed merge of an OPEN, unsnoozed, unlinked source writes. */
+function mergeRows(actor: MergeActor, s: Side, t: Side) {
+  return [
+    [s.id, "MERGED_INTO", actor.userId],
+    [s.id, "STATUS_CHANGED", actor.userId],
+    [t.id, "MERGED_FROM", actor.userId],
+  ] as const;
+}
+
+/** Every file stored anywhere under the test's UPLOADS_DIR. */
+async function filesUnderUploads(): Promise<number> {
+  const entries = await readdir(uploadsDir, { withFileTypes: true, recursive: true });
+  return entries.filter((entry) => entry.isFile()).length;
+}
+
+async function messageIdsOn(ticketId: string): Promise<string[]> {
+  const rows = await prisma.message.findMany({ where: { ticketId }, select: { id: true } });
+  return rows.map((row) => row.id);
+}
+
+/** Every listed message is on the target and carries the source as its provenance. */
+async function expectMovedFrom(ids: readonly string[], s: Side, t: Side) {
+  const rows = await prisma.message.findMany({
+    where: { id: { in: [...ids] } },
+    select: { ticketId: true, mergedFromTicketId: true },
+  });
+  expect(rows).toHaveLength(ids.length);
+  for (const row of rows) expect(row).toEqual({ ticketId: t.id, mergedFromTicketId: s.id });
+}
+
+async function expectMergedInto(s: Side, t: Side) {
+  const row = await ticketRow(s.id);
+  expect({ status: row.status, mergedIntoTicketId: row.mergedIntoTicketId }).toEqual({
+    status: "CLOSED",
+    mergedIntoTicketId: t.id,
+  });
+  expect(await prisma.message.count({ where: { ticketId: s.id } })).toBe(0);
+}
+
+/** Page listing and attachment status of one message for one token. */
+async function seenBy(token: string, messageId: string, attachmentId: string) {
+  return {
+    listed: (await pageIds(token)).includes(messageId),
+    served: await attachmentStatus(token, attachmentId),
+  };
+}
+
+describe("review C10: two merges into one target racing a reply, and the second mismatch", () => {
+  it("2a: a follow-up holding the target row, then two merges queued one at a time; F stays visible only to the target token", async () => {
+    const { orgId, actor } = await seedActor();
+    const [s1, s2, t] = await sameContact(orgId, 3);
+    await addMessage(s1.id);
+    await addMessage(s2.id);
+    await addMessage(t.id);
+    const s1Ids = await messageIdsOn(s1.id);
+    const s2Ids = await messageIdsOn(s2.id);
+    const audits = await auditTally([s1.id, s2.id, t.id]);
+
+    const recordedF = deferred<number>();
+    const heldF = deferred<void>();
+    const releaseF = deferred<void>();
+    setReopenObserverForTests({
+      onResolveStart: async (tx, ref) => {
+        if (ref.ticketId === t.id) recordedF.resolve(await backendPid(tx));
+      },
+      afterResolve: async (_tx, effectiveTicketId) => {
+        if (effectiveTicketId !== t.id) return;
+        heldF.resolve();
+        await releaseF.promise;
+      },
+    });
+    const marker = `c10-2a-${randomUUID()}`;
+    const reply = followUp(t.token, marker, [pdf(marker)]);
+    reply.catch(() => {});
+    const fPid = await recordedF.promise;
+    await heldF.promise;
+
+    // The first merge is the first waiter on T's row, blocked by F.
+    const first = recordedMerge(actor, s1, t);
+    const m1Pid = await first.pid;
+    await waitForBlockedBy(prisma, fPid, [m1Pid]);
+    // The second merge queues on T's row behind the first waiter (review R2-1).
+    const second = recordedMerge(actor, s2, t);
+    const m2Pid = await second.pid;
+    await waitForBlockedBy(prisma, m1Pid, [m2Pid]);
+    releaseF.resolve();
+
+    expect((await fulfilled(reply)).status).toBe(200);
+    expect(await fulfilled(first.done)).toMatchObject({ ok: true });
+    expect(await fulfilled(second.done)).toMatchObject({ ok: true });
+
+    const rows = await messagesWithBody(orgId, marker);
+    expect(rows.map((row) => [row.ticketId, row.mergedFromTicketId])).toEqual([[t.id, null]]);
+    const f = must(rows[0], "follow-up");
+    const aF = must(f.attachments[0], "follow-up attachment").id;
+    const r1 = await ticketRow(s1.id);
+    const r2 = await ticketRow(s2.id);
+    expect(f.seq < must(r1.mergeMessageSeq, "S1 marker")).toBe(true);
+    expect(f.seq < must(r2.mergeMessageSeq, "S2 marker")).toBe(true);
+
+    expect(await seenBy(t.token, f.id, aF)).toEqual({ listed: true, served: 200 });
+    expect(await seenBy(s1.token, f.id, aF)).toEqual({ listed: false, served: 404 });
+    expect(await seenBy(s2.token, f.id, aF)).toEqual({ listed: false, served: 404 });
+
+    await expectMovedFrom(s1Ids, s1, t);
+    await expectMovedFrom(s2Ids, s2, t);
+    await expectMergedInto(s1, t);
+    await expectMergedInto(s2, t);
+    expect(await auditTally([s1.id, s2.id, t.id])).toEqual(
+      plus(audits, [...mergeRows(actor, s1, t), ...mergeRows(actor, s2, t)]),
+    );
+  });
+
+  for (const rollsBack of [false, true]) {
+    const name = rollsBack
+      ? "2c: the first merge holds both contended rows and then rolls back; the second merge completes and F lands on the unmerged S1"
+      : "2b: the first merge holds both contended rows; the second merge and a follow-up through S1 queue on different rows and all complete";
+    it(name, async () => {
+      const { orgId, actor } = await seedActor();
+      const [s1, s2, t] = await sameContact(orgId, 3);
+      await addMessage(s1.id);
+      await addMessage(s2.id);
+      await addMessage(t.id);
+      const s1Ids = await messageIdsOn(s1.id);
+      const s2Ids = await messageIdsOn(s2.id);
+      const audits = await auditTally([s1.id, s2.id, t.id]);
+      const s1Before = await ticketRow(s1.id);
+      const sentinel = rollsBack ? new Error(`c10-2c-sentinel-${randomUUID()}`) : undefined;
+
+      const first = heldMerge(actor, s1, t, sentinel);
+      await first.atCommit;
+      const m1Pid = await first.pid;
+      // The second merge is the only waiter on T's row.
+      const second = recordedMerge(actor, s2, t);
+      const m2Pid = await second.pid;
+      await waitForBlockedBy(prisma, m1Pid, [m2Pid]);
+
+      // F is the only waiter on S1's row, which the first merge holds (review R2-1).
+      const recordedF = deferred<number>();
+      setReopenObserverForTests({
+        onResolveStart: async (tx, ref) => {
+          if (ref.ticketId === s1.id) recordedF.resolve(await backendPid(tx));
+        },
+      });
+      const marker = `c10-${rollsBack ? "2c" : "2b"}-${randomUUID()}`;
+      const reply = followUp(s1.token, marker, [pdf(marker)]);
+      reply.catch(() => {});
+      const fPid = await recordedF.promise;
+      await waitForBlockedBy(prisma, m1Pid, [fPid]);
+      first.release();
+
+      if (sentinel) {
+        const outcome = await first.done.then(
+          () => null,
+          (err: unknown) => err,
+        );
+        expect(outcome).toBe(sentinel);
+        expect(isDeadlock(outcome)).toBe(false);
+      } else {
+        expect(await fulfilled(first.done)).toMatchObject({ ok: true });
+      }
+      expect(await fulfilled(second.done)).toMatchObject({ ok: true });
+      expect((await fulfilled(reply)).status).toBe(200);
+
+      const rows = await messagesWithBody(orgId, marker);
+      const f = must(rows[0], "follow-up");
+      const aF = must(f.attachments[0], "follow-up attachment").id;
+      await expectMovedFrom(s2Ids, s2, t);
+      await expectMergedInto(s2, t);
+
+      if (sentinel) {
+        expect(rows.map((row) => [row.ticketId, row.mergedFromTicketId])).toEqual([[s1.id, null]]);
+        // S1 is exactly as before the race: its fixture status, unmerged, no marker.
+        expect(await ticketRow(s1.id)).toEqual(s1Before);
+        expect(s1Before).toMatchObject({
+          mergedIntoTicketId: null,
+          mergedAt: null,
+          mergeMessageSeq: null,
+        });
+        const onS1 = await prisma.message.findMany({
+          where: { id: { in: s1Ids } },
+          select: { ticketId: true, mergedFromTicketId: true },
+        });
+        expect(onS1).toEqual(s1Ids.map(() => ({ ticketId: s1.id, mergedFromTicketId: null })));
+        expect(await seenBy(s1.token, f.id, aF)).toEqual({ listed: true, served: 200 });
+        expect(await seenBy(t.token, f.id, aF)).toEqual({ listed: false, served: 404 });
+        expect(await seenBy(s2.token, f.id, aF)).toEqual({ listed: false, served: 404 });
+        // The rolled-back merge left no MERGED_INTO, MERGED_FROM, STATUS_CHANGED or relation row.
+        expect(await auditTally([s1.id, s2.id, t.id])).toEqual(
+          plus(audits, mergeRows(actor, s2, t)),
+        );
+        const links = await prisma.ticketRelation.findMany({
+          where: { organizationId: orgId },
+          select: { type: true, fromTicketId: true, toTicketId: true },
+        });
+        expect(links).toEqual([{ type: "DUPLICATE_OF", fromTicketId: s2.id, toTicketId: t.id }]);
+        return;
+      }
+
+      expect(rows.map((row) => [row.ticketId, row.mergedFromTicketId])).toEqual([[t.id, null]]);
+      await expectMovedFrom(s1Ids, s1, t);
+      await expectMergedInto(s1, t);
+      expect(await seenBy(s1.token, f.id, aF)).toEqual({ listed: true, served: 200 });
+      expect(await seenBy(t.token, f.id, aF)).toEqual({ listed: true, served: 200 });
+      // Whichever of F and the second merge took T's row first decides S2's view, through seq.
+      const s2Marker = must((await ticketRow(s2.id)).mergeMessageSeq, "S2 marker");
+      const s2Sees = f.seq > s2Marker;
+      expect(await seenBy(s2.token, f.id, aF)).toEqual({
+        listed: s2Sees,
+        served: s2Sees ? 200 : 404,
+      });
+      expect(await auditTally([s1.id, s2.id, t.id])).toEqual(
+        plus(audits, [...mergeRows(actor, s1, t), ...mergeRows(actor, s2, t)]),
+      );
+    });
+  }
+
+  it("2d: a forced second mismatch after the relock answers 409 TICKET_CHANGED and writes nothing", async () => {
+    const { orgId, actor } = await seedActor();
+    const [s, t, u] = await sameContact(orgId, 3);
+    await addMessage(s.id);
+    await addMessage(t.id);
+    const audits = await auditTally([s.id, t.id, u.id]);
+    const messagesBefore = await prisma.message.count({ where: { organizationId: orgId } });
+    const attachmentsBefore = await prisma.attachment.count({ where: { organizationId: orgId } });
+    const filesBefore = await filesUnderUploads();
+
+    const merge = heldMerge(actor, s, t);
+    await merge.atCommit;
+    const mergePid = await merge.pid;
+
+    const recordedF = deferred<number>();
+    let relocked = 0;
+    setReopenObserverForTests({
+      onResolveStart: async (tx, ref) => {
+        if (ref.ticketId === s.id) recordedF.resolve(await backendPid(tx));
+      },
+      // Inside F's transaction: simulate a broken write-once rule on S.
+      afterRelock: async (tx, ref) => {
+        if (ref.ticketId !== s.id) return;
+        relocked += 1;
+        await tx.$executeRaw`UPDATE "Ticket" SET "mergedIntoTicketId" = ${u.id} WHERE id = ${s.id}`;
+      },
+    });
+    const marker = `c10-2d-${randomUUID()}`;
+    const reply = followUp(s.token, marker, [pdf(`${marker}-a`), pdf(`${marker}-b`)]);
+    reply.catch(() => {});
+    const fPid = await recordedF.promise;
+    await waitForBlockedBy(prisma, mergePid, [fPid]);
+    merge.release();
+
+    expect(await fulfilled(merge.done)).toMatchObject({ ok: true });
+    const response = await fulfilled(reply);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "TICKET_CHANGED" });
+    expect(relocked).toBe(1);
+
+    expect((await ticketRow(s.id)).mergedIntoTicketId).toBe(t.id);
+    expect(await prisma.message.count({ where: { bodyMarkdown: { contains: marker } } })).toBe(0);
+    // Only the merge's own rows were added: F wrote no message, attachment or audit row.
+    expect(await prisma.message.count({ where: { organizationId: orgId } })).toBe(messagesBefore);
+    expect(await prisma.attachment.count({ where: { organizationId: orgId } })).toBe(
+      attachmentsBefore,
+    );
+    expect(await auditTally([s.id, t.id, u.id])).toEqual(plus(audits, mergeRows(actor, s, t)));
+    expect(await filesUnderUploads()).toBe(filesBefore);
+  });
+});
