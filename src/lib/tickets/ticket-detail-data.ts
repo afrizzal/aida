@@ -65,6 +65,8 @@ export type TicketDetailData =
       hasReceivedMerges: boolean;
       /** The merge target of a merged source, resolved through scopedDb; null when unreadable or not merged (UI-SPEC 3b). */
       mergeTarget: { id: string; number: number } | null;
+      /** Source ticket number per mergedFromTicketId on this ticket's messages (UI-SPEC 3d); an unreadable source is absent. */
+      movedFromSources: Record<string, { id: string; number: number }>;
     } & Awaited<ReturnType<typeof findRelated>>);
 
 export async function loadTicketDetailData(
@@ -99,9 +101,26 @@ export async function loadTicketDetailData(
       })
     : null;
 
+  const sourceIds = [
+    ...new Set(
+      ticket.messages
+        .map((message) => message.mergedFromTicketId)
+        .filter((id): id is string => id !== null),
+    ),
+  ];
+  const sources =
+    sourceIds.length > 0
+      ? await db.ticket.findMany({
+          where: { id: { in: sourceIds } },
+          select: { id: true, number: true },
+        })
+      : [];
+  const movedFromSources = Object.fromEntries(sources.map((source) => [source.id, source]));
+
   return {
     status: "ok",
     ticket,
+    movedFromSources,
     relations: relationList.relations,
     hasReceivedMerges: receivedMerges > 0,
     mergeTarget,

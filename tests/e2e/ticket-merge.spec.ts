@@ -167,4 +167,79 @@ test.describe("Ticket merge", () => {
     await expect(page.getByRole("note")).toHaveCount(0);
     await expect(page.locator("textarea").first()).toBeVisible();
   });
+
+  test("each status link shows only what D-09 allows after a merge", async ({ page, browser }) => {
+    const source = await seedTicket("token-source", "tokens");
+    const target = await seedTicket("token-target", "tokens");
+    const tokens = await prisma.ticket.findMany({
+      where: { id: { in: [source.id, target.id] } },
+      select: { id: true, statusToken: true, subject: true },
+    });
+    const sourceToken = tokens.find((t) => t.id === source.id)?.statusToken;
+    const targetToken = tokens.find((t) => t.id === target.id)?.statusToken;
+    const targetSubject = tokens.find((t) => t.id === target.id)?.subject ?? "";
+    expect(sourceToken && targetToken).toBeTruthy();
+
+    const admin = await prisma.user.findFirstOrThrow({ where: { email: ADMIN_EMAIL } });
+    const merged = await mergeTickets(
+      prisma,
+      { userId: admin.id, orgId },
+      { sourceTicketId: source.id, targetTicketId: target.id },
+    );
+    expect(merged.ok).toBe(true);
+
+    // An agent public reply on the target, posted through the real composer after the merge.
+    const reply = `Post-merge reply ${ts}`;
+    await openTicket(page, target.id);
+    await expect(page.getByText(`Moved from #${source.number}`)).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: `#${source.number}`, exact: true }).first(),
+    ).toHaveAttribute("href", `/tickets/${source.id}`);
+    await page.getByRole("button", { name: "Public Reply" }).click();
+    await page.getByPlaceholder("Write a reply…").fill(reply);
+    const [posted] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.url().endsWith(`/api/tickets/${target.id}/messages`) &&
+          response.request().method() === "POST",
+      ),
+      page.getByRole("button", { name: "Send Reply" }).click(),
+    ]);
+    expect(posted.status()).toBe(200);
+    await expect
+      .poll(() => prisma.message.count({ where: { ticketId: target.id, bodyMarkdown: reply } }))
+      .toBe(1);
+
+    // The customer's pages are unauthenticated.
+    const customer = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+    const status = await customer.newPage();
+
+    await expect
+      .poll(async () => (await status.goto(`/status/${sourceToken}`))?.status(), {
+        timeout: 60_000,
+      })
+      .toBe(200);
+    await expect(status.getByText("Combined", { exact: true })).toBeVisible();
+    await expect(status.getByRole("note")).toContainText(
+      "This request was combined with another one of yours.",
+    );
+    await expect(status.getByText("Seed body for token-source")).toBeVisible();
+    await expect(status.getByText(reply)).toBeVisible();
+    await expect(status.getByText("Seed body for token-target")).toHaveCount(0);
+    const sourceText = (await status.locator("body").innerText()) ?? "";
+    expect(sourceText).not.toContain(`#${target.number}`);
+    expect(sourceText).not.toContain(targetSubject);
+    expect(sourceText).not.toContain("Moved from");
+    await expect(status.locator(`a[href*="${targetToken}"]`)).toHaveCount(0);
+    await expect(status.locator(`a[href*="/tickets/"]`)).toHaveCount(0);
+
+    await status.goto(`/status/${targetToken}`);
+    await expect(status.getByText("Seed body for token-target")).toBeVisible();
+    await expect(status.getByText(reply)).toBeVisible();
+    await expect(status.getByText("Seed body for token-source")).toHaveCount(0);
+    await expect(status.getByText("Combined", { exact: true })).toHaveCount(0);
+    await expect(status.getByRole("note")).toHaveCount(0);
+    expect(await status.locator("body").innerText()).not.toContain("Moved from");
+    await customer.close();
+  });
 });

@@ -1,8 +1,10 @@
+import { Merge } from "lucide-react";
 import { Fragment } from "react";
 import { PublicPageShell } from "@/components/public/public-page-shell";
 import { StatusChip } from "@/components/tickets/status-chip";
 import { ThreadMessage } from "@/components/tickets/thread-message";
 import { ThreadSystemEvent } from "@/components/tickets/thread-system-event";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { BRANDING_SETTING_KEYS } from "@/lib/branding/settings";
 import { prisma } from "@/lib/db";
@@ -61,8 +63,29 @@ export default async function StatusPage({ params }: StatusPageProps) {
         <h1 className="truncate text-[18px] font-semibold">
           #{ticket.number} {ticket.subject}
         </h1>
-        <StatusChip status={ticket.status} />
+        {/* UI-SPEC Surface 7 (D-09): a merged source shows the neutral "Combined" label and a
+            fixed notice; nothing about the target (number, subject, status, date, count, link). */}
+        {ticket.merged ? (
+          <Badge className="h-5 shrink-0 border border-border bg-muted px-2 py-0 text-[12px] text-muted-foreground">
+            Combined
+          </Badge>
+        ) : (
+          <StatusChip status={ticket.status} />
+        )}
       </div>
+
+      {ticket.merged && (
+        <div
+          role="note"
+          className="mb-4 flex items-start gap-2 rounded-lg border border-border/70 bg-muted p-4 text-[13px] text-foreground"
+        >
+          <Merge aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          <p className="min-w-0">
+            This request was combined with another one of yours. New messages in the combined
+            request, including any you send here, also appear on this page.
+          </p>
+        </div>
+      )}
 
       <div className="space-y-4">
         {ticket.messages.map((message) => (

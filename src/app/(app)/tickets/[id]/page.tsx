@@ -68,6 +68,7 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
     relations,
     hasReceivedMerges,
     mergeTarget,
+    movedFromSources,
   } = detail;
   const isMergedSource = ticket.mergedIntoTicketId !== null;
 
@@ -164,6 +165,11 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
                   })),
                   deliveryStatus: message.deliveryStatus,
                 }}
+                movedFrom={
+                  message.mergedFromTicketId
+                    ? (movedFromSources[message.mergedFromTicketId] ?? null)
+                    : null
+                }
               />
               {message.triggeredReopen && (
                 <ThreadSystemEvent

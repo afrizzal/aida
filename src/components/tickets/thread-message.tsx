@@ -1,4 +1,5 @@
-import { Lock } from "lucide-react";
+import { CornerDownRight, Lock } from "lucide-react";
+import Link from "next/link";
 import { AttachmentChip, formatBytes } from "@/components/tickets/attachment-chip";
 import { DeliveryFailedChip } from "@/components/tickets/delivery-failed-chip";
 import type { MessageDeliveryStatus, MessageVisibility } from "@/generated/prisma/client";
@@ -39,9 +40,12 @@ export interface ThreadMessageData {
 export function ThreadMessage({
   message,
   attachmentHrefBase = "/api/attachments",
+  movedFrom,
 }: {
   message: ThreadMessageData;
   attachmentHrefBase?: string;
+  /** UI-SPEC 3d: the merge source of a moved message. Agent pages only; public routes never pass it (D-18). */
+  movedFrom?: { id: string; number: number } | null;
 }) {
   const isInbound = message.authorContactId !== null;
   const isInternal = message.visibility === "INTERNAL";
@@ -69,6 +73,23 @@ export function ThreadMessage({
         <span className="font-medium text-foreground">{authorName}</span>
         <span aria-hidden>·</span>
         <span>{formatRelativeTime(message.createdAt)}</span>
+        {movedFrom && (
+          <>
+            <span aria-hidden>·</span>
+            <span className="inline-flex items-center gap-1">
+              <CornerDownRight aria-hidden className="size-3" />
+              <span>
+                Moved from{" "}
+                <Link
+                  href={`/tickets/${movedFrom.id}`}
+                  className="text-foreground tabular-nums hover:text-primary-emphasis hover:underline"
+                >
+                  #{movedFrom.number}
+                </Link>
+              </span>
+            </span>
+          </>
+        )}
       </div>
 
       <div
