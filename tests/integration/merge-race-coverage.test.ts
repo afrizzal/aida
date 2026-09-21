@@ -20,9 +20,10 @@ import {
   mergeTickets,
   setAgentMessageObserverForTests,
 } from "@/lib/tickets/merge";
+import { removeRelation } from "@/lib/tickets/relations";
 import { setReopenObserverForTests } from "@/lib/tickets/reopen-on-reply";
 import { loadStatusPageData } from "@/lib/tickets/status-page-data";
-import { seedContactTicket, seedOrgWithMembers } from "../support/lifecycle-fixtures";
+import { seedContactTicket, seedOrgWithMembers, seedRelation } from "../support/lifecycle-fixtures";
 import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
 
 // The agent messages route reads its session through getScopedDb and enqueues through getBoss;
@@ -619,11 +620,9 @@ describe("review C10: two merges into one target racing a reply, and the second 
     );
   });
 
-  for (const rollsBack of [false, true]) {
-    const name = rollsBack
-      ? "2c: the first merge holds both contended rows and then rolls back; the second merge completes and F lands on the unmerged S1"
-      : "2b: the first merge holds both contended rows; the second merge and a follow-up through S1 queue on different rows and all complete";
-    it(name, async () => {
+  /** 2b and 2c: the first merge holds S1 and T; with rollsBack it then throws a sentinel. */
+  async function twoMergeRace(rollsBack: boolean) {
+    {
       const { orgId, actor } = await seedActor();
       const [s1, s2, t] = await sameContact(orgId, 3);
       await addMessage(s1.id);
@@ -720,8 +719,14 @@ describe("review C10: two merges into one target racing a reply, and the second 
       expect(await auditTally([s1.id, s2.id, t.id])).toEqual(
         plus(audits, [...mergeRows(actor, s1, t), ...mergeRows(actor, s2, t)]),
       );
-    });
+    }
   }
+
+  it("2b: the first merge holds both contended rows; the second merge and a follow-up through S1 queue on different rows and all complete", () =>
+    twoMergeRace(false));
+
+  it("2c: the first merge holds both contended rows and then rolls back; the second merge completes and F lands on the unmerged S1", () =>
+    twoMergeRace(true));
 
   it("2d: a forced second mismatch after the relock answers 409 TICKET_CHANGED and writes nothing", async () => {
     const { orgId, actor } = await seedActor();
@@ -773,4 +778,139 @@ describe("review C10: two merges into one target racing a reply, and the second 
     expect(await auditTally([s.id, t.id, u.id])).toEqual(plus(audits, mergeRows(actor, s, t)));
     expect(await filesUnderUploads()).toBe(filesBefore);
   });
+});
+
+type RemoveOrder = "merge holds" | "remove commits" | "remove rolls back";
+
+/**
+ * S and T of one contact linked RELATED_TO by R; a merge (actor) and a removal of R through T
+ * (other member) race in the given order. Exact audit tallies per actor tell whose rows exist.
+ */
+async function removeAgainstMerge(order: RemoveOrder) {
+  const { orgId, actor, other } = await seedActor();
+  const [s, t] = await sameContact(orgId, 2);
+  const r = await seedRelation(prisma, orgId, {
+    type: "RELATED_TO",
+    fromTicketId: s.id,
+    toTicketId: t.id,
+    createdById: actor.userId,
+  });
+  const audits = await auditTally([s.id, t.id]);
+  const sentinel =
+    order === "remove rolls back" ? new Error(`c10-3c-sentinel-${randomUUID()}`) : undefined;
+
+  let mergeDone: Promise<MergeResult>;
+  let removal: Promise<unknown>;
+  if (order === "merge holds") {
+    const merge = heldMerge(actor, s, t);
+    await merge.atCommit;
+    const mergePid = await merge.pid;
+    const recordedRemove = deferred<number>();
+    removal = removeRelation(
+      prisma,
+      other,
+      { ticketId: t.id, relationId: r.id },
+      { onTransactionStart: async (tx) => recordedRemove.resolve(await backendPid(tx)) },
+    );
+    removal.catch(() => {});
+    const removePid = await recordedRemove.promise;
+    await waitForBlockedBy(prisma, mergePid, [removePid]);
+    merge.release();
+    mergeDone = merge.done;
+  } else {
+    const recordedRemove = deferred<number>();
+    const heldRemove = deferred<void>();
+    const releaseRemove = deferred<void>();
+    removal = removeRelation(
+      prisma,
+      other,
+      { ticketId: t.id, relationId: r.id },
+      {
+        onTransactionStart: async (tx) => recordedRemove.resolve(await backendPid(tx)),
+        beforeCommit: async () => {
+          heldRemove.resolve();
+          await releaseRemove.promise;
+          if (sentinel) throw sentinel;
+        },
+      },
+    );
+    removal.catch(() => {});
+    await heldRemove.promise;
+    const removePid = await recordedRemove.promise;
+    const merge = recordedMerge(actor, s, t);
+    const mergePid = await merge.pid;
+    await waitForBlockedBy(prisma, removePid, [mergePid]);
+    releaseRemove.resolve();
+    mergeDone = merge.done;
+  }
+
+  if (sentinel) {
+    const outcome = await removal.then(
+      () => null,
+      (err: unknown) => err,
+    );
+    expect(outcome).toBe(sentinel);
+  } else if (order === "merge holds") {
+    expect(await fulfilled(removal)).toEqual({ ok: false, error: "ALREADY_REMOVED" });
+  } else {
+    expect(await fulfilled(removal)).toEqual({ ok: true, ticketIds: [s.id, t.id] });
+  }
+  expect(await fulfilled(mergeDone)).toEqual({
+    ok: true,
+    sourceTicketId: s.id,
+    targetTicketId: t.id,
+  });
+
+  const links = await prisma.ticketRelation.findMany({
+    where: { organizationId: orgId },
+    select: { id: true, type: true, fromTicketId: true, toTicketId: true },
+  });
+  expect(links.map(({ id: _id, ...link }) => link)).toEqual([
+    { type: "DUPLICATE_OF", fromTicketId: s.id, toTicketId: t.id },
+  ]);
+  const duplicate = must(links[0], "DUPLICATE_OF");
+
+  // The merge replaces R unless a committed removal deleted it first; the replacer writes the
+  // two RELATION_REMOVED rows (and only a merge writes RELATION_ADDED).
+  const remover = order === "remove commits" ? other.userId : actor.userId;
+  const expected = plus(audits, [
+    ...mergeRows(actor, s, t),
+    [s.id, "RELATION_REMOVED", remover],
+    [t.id, "RELATION_REMOVED", remover],
+    ...(order === "remove commits"
+      ? []
+      : ([
+          [s.id, "RELATION_ADDED", actor.userId],
+          [t.id, "RELATION_ADDED", actor.userId],
+        ] as const)),
+  ]);
+  expect(await auditTally([s.id, t.id])).toEqual(expected);
+  const removed = await prisma.ticketAuditEvent.findMany({
+    where: { ticketId: { in: [s.id, t.id] }, action: "RELATION_REMOVED" },
+    select: { before: true },
+  });
+  expect(removed).toHaveLength(2);
+  for (const row of removed) {
+    expect(row.before).toMatchObject({ relationId: r.id, type: "RELATED_TO" });
+  }
+
+  // D-06: the merge link cannot be removed afterwards, and the refusal changes nothing.
+  expect(await removeRelation(prisma, other, { ticketId: t.id, relationId: duplicate.id })).toEqual(
+    { ok: false, error: "MERGE_LINK" },
+  );
+  expect(await prisma.ticketRelation.findMany({ where: { organizationId: orgId } })).toHaveLength(
+    1,
+  );
+  expect(await auditTally([s.id, t.id])).toEqual(expected);
+}
+
+describe("review C10: a relation removal racing a merge's link replacement", () => {
+  it("3a: the merge holds after replacing R; the removal re-reads under the locks and returns ALREADY_REMOVED", () =>
+    removeAgainstMerge("merge holds"));
+
+  it("3b: the removal holds and commits first; the merge finds no link to replace", () =>
+    removeAgainstMerge("remove commits"));
+
+  it("3c: the removal holds and rolls back; the merge then replaces R and no row of the removal remains", () =>
+    removeAgainstMerge("remove rolls back"));
 });
