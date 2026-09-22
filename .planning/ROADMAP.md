@@ -275,18 +275,18 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 2. A merge moves the thread, closes the source as a duplicate, and leaves a full audit event, and no status link exposes one contact's messages to another.
 3. A snoozed ticket wakes by date or by customer reply, and auto-close skips it.
 
-**Plans:** 0/10 plans complete
+**Plans:** 10/10 plans complete
 
-- [ ] 12-01-PLAN.md — One migration (relations, merge provenance, snooze, audit actions), isolation tests, label and status-link visibility helpers (Wave 1)
-- [ ] 12-02-PLAN.md — Relations service with one parent and no cycles under a lock, and the ticket picker endpoint (AIDA-52) (Wave 2)
-- [ ] 12-03-PLAN.md — Merge service: same contact only, all-or-nothing, id-ordered locks, replies refused on a merged source (AIDA-53) (Wave 2)
-- [ ] 12-04-PLAN.md — Status-link visibility after a merge, follow-up and email redirect without deadlock (AIDA-53) (Wave 3)
-- [ ] 12-05-PLAN.md — Snooze, wake job, wake on customer reply, auto-close skip, snoozed filter (AIDA-54) (Wave 4)
-- [ ] 12-06-PLAN.md — Linked tickets row, picker, link and merge dialogs (AIDA-52, AIDA-53) (Wave 4)
-- [ ] 12-07-PLAN.md — Merged banner, moved marker, public merged notice, snooze control (Wave 5)
-- [ ] 12-08-PLAN.md — Agent activity feed and the Snoozed toggle (AIDA-55, AIDA-54) (Wave 6)
-- [ ] 12-09-PLAN.md — README note, phase gate and §9 checklist, evidence per requirement (Wave 7)
-- [ ] 12-10-PLAN.md — Forced-order race tests: two merges into one target racing a reply, the second-mismatch 409, relation removal against a merge replacement (Codex review C10) (Wave 4)
+- [x] 12-01-PLAN.md — One migration (relations, merge provenance, snooze, audit actions), isolation tests, label and status-link visibility helpers (Wave 1)
+- [x] 12-02-PLAN.md — Relations service with one parent and no cycles under a lock, and the ticket picker endpoint (AIDA-52) (Wave 2)
+- [x] 12-03-PLAN.md — Merge service: same contact only, all-or-nothing, id-ordered locks, replies refused on a merged source (AIDA-53) (Wave 2)
+- [x] 12-04-PLAN.md — Status-link visibility after a merge, follow-up and email redirect without deadlock (AIDA-53) (Wave 3)
+- [x] 12-05-PLAN.md — Snooze, wake job, wake on customer reply, auto-close skip, snoozed filter (AIDA-54) (Wave 4)
+- [x] 12-06-PLAN.md — Linked tickets row, picker, link and merge dialogs (AIDA-52, AIDA-53) (Wave 4)
+- [x] 12-07-PLAN.md — Merged banner, moved marker, public merged notice, snooze control (Wave 5)
+- [x] 12-08-PLAN.md — Agent activity feed and the Snoozed toggle (AIDA-55, AIDA-54) (Wave 6)
+- [x] 12-09-PLAN.md — README note, phase gate and §9 checklist, evidence per requirement (Wave 7)
+- [x] 12-10-PLAN.md — Forced-order race tests: two merges into one target racing a reply, the second-mismatch 409, relation removal against a merge replacement (Codex review C10) (Wave 4)
 
 ### Phase 12.1: Ticket Lifecycle — custom states and SLA pause
 
@@ -448,7 +448,7 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 | 9. Operations | v2.0 | 0/11 | Parked (Codex plan review cycle 3 left a HIGH finding; owner decision) | - |
 | 10. Team | v2.0 | 0/16 | Parked (Codex plan review cycle 3 left HIGH findings; owner decision) | - |
 | 11. Inbox | v2.0 | 9/9 | Verified: human_needed (visual, dark mode, 360px and screen-reader checks open) | - |
-| 12. Ticket Lifecycle (relations, merge, snooze, activity) | v2.0 | 0/10 | Planned (plan review done after 3 cycles, no HIGH left; execution next) | - |
+| 12. Ticket Lifecycle (relations, merge, snooze, activity) | v2.0 | 10/10 | Executed (code review and verification next) | - |
 | 12.1. Ticket Lifecycle (custom states, SLA pause) | v2.0 | 0/0 | Not started | - |
 | 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 0/0 | Not started | - |
 | 13. Integrations | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
