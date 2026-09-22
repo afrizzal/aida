@@ -4,7 +4,8 @@
 //   1. hooks.onTransactionStart (test seam only)
 //   2. the actor's member row (findActiveMembership), refused with MEMBERSHIP_ENDED (D-01)
 //   3. CHILD_OF inserts only: pg_advisory_xact_lock keyed on the organization (D-05)
-//   4. both ticket rows SELECT … FOR UPDATE in id order, under the actor's organization
+//   4. both ticket rows locked through lockTicketsInIdOrder (the one ascending-id FOR UPDATE
+//      statement of the lock-order contract in merge.ts), under the actor's organization
 //   5. hooks.afterLock (test seam only)
 //   6. validation (CHILD_OF: parent check, bounded ancestor walk), then the write and the audit
 //   7. hooks.beforeCommit (test seam only)
@@ -22,6 +23,7 @@
 import type { Prisma, PrismaClient } from "../../generated/prisma/client";
 import { findActiveMembership } from "../membership";
 import { scopedDb } from "../scoped-db";
+import { type LockedTicketRow, lockTicketsInIdOrder } from "./merge";
 import {
   LINK_CHOICES,
   type RelationLabel,
@@ -95,11 +97,6 @@ export interface AddRelationOptions {
   ancestorWalkLimit?: number;
 }
 
-interface LockedTicket {
-  id: string;
-  mergedIntoTicketId: string | null;
-}
-
 interface RelationRow {
   id: string;
   type: RelationType;
@@ -110,20 +107,17 @@ interface RelationRow {
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0;
 
-/** Locks both tickets of the organization in id order; refuses when either is missing. */
+/**
+ * Locks both tickets of the organization through lockTicketsInIdOrder (review WR-02: one lock
+ * statement for every Ticket pair writer); refuses when either is missing.
+ */
 async function lockPair(
   tx: Prisma.TransactionClient,
   orgId: string,
   a: string,
   b: string,
-): Promise<Map<string, LockedTicket>> {
-  const rows = await tx.$queryRaw<LockedTicket[]>`
-    SELECT id, "mergedIntoTicketId"
-    FROM "Ticket"
-    WHERE "organizationId" = ${orgId} AND id = ANY(${[a, b]}::text[])
-    ORDER BY id
-    FOR UPDATE
-  `;
+): Promise<Map<string, LockedTicketRow>> {
+  const rows = await lockTicketsInIdOrder(tx, orgId, [a, b]);
   if (rows.length !== 2) throw new RelationError("TICKET_UNAVAILABLE");
   return new Map(rows.map((row) => [row.id, row]));
 }

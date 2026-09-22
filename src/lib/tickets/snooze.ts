@@ -4,7 +4,8 @@
 // unchanged. Each call is one interactive transaction:
 //   1. hooks.onTransactionStart (test seam only)
 //   2. the actor's member row (findActiveMembership) is the FIRST statement: MEMBERSHIP_ENDED
-//   3. SELECT … FOR UPDATE on the ticket row with the organization predicate: TICKET_UNAVAILABLE
+//   3. the ticket row locked through lockTicketsInIdOrder (merge.ts, the one FOR UPDATE statement
+//      of the lock-order contract) with the organization predicate: TICKET_UNAVAILABLE
 //   4. the checks, the update and one SNOOZED or WOKEN audit row (USER), before/after hold the
 //      deadline as an ISO string or null only (D-21)
 //   5. hooks.beforeCommit (test seam only)
@@ -20,6 +21,7 @@
 // Relative imports only and no Next.js import: revalidation belongs to the server action.
 import type { Prisma, PrismaClient } from "../../generated/prisma/client";
 import { findActiveMembership } from "../membership";
+import { type LockedTicketRow, lockTicketsInIdOrder } from "./merge";
 import { recordTicketAudit } from "./ticket-audit";
 
 const TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: 30_000 } as const;
@@ -74,26 +76,14 @@ export type SnoozeResult =
 
 export type WakeResult = { ok: true; ticketId: string } | { ok: false; error: SnoozeErrorCode };
 
-interface LockedSnoozeRow {
-  id: string;
-  status: string;
-  mergedIntoTicketId: string | null;
-  snoozedUntil: Date | null;
-}
-
+/** Locks the ticket through lockTicketsInIdOrder (review WR-02); refuses when it is missing. */
 async function lockTicket(
   tx: Prisma.TransactionClient,
   orgId: string,
   ticketId: string,
-): Promise<LockedSnoozeRow> {
-  const rows = await tx.$queryRaw<LockedSnoozeRow[]>`
-    SELECT id, status::text AS status, "mergedIntoTicketId", "snoozedUntil"
-    FROM "Ticket"
-    WHERE id = ${ticketId} AND "organizationId" = ${orgId}
-    FOR UPDATE
-  `;
-  const row = rows[0];
-  if (!row) throw new SnoozeError("TICKET_UNAVAILABLE");
+): Promise<LockedTicketRow> {
+  const [row] = await lockTicketsInIdOrder(tx, orgId, [ticketId]);
+  if (!row || row.id !== ticketId) throw new SnoozeError("TICKET_UNAVAILABLE");
   return row;
 }
 
