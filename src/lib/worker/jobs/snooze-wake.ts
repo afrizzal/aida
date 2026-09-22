@@ -1,12 +1,15 @@
 // The every-minute snooze wake job (Phase 12, AIDA-54, D-13).
 //
-// Reads at most 500 due tickets across organizations, ordered by snoozedUntil then id, and
-// wakes each in its own transaction through wakeDueTicket:
-//   1. SELECT "organizationId", "snoozedUntil" … FOR UPDATE: the deadline read under the row
-//      lock is the WOKEN audit's `before` (review C6; an UPDATE … RETURNING yields the new null)
+// Reads at most 500 due tickets across organizations (id and organizationId), ordered by
+// snoozedUntil then id, and wakes each in its own transaction through wakeDueTicket, which is
+// given the ticket's organization and puts it in both statements (review WR-01):
+//   1. SELECT "snoozedUntil" … FOR UPDATE with the organization predicate: the deadline read
+//      under the row lock is the WOKEN audit's `before` (review C6; an UPDATE … RETURNING yields
+//      the new null)
 //   2. hooks.afterWakeLock (test seam only)
-//   3. one conditional UPDATE that re-checks "snoozedUntil" IS NOT NULL AND "snoozedUntil" <= now
-//      in the statement, so a re-snooze to a later time that committed first is not undone
+//   3. one conditional UPDATE with the organization predicate that re-checks "snoozedUntil" IS
+//      NOT NULL AND "snoozedUntil" <= now in the statement, so a re-snooze to a later time that
+//      committed first is not undone
 //   4. WOKEN (SYSTEM) only when a row changed
 // A second run wakes nothing (idempotent); a run after a worker restart picks up whatever is
 // due; anything beyond 500 is left for the next minute. Nothing is sent to anyone.
@@ -26,16 +29,20 @@ export interface WakeDueHooks {
   afterWakeLock?(tx: Prisma.TransactionClient): Promise<void> | void;
 }
 
-/** Wakes one ticket when its deadline is due at `now`. Must run inside a transaction. */
+/**
+ * Wakes one ticket of the organization when its deadline is due at `now`; a ticket id of another
+ * organization wakes nothing. Must run inside a transaction.
+ */
 export async function wakeDueTicket(
   tx: Prisma.TransactionClient,
   ticketId: string,
   now: Date,
+  orgId: string,
   hooks: WakeDueHooks = {},
 ): Promise<boolean> {
-  const locked = await tx.$queryRaw<{ organizationId: string; snoozedUntil: Date | null }[]>`
-    SELECT "organizationId", "snoozedUntil" FROM "Ticket"
-    WHERE id = ${ticketId}
+  const locked = await tx.$queryRaw<{ snoozedUntil: Date | null }[]>`
+    SELECT "snoozedUntil" FROM "Ticket"
+    WHERE id = ${ticketId} AND "organizationId" = ${orgId}
     FOR UPDATE
   `;
   const row = locked[0];
@@ -47,13 +54,14 @@ export async function wakeDueTicket(
     UPDATE "Ticket"
     SET "snoozedUntil" = NULL, "updatedAt" = now()
     WHERE id = ${ticketId}
+      AND "organizationId" = ${orgId}
       AND "snoozedUntil" IS NOT NULL
       AND "snoozedUntil" <= ${now}
     RETURNING id
   `;
   if (changed.length === 0) return false;
 
-  await recordTicketAudit(tx, row.organizationId, {
+  await recordTicketAudit(tx, orgId, {
     ticketId,
     actorType: "SYSTEM",
     actorUserId: null,
@@ -79,18 +87,18 @@ export async function snoozeWakeHandler(
   const now = opts.now ?? new Date();
   const batchSize = opts.batchSize ?? MAX_SNOOZE_WAKE_PER_RUN;
 
-  const due = await prisma.$queryRaw<{ id: string }[]>`
-    SELECT id FROM "Ticket"
+  const due = await prisma.$queryRaw<{ id: string; organizationId: string }[]>`
+    SELECT id, "organizationId" FROM "Ticket"
     WHERE "snoozedUntil" IS NOT NULL AND "snoozedUntil" <= ${now}
     ORDER BY "snoozedUntil" ASC, id ASC
     LIMIT ${batchSize}
   `;
 
   let woken = 0;
-  for (const { id } of due) {
+  for (const { id, organizationId } of due) {
     const done = await prisma.$transaction(async (tx) => {
       if (opts.onWakeTransaction) await opts.onWakeTransaction(tx, id);
-      return wakeDueTicket(tx, id, now, { afterWakeLock: opts.afterWakeLock });
+      return wakeDueTicket(tx, id, now, organizationId, { afterWakeLock: opts.afterWakeLock });
     }, TRANSACTION_OPTIONS);
     if (done) woken += 1;
   }

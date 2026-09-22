@@ -22,7 +22,7 @@ import {
   wakeTicket,
 } from "@/lib/tickets/snooze";
 import { autoCloseHandler } from "@/lib/worker/jobs/auto-close";
-import { snoozeWakeHandler } from "@/lib/worker/jobs/snooze-wake";
+import { snoozeWakeHandler, wakeDueTicket } from "@/lib/worker/jobs/snooze-wake";
 import { seedOrgWithMembers, seedTicket } from "../support/inbox-fixtures";
 import { seedContactTicket } from "../support/lifecycle-fixtures";
 
@@ -516,5 +516,32 @@ describe("the snoozed filter in the list query (D-16)", () => {
 
     const rows = await fetchTicketList({ view: "all", snoozed: true }, ctx);
     for (const row of rows) expect(row.snoozedUntil?.toISOString()).toBe(later.toISOString());
+  });
+});
+
+describe("wakeDueTicket is scoped to the organization it is given (review WR-01)", () => {
+  it("ignores a ticket id paired with another organization, then wakes it for its own", async () => {
+    const { orgId, owner } = await seedOrg();
+    const other = await seedOrg();
+    const ticket = await seedTicket(orgId);
+    const now = new Date();
+    const until = new Date(now.getTime() + 10 * MIN);
+    expect((await snoozeTicket(prisma, owner, { ticketId: ticket.id, until }, { now })).ok).toBe(
+      true,
+    );
+    const wakeAt = new Date(until.getTime() + 1000);
+
+    const wrongOrg = await prisma.$transaction((tx) =>
+      wakeDueTicket(tx, ticket.id, wakeAt, other.orgId),
+    );
+    expect(wrongOrg).toBe(false);
+    expect((await snoozedUntil(ticket.id))?.toISOString()).toBe(until.toISOString());
+    expect(await audits(ticket.id, "WOKEN")).toEqual([]);
+    expect(await prisma.ticketAuditEvent.count({ where: { organizationId: other.orgId } })).toBe(0);
+
+    const ownOrg = await prisma.$transaction((tx) => wakeDueTicket(tx, ticket.id, wakeAt, orgId));
+    expect(ownOrg).toBe(true);
+    expect(await snoozedUntil(ticket.id)).toBeNull();
+    expect(await audits(ticket.id, "WOKEN")).toHaveLength(1);
   });
 });
