@@ -163,6 +163,36 @@ describe("addRelation: refusals change nothing", () => {
       error: "MEMBERSHIP_ENDED",
     });
   });
+
+  it("TICKET_UNAVAILABLE when either ticket is a merged source (run decision K34), nothing written", async () => {
+    const { orgId, actor } = await seedActor();
+    const [s, t, u] = await tickets(orgId, 3);
+    await prisma.ticket.update({
+      where: { id: s.id },
+      data: {
+        mergedIntoTicketId: t.id,
+        mergedAt: new Date(),
+        mergeMessageSeq: 1n,
+        status: "CLOSED",
+      },
+    });
+    const before = await counts(orgId);
+    for (const [from, to, choice] of [
+      [s.id, u.id, "is related to"],
+      [u.id, s.id, "is related to"],
+      [u.id, s.id, "is a duplicate of"],
+      [s.id, u.id, "is a child of"],
+      [u.id, s.id, "is the parent of"],
+    ] as const) {
+      expect(await link(actor, from, to, choice)).toEqual({
+        ok: false,
+        error: "TICKET_UNAVAILABLE",
+      });
+    }
+    expect(await counts(orgId)).toEqual(before);
+    // The merge target is not a merged source: it still takes new links.
+    expect((await link(actor, t.id, u.id, "is related to")).ok).toBe(true);
+  });
 });
 
 describe("addRelation: CHILD_OF hierarchy (D-05)", () => {

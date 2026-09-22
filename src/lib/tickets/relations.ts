@@ -7,7 +7,10 @@
 //   4. both ticket rows locked through lockTicketsInIdOrder (the one ascending-id FOR UPDATE
 //      statement of the lock-order contract in merge.ts), under the actor's organization
 //   5. hooks.afterLock (test seam only)
-//   6. validation (CHILD_OF: parent check, bounded ancestor walk), then the write and the audit
+//   6. validation: a merged source on either side is refused with TICKET_UNAVAILABLE (run
+//      decision K34, review IN-01: a merged source is closed into its target and takes no new
+//      links; removal of its existing links stays as D-06 says), then for CHILD_OF the parent
+//      check and the bounded ancestor walk; then the write and the audit
 //   7. hooks.beforeCommit (test seam only)
 //
 // "One parent per child" is a technical choice of D-05 to keep the hierarchy explainable; it is
@@ -209,8 +212,14 @@ export async function addRelation(
         `;
       }
 
-      await lockPair(tx, orgId, fromTicketId, toTicketId);
+      const locked = await lockPair(tx, orgId, fromTicketId, toTicketId);
       if (hooks.afterLock) await hooks.afterLock(tx);
+
+      // K34 (review IN-01): decided on the locked rows, so a merge that committed while this
+      // waited is seen.
+      for (const row of locked.values()) {
+        if (row.mergedIntoTicketId !== null) throw new RelationError("TICKET_UNAVAILABLE");
+      }
 
       if (type === "CHILD_OF") {
         const parent = await tx.ticketRelation.findFirst({
