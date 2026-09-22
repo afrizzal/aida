@@ -7,6 +7,7 @@ import { recordAuditEvent } from "@/lib/audit/record-audit-event";
 import { getEmailSettings } from "@/lib/channels/email/settings";
 import { resolveActiveProvider } from "@/lib/llm/active-provider";
 import { renderMarkdown } from "@/lib/markdown/render";
+import { findActiveMembership } from "@/lib/membership";
 import { getBoss } from "@/lib/queue/boss-client";
 import { getScopedDb } from "@/lib/session";
 import { getAgentMessageObserver, lockTicketForAgentWrite } from "@/lib/tickets/merge";
@@ -97,6 +98,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     outcome = await db.$transaction(async (tx) => {
       const observer = getAgentMessageObserver();
       if (observer?.onTransactionStart) await observer.onTransactionStart(tx);
+      // D-01 (review WR-03): getScopedDb does not check the member row, so a user removed from
+      // the organization whose session still names it is refused here, before the ticket lock
+      // and before anything is written or queued.
+      if (!(await findActiveMembership(tx, session.user.id, orgId))) {
+        return { ok: false as const, error: "MEMBERSHIP_ENDED" };
+      }
       // AIDA-53: every agent message insert happens under the ticket row lock and a merged
       // source is refused before anything is written (review C1, UI-SPEC Assumption 7).
       const lock = await lockTicketForAgentWrite(tx, orgId, ticketId);
@@ -147,6 +154,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   if (!outcome.ok) {
     await staged.discard();
+    if (outcome.error === "MEMBERSHIP_ENDED") {
+      return NextResponse.json({ error: "MEMBERSHIP_ENDED" }, { status: 403 });
+    }
     if (outcome.error === "MERGED_SOURCE") {
       return NextResponse.json({ error: "MERGED_SOURCE" }, { status: 409 });
     }

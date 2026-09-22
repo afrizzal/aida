@@ -930,4 +930,21 @@ describe("POST /api/tickets/{id}/messages on a merged source (review C1, C7, R3-
     );
     for (const line of logged) expect(line).not.toContain(marker);
   });
+
+  it("a removed member gets 403 MEMBERSHIP_ENDED: no message, no stored file, nothing queued (review WR-03)", async () => {
+    const { orgId, actor, t } = await mergedPair();
+    await prisma.member.deleteMany({ where: { userId: actor.userId, organizationId: orgId } });
+    const before = await snapshot(orgId);
+
+    const reply = await post(t.id, "public", "Reply after removal", [pdf("gone.pdf")]);
+    expect(reply.status).toBe(403);
+    expect(await reply.json()).toEqual({ error: "MEMBERSHIP_ENDED" });
+    const note = await post(t.id, "internal", "Note after removal", [pdf("gone-note.pdf")]);
+    expect(note.status).toBe(403);
+    expect(await note.json()).toEqual({ error: "MEMBERSHIP_ENDED" });
+
+    expect(await snapshot(orgId)).toEqual(before);
+    expect(routeEnv.sends).toEqual([]);
+    expect(await storedFiles(orgId)).toEqual([]);
+  });
 });
