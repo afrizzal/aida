@@ -264,6 +264,20 @@ describe("removeRelation", () => {
     ).toEqual({ ok: false, error: "ALREADY_REMOVED" });
   });
 
+  it("MEMBERSHIP_ENDED when the actor's member row was deleted, and the link and its audit stay", async () => {
+    const { orgId, actor } = await seedActor();
+    const [a, b] = await tickets(orgId, 2);
+    const added = await link(actor, a.id, b.id, "is related to");
+    if (!added.ok) throw new Error("setup");
+    await prisma.member.deleteMany({ where: { userId: actor.userId, organizationId: orgId } });
+    const before = await counts(orgId);
+    expect(
+      await removeRelation(prisma, actor, { ticketId: a.id, relationId: added.relationId }),
+    ).toEqual({ ok: false, error: "MEMBERSHIP_ENDED" });
+    expect(await counts(orgId)).toEqual(before);
+    expect(await prisma.ticketRelation.count({ where: { id: added.relationId } })).toBe(1);
+  });
+
   it("TICKET_UNAVAILABLE for another organization's relation, which stays", async () => {
     const { actor } = await seedActor();
     const other = await seedActor();
