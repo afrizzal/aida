@@ -286,6 +286,19 @@ async function messagesWithBody(orgId: string, marker: string) {
   });
 }
 
+// Sets a stored message's createdAt one millisecond before mergedAt and proves the stored value,
+// so a case can state "createdAt earlier than mergedAt" without depending on two clocks agreeing.
+async function pinCreatedAtBefore(messageId: string, mergedAt: Date): Promise<void> {
+  const before = new Date(mergedAt.getTime() - 1);
+  await prisma.message.update({ where: { id: messageId }, data: { createdAt: before } });
+  const stored = await prisma.message.findUniqueOrThrow({
+    where: { id: messageId },
+    select: { createdAt: true },
+  });
+  expect(stored.createdAt.getTime()).toBe(before.getTime());
+  expect(stored.createdAt.getTime()).toBeLessThan(mergedAt.getTime());
+}
+
 async function ticketRow(id: string) {
   return prisma.ticket.findUniqueOrThrow({
     where: { id },
@@ -352,8 +365,11 @@ describe("review C1: provenance is decided by seq under the lock, never by times
     const source = await ticketRow(s.id);
     const marker1 = must(source.mergeMessageSeq, "mergeMessageSeq");
     expect(r.seq > marker1).toBe(true);
-    // The reply's createdAt is its transaction's start time, before the merge's mergedAt.
-    expect(r.createdAt.getTime()).toBeLessThan(must(source.mergedAt, "mergedAt").getTime());
+    // Prisma 7 fills @default(now()) from the application clock when it builds the insert, while
+    // mergedAt is the database's clock_timestamp(). Comparing the two raw values depends on clock
+    // skew, so the case pins the C1 condition itself: R's createdAt is set before mergedAt, and
+    // the pages and attachments below must still follow seq.
+    await pinCreatedAtBefore(r.id, must(source.mergedAt, "mergedAt"));
 
     const sPage = await pageIds(s.token);
     const tPage = await pageIds(t.token);
@@ -412,7 +428,8 @@ describe("review C1: provenance is decided by seq under the lock, never by times
     const source = await ticketRow(s.id);
     expect(source.mergedIntoTicketId).toBe(t.id);
     expect(f.seq > must(source.mergeMessageSeq, "mergeMessageSeq")).toBe(true);
-    expect(f.createdAt.getTime()).toBeLessThan(must(source.mergedAt, "mergedAt").getTime());
+    // Same clock reasoning as 1a: pin F's createdAt before mergedAt, then require seq to decide.
+    await pinCreatedAtBefore(f.id, must(source.mergedAt, "mergedAt"));
 
     const sPage = await pageIds(s.token);
     const tPage = await pageIds(t.token);
