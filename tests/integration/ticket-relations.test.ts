@@ -485,3 +485,34 @@ describe("races bound to recorded PIDs (D-05, review C5 and C10)", () => {
     expect(await prisma.ticketRelation.count({ where: { organizationId: orgId } })).toBe(1);
   });
 });
+
+describe("addRelation: unique violations (review IN-03)", () => {
+  it("a unique violation on an index other than the pair key is rethrown, never ALREADY_LINKED", async () => {
+    const { orgId, actor } = await seedActor();
+    const [a, b, c] = await tickets(orgId, 3);
+    expect((await link(actor, a.id, b.id, "is related to")).ok).toBe(true);
+    const before = await counts(orgId);
+    // A unique index the service does not know, created inside the service's own transaction
+    // (so it rolls back with it) and limited to this organization: the second link by the same
+    // actor violates it. orgId is a fixture id, not input.
+    const indexName = "TicketRelation_review_in03_key";
+    const run = addRelation(
+      prisma,
+      actor,
+      { ticketId: a.id, otherTicketId: c.id, choice: "is related to" },
+      {
+        afterLock: async (tx) => {
+          await tx.$executeRawUnsafe(
+            `CREATE UNIQUE INDEX "${indexName}" ON "TicketRelation" ("organizationId", "createdById") WHERE "organizationId" = '${orgId}'`,
+          );
+        },
+      },
+    );
+    await expect(run).rejects.toMatchObject({ code: "P2002" });
+    expect(await counts(orgId)).toEqual(before);
+    const indexes = await prisma.$queryRaw<{ n: bigint }[]>`
+      SELECT count(*) AS n FROM pg_indexes WHERE indexname = ${indexName}
+    `;
+    expect(Number(indexes[0]?.n)).toBe(0);
+  });
+});

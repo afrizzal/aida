@@ -125,7 +125,10 @@ async function lockPair(
   return new Map(rows.map((row) => [row.id, row]));
 }
 
-/** The name of the unique index a Postgres 23505 names, or null for any other error. */
+/**
+ * The name of the unique index a Postgres 23505 names, "unknown" for a unique violation of any
+ * other index, or null for any other error.
+ */
 function violatedIndex(err: unknown): string | null {
   if (!err || typeof err !== "object") return null;
   const e = err as { code?: unknown; meta?: unknown; message?: unknown };
@@ -238,9 +241,11 @@ export async function addRelation(
         });
         relationId = created.id;
       } catch (err) {
+        // Only the two known indexes are refusals; any other unique violation is not a
+        // duplicate link and is rethrown unchanged (review IN-03).
         const index = violatedIndex(err);
         if (index === "TicketRelation_one_parent_key") throw new RelationError("PARENT_EXISTS");
-        if (index !== null) throw new RelationError("ALREADY_LINKED");
+        if (index === "TicketRelation_pair_key") throw new RelationError("ALREADY_LINKED");
         throw err;
       }
 
