@@ -6,7 +6,10 @@
 // Order, always:
 //   1. automatic mail returns false at once: it never reopens (D-13)
 //   2. the test observer, when one is set (test seam, never set in production)
-//   3. SELECT … FOR UPDATE on the one ticket row
+//   3. SELECT … FOR UPDATE on the one ticket row. Both callers run resolveReplyTicket first, which
+//      already holds this row's lock (lockTicketsInIdOrder), so this is a second, re-entrant lock
+//      in the same transaction and never waits; it is kept because it is the read the snooze
+//      deadline of step 5 comes from (review IN-02)
 //   4. one conditional UPDATE from RESOLVED or CLOSED to OPEN with resolvedAt null
 //   5. the snooze wake (12-05, D-14): a conditional UPDATE clears snoozedUntil and WOKEN (SYSTEM)
 //      is written only when it changed a row, with the deadline read under the lock in step 3
@@ -14,9 +17,10 @@
 //
 // Why the row lock comes first: a conditional UPDATE alone skips a row that fails its WHERE on
 // the statement snapshot without waiting, so it would miss an agent's resolve that is still
-// uncommitted. Waiting on the row lock first makes the UPDATE read the committed status. The
-// auto-close job's conditional close waits on this lock too and re-checks RESOLVED afterwards,
-// so a customer reply always wins: the ticket ends OPEN.
+// uncommitted. Waiting on the row lock first (in resolveReplyTicket, before this function runs)
+// makes the UPDATE read the committed status. The auto-close job's conditional close waits on
+// this lock too and re-checks RESOLVED afterwards, so a customer reply always wins: the ticket
+// ends OPEN.
 //
 // Relative imports only: the worker bundles the ingest path.
 
