@@ -82,3 +82,31 @@ Verified against the code: the services I read have no Critical issue. Each one 
 _Reviewed: 2026-11-08_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard (partial: 9 of 47 files)_
+
+## Orchestrator dispositions (all three parts)
+
+Parts: this file (a, 9 files), `12-REVIEW-b.md` (b, server, 14 files), `12-REVIEW-c.md` (c, UI, 17 files). Every warning below was checked against the code at `0e04fc6` and holds. Fixes run in three sequential fixer passes, each fix with a test seen failing before the fix where behaviour changes; assertions are never loosened. Each pass appends its section to `12-REVIEW-FIX.md`.
+
+| ID | Part | Disposition | Pass |
+|----|------|-------------|------|
+| WR-01 | a | Fix: `organizationId` predicate in both wake statements | F1 |
+| WR-02 | a | Fix: `lockPair` and snooze `lockTicket` call `lockTicketsInIdOrder` | F1 |
+| IN-01 | a | Fix (run decision K34): adding a link is refused when either ticket is a merged source, with the existing `TICKET_UNAVAILABLE` refusal | F1 |
+| IN-02 | a | Comment only: the reopen lock is a re-entrant second lock | F1 |
+| IN-03 | a | Fix: only `TicketRelation_pair_key` maps to `ALREADY_LINKED`; other unique violations rethrow | F1 |
+| WR-03 | b | Fix: messages route checks `findActiveMembership` inside the transaction; removed member gets 403 and staged files are discarded | F1 |
+| WR-04 | b | Fix: `firstRespondedAt` written with a conditional update under the lock | F1 |
+| WR-05 | b | Fix: `lockDemoTicket` calls `lockTicketsInIdOrder` | F1 |
+| IN-04 | b | Fix: typed error for a matched ticket that can no longer take the reply | F1 |
+| IN-05 | b | No change: status-page branding by first organization predates Phase 12 and follows the single-org v1 precedent; recorded in `deferred-items.md` | none |
+| IN-06 | b | No change: whether reopen markers show on a merged source page is a copy decision for the visual pass; stays open | none |
+| UI-WR-01 | c | Fix: hydration-safe snooze label | F2 |
+| UI-WR-02 | c | Fix: feed tooltip in local time after mount | F2 |
+| UI-WR-03 | c | Fix: Link and Merge dialogs return focus to the menu trigger | F2 |
+| UI-WR-04 | c | Fix: focus after refusals, stable snooze trigger, focus after link removal | F2 |
+| UI-IN-01, 03, 04, 05, 06 | c | Fix | F2 |
+| UI-WR-05 | c | Fix: add the missing Copywriting rows to `12-UI-SPEC.md` (additive) and use them verbatim from one module | F3 |
+| UI-WR-06 | c | Fix: picker returns the current link label; generic row when unknown | F3 |
+| UI-WR-07 | c | Fix: Back keeps the visible choice; a rule refusal clears the target | F3 |
+| UI-WR-08 | c | Fix: E2E for merge refusal and unknown, snooze refusal, unknown and validation, link removal failure, and an `Asia/Jakarta` time-zone block | F3 |
+| UI-IN-02 | c | Fix: exhaustive switch, dead branch removed | F3 |
