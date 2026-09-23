@@ -202,6 +202,46 @@ test.describe("Snooze", () => {
     const stored = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
     expect(stored.snoozedUntil).toBeNull();
   });
+
+  test("a custom time that is too soon is announced on both fields and clears on edit (review UI-IN-03)", async ({
+    page,
+  }) => {
+    const ticket = await seedTicket("too-soon");
+    await open(page, `/tickets/${ticket.id}`);
+    await page.getByRole("button", { name: "Snooze", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "Snooze until" })).toBeVisible();
+
+    // The current minute in the browser's zone: less than 5 minutes ahead.
+    const now = await page.evaluate(() => {
+      const d = new Date();
+      const pad = (n: number) => String(n).padStart(2, "0");
+      return {
+        date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+        time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+      };
+    });
+    const date = dialog.getByLabel("Date");
+    const time = dialog.getByLabel("Time");
+    await date.fill(now.date);
+    await time.fill(now.time);
+    await dialog.getByRole("button", { name: "Snooze ticket" }).click();
+
+    const tooSoon = "Pick a time at least 5 minutes from now.";
+    await expect(dialog.getByRole("alert")).toHaveText(tooSoon);
+    for (const field of [date, time]) {
+      await expect(field).toHaveAttribute("aria-invalid", "true");
+      await expect(field).toHaveAccessibleDescription(new RegExp(tooSoon.replace(/\./g, "\\.")));
+    }
+
+    await time.fill(now.time === "23:55" ? "23:50" : "23:55");
+    await expect(dialog.getByRole("alert")).toHaveCount(0);
+    for (const field of [date, time]) {
+      await expect(field).not.toHaveAttribute("aria-invalid", "true");
+    }
+    const stored = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+    expect(stored.snoozedUntil).toBeNull();
+  });
 });
 
 // UI-SPEC 4a (D-12), review UI-WR-01 and UI-WR-02: the browser is in Asia/Jakarta (UTC+7, no

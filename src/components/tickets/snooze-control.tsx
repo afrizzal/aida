@@ -142,6 +142,7 @@ export function SnoozeControl({
   const calloutRef = useRef<HTMLDivElement>(null);
   const headingId = useId();
   const zoneLineId = useId();
+  const fieldErrorId = useId();
   const dateId = useId();
   const timeId = useId();
 
@@ -154,6 +155,9 @@ export function SnoozeControl({
       : null;
   const snoozeBlocked = isClosed || mergedSource;
   const busy = isPending || pendingKey !== null;
+  // The field error is announced (role="alert"), described on both fields and marks them
+  // invalid; editing either field clears it (review UI-IN-03).
+  const fieldDescribedBy = fieldError ? `${zoneLineId} ${fieldErrorId}` : zoneLineId;
 
   // Every control is disabled while a call runs, so the clicked one loses focus. After a failure
   // focus goes back to it, or to the callout when it stays disabled (review UI-WR-04).
@@ -381,9 +385,13 @@ export function SnoozeControl({
                   min={bounds.min}
                   max={bounds.max}
                   value={dateValue}
-                  onChange={(event) => setDateValue(event.target.value)}
+                  onChange={(event) => {
+                    setDateValue(event.target.value);
+                    setFieldError(null);
+                  }}
                   disabled={busy || snoozeBlocked}
-                  aria-describedby={zoneLineId}
+                  aria-describedby={fieldDescribedBy}
+                  aria-invalid={fieldError ? true : undefined}
                   className="h-8 text-[13px]"
                 />
                 <Label htmlFor={timeId} className="sr-only">
@@ -394,16 +402,24 @@ export function SnoozeControl({
                   type="time"
                   step={300}
                   value={timeValue}
-                  onChange={(event) => setTimeValue(event.target.value)}
+                  onChange={(event) => {
+                    setTimeValue(event.target.value);
+                    setFieldError(null);
+                  }}
                   disabled={busy || snoozeBlocked}
-                  aria-describedby={zoneLineId}
+                  aria-describedby={fieldDescribedBy}
+                  aria-invalid={fieldError ? true : undefined}
                   className="h-8 text-[13px]"
                 />
               </div>
               <p id={zoneLineId} className="break-words text-[12px] text-muted-foreground">
                 Times are in your time zone: {zone}.
               </p>
-              {fieldError && <p className="text-[12px] text-destructive">{fieldError}</p>}
+              {fieldError && (
+                <p id={fieldErrorId} role="alert" className="text-[12px] text-destructive">
+                  {fieldError}
+                </p>
+              )}
               <Button
                 ref={registerControl("custom")}
                 type="button"
