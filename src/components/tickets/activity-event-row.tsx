@@ -12,7 +12,7 @@ import {
   UserRound,
 } from "lucide-react";
 import Link from "next/link";
-import { LocalDateTime } from "@/components/tickets/local-date-time";
+import { LocalDateTime, TimeWithLocalTitle } from "@/components/tickets/local-date-time";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import type { ActivityIconName, DescribedEvent } from "@/lib/tickets/activity-copy";
 
@@ -28,19 +28,6 @@ const ICONS: Record<ActivityIconName, LucideIcon> = {
   Unlink2,
   UserRound,
 };
-
-// The server has no viewer time zone, so the title states the full time in UTC, as the first
-// render of LocalDateTime does (UI-SPEC 4a).
-const TITLE_FORMAT = new Intl.DateTimeFormat("en-US", {
-  weekday: "short",
-  year: "numeric",
-  month: "short",
-  day: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  hourCycle: "h23",
-  timeZone: "UTC",
-});
 
 // UI-SPEC Surface 6: one audit row in the activity feed, in the existing system-event style
 // plus an icon and a relative time. Server-rendered and agent-only.
@@ -74,9 +61,9 @@ export function ActivityEventRow({
           return <span key={key}>{part.text}</span>;
         })}
         <span aria-hidden="true"> · </span>
-        <time dateTime={iso} title={`${TITLE_FORMAT.format(createdAt)} UTC`}>
-          {formatRelativeTime(createdAt)}
-        </time>
+        {/* The server has no viewer zone: the title starts in UTC, as LocalDateTime does, and
+            switches to the viewer's zone after mount (UI-SPEC Surface 6, review UI-WR-02). */}
+        <TimeWithLocalTitle value={iso}>{formatRelativeTime(createdAt)}</TimeWithLocalTitle>
       </span>
     </li>
   );

@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
+import { snoozeTicket } from "../../src/lib/tickets/snooze";
 import { snoozeWakeHandler } from "../../src/lib/worker/jobs/snooze-wake";
 import { ADMIN_EMAIL } from "./global-setup";
 import { createTicket, orgId, prisma } from "./support/db";
@@ -218,6 +219,39 @@ test.describe("Snooze times in the viewer's time zone", () => {
     await expect(snoozedChipTrigger(page)).toContainText(`Snoozed until ${local}`);
     await expect(snoozedChipTrigger(page)).toHaveAccessibleName(
       `Snoozed until ${local}. Change or wake.`,
+    );
+  });
+
+  test("the feed's event time tooltip gives the full time in the viewer's zone (review UI-WR-02)", async ({
+    page,
+  }) => {
+    const ticket = await seedTicket("tz-feed");
+    const admin = await prisma.user.findFirstOrThrow({ where: { email: ADMIN_EMAIL } });
+    const snoozed = await snoozeTicket(
+      prisma,
+      { userId: admin.id, orgId },
+      { ticketId: ticket.id, until: deadline() },
+    );
+    expect(snoozed.ok).toBe(true);
+    const event = await prisma.ticketAuditEvent.findFirstOrThrow({
+      where: { ticketId: ticket.id, action: "SNOOZED" },
+    });
+    const full = new Intl.DateTimeFormat("en-US", {
+      ...SHORT,
+      year: "numeric",
+      timeZone: ZONE,
+      timeZoneName: "short",
+    }).format(event.createdAt);
+
+    await open(page, `/tickets/${ticket.id}`);
+    const row = page
+      .getByRole("list", { name: "Ticket activity" })
+      .locator(":scope > li")
+      .filter({ hasText: "snoozed this ticket until" });
+    await expect(row).toHaveCount(1);
+    await expect(row.locator(`time[datetime="${event.createdAt.toISOString()}"]`)).toHaveAttribute(
+      "title",
+      full,
     );
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react";
 
 // UI-SPEC 4a (D-12): times are stored in UTC and shown in the viewer's browser time zone. The
 // server render and the first client render use the UTC form so hydration matches; after mount
@@ -70,6 +70,21 @@ export function LocalDateTime({ value, className }: { value: Date | string; clas
   return (
     <time dateTime={iso} title={local?.title ?? formatFull(date, "UTC")} className={className}>
       {local?.text ?? formatUtc(date)}
+    </time>
+  );
+}
+
+/**
+ * A `<time>` whose text is rendered by the caller (the feed's relative time) and whose title
+ * holds the full time: UTC before mount, the viewer's zone after (UI-SPEC Surface 6 and 4a,
+ * review UI-WR-02).
+ */
+export function TimeWithLocalTitle({ value, children }: { value: string; children: ReactNode }) {
+  const hydrated = useHydrated();
+  const date = new Date(value);
+  return (
+    <time dateTime={value} title={hydrated ? formatFull(date) : formatFull(date, "UTC")}>
+      {children}
     </time>
   );
 }
