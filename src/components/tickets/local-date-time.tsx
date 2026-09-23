@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
 // UI-SPEC 4a (D-12): times are stored in UTC and shown in the viewer's browser time zone. The
 // server render and the first client render use the UTC form so hydration matches; after mount
@@ -29,6 +29,32 @@ function formatFull(date: Date, timeZone?: string): string {
     timeZone,
     timeZoneName: "short",
   }).format(date);
+}
+
+function subscribeNever() {
+  return () => {};
+}
+
+/**
+ * False on the server and during hydration, true afterwards. Text that is not the content of a
+ * `LocalDateTime` (an aria-label, a title) uses it to render the UTC form first, so hydration
+ * matches, and the viewer's zone after mount. React does not patch a mismatched attribute
+ * during hydration, so formatting such text in the render's own zone is wrong (review UI-WR-01).
+ */
+export function useHydrated(): boolean {
+  return useSyncExternalStore(
+    subscribeNever,
+    () => true,
+    () => false,
+  );
+}
+
+/** The text `LocalDateTime` shows for `value`: the UTC form before mount, local after (4a). */
+export function useLocalDateTimeText(value: Date | string | null): string | null {
+  const hydrated = useHydrated();
+  if (value === null) return null;
+  const date = typeof value === "string" ? new Date(value) : value;
+  return hydrated ? formatLocalDateTime(date) : formatUtc(date);
 }
 
 export function LocalDateTime({ value, className }: { value: Date | string; className?: string }) {

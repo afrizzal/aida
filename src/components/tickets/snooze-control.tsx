@@ -4,7 +4,11 @@ import { AlarmClock, Loader2, Sunrise } from "lucide-react";
 import { useId, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { snoozeTicketAction, wakeTicketAction } from "@/app/(app)/tickets/[id]/snooze-actions";
-import { formatLocalDateTime, LocalDateTime } from "@/components/tickets/local-date-time";
+import {
+  formatLocalDateTime,
+  LocalDateTime,
+  useLocalDateTimeText,
+} from "@/components/tickets/local-date-time";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -114,6 +118,8 @@ export function SnoozeControl({
 }: SnoozeControlProps) {
   const isSnoozed = snoozedUntil !== null;
   const isClosed = status === "CLOSED";
+  // The chip's aria-label, from the same hydration-safe text as the chip (review UI-WR-01).
+  const snoozedText = useLocalDateTimeText(snoozedUntil);
   const [open, setOpen] = useState(false);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [zone, setZone] = useState("");
@@ -254,7 +260,7 @@ export function SnoozeControl({
         {isSnoozed ? (
           <button
             type="button"
-            aria-label={`Snoozed until ${formatLocalDateTime(new Date(snoozedUntil))}. Change or wake.`}
+            aria-label={`Snoozed until ${snoozedText}. Change or wake.`}
             className="rounded-4xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
             <SnoozedChip until={snoozedUntil} />

@@ -181,6 +181,47 @@ test.describe("Snooze", () => {
   });
 });
 
+// UI-SPEC 4a (D-12), review UI-WR-01 and UI-WR-02: the browser is in Asia/Jakarta (UTC+7, no
+// daylight saving). The E2E server may run in another zone (CI and containers run in UTC), so
+// every assertion is what the browser user sees after mount, in the browser's zone.
+test.describe("Snooze times in the viewer's time zone", () => {
+  const ZONE = "Asia/Jakarta";
+  test.use({ timezoneId: ZONE });
+
+  const SHORT: Intl.DateTimeFormatOptions = {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  };
+
+  /** Two days ahead at 02:00 UTC, which is 09:00 in Jakarta. */
+  function deadline() {
+    const at = new Date();
+    at.setUTCDate(at.getUTCDate() + 2);
+    at.setUTCHours(2, 0, 0, 0);
+    return at;
+  }
+
+  test("the snoozed chip's accessible name gives the deadline in the viewer's zone (review UI-WR-01)", async ({
+    page,
+  }) => {
+    const ticket = await seedTicket("tz-chip");
+    const until = deadline();
+    await prisma.ticket.update({ where: { id: ticket.id }, data: { snoozedUntil: until } });
+    const local = new Intl.DateTimeFormat("en-US", { ...SHORT, timeZone: ZONE }).format(until);
+    expect(local).toMatch(/, 09:00$/);
+
+    await open(page, `/tickets/${ticket.id}`);
+    await expect(snoozedChipTrigger(page)).toContainText(`Snoozed until ${local}`);
+    await expect(snoozedChipTrigger(page)).toHaveAccessibleName(
+      `Snoozed until ${local}. Change or wake.`,
+    );
+  });
+});
+
 // UI-SPEC Surface 5 (D-16): the Snoozed toggle in the filter row, its saved views and its
 // empty line.
 test.describe("Snoozed filter", () => {
