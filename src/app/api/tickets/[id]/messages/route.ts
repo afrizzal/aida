@@ -138,9 +138,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
       // Pitfall 5: clear at-risk/breach in the SAME write as stamping firstRespondedAt —
       // the sla-flag worker job is one-directional (only ever sets these flags).
-      if (mode === "public" && !ticket.firstRespondedAt) {
-        await tx.ticket.update({
-          where: { id: ticketId },
+      // Review WR-04: decided by the write itself under the row lock, never by the pre-read
+      // above (taken before the lock), so a second concurrent first reply that waited on the
+      // lock keeps the first stamp instead of overwriting it.
+      if (mode === "public") {
+        await tx.ticket.updateMany({
+          where: { id: ticketId, organizationId: orgId, firstRespondedAt: null },
           data: { firstRespondedAt: new Date(), isAtRisk: false, isBreached: false },
         });
       }

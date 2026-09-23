@@ -947,4 +947,64 @@ describe("POST /api/tickets/{id}/messages on a merged source (review C1, C7, R3-
     expect(routeEnv.sends).toEqual([]);
     expect(await storedFiles(orgId)).toEqual([]);
   });
+
+  it("two concurrent first public replies keep the first firstRespondedAt stamp (review WR-04)", async () => {
+    const { t } = await mergedPair();
+    expect(
+      (await prisma.ticket.findUniqueOrThrow({ where: { id: t.id } })).firstRespondedAt,
+    ).toBeNull();
+    const pids = [deferred<number>(), deferred<number>()];
+    let starts = 0;
+    let locks = 0;
+    const firstHeld = deferred<void>();
+    const releaseFirst = deferred<void>();
+    const committedStamp = deferred<Date | null>();
+    setAgentMessageObserverForTests({
+      onTransactionStart: async (tx) => {
+        const slot = pids[starts++];
+        slot?.resolve(await backendPid(tx));
+      },
+      afterLock: async (tx) => {
+        if (locks++ === 0) {
+          firstHeld.resolve();
+          await releaseFirst.promise;
+          return;
+        }
+        // The second reply holds the row lock after the first committed: the stamp it reads
+        // here is the first reply's.
+        const rows = await tx.$queryRaw<{ firstRespondedAt: Date | null }[]>`
+          SELECT "firstRespondedAt" FROM "Ticket" WHERE id = ${t.id}
+        `;
+        const stamp = rows[0]?.firstRespondedAt ?? null;
+        committedStamp.resolve(stamp);
+        // A later stamp must differ at millisecond precision; this waits on database round
+        // trips, not on a timer.
+        while (stamp && Date.now() <= stamp.getTime()) await tx.$queryRaw`SELECT 1`;
+      },
+    });
+
+    const first = post(t.id, "public", "First reply one", []);
+    first.catch(() => {});
+    await firstHeld.promise;
+    // The second reply's own pre-read sees firstRespondedAt null: the first is uncommitted.
+    const second = post(t.id, "public", "First reply two", []);
+    second.catch(() => {});
+    await waitForBlockedBy(prisma, await pids[0].promise, [await pids[1].promise]);
+    releaseFirst.resolve();
+
+    expect((await first).status).toBe(200);
+    expect((await second).status).toBe(200);
+    const stamp = await committedStamp.promise;
+    expect(stamp).toBeInstanceOf(Date);
+    const after = await prisma.ticket.findUniqueOrThrow({
+      where: { id: t.id },
+      select: { firstRespondedAt: true },
+    });
+    expect(after.firstRespondedAt?.toISOString()).toBe(stamp?.toISOString());
+    expect(
+      await prisma.message.count({
+        where: { ticketId: t.id, bodyMarkdown: { startsWith: "First reply" } },
+      }),
+    ).toBe(2);
+  });
 });
