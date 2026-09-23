@@ -79,7 +79,10 @@ export default async function StatusPage({ params }: StatusPageProps) {
           role="note"
           className="mb-4 flex items-start gap-2 rounded-lg border border-border/70 bg-muted p-4 text-[13px] text-foreground"
         >
-          <Merge aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          {/* A 20px box, the height of one 13px line, aligns the icon (review UI-IN-05). */}
+          <span className="flex h-5 shrink-0 items-center">
+            <Merge aria-hidden className="size-4 text-muted-foreground" />
+          </span>
           <p className="min-w-0">
             This request was combined with another one of yours. New messages in the combined
             request, including any you send here, also appear on this page.

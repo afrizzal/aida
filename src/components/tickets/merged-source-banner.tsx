@@ -20,15 +20,20 @@ export function MergedSourceBanner({
   mergedAt: Date | null;
 }) {
   const date = mergedAt ? <LocalDateTime value={mergedAt} /> : "an earlier date";
+  // UI-SPEC E5 (review UI-IN-05): the banner wraps, so on a narrow pane the button moves below
+  // the text instead of squeezing it (the text asks for 240px before the button wraps). The
+  // icon sits in a 20px box, the height of one 13px line, instead of an off-scale offset.
   return (
     <div
       role="note"
-      className="mx-6 mt-4 flex items-start gap-2 rounded-lg border border-border/70 bg-muted p-4 text-[13px] text-foreground"
+      className="mx-6 mt-4 flex flex-wrap items-start gap-2 rounded-lg border border-border/70 bg-muted p-4 text-[13px] text-foreground"
     >
-      <Merge aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+      <span className="flex h-5 shrink-0 items-center">
+        <Merge aria-hidden className="size-4 text-muted-foreground" />
+      </span>
       {target ? (
         <>
-          <p className="min-w-0 flex-1">
+          <p className="min-w-0 grow basis-60">
             This ticket was merged into{" "}
             <Link
               href={`/tickets/${target.id}`}
