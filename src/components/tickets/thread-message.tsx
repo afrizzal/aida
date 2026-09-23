@@ -63,7 +63,7 @@ export function ThreadMessage({
         isInternal && "border-warning/30 border-l-2 border-l-warning bg-warning/10",
       )}
     >
-      <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-1.5 gap-y-1 text-[12px] text-muted-foreground">
         {isInternal && (
           <>
             <Lock className="size-4 text-warning" />
