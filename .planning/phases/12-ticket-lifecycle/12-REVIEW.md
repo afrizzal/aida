@@ -108,5 +108,6 @@ Parts: this file (a, 9 files), `12-REVIEW-b.md` (b, server, 14 files), `12-REVIE
 | UI-WR-05 | c | Fix: add the missing Copywriting rows to `12-UI-SPEC.md` (additive) and use them verbatim from one module | F3 |
 | UI-WR-06 | c | Fix: picker returns the current link label; generic row when unknown | F3 |
 | UI-WR-07 | c | Fix: Back keeps the visible choice; a rule refusal clears the target | F3 |
-| UI-WR-08 | c | Fix: E2E for merge refusal and unknown, snooze refusal, unknown and validation, link removal failure, and an `Asia/Jakarta` time-zone block | F3 |
+| UI-WR-08 | c | Fix: E2E for merge refusal and unknown, snooze refusal, unknown and validation, and link removal failure (F3); the `Asia/Jakarta` time-zone block is the seen-failing test of UI-WR-01 and UI-WR-02 (F2) | F2, F3 |
+| UI-K34 | F1 report | Fix: follow-up of K34 in the UI. The link picker marks merged sources unavailable (reuse the row "Already merged into another ticket"), and "Link a ticket…" is disabled on a merged source with the reason "This ticket was already merged." (new UI-SPEC rows) | F3 |
 | UI-IN-02 | c | Fix: exhaustive switch, dead branch removed | F3 |
