@@ -163,6 +163,35 @@ test.describe("Ticket merge", () => {
     await expect(menuTrigger(page)).toBeFocused();
   });
 
+  test("a merge call that never returns moves focus to Keep tickets separate (review UI-WR-04)", async ({
+    page,
+  }) => {
+    const source = await seedTicket("unknown-source", "unknown");
+    const target = await seedTicket("unknown-target", "unknown");
+    const before = await snapshot([source.id, target.id]);
+
+    await openTicket(page, source.id);
+    const dialog = await openMergeDialog(page);
+    await (await pickTarget(page, target.number)).click();
+    await dialog.getByRole("button", { name: "Review merge" }).click();
+    await expect(
+      dialog.getByRole("heading", { name: `Merge #${source.number} into #${target.number}?` }),
+    ).toBeVisible();
+
+    // The server action posts to the page URL; aborting it makes the call reject (no code).
+    await page.route(`**/tickets/${source.id}`, (route) =>
+      route.request().method() === "POST" ? route.abort() : route.continue(),
+    );
+    await dialog.getByRole("button", { name: "Merge tickets" }).click();
+
+    await expect(dialog.getByRole("alert")).toHaveText(
+      "The result is not known. The tickets may have been merged. Refresh the page to check before you try again.",
+    );
+    await expect(dialog.getByRole("button", { name: "Merge tickets" })).toBeDisabled();
+    await expect(dialog.getByRole("button", { name: "Keep tickets separate" })).toBeFocused();
+    expect(await snapshot([source.id, target.id])).toEqual(before);
+  });
+
   test("a merged source shows the banner and no composer", async ({ page }) => {
     const source = await seedTicket("banner-source", "banner");
     const target = await seedTicket("banner-target", "banner");

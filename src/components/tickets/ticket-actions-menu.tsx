@@ -5,7 +5,7 @@
 // and on a ticket that has received merges (D-07); the server refuses both anyway.
 
 import { Ellipsis, Link2, Merge } from "lucide-react";
-import { useRef, useState } from "react";
+import { type RefObject, useRef, useState } from "react";
 import { LinkTicketDialog } from "@/components/tickets/link-ticket-dialog";
 import { MergeTicketDialog } from "@/components/tickets/merge-ticket-dialog";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,8 @@ export interface TicketActionsMenuProps {
   hasReceivedMerges: boolean;
   /** The current link label from this side, per other ticket id ("Merge replaces link"). */
   linkLabels: Record<string, string>;
+  /** A ref to the menu trigger, for a parent that also moves focus to it. */
+  triggerRef?: RefObject<HTMLButtonElement | null>;
 }
 
 /** The Copywriting "Merge unavailable" reason, or null when Merge is offered. */
@@ -45,11 +47,13 @@ export function TicketActionsMenu({
   mergedSource,
   hasReceivedMerges,
   linkLabels,
+  triggerRef: parentTriggerRef,
 }: TicketActionsMenuProps) {
   const [linkOpen, setLinkOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const mergeReason = mergeUnavailableReason(mergedSource, hasReceivedMerges);
-  const triggerRef = useRef<HTMLButtonElement>(null);
+  const ownTriggerRef = useRef<HTMLButtonElement>(null);
+  const triggerRef = parentTriggerRef ?? ownTriggerRef;
 
   // UI-SPEC Surface 1: both dialogs return focus to the menu trigger when they close. They are
   // opened from a menu item, not a DialogTrigger, so Radix has no trigger to return to and would

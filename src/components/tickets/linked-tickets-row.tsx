@@ -6,7 +6,7 @@
 
 import { Loader2, LockKeyhole, X } from "lucide-react";
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { type RefObject, useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { removeRelationAction } from "@/app/(app)/tickets/[id]/relation-actions";
 import { Button } from "@/components/ui/button";
@@ -61,19 +61,53 @@ export function relationErrorMessage(
 interface LinkedTicketsRowProps {
   ticketId: string;
   relations: LinkedTicketChip[];
+  /** Where focus goes when the last chip is removed and the row disappears. */
+  fallbackFocusRef?: RefObject<HTMLElement | null>;
 }
 
-export function LinkedTicketsRow({ ticketId, relations }: LinkedTicketsRowProps) {
+/** A removal that succeeded (focus the chip now at its place) or failed (focus its button). */
+type FocusRequest =
+  | { kind: "removed"; relationId: string; index: number }
+  | { kind: "failed"; relationId: string };
+
+export function LinkedTicketsRow({ ticketId, relations, fallbackFocusRef }: LinkedTicketsRowProps) {
   const [expanded, setExpanded] = useState(false);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null);
   const [, startTransition] = useTransition();
+  const sectionRef = useRef<HTMLElement>(null);
+
+  // The focused remove button is disabled during the call and leaves with its chip, so focus
+  // would fall to <body> (review UI-WR-04). After a removal, focus the link of the chip that
+  // took its place (or the one before it); with no chip left, the fallback. After a failure,
+  // focus the same remove button again.
+  useEffect(() => {
+    if (focusRequest === null || pendingId !== null) return;
+    const section = sectionRef.current;
+    if (focusRequest.kind === "failed") {
+      section
+        ?.querySelector<HTMLButtonElement>(
+          `button[data-relation-id="${CSS.escape(focusRequest.relationId)}"]`,
+        )
+        ?.focus();
+      setFocusRequest(null);
+      return;
+    }
+    // Wait for the refreshed list without the removed chip.
+    if (relations.some((r) => r.relationId === focusRequest.relationId)) return;
+    const links = section ? Array.from(section.querySelectorAll<HTMLElement>("li a[href]")) : [];
+    const next = links[Math.min(focusRequest.index, links.length - 1)];
+    if (next) next.focus();
+    else fallbackFocusRef?.current?.focus();
+    setFocusRequest(null);
+  }, [focusRequest, pendingId, relations, fallbackFocusRef]);
 
   if (relations.length === 0) return null;
 
   const visible = expanded ? relations : relations.slice(0, VISIBLE_CHIP_LIMIT);
 
-  function handleRemove(chip: LinkedTicketChip) {
+  function handleRemove(chip: LinkedTicketChip, index: number) {
     setError(null);
     setPendingId(chip.relationId);
     startTransition(async () => {
@@ -81,14 +115,17 @@ export function LinkedTicketsRow({ ticketId, relations }: LinkedTicketsRowProps)
         const result = await removeRelationAction(ticketId, chip.relationId);
         if (result.ok) {
           toast.success("Link removed.");
+          setFocusRequest({ kind: "removed", relationId: chip.relationId, index });
         } else {
           setError(relationErrorMessage(result.error));
+          setFocusRequest({ kind: "failed", relationId: chip.relationId });
         }
       } catch {
         // No returned code: the outcome is not known (P11 D2).
         setError(
           "The result is not known. The link may have been saved. Refresh the page to check before you try again.",
         );
+        setFocusRequest({ kind: "failed", relationId: chip.relationId });
       } finally {
         setPendingId(null);
       }
@@ -98,6 +135,7 @@ export function LinkedTicketsRow({ ticketId, relations }: LinkedTicketsRowProps)
   return (
     <TooltipProvider>
       <section
+        ref={sectionRef}
         aria-labelledby="linked-tickets-heading"
         className="flex flex-wrap items-center gap-2 border-b border-border/70 px-6 py-2"
       >
@@ -105,7 +143,7 @@ export function LinkedTicketsRow({ ticketId, relations }: LinkedTicketsRowProps)
           Linked tickets
         </h2>
         <ul className="contents">
-          {visible.map((chip) => {
+          {visible.map((chip, index) => {
             const pending = pendingId === chip.relationId;
             return (
               <li
@@ -149,8 +187,9 @@ export function LinkedTicketsRow({ ticketId, relations }: LinkedTicketsRowProps)
                     size="icon"
                     className="size-5 shrink-0"
                     aria-label={`Remove the link "${chip.label} #${chip.number}"`}
+                    data-relation-id={chip.relationId}
                     disabled={pendingId !== null}
-                    onClick={() => handleRemove(chip)}
+                    onClick={() => handleRemove(chip, index)}
                   >
                     {pending ? (
                       <Loader2 className="size-3 animate-spin" />

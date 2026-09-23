@@ -124,6 +124,7 @@ function MergeFlow({ source, linkLabels, pending, onPendingChange, onClose }: Me
   const [failure, setFailure] = useState<MergeFailure | null>(null);
   const [, startTransition] = useTransition();
   const backRef = useRef<HTMLButtonElement>(null);
+  const keepRef = useRef<HTMLButtonElement>(null);
 
   const eligible = target !== null && pickerReason(target, "merge") === null;
 
@@ -131,8 +132,11 @@ function MergeFlow({ source, linkLabels, pending, onPendingChange, onClose }: Me
   useEffect(() => {
     if (step === "confirm") backRef.current?.focus();
   }, [step]);
+  // After a rejected call, "Merge tickets" and "Back" stay disabled, so the only way on, "Keep
+  // tickets separate", takes focus instead of leaving it on <body> (review UI-WR-04).
   useEffect(() => {
     if (failure?.kind === "refused" && failure.rule) backRef.current?.focus();
+    if (failure?.kind === "unknown") keepRef.current?.focus();
   }, [failure]);
 
   function handleMerge() {
@@ -300,6 +304,7 @@ function MergeFlow({ source, linkLabels, pending, onPendingChange, onClose }: Me
           Back
         </Button>
         <Button
+          ref={keepRef}
           type="button"
           variant="outline"
           size="sm"

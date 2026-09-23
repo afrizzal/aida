@@ -102,6 +102,8 @@ test.describe("Ticket relations", () => {
       .click();
     await expect(page.getByText("Link removed.")).toBeVisible();
     await expect(linkedRow(page)).toHaveCount(0);
+    // Review UI-WR-04: the row is gone with its last chip, so focus goes to the menu trigger.
+    await expect(menuTrigger(page)).toBeFocused();
 
     await expect
       .poll(() =>
@@ -193,7 +195,68 @@ test.describe("Ticket relations", () => {
       "This link would make a ticket its own parent or ancestor. Pick another ticket.",
     );
     await expect(dialog).toBeVisible();
+    // Review UI-WR-04: the refusal hands focus back to the picker, the first field to change.
+    await expect(dialog.getByPlaceholder("Search by number or subject…")).toBeFocused();
     expect(await relationCounts(ids)).toEqual(before);
+  });
+
+  test("removing one of two links moves focus to the next link (review UI-WR-04)", async ({
+    page,
+  }) => {
+    const a = await seedTicket("next-a");
+    const b = await seedTicket("next-b");
+    const c = await seedTicket("next-c");
+    const actor = await adminActor();
+    for (const other of [b, c]) {
+      const stored = await addRelation(prisma, actor, {
+        ticketId: a.id,
+        otherTicketId: other.id,
+        choice: "is related to",
+      });
+      expect(stored.ok).toBe(true);
+    }
+
+    await openTicket(page, a.id);
+    await expect(linkedRow(page).getByRole("listitem")).toHaveCount(2);
+    await linkedRow(page)
+      .getByRole("button", { name: `Remove the link "Related to #${b.number}"` })
+      .click();
+    await expect(page.getByText("Link removed.")).toBeVisible();
+    await expect(linkedRow(page).getByRole("listitem")).toHaveCount(1);
+    await expect(
+      linkedRow(page).getByRole("link", { name: new RegExp(`#${c.number}\\b`) }),
+    ).toBeFocused();
+  });
+
+  test("a removal call that never returns keeps focus on its remove button (review UI-WR-04)", async ({
+    page,
+  }) => {
+    const a = await seedTicket("unknown-remove-a");
+    const b = await seedTicket("unknown-remove-b");
+    const stored = await addRelation(prisma, await adminActor(), {
+      ticketId: a.id,
+      otherTicketId: b.id,
+      choice: "is related to",
+    });
+    expect(stored.ok).toBe(true);
+
+    await openTicket(page, a.id);
+    // The server action posts to the page URL; aborting it makes the call reject (no code).
+    await page.route(`**/tickets/${a.id}`, (route) =>
+      route.request().method() === "POST" ? route.abort() : route.continue(),
+    );
+    const remove = linkedRow(page).getByRole("button", {
+      name: `Remove the link "Related to #${b.number}"`,
+    });
+    await remove.click();
+    await expect(linkedRow(page).getByRole("alert")).toBeVisible();
+    await expect(remove).toBeEnabled();
+    await expect(remove).toBeFocused();
+    expect(
+      await prisma.ticketRelation.count({
+        where: { OR: [{ fromTicketId: a.id }, { toTicketId: a.id }] },
+      }),
+    ).toBe(1);
   });
 
   test("closing the Link dialog returns focus to the menu trigger (review UI-WR-03)", async ({

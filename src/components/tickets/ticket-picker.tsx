@@ -7,7 +7,7 @@
 // still refuses every rule (D-07).
 
 import { Check, Loader2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { type Ref, useEffect, useRef, useState } from "react";
 import { StatusChip } from "@/components/tickets/status-chip";
 import {
   Command,
@@ -60,6 +60,8 @@ interface TicketPickerProps {
   selected: PickerRow | null;
   onSelect(row: PickerRow): void;
   disabled?: boolean;
+  /** The search input, so a dialog can hand focus back to it after a refusal. */
+  inputRef?: Ref<HTMLInputElement>;
 }
 
 export function TicketPicker({
@@ -68,6 +70,7 @@ export function TicketPicker({
   selected,
   onSelect,
   disabled,
+  inputRef,
 }: TicketPickerProps) {
   const [query, setQuery] = useState("");
   const [outcome, setOutcome] = useState<SearchOutcome | null>(null);
@@ -115,6 +118,7 @@ export function TicketPicker({
   return (
     <Command shouldFilter={false} className="rounded-lg border border-border/70">
       <CommandInput
+        ref={inputRef}
         autoFocus
         aria-label="Ticket"
         value={query}

@@ -5,7 +5,7 @@
 // refusal code maps to exactly one Copywriting "Link error" row.
 
 import { Loader2 } from "lucide-react";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { addRelationAction } from "@/app/(app)/tickets/[id]/relation-actions";
 import { relationErrorMessage } from "@/components/tickets/linked-tickets-row";
@@ -88,8 +88,15 @@ function LinkTicketForm({ ticketId, ticketNumber, onPendingChange, onDone }: Lin
   const [selected, setSelected] = useState<PickerRow | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const pickerInputRef = useRef<HTMLInputElement>(null);
 
   const choice = LINK_CHOICES.find((c) => c.label === choiceLabel) ?? DEFAULT_LINK_CHOICE;
+
+  // The picker and "Link tickets" are disabled while the call runs, so focus is lost. When it
+  // fails, focus goes back to the picker, the first field to change (review UI-WR-04).
+  useEffect(() => {
+    if (error !== null && !pending) pickerInputRef.current?.focus();
+  }, [error, pending]);
   const canSubmit = selected !== null && pickerReason(selected, "link") === null && !pending;
 
   function handleSubmit() {
@@ -165,6 +172,7 @@ function LinkTicketForm({ ticketId, ticketNumber, onPendingChange, onDone }: Lin
             purpose="link"
             selected={selected}
             disabled={pending}
+            inputRef={pickerInputRef}
             onSelect={(row) => {
               setSelected(row);
               setError(null);

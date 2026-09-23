@@ -187,6 +187,8 @@ export function TicketMetaHeader({
   const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false);
   const focusStatusValue = useRef(false);
   const focusAssigneeValue = useRef(false);
+  // The "More ticket actions" trigger, shared with the Linked tickets row (review UI-WR-04).
+  const actionsTriggerRef = useRef<HTMLButtonElement>(null);
   const statusMenuRef = useCallback(
     (node: HTMLDivElement | null) => focusCurrentValue(node, focusStatusValue),
     [],
@@ -402,6 +404,7 @@ export function TicketMetaHeader({
             mergedSource={mergedSource}
             hasReceivedMerges={hasReceivedMerges}
             linkLabels={Object.fromEntries(relations.map((r) => [r.otherTicketId, r.label]))}
+            triggerRef={actionsTriggerRef}
           />
         </div>
       </div>
@@ -530,7 +533,13 @@ export function TicketMetaHeader({
         ))}
       </div>
 
-      {relations.length > 0 && <LinkedTicketsRow ticketId={ticket.id} relations={relations} />}
+      {/* Always mounted (it renders nothing without relations), so after the last link is
+          removed it can still move focus to the actions menu trigger (review UI-WR-04). */}
+      <LinkedTicketsRow
+        ticketId={ticket.id}
+        relations={relations}
+        fallbackFocusRef={actionsTriggerRef}
+      />
     </div>
   );
 }

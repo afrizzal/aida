@@ -57,6 +57,8 @@ async function snoozeInThreeHours(page: Page) {
     page.getByText(/^Snoozed until .*\. It is hidden from the inbox until then\.$/),
   ).toBeVisible();
   await expect(snoozedChipTrigger(page)).toBeVisible();
+  // Review UI-WR-04: the trigger is one element, so focus survives the revalidation.
+  await expect(snoozedChipTrigger(page)).toBeFocused();
 }
 
 test.describe("Snooze", () => {
@@ -130,6 +132,7 @@ test.describe("Snooze", () => {
     await expect(page.getByText("Ticket woken.")).toBeVisible();
     await expect(snoozedChipTrigger(page)).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Snooze", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Snooze", exact: true })).toBeFocused();
     const stored = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
     expect(stored.snoozedUntil).toBeNull();
   });
@@ -170,6 +173,7 @@ test.describe("Snooze", () => {
       "aria-disabled",
       "true",
     );
+    await expect(page.getByRole("button", { name: `Snooze. ${CLOSED_REASON}` })).toBeFocused();
 
     const stored = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
     expect(stored.status).toBe("CLOSED");
@@ -179,6 +183,24 @@ test.describe("Snooze", () => {
     });
     expect(woken).toHaveLength(1);
     expect(woken[0]?.actorType).toBe("USER");
+  });
+
+  test("a refused snooze keeps focus on the chosen preset (review UI-WR-04)", async ({ page }) => {
+    const ticket = await seedTicket("refused-focus");
+    await open(page, `/tickets/${ticket.id}`);
+    await page.getByRole("button", { name: "Snooze", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    const preset = dialog.getByRole("button", { name: /^In 3 hours/ });
+    await expect(preset).toBeFocused();
+
+    // Closed behind the agent's back: the server refuses, the page is not revalidated.
+    await prisma.ticket.update({ where: { id: ticket.id }, data: { status: "CLOSED" } });
+    await preset.click();
+    await expect(dialog.getByRole("alert")).toHaveText(CLOSED_REASON);
+    await expect(preset).toBeEnabled();
+    await expect(preset).toBeFocused();
+    const stored = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+    expect(stored.snoozedUntil).toBeNull();
   });
 });
 

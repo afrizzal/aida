@@ -1,7 +1,7 @@
 "use client";
 
 import { AlarmClock, Loader2, Sunrise } from "lucide-react";
-import { useId, useRef, useState, useTransition } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { snoozeTicketAction, wakeTicketAction } from "@/app/(app)/tickets/[id]/snooze-actions";
 import {
@@ -10,13 +10,14 @@ import {
   useLocalDateTimeText,
 } from "@/components/tickets/local-date-time";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { TicketStatus } from "@/generated/prisma/client";
 import type { SnoozeErrorCode } from "@/lib/tickets/snooze";
+import { cn } from "@/lib/utils";
 
 // UI-SPEC 4b to 4d (AIDA-54, D-12). Every time is chosen and shown in the browser's zone and
 // sent as a UTC instant; the server checks every bound again (12-05), so the client checks
@@ -32,6 +33,10 @@ const MERGED_REASON = "This ticket was merged, so it can't be snoozed.";
 
 const CHIP_CLASSES =
   "h-5 gap-1 border border-border bg-muted px-2 py-0 font-normal text-[12px] text-muted-foreground";
+
+/** The trigger while snoozed: a bare button around the chip (UI-SPEC 4b). */
+const CHIP_TRIGGER_CLASSES =
+  "rounded-4xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
 /** UI-SPEC Copywriting "Snooze error: …" rows; one row per server code, never raw text. */
 function snoozeErrorCopy(code: SnoozeErrorCode): string {
@@ -130,8 +135,11 @@ export function SnoozeControl({
   const [callout, setCallout] = useState<string | null>(null);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  const firstPresetRef = useRef<HTMLButtonElement>(null);
-  const wakeRef = useRef<HTMLButtonElement>(null);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+  // The control that submitted, so focus can go back to it after a failure (review UI-WR-04).
+  const [refocusKey, setRefocusKey] = useState<string | null>(null);
+  const controlRefs = useRef(new Map<string, HTMLButtonElement>());
+  const calloutRef = useRef<HTMLDivElement>(null);
   const headingId = useId();
   const zoneLineId = useId();
   const dateId = useId();
@@ -147,7 +155,25 @@ export function SnoozeControl({
   const snoozeBlocked = isClosed || mergedSource;
   const busy = isPending || pendingKey !== null;
 
+  // Every control is disabled while a call runs, so the clicked one loses focus. After a failure
+  // focus goes back to it, or to the callout when it stays disabled (review UI-WR-04).
+  useEffect(() => {
+    if (refocusKey === null || busy) return;
+    const control = controlRefs.current.get(refocusKey);
+    if (control && !control.disabled) control.focus();
+    else calloutRef.current?.focus();
+    setRefocusKey(null);
+  }, [refocusKey, busy]);
+
+  function registerControl(key: string) {
+    return (node: HTMLButtonElement | null) => {
+      if (node) controlRefs.current.set(key, node);
+      else controlRefs.current.delete(key);
+    };
+  }
+
   function handleOpenChange(next: boolean) {
+    if (next && disabledReason) return;
     if (busy && !next) return;
     if (next) {
       const now = new Date();
@@ -178,9 +204,11 @@ export function SnoozeControl({
           );
         } else {
           setCallout(snoozeErrorCopy(result.error));
+          setRefocusKey(key);
         }
       } catch {
         setCallout(OUTCOME_UNKNOWN);
+        setRefocusKey(key);
       } finally {
         setPendingKey(null);
       }
@@ -198,9 +226,11 @@ export function SnoozeControl({
           toast.success("Ticket woken.");
         } else {
           setCallout(snoozeErrorCopy(result.error));
+          setRefocusKey("wake");
         }
       } catch {
         setCallout(OUTCOME_UNKNOWN);
+        setRefocusKey("wake");
       } finally {
         setPendingKey(null);
       }
@@ -228,175 +258,190 @@ export function SnoozeControl({
     submitSnooze("custom", at);
   }
 
-  if (disabledReason) {
-    return (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              aria-disabled="true"
-              aria-label={`Snooze. ${disabledReason}`}
-              className="gap-2 text-[13px] text-muted-foreground aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-              onClick={(event) => event.preventDefault()}
-            >
-              <AlarmClock aria-hidden className="size-4" />
-              Snooze
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent className="max-w-[240px] text-[12px]">{disabledReason}</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    );
-  }
-
   const spinner = <Loader2 aria-hidden className="size-4 animate-spin" />;
+  const triggerLabel = disabledReason
+    ? `Snooze. ${disabledReason}`
+    : isSnoozed
+      ? `Snoozed until ${snoozedText}. Change or wake.`
+      : undefined;
 
+  // One <button> in every state (Snooze, the snoozed chip, disabled): snoozing, waking or a
+  // status change revalidates the page and only the content changes, so the node keeps focus
+  // and Radix returns focus to a trigger that still exists (review UI-WR-04). The tooltip only
+  // opens while the trigger is disabled, to give the reason.
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger asChild>
-        {isSnoozed ? (
-          <button
-            type="button"
-            aria-label={`Snoozed until ${snoozedText}. Change or wake.`}
-            className="rounded-4xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-          >
-            <SnoozedChip until={snoozedUntil} />
-          </button>
-        ) : (
-          <Button type="button" variant="ghost" size="sm" className="gap-2 text-[13px]">
-            <AlarmClock aria-hidden className="size-4" />
-            Snooze
-          </Button>
-        )}
-      </PopoverTrigger>
-      <PopoverContent
-        align="end"
-        aria-labelledby={headingId}
-        className="w-[320px] max-w-[calc(100vw-16px)] space-y-4 p-4"
-        onOpenAutoFocus={(event) => {
-          event.preventDefault();
-          (snoozeBlocked ? wakeRef.current : firstPresetRef.current)?.focus();
-        }}
-        onEscapeKeyDown={(event) => {
-          if (busy) event.preventDefault();
-        }}
-        onInteractOutside={(event) => {
-          if (busy) event.preventDefault();
-        }}
+    <TooltipProvider>
+      <Tooltip
+        open={disabledReason !== null && tooltipOpen}
+        onOpenChange={(next) => setTooltipOpen(next && disabledReason !== null)}
       >
-        {callout && (
-          <div
-            role="alert"
-            className="rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-[13px] text-destructive"
-          >
-            {callout}
-          </div>
-        )}
-
-        <div className="space-y-1">
-          <h2 id={headingId} className="font-semibold text-[15px] leading-tight">
-            {isSnoozed ? "Change snooze" : "Snooze until"}
-          </h2>
-          <p className="text-[12px] text-muted-foreground">
-            The ticket leaves the inbox until then. A reply from the customer brings it back sooner.
-          </p>
-        </div>
-
-        {snoozeBlocked && <p className="text-[12px] text-muted-foreground">{CLOSED_REASON}</p>}
-
-        <ul className="space-y-1">
-          {presets.map((preset, index) => (
-            <li key={preset.label}>
-              <Button
-                ref={index === 0 ? firstPresetRef : undefined}
+        <Popover open={open} onOpenChange={handleOpenChange}>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>
+              <button
                 type="button"
-                variant="ghost"
-                disabled={busy || snoozeBlocked}
-                onClick={() => submitSnooze(preset.label, preset.at)}
-                className="flex h-8 w-full items-center justify-between gap-2 px-2 font-normal text-[13px]"
+                aria-label={triggerLabel}
+                aria-disabled={disabledReason ? "true" : undefined}
+                onClick={(event) => {
+                  if (disabledReason) event.preventDefault();
+                }}
+                className={
+                  isSnoozed
+                    ? CHIP_TRIGGER_CLASSES
+                    : cn(
+                        buttonVariants({ variant: "ghost", size: "sm" }),
+                        "gap-2 text-[13px]",
+                        disabledReason &&
+                          "text-muted-foreground aria-disabled:cursor-not-allowed aria-disabled:opacity-50",
+                      )
+                }
               >
-                <span className="flex items-center gap-2">
-                  {pendingKey === preset.label && spinner}
-                  {pendingKey === preset.label ? "Saving…" : preset.label}
-                </span>
-                <span className="text-[12px] text-muted-foreground tabular-nums">
-                  {formatLocalDateTime(preset.at)}
-                </span>
-              </Button>
-            </li>
-          ))}
-        </ul>
-
-        <div className="space-y-2">
-          <p className="font-semibold text-[13px]">Pick a date and time</p>
-          <div className="flex gap-2">
-            <Label htmlFor={dateId} className="sr-only">
-              Date
-            </Label>
-            <Input
-              id={dateId}
-              type="date"
-              min={bounds.min}
-              max={bounds.max}
-              value={dateValue}
-              onChange={(event) => setDateValue(event.target.value)}
-              disabled={busy || snoozeBlocked}
-              aria-describedby={zoneLineId}
-              className="h-8 text-[13px]"
-            />
-            <Label htmlFor={timeId} className="sr-only">
-              Time
-            </Label>
-            <Input
-              id={timeId}
-              type="time"
-              step={300}
-              value={timeValue}
-              onChange={(event) => setTimeValue(event.target.value)}
-              disabled={busy || snoozeBlocked}
-              aria-describedby={zoneLineId}
-              className="h-8 text-[13px]"
-            />
-          </div>
-          <p id={zoneLineId} className="break-words text-[12px] text-muted-foreground">
-            Times are in your time zone: {zone}.
-          </p>
-          {fieldError && <p className="text-[12px] text-destructive">{fieldError}</p>}
-          <Button
-            type="button"
-            size="sm"
-            disabled={busy || snoozeBlocked || !dateValue || !timeValue}
-            onClick={submitCustom}
-            className="gap-2 text-[13px]"
+                {isSnoozed ? (
+                  <SnoozedChip until={snoozedUntil} />
+                ) : (
+                  <>
+                    <AlarmClock aria-hidden className="size-4" />
+                    Snooze
+                  </>
+                )}
+              </button>
+            </PopoverTrigger>
+          </TooltipTrigger>
+          <PopoverContent
+            align="end"
+            aria-labelledby={headingId}
+            className="w-[320px] max-w-[calc(100vw-16px)] space-y-4 p-4"
+            onOpenAutoFocus={(event) => {
+              event.preventDefault();
+              const first = snoozeBlocked ? "wake" : presets[0]?.label;
+              if (first) controlRefs.current.get(first)?.focus();
+            }}
+            onEscapeKeyDown={(event) => {
+              if (busy) event.preventDefault();
+            }}
+            onInteractOutside={(event) => {
+              if (busy) event.preventDefault();
+            }}
           >
-            {pendingKey === "custom" && spinner}
-            {pendingKey === "custom" ? "Saving…" : "Snooze ticket"}
-          </Button>
-        </div>
+            {callout && (
+              <div
+                ref={calloutRef}
+                role="alert"
+                tabIndex={-1}
+                className="rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-[13px] text-destructive"
+              >
+                {callout}
+              </div>
+            )}
 
-        {isSnoozed && (
-          <div className="space-y-2 border-border/70 border-t pt-4">
-            <p className="text-[13px]">
-              Snoozed until <LocalDateTime value={snoozedUntil} />.
-            </p>
-            <Button
-              ref={wakeRef}
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={busy}
-              onClick={submitWake}
-              className="gap-2 text-[13px]"
-            >
-              {pendingKey === "wake" ? spinner : <Sunrise aria-hidden className="size-4" />}
-              {pendingKey === "wake" ? "Saving…" : "Wake now"}
-            </Button>
-          </div>
+            <div className="space-y-1">
+              <h2 id={headingId} className="font-semibold text-[15px] leading-tight">
+                {isSnoozed ? "Change snooze" : "Snooze until"}
+              </h2>
+              <p className="text-[12px] text-muted-foreground">
+                The ticket leaves the inbox until then. A reply from the customer brings it back
+                sooner.
+              </p>
+            </div>
+
+            {snoozeBlocked && <p className="text-[12px] text-muted-foreground">{CLOSED_REASON}</p>}
+
+            <ul className="space-y-1">
+              {presets.map((preset) => (
+                <li key={preset.label}>
+                  <Button
+                    ref={registerControl(preset.label)}
+                    type="button"
+                    variant="ghost"
+                    disabled={busy || snoozeBlocked}
+                    onClick={() => submitSnooze(preset.label, preset.at)}
+                    className="flex h-8 w-full items-center justify-between gap-2 px-2 font-normal text-[13px]"
+                  >
+                    <span className="flex items-center gap-2">
+                      {pendingKey === preset.label && spinner}
+                      {pendingKey === preset.label ? "Saving…" : preset.label}
+                    </span>
+                    <span className="text-[12px] text-muted-foreground tabular-nums">
+                      {formatLocalDateTime(preset.at)}
+                    </span>
+                  </Button>
+                </li>
+              ))}
+            </ul>
+
+            <div className="space-y-2">
+              <p className="font-semibold text-[13px]">Pick a date and time</p>
+              <div className="flex gap-2">
+                <Label htmlFor={dateId} className="sr-only">
+                  Date
+                </Label>
+                <Input
+                  id={dateId}
+                  type="date"
+                  min={bounds.min}
+                  max={bounds.max}
+                  value={dateValue}
+                  onChange={(event) => setDateValue(event.target.value)}
+                  disabled={busy || snoozeBlocked}
+                  aria-describedby={zoneLineId}
+                  className="h-8 text-[13px]"
+                />
+                <Label htmlFor={timeId} className="sr-only">
+                  Time
+                </Label>
+                <Input
+                  id={timeId}
+                  type="time"
+                  step={300}
+                  value={timeValue}
+                  onChange={(event) => setTimeValue(event.target.value)}
+                  disabled={busy || snoozeBlocked}
+                  aria-describedby={zoneLineId}
+                  className="h-8 text-[13px]"
+                />
+              </div>
+              <p id={zoneLineId} className="break-words text-[12px] text-muted-foreground">
+                Times are in your time zone: {zone}.
+              </p>
+              {fieldError && <p className="text-[12px] text-destructive">{fieldError}</p>}
+              <Button
+                ref={registerControl("custom")}
+                type="button"
+                size="sm"
+                disabled={busy || snoozeBlocked || !dateValue || !timeValue}
+                onClick={submitCustom}
+                className="gap-2 text-[13px]"
+              >
+                {pendingKey === "custom" && spinner}
+                {pendingKey === "custom" ? "Saving…" : "Snooze ticket"}
+              </Button>
+            </div>
+
+            {isSnoozed && (
+              <div className="space-y-2 border-border/70 border-t pt-4">
+                <p className="text-[13px]">
+                  Snoozed until <LocalDateTime value={snoozedUntil} />.
+                </p>
+                <Button
+                  ref={registerControl("wake")}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={busy}
+                  onClick={submitWake}
+                  className="gap-2 text-[13px]"
+                >
+                  {pendingKey === "wake" ? spinner : <Sunrise aria-hidden className="size-4" />}
+                  {pendingKey === "wake" ? "Saving…" : "Wake now"}
+                </Button>
+              </div>
+            )}
+          </PopoverContent>
+        </Popover>
+        {disabledReason && (
+          <TooltipContent className="max-w-[240px] text-[12px]">{disabledReason}</TooltipContent>
         )}
-      </PopoverContent>
-    </Popover>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
