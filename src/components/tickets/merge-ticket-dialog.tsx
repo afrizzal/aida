@@ -61,6 +61,8 @@ interface MergeTicketDialogProps {
   linkLabels: Record<string, string>;
   open: boolean;
   onOpenChange(open: boolean): void;
+  /** Where focus goes when the dialog closes (the menu trigger, UI-SPEC Surface 1). */
+  onCloseAutoFocus?(event: Event): void;
 }
 
 export function MergeTicketDialog({
@@ -68,6 +70,7 @@ export function MergeTicketDialog({
   linkLabels,
   open,
   onOpenChange,
+  onCloseAutoFocus,
 }: MergeTicketDialogProps) {
   const [pending, setPending] = useState(false);
 
@@ -81,6 +84,7 @@ export function MergeTicketDialog({
       <DialogContent
         showCloseButton={false}
         className="sm:max-w-[560px]"
+        onCloseAutoFocus={onCloseAutoFocus}
         onEscapeKeyDown={(event) => {
           if (pending) event.preventDefault();
         }}

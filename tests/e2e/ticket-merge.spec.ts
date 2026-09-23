@@ -32,8 +32,12 @@ async function openTicket(page: Page, ticketId: string) {
     .toBe(200);
 }
 
+function menuTrigger(page: Page) {
+  return page.getByRole("button", { name: "More ticket actions" });
+}
+
 async function openMergeDialog(page: Page) {
-  await page.getByRole("button", { name: "More ticket actions" }).click();
+  await menuTrigger(page).click();
   await page.getByRole("menuitem", { name: /Merge into another ticket…/ }).click();
   const dialog = page.getByRole("dialog");
   await expect(
@@ -137,8 +141,26 @@ test.describe("Ticket merge", () => {
     ).toBeVisible();
     await dialog.getByRole("button", { name: "Keep tickets separate" }).click();
     await expect(dialog).toBeHidden();
+    await expect(menuTrigger(page)).toBeFocused();
     const after = await prisma.ticket.findUniqueOrThrow({ where: { id: source.id } });
     expect(after.mergedIntoTicketId).toBeNull();
+  });
+
+  test("closing the merge dialog returns focus to the menu trigger (review UI-WR-03)", async ({
+    page,
+  }) => {
+    const source = await seedTicket("focus-close", "focus-close");
+    await openTicket(page, source.id);
+
+    const dialog = await openMergeDialog(page);
+    await dialog.getByRole("button", { name: "Close" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(menuTrigger(page)).toBeFocused();
+
+    const again = await openMergeDialog(page);
+    await page.keyboard.press("Escape");
+    await expect(again).toBeHidden();
+    await expect(menuTrigger(page)).toBeFocused();
   });
 
   test("a merged source shows the banner and no composer", async ({ page }) => {

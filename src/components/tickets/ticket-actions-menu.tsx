@@ -5,7 +5,7 @@
 // and on a ticket that has received merges (D-07); the server refuses both anyway.
 
 import { Ellipsis, Link2, Merge } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { LinkTicketDialog } from "@/components/tickets/link-ticket-dialog";
 import { MergeTicketDialog } from "@/components/tickets/merge-ticket-dialog";
 import { Button } from "@/components/ui/button";
@@ -49,12 +49,27 @@ export function TicketActionsMenu({
   const [linkOpen, setLinkOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const mergeReason = mergeUnavailableReason(mergedSource, hasReceivedMerges);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  // UI-SPEC Surface 1: both dialogs return focus to the menu trigger when they close. They are
+  // opened from a menu item, not a DialogTrigger, so Radix has no trigger to return to and would
+  // leave focus on <body> (review UI-WR-03).
+  function returnFocusToTrigger(event: Event) {
+    event.preventDefault();
+    triggerRef.current?.focus();
+  }
 
   return (
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="size-8" aria-label="More ticket actions">
+          <Button
+            ref={triggerRef}
+            variant="ghost"
+            size="icon"
+            className="size-8"
+            aria-label="More ticket actions"
+          >
             <Ellipsis className="size-4" />
           </Button>
         </DropdownMenuTrigger>
@@ -84,6 +99,7 @@ export function TicketActionsMenu({
         ticketNumber={ticketNumber}
         open={linkOpen}
         onOpenChange={setLinkOpen}
+        onCloseAutoFocus={returnFocusToTrigger}
       />
 
       <MergeTicketDialog
@@ -96,6 +112,7 @@ export function TicketActionsMenu({
         linkLabels={linkLabels}
         open={mergeOpen}
         onOpenChange={setMergeOpen}
+        onCloseAutoFocus={returnFocusToTrigger}
       />
     </>
   );

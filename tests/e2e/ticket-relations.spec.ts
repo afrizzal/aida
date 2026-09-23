@@ -40,6 +40,10 @@ function linkedRow(page: Page) {
   return page.getByRole("region", { name: "Linked tickets" });
 }
 
+function menuTrigger(page: Page) {
+  return page.getByRole("button", { name: "More ticket actions" });
+}
+
 async function openLinkDialog(page: Page) {
   await page.getByRole("button", { name: "More ticket actions" }).click();
   await page.getByRole("menuitem", { name: "Link a ticket…" }).click();
@@ -134,6 +138,7 @@ test.describe("Ticket relations", () => {
 
     await expect(page.getByText("Link added.")).toBeVisible();
     await expect(dialog).toBeHidden();
+    await expect(menuTrigger(page)).toBeFocused();
     const chipOnA = linkedRow(page).getByRole("listitem");
     await expect(chipOnA).toContainText("Parent of");
     await expect(chipOnA.getByRole("link", { name: new RegExp(`#${b.number}\\b`) })).toBeVisible();
@@ -189,6 +194,23 @@ test.describe("Ticket relations", () => {
     );
     await expect(dialog).toBeVisible();
     expect(await relationCounts(ids)).toEqual(before);
+  });
+
+  test("closing the Link dialog returns focus to the menu trigger (review UI-WR-03)", async ({
+    page,
+  }) => {
+    const a = await seedTicket("focus-close-a");
+    await openTicket(page, a.id);
+
+    const dialog = await openLinkDialog(page);
+    await dialog.getByRole("button", { name: "Close" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(menuTrigger(page)).toBeFocused();
+
+    const again = await openLinkDialog(page);
+    await page.keyboard.press("Escape");
+    await expect(again).toBeHidden();
+    await expect(menuTrigger(page)).toBeFocused();
   });
 
   test("the picker asks for more input and reports no match", async ({ page }) => {

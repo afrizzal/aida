@@ -37,6 +37,8 @@ interface LinkTicketDialogProps {
   ticketNumber: number;
   open: boolean;
   onOpenChange(open: boolean): void;
+  /** Where focus goes when the dialog closes (the menu trigger, UI-SPEC Surface 1). */
+  onCloseAutoFocus?(event: Event): void;
 }
 
 export function LinkTicketDialog({
@@ -44,6 +46,7 @@ export function LinkTicketDialog({
   ticketNumber,
   open,
   onOpenChange,
+  onCloseAutoFocus,
 }: LinkTicketDialogProps) {
   const [pending, setPending] = useState(false);
 
@@ -54,7 +57,11 @@ export function LinkTicketDialog({
         if (!pending) onOpenChange(next);
       }}
     >
-      <DialogContent showCloseButton={false} className="sm:max-w-[560px]">
+      <DialogContent
+        showCloseButton={false}
+        className="sm:max-w-[560px]"
+        onCloseAutoFocus={onCloseAutoFocus}
+      >
         {open && (
           <LinkTicketForm
             ticketId={ticketId}
