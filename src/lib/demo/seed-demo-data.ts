@@ -51,6 +51,7 @@ import { createKbArticle } from "@/lib/kb/create-article";
 import { renderMarkdown } from "@/lib/markdown/render";
 import { scopedDb } from "@/lib/scoped-db";
 import { createTicket } from "@/lib/tickets/create-ticket";
+import { lockTicketsInIdOrder } from "@/lib/tickets/merge";
 import { computeDueTimestamps, DEFAULT_SLA_TARGETS } from "@/lib/tickets/sla";
 
 /** All seeded AI artifacts (AuditEvent/InsightRun) use these — never a real vendor/model name.
@@ -156,9 +157,10 @@ function computeTagVolumeRows(
 // Writes on an existing ticket take that ticket's row lock (Phase 12, reviews R2-2 and R3-1).
 // createTicket commits its own transaction, so a merge can land between it and the seed's
 // later writes. Every reply insert and the step-4e status write therefore run in one
-// transaction that first locks the ticket row FOR UPDATE and refuses a merged or missing ticket
-// (DemoSeedTicketMergedError): the seed refuses, it never skips silently, and it never writes a
-// Message or a status onto a merged source.
+// transaction that first locks the ticket row FOR UPDATE through lockTicketsInIdOrder (the one
+// lock statement of the merge.ts lock-order contract, review WR-05) and refuses a merged or
+// missing ticket (DemoSeedTicketMergedError): the seed refuses, it never skips silently, and it
+// never writes a Message or a status onto a merged source.
 // ---------------------------------------------------------------------------
 
 /** Thrown when a demo seed write targets a merged ticket or a ticket not in the organization. */
@@ -194,12 +196,8 @@ async function lockDemoTicket(
   orgId: string,
   ticketId: string,
 ): Promise<void> {
-  const rows = await tx.$queryRaw<{ id: string; mergedIntoTicketId: string | null }[]>`
-    SELECT id, "mergedIntoTicketId" FROM "Ticket"
-    WHERE id = ${ticketId} AND "organizationId" = ${orgId}
-    FOR UPDATE
-  `;
-  if (rows.length === 0 || rows[0].mergedIntoTicketId !== null) {
+  const [row] = await lockTicketsInIdOrder(tx, orgId, [ticketId]);
+  if (!row || row.id !== ticketId || row.mergedIntoTicketId !== null) {
     throw new DemoSeedTicketMergedError(ticketId);
   }
 }
