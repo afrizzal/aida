@@ -46,6 +46,8 @@ async function snoozeInThreeHours(page: Page) {
   await page.getByRole("button", { name: "Snooze", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("heading", { name: "Snooze until" })).toBeVisible();
+  // Review UI-IN-06: the popover dialog is named by its heading.
+  await expect(page.getByRole("dialog", { name: "Snooze until" })).toBeVisible();
   await expect(dialog.getByText(/^Times are in your time zone: .+\.$/)).toBeVisible();
   const preset = dialog.getByRole("button", { name: /^In 3 hours/ });
   await expect(preset).toBeFocused();
@@ -122,6 +124,7 @@ test.describe("Snooze", () => {
     await snoozedChipTrigger(page).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByRole("heading", { name: "Change snooze" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Change snooze" })).toBeVisible();
     await dialog.getByRole("button", { name: "Wake now" }).click();
     await expect(page.getByText("Ticket woken.")).toBeVisible();
     await expect(snoozedChipTrigger(page)).toHaveCount(0);

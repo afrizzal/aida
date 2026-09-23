@@ -126,6 +126,7 @@ export function SnoozeControl({
   const [isPending, startTransition] = useTransition();
   const firstPresetRef = useRef<HTMLButtonElement>(null);
   const wakeRef = useRef<HTMLButtonElement>(null);
+  const headingId = useId();
   const zoneLineId = useId();
   const dateId = useId();
   const timeId = useId();
@@ -267,6 +268,7 @@ export function SnoozeControl({
       </PopoverTrigger>
       <PopoverContent
         align="end"
+        aria-labelledby={headingId}
         className="w-[320px] max-w-[calc(100vw-16px)] space-y-4 p-4"
         onOpenAutoFocus={(event) => {
           event.preventDefault();
@@ -289,7 +291,7 @@ export function SnoozeControl({
         )}
 
         <div className="space-y-1">
-          <h2 className="font-semibold text-[15px] leading-tight">
+          <h2 id={headingId} className="font-semibold text-[15px] leading-tight">
             {isSnoozed ? "Change snooze" : "Snooze until"}
           </h2>
           <p className="text-[12px] text-muted-foreground">
