@@ -325,7 +325,7 @@ export function FilterChipRow({ tags, customFieldDefinitions }: FilterChipRowPro
           variant="outline"
           size="sm"
           aria-pressed={snoozedOn}
-          className={cn(snoozedOn && "border-primary/40 text-primary-emphasis")}
+          className={cn("text-[13px]", snoozedOn && "border-primary/40 text-primary-emphasis")}
           onClick={() => updateParams({ snoozed: snoozedOn ? null : "1" })}
         >
           <AlarmClock className="size-3.5" />
