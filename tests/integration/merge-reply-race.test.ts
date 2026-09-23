@@ -29,7 +29,10 @@ import type { Prisma } from "@/generated/prisma/client";
 import { deriveEmailMessageId, ingestMessage } from "@/lib/channels/email/ingest-message";
 import { prisma } from "@/lib/db";
 import { lockTicketsInIdOrder, type MergeActor, mergeTickets } from "@/lib/tickets/merge";
-import { setReopenObserverForTests } from "@/lib/tickets/reopen-on-reply";
+import {
+  ReplyTicketUnavailableError,
+  setReopenObserverForTests,
+} from "@/lib/tickets/reopen-on-reply";
 import { loadStatusPageData } from "@/lib/tickets/status-page-data";
 import { seedContactTicket, seedOrgWithMembers } from "../support/lifecycle-fixtures";
 import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
@@ -480,5 +483,29 @@ describe("review C7: a follow-up that commits no message leaves no stored file",
     expect(await response.json()).toEqual({ error: "not_found" });
     expect(await filesUnder(orgId)).toBe(0);
     expect(await orgCounts(orgId)).toEqual(before);
+  });
+});
+
+describe("review IN-04: inbound email on a matched ticket that can no longer take the reply", () => {
+  it("rejects with the typed ReplyTicketUnavailableError and writes nothing", async () => {
+    const { s, orgId } = await pair(true);
+    const other = await seedOrgWithMembers(prisma, ["admin"]);
+    const before = await orgCounts(orgId);
+    setReopenObserverForTests({
+      onResolveStart: async (_tx, ref) => {
+        if (ref.ticketId !== s.id) return;
+        // The test's own client, committed before the callback returns.
+        await prisma.$executeRaw`UPDATE "Ticket" SET "organizationId" = ${other.orgId} WHERE id = ${s.id}`;
+      },
+    });
+    const mail = await emailReply(orgId, `Re: question [#${s.number}]`);
+    const rejection = mail.run();
+    await expect(rejection).rejects.toMatchObject({
+      name: "ReplyTicketUnavailableError",
+      code: "TICKET_UNAVAILABLE",
+    });
+    await expect(rejection).rejects.toBeInstanceOf(ReplyTicketUnavailableError);
+    expect(await orgCounts(orgId)).toEqual(before);
+    expect(await prisma.message.count({ where: { emailMessageId: mail.emailMessageId } })).toBe(0);
   });
 });

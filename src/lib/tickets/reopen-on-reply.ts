@@ -93,6 +93,23 @@ export class ReplyTicketChangedError extends Error {
   }
 }
 
+/**
+ * The matched ticket can no longer take the reply: resolveReplyTicket returned
+ * TICKET_UNAVAILABLE (the ticket, or its merge target, is gone from the organization). Email
+ * ingest throws it before anything is written, so the reply transaction rolls back and the
+ * poller can tell this case from an unknown failure (review IN-04). The follow-up route keeps
+ * its own 404 answer for the same result.
+ */
+export class ReplyTicketUnavailableError extends Error {
+  readonly code = "TICKET_UNAVAILABLE";
+  readonly ticketId: string;
+  constructor(ticketId: string) {
+    super("matched ticket is no longer available");
+    this.name = "ReplyTicketUnavailableError";
+    this.ticketId = ticketId;
+  }
+}
+
 async function readMergedInto(
   tx: ReopenTx,
   orgId: string,
