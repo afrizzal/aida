@@ -33,8 +33,13 @@ export interface MergeSourceTicket {
 const MERGE_OUTCOME_UNKNOWN =
   "The result is not known. The tickets may have been merged. Refresh the page to check before you try again.";
 
-/** UI-SPEC Copywriting "Merge error: …" rows; null for a code with no row (the unknown refusal). */
-export function mergeErrorMessage(code: MergeErrorCode, source: number, target: number) {
+/**
+ * UI-SPEC Copywriting "Merge error: …" rows, one per MergeErrorCode. The switch is exhaustive:
+ * the service returns only these codes and rethrows anything else, which reaches the dialog as a
+ * rejected call ("Merge outcome unknown"), so every returned refusal is a rule refusal (review
+ * UI-IN-02). A new code fails the type check here until it has its row.
+ */
+export function mergeErrorMessage(code: MergeErrorCode, source: number, target: number): string {
   switch (code) {
     case "DIFFERENT_CONTACTS":
       return "These tickets belong to different customers, so they can't be merged. Link them as related instead.";
@@ -50,8 +55,10 @@ export function mergeErrorMessage(code: MergeErrorCode, source: number, target: 
       return "One of these tickets is no longer available. Refresh the page and try again.";
     case "MEMBERSHIP_ENDED":
       return "Your access to this workspace has ended. Sign out, then sign in again.";
-    default:
-      return null;
+    default: {
+      const unhandled: never = code;
+      return unhandled;
+    }
   }
 }
 
@@ -106,7 +113,7 @@ export function MergeTicketDialog({
   );
 }
 
-type MergeFailure = { kind: "refused"; message: string; rule: boolean } | { kind: "unknown" };
+type MergeFailure = { kind: "refused"; message: string } | { kind: "unknown" };
 
 interface MergeFlowProps {
   source: MergeSourceTicket;
@@ -135,7 +142,7 @@ function MergeFlow({ source, linkLabels, pending, onPendingChange, onClose }: Me
   // After a rejected call, "Merge tickets" and "Back" stay disabled, so the only way on, "Keep
   // tickets separate", takes focus instead of leaving it on <body> (review UI-WR-04).
   useEffect(() => {
-    if (failure?.kind === "refused" && failure.rule) backRef.current?.focus();
+    if (failure?.kind === "refused") backRef.current?.focus();
     if (failure?.kind === "unknown") keepRef.current?.focus();
   }, [failure]);
 
@@ -154,16 +161,10 @@ function MergeFlow({ source, linkLabels, pending, onPendingChange, onClose }: Me
           router.push(`/tickets/${result.targetId}`);
           return;
         }
-        const message = mergeErrorMessage(result.error, source.number, chosen.number);
-        setFailure(
-          message === null
-            ? {
-                kind: "refused",
-                message: "The tickets could not be merged. Wait a moment and try again.",
-                rule: false,
-              }
-            : { kind: "refused", message, rule: true },
-        );
+        setFailure({
+          kind: "refused",
+          message: mergeErrorMessage(result.error, source.number, chosen.number),
+        });
       } catch {
         setFailure({ kind: "unknown" });
       }
@@ -218,7 +219,9 @@ function MergeFlow({ source, linkLabels, pending, onPendingChange, onClose }: Me
 
   if (!target) return null;
   const replacedLabel = target.alreadyLinked ? linkLabels[target.id] : undefined;
-  const mergeBlocked = failure !== null && (failure.kind === "unknown" || failure.rule);
+  // Every refusal is a rule refusal and a rejected call has no known outcome: either way
+  // "Merge tickets" stays disabled (UI-SPEC 3a).
+  const mergeBlocked = failure !== null;
 
   return (
     <>
