@@ -175,3 +175,80 @@ An "Amended … fix pass F3" note at the end of the spec records each row and th
 | `pnpm test:e2e` `ticket-relations`, `ticket-merge`, `snooze`, `activity-feed`, `public-status`, `a11y-contrast` (one process, host zone) | 0 | 48 passed |
 
 Intermediate runs: `ticket-merge.spec.ts` after UI-WR-07, 10 passed; `ticket-relations.spec.ts` after UI-K34, 9 passed. Build, egress, the full integration suite and the full E2E suite were not run in this pass. The orchestrator reruns the full gate.
+
+## Fix pass F4 (Codex diff round 1)
+
+**Scope:** D1, D2, D4 and D5 from the dispositions table in `12-REVIEW.md` ("Codex critique of the phase diff (round 1)"). D3 and D6 were not touched. Each claim was checked against the code at `6e77100` before editing, and all four still held:
+- D1: the lock in `runTicketMutation` did not select `mergedIntoTicketId`, and the header status menu was enabled on a merged source.
+- D2: the messages route read the ticket (`route.ts:32`) and the body, the email settings and the staged files before the in-transaction membership check (`:104`).
+- D4: `MergeFlow` kept the `target` object from the first pick and never replaced it from newer rows.
+- D5: `loadStatusPageData` and the attachment route read the ticket and the rows in two separate statements.
+
+**Where it ran:** main checkout, branch `v2/run-loop` (`workflow.use_worktrees` is `false`). Integration and E2E used Testcontainers on Colima. Host zone Asia/Jakarta, no `TZ` override.
+**Result:** 4 of 4 fixed. No schema change, no migration, no new package. The provenance predicate (`status-visibility.ts`) is unchanged, and the public page shows no target data.
+**Method:** for each finding, the tests were written first and run once against the unfixed code, then the fix was made and the same tests run again. For D1, the E2E before-run had the server fix in place but not the UI fix, so it measured the UI changes. For D5, the test seam was added first without the snapshot, so the before-run shows Codex's failure itself.
+
+| ID | Status | Commit | Test | Failing assertion seen before the fix |
+|----|--------|--------|------|------------------------------------|
+| D1 | fixed | e0319cd | `ticket-mutations.test.ts` › "runTicketMutation: a merged source keeps its status (Codex diff round 1, D1)" › "single: …", "bulk: one merged source in the batch refuses the whole batch …", "forced order: a status change observed blocked by a held merge is refused after the merge commits"; `ticket-merge.spec.ts` › "the status control is disabled on a merged source, with its reason (Codex diff round 1, D1)" and "a status change sent after a merge the page did not see is refused and says why …"; `bulk-actions.spec.ts` › "a bulk status change over a merged source changes nothing and says why …" | Integration: `AssertionError: expected { ok: true, count: 1, batchId: null } to deeply equal { ok: false, error: 'MERGED_SOURCE' }` (single and forced order), `expected { ok: true, count: 2, …(1) } to deeply equal { ok: false, error: 'MERGED_SOURCE' }` (bulk). E2E: `toContainText` Expected `"This ticket was already merged."`, Received `"NewOpenPendingResolvedClosed"`; bulk alert Expected substring `"One of the selected tickets was already merged into another ticket, …"`, Received `"Nothing was changed.The change could not be saved. Wait a moment and try again."`; `toBeVisible` on the single-ticket refusal text: element(s) not found |
+| D2 | fixed | 2a90d6f | `ticket-merge.test.ts` › "a removed member is refused before anything is read (Codex diff round 1, D2)" › "an existing id: 403 MEMBERSHIP_ENDED and no file is ever written, not even staged", "a missing id: the same 403 MEMBERSHIP_ENDED, never 404", "an invalid body: the same 403 MEMBERSHIP_ENDED, never 400 or 415" | `AssertionError: expected "save" to not be called at all, but actually been called 1 times`; `expected 404 to be 403 // Object.is equality`; `expected 400 to be 403 // Object.is equality` |
+| D4 | fixed | c333ec6 | `ticket-merge.spec.ts` › "a link added while the dialog is open shows on the confirm step after Back and Review (Codex diff round 1, D4)" and "a link added after the target was picked shows on the confirm step …" | `toBeVisible` on `getByRole('dialog').getByText('The current link "Child of" between these tickets is replaced by "Duplicate of".')` and on the same line with `"Related to"`: element(s) not found |
+| D5 | fixed | 987f0a8 | `status-read-snapshot.test.ts` (new) › "the source token's page shows the pre-merge thread, never an empty one" and "the source token's attachment is still served when the merge commits between the reads" | `AssertionError: expected [] to deeply equal [ 'cmw83ctlp00021sq5l5qz7wty', …(1) ]` (the empty thread); `expected 404 to be 200 // Object.is equality` |
+
+Tests added as guards, not seen failing, because they pin behaviour that already held:
+- D1: "other operations on a merged source still apply …", and the unit case "the status refusals on a merged source are exported constants …" in `tests/unit/activity-feed.test.ts`.
+- D2: "a removal that commits after the first check is still refused inside the transaction (WR-03 kept)", and "an active member still gets the existing answers for a missing id and an empty body".
+- D5: "the target token sees nothing of the source in either snapshot".
+
+No existing assertion was loosened or removed.
+
+### What changed
+
+- **D1:**
+  - `runTicketMutation` now selects `mergedIntoTicketId` in its one `FOR UPDATE` statement. A `status` operation is refused with the new `TicketMutationErrorCode` `MERGED_SOURCE` when any locked ticket is a merged source. The whole payload rolls back and nothing is written. Because the check reads the locked rows, a status change that waited on a merge's lock sees the committed merge.
+  - Choice: only `status` is refused. Assignee, priority and tags stay changeable, because D-08 keeps them on the source. A test pins this choice.
+  - In the header, "Change status" still opens its menu on a merged source, but all five choices are disabled (`aria-disabled`, not hidden). The menu shows `MERGED_SOURCE_REASON` as a 12px muted line, which is also the menu's `aria-describedby`. This mirrors how Merge shows its reason.
+  - A page loaded before the merge maps `MERGED_SOURCE` to `STATUS_REFUSED_MERGED_SOURCE`. The bulk bar maps it to `BULK_STATUS_REFUSED_MERGED_SOURCE`, under its existing "Nothing was changed." line.
+- **D2:** `findActiveMembership(db, …)` is the first thing the route does after the session, before `params`, the ticket, the form, the email settings or any file. The in-transaction check is kept, and its comment now says it covers a removal that commits after the first check.
+- **D4:**
+  - `TicketPicker` gains `onRows`, called with every list of rows it shows. Its fetch moved into an exported `fetchPickerRows`; the behaviour is the same.
+  - `MergeFlow` replaces its kept choice with the newest row of the same id.
+  - "Review merge" re-reads the row by `#number` through the same endpoint before the confirm step. While it reads, the button shows `Loader2` and the picker is disabled.
+  - If the re-read fails, the newest row on screen is used. If the fresh row is ineligible, step 1 stays, the choice is cleared, and the picker re-fetches so the row shows its reason.
+  - No server change.
+- **D5:**
+  - `loadStatusPageData` and a new `loadStatusAttachment` (in `status-page-data.ts`) each run their two reads in one `prisma.$transaction` with `isolationLevel: "RepeatableRead"`. The attachment route now calls `loadStatusAttachment`, and the file read stays outside the transaction.
+  - The new test seam is `setStatusReadObserverForTests({ afterTicketRead })`, awaited between the two reads.
+  - Default transaction timeouts are kept. The reads are plain and take no row lock.
+
+### UI-SPEC rows added (`12-UI-SPEC.md`, additive only; no approved row changed)
+
+1. Status unavailable: merged source: "This ticket was already merged." (D1, reuses `MERGED_SOURCE_REASON`)
+2. Status error: merged source: "Nothing was changed. This ticket was already merged, so its status can't change." (D1, `STATUS_REFUSED_MERGED_SOURCE`)
+3. Bulk error: merged source (after the "Nothing was changed." line): "One of the selected tickets was already merged into another ticket, so its status can't change. Unselect it and try again." (D1, `BULK_STATUS_REFUSED_MERGED_SOURCE`)
+
+An "Amended … fix pass F4" note at the end of the spec records the D1 menu behaviour and the D4 confirm-step behaviour. D4 adds no copy.
+
+### Notes for the orchestrator (no change made here)
+
+- D6: `12-GATE.md` open item 11 can now say that the messages route checks membership both before any read (D2) and inside its transaction (WR-03).
+- D1 refuses a status change only on the source. Snooze already refused merged sources. A merge target is not a merged source and keeps every control.
+- D5 uses Prisma's default interactive-transaction timeouts (`maxWait` 2 s, `timeout` 5 s) on the public page and the attachment route. If the connection pool is exhausted, a request now fails with a transaction timeout instead of waiting in the pool.
+- At the end of the run, the only container from these runs was Testcontainers' own `ryuk` reaper, which removes itself. No container was created, stopped or removed by hand.
+
+### Final commands (after all four commits)
+
+| Command | Exit | Counts |
+|---------|------|--------|
+| `pnpm lint` | 0 | 389 files checked, no fixes |
+| `pnpm typecheck` | 0 | clean |
+| `pnpm test` | 0 | 27 files, 274 tests passed |
+| `pnpm test:integration` `ticket-mutations` (D1 block, before the fix) | 1 | 3 failed, 1 passed (the seen-failing run) |
+| `pnpm test:e2e` `ticket-merge`, `bulk-actions` `--grep D1` (server fix only, before the UI fix) | 1 | 3 failed |
+| `pnpm test:integration` `ticket-merge -t "Codex diff round 1, D2"` (before the fix) | 1 | 3 failed, 1 passed |
+| `pnpm test:e2e ticket-merge.spec.ts --grep D4` (before the fix) | 1 | 2 failed |
+| `pnpm test:integration` `status-read-snapshot` (seam without the snapshot) | 1 | 2 failed, 1 passed |
+| `pnpm test:integration` `ticket-mutations`, `ticket-merge`, `status-read-snapshot`, `merge-provenance`, `merge-race-coverage`, `merge-reply-race` (one process) | 0 | 6 files, 107 tests passed |
+| `pnpm test:e2e` `ticket-merge`, `mutations`, `bulk-actions`, `public-status`, `ticket-relations` (one process, host zone) | 0 | 44 passed |
+
+Intermediate runs after each fix: D1 E2E 3 passed; `ticket-mutations` 33 passed; `ticket-merge` integration 43 passed; `ticket-merge` and `ticket-relations` E2E 24 passed; `status-read-snapshot` and `merge-provenance` 9 passed. Build, egress, the full integration suite and the full E2E suite were not run in this pass. The orchestrator reruns the full gate.
