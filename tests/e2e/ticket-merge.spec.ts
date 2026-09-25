@@ -59,6 +59,10 @@ async function adminActor() {
   return { userId: admin.id, orgId };
 }
 
+function pickerInput(page: Page) {
+  return page.getByRole("dialog").getByPlaceholder("Search by number or subject…");
+}
+
 /** Opens the confirm step of source into target. */
 async function reviewMerge(page: Page, source: { number: number }, target: { number: number }) {
   const dialog = await openMergeDialog(page);
@@ -206,6 +210,52 @@ test.describe("Ticket merge", () => {
     await expect(dialog.getByRole("button", { name: "Merge tickets" })).toBeDisabled();
     await expect(dialog.getByRole("button", { name: "Keep tickets separate" })).toBeFocused();
     expect(await snapshot([source.id, target.id])).toEqual(before);
+  });
+
+  test("Back from the confirm step shows the kept choice (review UI-WR-07)", async ({ page }) => {
+    const source = await seedTicket("back-source", "back");
+    const target = await seedTicket("back-target", "back");
+
+    await openTicket(page, source.id);
+    const dialog = await reviewMerge(page, source, target);
+    await dialog.getByRole("button", { name: "Back" }).click();
+
+    await expect(
+      dialog.getByRole("heading", { name: "Merge this ticket into another" }),
+    ).toBeVisible();
+    await expect(pickerInput(page)).toHaveValue(String(target.number));
+    const row = dialog.getByRole("option", { name: new RegExp(`^#${target.number}\\b`) });
+    await expect(row).toHaveAttribute("data-chosen", "true");
+    await expect(dialog.getByRole("button", { name: "Review merge" })).toBeEnabled();
+    await dialog.getByRole("button", { name: "Review merge" }).click();
+    await expect(
+      dialog.getByRole("heading", { name: `Merge #${source.number} into #${target.number}?` }),
+    ).toBeVisible();
+  });
+
+  test("after a rule refusal, Back asks for a new pick (review UI-WR-07)", async ({ page }) => {
+    const source = await seedTicket("repick-source", "repick");
+    const target = await seedTicket("repick-target", "repick");
+    const elsewhere = await seedTicket("repick-elsewhere", "repick");
+
+    await openTicket(page, source.id);
+    const dialog = await reviewMerge(page, source, target);
+    const moved = await mergeTickets(prisma, await adminActor(), {
+      sourceTicketId: target.id,
+      targetTicketId: elsewhere.id,
+    });
+    expect(moved.ok).toBe(true);
+    await dialog.getByRole("button", { name: "Merge tickets" }).click();
+    await expect(dialog.getByRole("alert")).toBeVisible();
+    await dialog.getByRole("button", { name: "Back" }).click();
+
+    await expect(dialog.getByRole("button", { name: "Review merge" })).toBeDisabled();
+    await expect(dialog.locator('[data-chosen="true"]')).toHaveCount(0);
+    // The refused target is shown again, now with its reason.
+    await expect(pickerInput(page)).toHaveValue(String(target.number));
+    const row = dialog.getByRole("option", { name: new RegExp(`^#${target.number}\\b`) });
+    await expect(row).toHaveAttribute("aria-disabled", "true");
+    await expect(row).toContainText("Already merged into another ticket");
   });
 
   test("the confirmation names a link added after the page loaded (review UI-WR-06)", async ({

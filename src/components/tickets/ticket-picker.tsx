@@ -65,6 +65,12 @@ interface TicketPickerProps {
   disabled?: boolean;
   /** The search input, so a dialog can hand focus back to it after a refusal. */
   inputRef?: Ref<HTMLInputElement>;
+  /**
+   * The search text, when the dialog keeps it across a remount (the merge dialog's Back, review
+   * UI-WR-07). Without it the picker keeps its own text and starts empty on every mount.
+   */
+  query?: string;
+  onQueryChange?(query: string): void;
 }
 
 export function TicketPicker({
@@ -74,8 +80,12 @@ export function TicketPicker({
   onSelect,
   disabled,
   inputRef,
+  query: controlledQuery,
+  onQueryChange,
 }: TicketPickerProps) {
-  const [query, setQuery] = useState("");
+  const [ownQuery, setOwnQuery] = useState("");
+  const query = controlledQuery ?? ownQuery;
+  const setQuery = onQueryChange ?? setOwnQuery;
   const [outcome, setOutcome] = useState<SearchOutcome | null>(null);
   // Stale-response guard: only the response for the current query is ever shown.
   const currentQuery = useRef("");

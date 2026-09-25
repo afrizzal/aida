@@ -123,7 +123,12 @@ interface MergeFlowProps {
 function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps) {
   const router = useRouter();
   const [step, setStep] = useState<"pick" | "confirm">("pick");
+  // The row chosen in the picker (step 1) and the row the confirm step is about (step 2).
   const [target, setTarget] = useState<PickerRow | null>(null);
+  const [reviewed, setReviewed] = useState<PickerRow | null>(null);
+  // The picker's search text lives here, so "Back" remounts step 1 with the same search and the
+  // chosen row checked, as UI-SPEC 3a asks ("the choice kept", review UI-WR-07).
+  const [query, setQuery] = useState("");
   const [failure, setFailure] = useState<MergeFailure | null>(null);
   const [, startTransition] = useTransition();
   const backRef = useRef<HTMLButtonElement>(null);
@@ -143,8 +148,8 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
   }, [failure]);
 
   function handleMerge() {
-    if (!target) return;
-    const chosen = target;
+    if (!reviewed) return;
+    const chosen = reviewed;
     setFailure(null);
     onPendingChange(true);
     startTransition(async () => {
@@ -161,6 +166,10 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
           kind: "refused",
           message: mergeErrorMessage(result.error, source.number, chosen.number),
         });
+        // A rule refused this target, so it is no longer the picker's choice: after "Back" the
+        // user picks again from the refreshed rows instead of re-submitting it (review UI-WR-07).
+        // The confirm step keeps showing the refused pair until then.
+        setTarget(null);
       } catch {
         setFailure({ kind: "unknown" });
       }
@@ -185,6 +194,8 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
           purpose="merge"
           selected={target}
           onSelect={(row) => setTarget(row)}
+          query={query}
+          onQueryChange={setQuery}
         />
         <DialogFooter>
           <Button
@@ -203,6 +214,7 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
             disabled={!eligible}
             onClick={() => {
               setFailure(null);
+              setReviewed(target);
               setStep("confirm");
             }}
           >
@@ -213,7 +225,7 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
     );
   }
 
-  if (!target) return null;
+  if (!reviewed) return null;
   // Every refusal is a rule refusal and a rejected call has no known outcome: either way
   // "Merge tickets" stays disabled (UI-SPEC 3a).
   const mergeBlocked = failure !== null;
@@ -222,7 +234,7 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
     <>
       <DialogHeader>
         <DialogTitle className="text-[15px] font-semibold tracking-tight">
-          Merge #{source.number} into #{target.number}?
+          Merge #{source.number} into #{reviewed.number}?
         </DialogTitle>
         <DialogDescription className="sr-only">{MERGE_CONFIRM_DESCRIPTION}</DialogDescription>
       </DialogHeader>
@@ -231,7 +243,7 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
         <div className="space-y-2 rounded-lg border border-border/70 p-4">
           {[
             { label: "From", ticket: source },
-            { label: "Into", ticket: target },
+            { label: "Into", ticket: reviewed },
           ].map(({ label, ticket }) => (
             <div
               key={label}
@@ -249,10 +261,10 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
 
         <ul className="list-disc space-y-1 pl-4 text-[13px] text-foreground">
           <li>
-            All messages and attachments of #{source.number} move to #{target.number}.
+            All messages and attachments of #{source.number} move to #{reviewed.number}.
           </li>
           <li>
-            #{source.number} is closed and marked as a duplicate of #{target.number}.
+            #{source.number} is closed and marked as a duplicate of #{reviewed.number}.
           </li>
           <li>Tags, assignee and custom fields stay on #{source.number}.</li>
           <li>
@@ -262,7 +274,7 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
           {/* The label comes with the picked row, read when it was picked, so a link added
               after the page loaded is named correctly; with no label the generic row is used,
               never a guessed type (review UI-WR-06). */}
-          {target.alreadyLinked && <li>{mergeReplacesLinkText(target.linkLabel ?? null)}</li>}
+          {reviewed.alreadyLinked && <li>{mergeReplacesLinkText(reviewed.linkLabel ?? null)}</li>}
         </ul>
 
         <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 p-4 text-[13px] text-warning">
