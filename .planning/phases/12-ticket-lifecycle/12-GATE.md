@@ -181,3 +181,19 @@ Run by the orchestrator after fixer passes F1, F2 and F3 (`12-REVIEW-FIX.md`). O
 Integration full and `pnpm test:egress` stay blocked (O-1); no `aida-egress-test` container exists. Compared with attempt 3 on `7c3bad3`: unit 268 to 273, integration 270 to 278, E2E 140 to 158 passed; nothing is worse.
 
 Gate item 7 of "Open items" (no E2E for the merge-refusal, rejected-call and snooze error callouts) is now covered by the F2 and F3 cases in `ticket-merge.spec.ts`, `snooze.spec.ts` and `ticket-relations.spec.ts`. The time-zone backstop is covered by the zone block in `snooze.spec.ts`, which picks a viewer zone different from the host zone. A visual pass is still open.
+
+## Rerun after Codex diff round 1 fixes (on `d61b370`)
+
+Same procedure as the rerun on `06279f9` (one command at a time, own logs under `$TMPDIR` as `aida-12-fixgate2-*.log`, exit codes from the commands themselves, `pgrep -f 'artisan test'` empty before each, Docker env for integration, E2E and build, no container handled by hand).
+
+| Command | Exit | Result |
+|---------|------|--------|
+| `pnpm lint` | 0 | 389 files checked, no fixes |
+| `pnpm typecheck` | 0 | clean |
+| `pnpm test` | 0 | 27 files, 274 tests passed |
+| `pnpm test:integration --exclude tests/integration/egress-isolation.test.ts --reporter=verbose` | 0 | 33 files, 290 tests passed; `egress-isolation` appears only in the echoed command |
+| `pnpm test:e2e` (full suite) | 0 | 163 passed, 1 skipped (the existing `uat-gaps.spec.ts:17` skip), 0 failed, 0 flaky, 3.9 min; `taskkill` noise 3 times |
+| `pnpm build` | 0 | built |
+| `pnpm audit --prod` | 1 | 7 critical, 52 high (baseline) |
+
+Integration full and `pnpm test:egress` stay blocked (O-1). Nothing is worse than the rerun on `06279f9`.
