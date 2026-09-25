@@ -918,3 +918,11 @@ Dipicu selesainya Codex. Log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`.
 Keputusan K36: D3 tidak diubah. Sesudah merge, percakapan hidup di target, sama seperti email masuk (D-09); balasan yang antre sampai ke kontak yang sama dengan thread target. Dicatat di `deferred-items.md`; bisa ditinjau di pass email.
 
 Disposisi di `12-REVIEW.md` (`6e77100`). Pass F4 (D1, D2, D4, D5) berjalan di latar; D6 dikoreksi orkestrator sesudah F4. Folder ekspor Codex dihapus (path di bawah `$TMPDIR`, pola `tmp.*`). Sesudah F4: gerbang ulang, lalu kritik Codex putaran 2.
+
+## Putaran 55 (2026-11-09, mulai 00.16 WIB)
+
+Dipicu laporan pass F4. Cek A (25 GiB) dan B lolos; berhenti total tidak terpicu; tidak ada proses `artisan test`. F4 selesai: D1 `e0319cd` (perubahan status pada sumber merge ditolak `MERGED_SOURCE` di bawah row lock, seluruh batch; assignee, prioritas, dan tag tetap bisa diubah), D2 `2a90d6f` (cek keanggotaan sebelum membaca apa pun), D4 `c333ec6` (pilihan merge disegarkan), D5 `987f0a8` (snapshot `REPEATABLE READ` di halaman status dan lampiran); status `fc06fe7`. Tiap perbaikan punya test yang terlihat gagal lebih dulu. Dicek di kode: cek `mergedIntoTicketId` di `mutations.ts:263`, cek keanggotaan sebelum baca di route pesan, `SNAPSHOT` di `status-page-data.ts` dipakai oleh loader dan route lampiran. D6 dikoreksi (`d61b370`).
+
+Gerbang ulang di `d61b370`: `lint` 0 (389), `typecheck` 0, `pnpm test` 0 (274), integration tanpa egress 0 (33 berkas, 290), E2E penuh 0 (163 lolos, 1 skip lama, 0 gagal), `build` 0, `audit --prod` 1 (baseline). Egress blocked (O-1).
+
+Kritik Codex putaran 2 (`fase12-diff-r2-tanya.md`, ekspor baru dari `2649830`; pindaian: hanya `.env.example`, string mirip kunci semuanya dummy yang dikenal, password container dev dan path rumah tidak ada). Log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Berjalan di latar.
