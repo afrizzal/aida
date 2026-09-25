@@ -345,6 +345,9 @@ All copy is English, written fresh for AIDA, and final; the executor uses it ver
 | Merge unavailable: merged source | This ticket was already merged. |
 | Merge unavailable: has received merges | Other tickets were merged into this one, so it can't be merged again. |
 | Link unavailable: merged source | This ticket was already merged. |
+| Status unavailable: merged source | This ticket was already merged. |
+| Status error: merged source | Nothing was changed. This ticket was already merged, so its status can't change. |
+| Bulk error: merged source (after the "Nothing was changed." line) | One of the selected tickets was already merged into another ticket, so its status can't change. Unselect it and try again. |
 | Linked tickets label | Linked tickets |
 | Relation labels (this side) | Duplicate of / Has duplicate / Child of / Parent of / Related to |
 | Remove link (aria-label) | Remove the link "{label} #{n}" |
@@ -580,3 +583,6 @@ Token-only colours (no oklch/hex in new files; no new token); no new page-level 
 - UI-WR-06: the picker rows carry the current link label from this ticket's side (`linkLabel`), and the "Merge replaces link" line uses it. With no known label the new row "Merge replaces link, label unknown" is used; a link type is never assumed.
 - UI-WR-07 (no new copy): "Back" from the confirm step shows step 1 with the same search text and the chosen row checked. After a rule refusal the refused ticket is no longer the chosen row, so "Review merge" stays disabled until the user picks again; the refreshed rows show the refused ticket with its reason when one applies.
 - UI-K34 (run decision K34; the server refuses a new link on a merged source with `TICKET_UNAVAILABLE` since fix pass F1): two rows added. "Link a ticket…" in "More ticket actions" is disabled (not hidden) on a merged source and shows "Link unavailable: merged source" as its second 12px muted line, the same way Merge shows its reason. The link dialog's picker shows a merged source disabled with "Picker reason: merged (link dialog)", the same text as the merge dialog's row; this replaces "only Already linked applies" in Surface 2c. A merge target is not a merged source and keeps both.
+
+*Amended 2026-11-09 after Codex diff critique round 1, fix pass F4 (additive rows only, no approved row changed):*
+- D1: the server refuses any status change on a merged source (code `MERGED_SOURCE`, whole batch, nothing changed); assignee, priority and tags stay changeable, because they stay on the source (D-08). Three rows added. "Change status" in the top bar still opens its menu on a merged source, but every status choice is disabled (not hidden), and the menu shows "Status unavailable: merged source" as a 12px muted line, which is also the menu's accessible description. This is the way Merge shows its reason in "More ticket actions" (Surface 1). A ticket page that was loaded before the merge gets "Status error: merged source" as its refusal message. The inbox bulk bar shows "Bulk error: merged source" under its existing "Nothing was changed." line. Each string is one exported constant in `src/lib/tickets/lifecycle-copy.ts`; "Status unavailable" reuses `MERGED_SOURCE_REASON`.

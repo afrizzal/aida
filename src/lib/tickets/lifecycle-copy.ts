@@ -3,8 +3,22 @@
 // exported constant used verbatim, and the copy-table unit test checks each against its row.
 // Pure and client-safe: server and client components import it. Relative imports only.
 
-/** Copywriting "Merge unavailable: merged source" and "Link unavailable: merged source" (K34). */
+/**
+ * Copywriting "Merge unavailable: merged source", "Link unavailable: merged source" (K34) and
+ * "Status unavailable: merged source" (Codex diff round 1, D1).
+ */
 export const MERGED_SOURCE_REASON = "This ticket was already merged.";
+
+/** Copywriting "Status error: merged source": the ticket page's refused status change (D1). */
+export const STATUS_REFUSED_MERGED_SOURCE =
+  "Nothing was changed. This ticket was already merged, so its status can't change.";
+
+/**
+ * Copywriting "Bulk error: merged source": the reason under the bulk bar's "Nothing was
+ * changed." when a selected ticket is a merged source (D1).
+ */
+export const BULK_STATUS_REFUSED_MERGED_SOURCE =
+  "One of the selected tickets was already merged into another ticket, so its status can't change. Unselect it and try again.";
 
 /** Copywriting "Picker reason: merged", in the merge dialog and, since K34, the link dialog. */
 export const PICKER_REASON_MERGED = "Already merged into another ticket";

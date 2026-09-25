@@ -5,7 +5,8 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
-import { MEMBER_EMAIL } from "./global-setup";
+import { mergeTickets } from "../../src/lib/tickets/merge";
+import { ADMIN_EMAIL, MEMBER_EMAIL } from "./global-setup";
 import { createTicket, orgId, prisma } from "./support/db";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -261,6 +262,62 @@ test.describe("Bulk actions", () => {
     const after = await prisma.ticket.findUniqueOrThrow({ where: { id: kept.id } });
     expect(after.priority).toBe("NORMAL");
     expect(await prisma.ticketAuditEvent.count({ where: { ticketId: kept.id } })).toBe(0);
+  });
+
+  test("a bulk status change over a merged source changes nothing and says why (Codex diff round 1, D1)", async ({
+    page,
+  }) => {
+    const token = tokenFor("mergedsource");
+    const [kept, source] = await seedTickets(token, 2);
+    // Same contact as the source (seedTickets' second email), so the merge is allowed (K33).
+    const target = await createTicket(orgId, {
+      subject: `E2E Bulk merge target ${ts}`,
+      priority: "NORMAL",
+      body: "Merge target body",
+      contact: { email: `bulk-${token}-2@example.com` },
+      direction: "INBOUND",
+    });
+    await openInbox(page, `q=${token}`, kept.subject);
+
+    await rowCheckbox(page, kept.subject).click();
+    await rowCheckbox(page, source.subject).click();
+    const bar = bulkBar(page);
+    await expect(bar.getByText("2 tickets selected")).toBeVisible();
+
+    // Another agent merges the second ticket after it was selected.
+    const admin = await prisma.user.findFirstOrThrow({ where: { email: ADMIN_EMAIL } });
+    const merged = await mergeTickets(
+      prisma,
+      { userId: admin.id, orgId },
+      { sourceTicketId: source.id, targetTicketId: target.id },
+    );
+    expect(merged.ok).toBe(true);
+    const auditsBefore = await prisma.ticketAuditEvent.count({
+      where: { ticketId: { in: [kept.id, source.id] } },
+    });
+
+    await bar.getByRole("button", { name: "Status" }).click();
+    await page.getByRole("option", { name: "Open" }).click();
+
+    const alert = bar.getByRole("alert");
+    await expect(alert).toContainText("Nothing was changed.");
+    await expect(alert).toContainText(
+      "One of the selected tickets was already merged into another ticket, so its status can't change. Unselect it and try again.",
+    );
+    await expect(alert).not.toContainText("The result is not known.");
+    await expect(bar.getByText("2 tickets selected")).toBeVisible();
+
+    const rows = await prisma.ticket.findMany({
+      where: { id: { in: [kept.id, source.id] } },
+      select: { id: true, status: true },
+    });
+    expect(Object.fromEntries(rows.map((row) => [row.id, row.status]))).toEqual({
+      [kept.id]: "OPEN",
+      [source.id]: "CLOSED",
+    });
+    expect(
+      await prisma.ticketAuditEvent.count({ where: { ticketId: { in: [kept.id, source.id] } } }),
+    ).toBe(auditsBefore);
   });
 
   test("a lost response after the commit says the result is not known, never that nothing changed (Codex diff critique D2)", async ({

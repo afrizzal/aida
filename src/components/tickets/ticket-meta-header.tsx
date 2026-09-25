@@ -5,6 +5,7 @@ import {
   type ReactNode,
   type RefObject,
   useCallback,
+  useId,
   useRef,
   useState,
   useTransition,
@@ -64,6 +65,7 @@ import type {
   TriageStatus,
 } from "@/generated/prisma/client";
 import type { Command as RegistryCommand } from "@/lib/commands/registry";
+import { MERGED_SOURCE_REASON, STATUS_REFUSED_MERGED_SOURCE } from "@/lib/tickets/lifecycle-copy";
 
 const STATUSES: { value: TicketStatus; label: string }[] = [
   { value: "NEW", label: "New" },
@@ -189,6 +191,7 @@ export function TicketMetaHeader({
   const focusAssigneeValue = useRef(false);
   // The "More ticket actions" trigger, shared with the Linked tickets row (review UI-WR-04).
   const actionsTriggerRef = useRef<HTMLButtonElement>(null);
+  const statusReasonId = useId();
   const statusMenuRef = useCallback(
     (node: HTMLDivElement | null) => focusCurrentValue(node, focusStatusValue),
     [],
@@ -247,7 +250,13 @@ export function TicketMetaHeader({
   function handleStatusChange(status: TicketStatus) {
     startTransition(async () => {
       const result = await changeStatus(ticket.id, status).catch(() => null);
-      if (!result?.ok) toast.error("Couldn't update status. Try again.");
+      if (result?.ok) return;
+      // A merged source keeps its status (Codex diff round 1, D1); this page may predate the merge.
+      toast.error(
+        result?.error === "MERGED_SOURCE"
+          ? STATUS_REFUSED_MERGED_SOURCE
+          : "Couldn't update status. Try again.",
+      );
     });
   }
 
@@ -327,13 +336,33 @@ export function TicketMetaHeader({
                 <StatusChip status={ticket.status} />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent ref={statusMenuRef}>
+            {/* A merged source keeps its status (D-07, D-08; Codex diff round 1, D1): every
+                choice is disabled (not hidden) and the reason is a 12px muted line, as Merge
+                shows its reason in "More ticket actions". The server refuses it anyway. */}
+            <DropdownMenuContent
+              ref={statusMenuRef}
+              aria-describedby={mergedSource ? statusReasonId : undefined}
+            >
+              {mergedSource && (
+                <p
+                  id={statusReasonId}
+                  className="max-w-[240px] px-2 py-1.5 text-[12px] text-muted-foreground"
+                >
+                  {MERGED_SOURCE_REASON}
+                </p>
+              )}
               <DropdownMenuRadioGroup
                 value={ticket.status}
-                onValueChange={(value) => handleStatusChange(value as TicketStatus)}
+                onValueChange={(value) => {
+                  if (!mergedSource) handleStatusChange(value as TicketStatus);
+                }}
               >
                 {STATUSES.map((status) => (
-                  <DropdownMenuRadioItem key={status.value} value={status.value}>
+                  <DropdownMenuRadioItem
+                    key={status.value}
+                    value={status.value}
+                    disabled={mergedSource}
+                  >
                     {status.label}
                   </DropdownMenuRadioItem>
                 ))}

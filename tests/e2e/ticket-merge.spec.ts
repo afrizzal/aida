@@ -313,6 +313,77 @@ test.describe("Ticket merge", () => {
     await expect(dialog.getByText('The current link "Related to"')).toHaveCount(0);
   });
 
+  test("the status control is disabled on a merged source, with its reason (Codex diff round 1, D1)", async ({
+    page,
+  }) => {
+    const source = await seedTicket("status-lock-source", "status-lock");
+    const target = await seedTicket("status-lock-target", "status-lock");
+    const merged = await mergeTickets(prisma, await adminActor(), {
+      sourceTicketId: source.id,
+      targetTicketId: target.id,
+    });
+    expect(merged.ok).toBe(true);
+    const auditsBefore = await prisma.ticketAuditEvent.count({ where: { ticketId: source.id } });
+
+    await openTicket(page, source.id);
+    await page.getByRole("button", { name: "Change status" }).click();
+    const menu = page.getByRole("menu");
+    await expect(menu).toBeVisible();
+    await expect(menu).toContainText("This ticket was already merged.");
+    await expect(menu).toHaveAccessibleDescription("This ticket was already merged.");
+    const items = menu.getByRole("menuitemradio");
+    await expect(items).toHaveCount(5);
+    for (const name of ["New", "Open", "Pending", "Resolved", "Closed"]) {
+      await expect(menu.getByRole("menuitemradio", { name })).toHaveAttribute(
+        "aria-disabled",
+        "true",
+      );
+    }
+    await menu.getByRole("menuitemradio", { name: "Open" }).click({ force: true });
+    await page.keyboard.press("Escape");
+    const after = await prisma.ticket.findUniqueOrThrow({ where: { id: source.id } });
+    expect(after.status).toBe("CLOSED");
+    expect(await prisma.ticketAuditEvent.count({ where: { ticketId: source.id } })).toBe(
+      auditsBefore,
+    );
+
+    // The target is not a merged source: its status control stays enabled, with no reason.
+    await openTicket(page, target.id);
+    await page.getByRole("button", { name: "Change status" }).click();
+    await expect(page.getByRole("menuitemradio", { name: "Open" })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    await expect(page.getByRole("menu")).not.toContainText("This ticket was already merged.");
+    await page.keyboard.press("Escape");
+  });
+
+  test("a status change sent after a merge the page did not see is refused and says why (Codex diff round 1, D1)", async ({
+    page,
+  }) => {
+    const source = await seedTicket("status-race-source", "status-race");
+    const target = await seedTicket("status-race-target", "status-race");
+
+    await openTicket(page, source.id);
+    // Another agent merges this ticket after the page loaded.
+    const merged = await mergeTickets(prisma, await adminActor(), {
+      sourceTicketId: source.id,
+      targetTicketId: target.id,
+    });
+    expect(merged.ok).toBe(true);
+
+    await page.getByRole("button", { name: "Change status" }).click();
+    await page.getByRole("menuitemradio", { name: "Open" }).click();
+    await expect(
+      page.getByText(
+        "Nothing was changed. This ticket was already merged, so its status can't change.",
+      ),
+    ).toBeVisible();
+    const after = await prisma.ticket.findUniqueOrThrow({ where: { id: source.id } });
+    expect(after.status).toBe("CLOSED");
+    expect(after.mergedIntoTicketId).toBe(target.id);
+  });
+
   test("a merged source shows the banner and no composer", async ({ page }) => {
     const source = await seedTicket("banner-source", "banner");
     const target = await seedTicket("banner-target", "banner");

@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { TicketPriority, TicketStatus } from "@/generated/prisma/client";
+import { BULK_STATUS_REFUSED_MERGED_SOURCE } from "@/lib/tickets/lifecycle-copy";
 import type { TicketMutationErrorCode } from "@/lib/tickets/mutations";
 import { type BulkUpdateInput, bulkUpdateTickets } from "./bulk-actions";
 import { MAX_SELECTED_TICKETS, useTicketSelection } from "./ticket-selection";
@@ -144,6 +145,8 @@ function failureReason(code: TicketMutationErrorCode | null, memberName?: string
       return "That tag no longer exists. Pick another tag.";
     case "MEMBERSHIP_ENDED":
       return "Your access to this workspace has ended. Sign out, then sign in again.";
+    case "MERGED_SOURCE":
+      return BULK_STATUS_REFUSED_MERGED_SOURCE;
     default:
       return UNKNOWN_ERROR;
   }

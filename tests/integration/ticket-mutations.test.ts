@@ -4,8 +4,10 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
+import { mergeTickets } from "@/lib/tickets/merge";
 import { runTicketMutation, type TicketMutationActor } from "@/lib/tickets/mutations";
 import { seedOrgWithMembers, seedTicket } from "../support/inbox-fixtures";
+import { seedContactTicket } from "../support/lifecycle-fixtures";
 import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
 
 /** Every organization whose actor wrote audit rows in this file (the audit-content case). */
@@ -928,6 +930,149 @@ describe("runTicketMutation: addTagByName same-name race (Codex review R2-2)", (
     expect(await links(p.id)).toHaveLength(0);
     expect(await auditRows(orgId, p.id)).toHaveLength(0);
     expect((await auditRows(orgId, q.id)).map((r) => r.action)).toEqual(["TAG_ADDED"]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Codex diff critique round 1, D1: a merged source's status cannot change (Phase 12, D-07, D-08)
+// ---------------------------------------------------------------------------------------------
+
+describe("runTicketMutation: a merged source keeps its status (Codex diff round 1, D1)", () => {
+  // Not added to actorOrgIds: the merge writes its own audit rows (MERGED_INTO and others),
+  // whose keys the privacy case above does not list.
+  async function seedMergedPair() {
+    const { orgId, users } = await seedOrgWithMembers(prisma, ["admin"]);
+    const actor: TicketMutationActor = { userId: users[0].id, orgId };
+    const contactEmail = `mutation-merge-${randomUUID()}@example.test`;
+    const source = await seedContactTicket(orgId, { contactEmail });
+    const target = await seedContactTicket(orgId, { contactEmail });
+    return { orgId, actor, source, target };
+  }
+
+  async function merge(actor: TicketMutationActor, sourceId: string, targetId: string) {
+    return mergeTickets(prisma, actor, { sourceTicketId: sourceId, targetTicketId: targetId });
+  }
+
+  async function sourceState(id: string) {
+    return prisma.ticket.findUniqueOrThrow({
+      where: { id },
+      select: { status: true, resolvedAt: true, mergedIntoTicketId: true, updatedAt: true },
+    });
+  }
+
+  it("single: a status change on a merged source is refused with MERGED_SOURCE and changes nothing", async () => {
+    const { orgId, actor, source, target } = await seedMergedPair();
+    expect((await merge(actor, source.id, target.id)).ok).toBe(true);
+    const before = await sourceState(source.id);
+    const auditsBefore = await auditRows(orgId);
+    expect(before.status).toBe("CLOSED");
+
+    const result = await runTicketMutation({
+      actor,
+      ticketIds: [source.id],
+      op: { kind: "status", status: "OPEN" },
+      mode: "single",
+    });
+
+    expect(result).toEqual({ ok: false, error: "MERGED_SOURCE" });
+    expect(await sourceState(source.id)).toEqual(before);
+    expect(await auditRows(orgId)).toEqual(auditsBefore);
+  });
+
+  it("bulk: one merged source in the batch refuses the whole batch with MERGED_SOURCE, nothing changed", async () => {
+    const { orgId, actor, source, target } = await seedMergedPair();
+    const plain = await seedTicket(orgId, { status: "OPEN" });
+    expect((await merge(actor, source.id, target.id)).ok).toBe(true);
+    const before = await ticketSnapshot([plain.id, source.id, target.id]);
+    const auditsBefore = await auditRows(orgId);
+
+    const result = await runTicketMutation({
+      actor,
+      ticketIds: [plain.id, source.id],
+      op: { kind: "status", status: "PENDING" },
+      mode: "bulk",
+    });
+
+    expect(result).toEqual({ ok: false, error: "MERGED_SOURCE" });
+    expect(await ticketSnapshot([plain.id, source.id, target.id])).toEqual(before);
+    expect(await auditRows(orgId)).toEqual(auditsBefore);
+  });
+
+  it("other operations on a merged source still apply: assignee, priority and tags stay on the source (D-08)", async () => {
+    const { orgId, actor, source, target } = await seedMergedPair();
+    expect((await merge(actor, source.id, target.id)).ok).toBe(true);
+    const tag = await prisma.tag.create({ data: { organizationId: orgId, name: "after-merge" } });
+
+    const ops = [
+      { kind: "assign", assigneeId: actor.userId },
+      { kind: "priority", priority: "HIGH" },
+      { kind: "addTag", tagId: tag.id },
+    ] as const;
+    for (const op of ops) {
+      const result = await runTicketMutation({ actor, ticketIds: [source.id], op, mode: "single" });
+      expect(result).toMatchObject({ ok: true, count: 1 });
+    }
+    const after = await prisma.ticket.findUniqueOrThrow({ where: { id: source.id } });
+    expect(after).toMatchObject({
+      status: "CLOSED",
+      mergedIntoTicketId: target.id,
+      assigneeId: actor.userId,
+      priority: "HIGH",
+    });
+    expect((await links(source.id)).map((l) => l.tagId)).toEqual([tag.id]);
+  });
+
+  it("forced order: a status change observed blocked by a held merge is refused after the merge commits", async () => {
+    const { orgId, actor, source, target } = await seedMergedPair();
+    const mergePid = deferred<number>();
+    const mergeHeld = deferred<void>();
+    const releaseMerge = deferred<void>();
+    const mergeRun = mergeTickets(
+      prisma,
+      actor,
+      { sourceTicketId: source.id, targetTicketId: target.id },
+      {
+        async afterLock(tx) {
+          mergePid.resolve(await backendPid(tx));
+          mergeHeld.resolve();
+          await releaseMerge.promise;
+        },
+      },
+    );
+    mergeRun.catch(() => {});
+    await mergeHeld.promise;
+
+    const statusPid = deferred<number>();
+    const statusRun = runTicketMutation(
+      { actor, ticketIds: [source.id], op: { kind: "status", status: "OPEN" }, mode: "single" },
+      {
+        async onTransactionStart(tx) {
+          statusPid.resolve(await backendPid(tx));
+        },
+      },
+    );
+    statusRun.catch(() => {});
+    // The status change waits on the source's row lock, which the merge holds.
+    await waitForBlockedBy(prisma, await mergePid.promise, [await statusPid.promise]);
+    const statusBefore = await sourceState(source.id);
+    expect(statusBefore.mergedIntoTicketId).toBeNull();
+
+    releaseMerge.resolve();
+    expect(await mergeRun).toEqual({
+      ok: true,
+      sourceTicketId: source.id,
+      targetTicketId: target.id,
+    });
+    expect(await statusRun).toEqual({ ok: false, error: "MERGED_SOURCE" });
+
+    const after = await sourceState(source.id);
+    expect(after.status).toBe("CLOSED");
+    expect(after.mergedIntoTicketId).toBe(target.id);
+    const statusRows = await prisma.ticketAuditEvent.findMany({
+      where: { organizationId: orgId, ticketId: source.id, action: "STATUS_CHANGED" },
+    });
+    // Only the merge's own close (D-08), never an OPEN written after it.
+    expect(statusRows.map((row) => row.after)).toEqual([{ status: "CLOSED" }]);
   });
 });
 

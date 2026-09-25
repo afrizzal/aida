@@ -11,6 +11,7 @@ import {
 } from "../../src/lib/tickets/activity-copy";
 import { buildActivityFeed } from "../../src/lib/tickets/activity-feed";
 import {
+  BULK_STATUS_REFUSED_MERGED_SOURCE,
   LINK_REMOVE_OUTCOME_UNKNOWN,
   MERGE_CONFIRM_DESCRIPTION,
   MERGED_BANNER_DATE_UNKNOWN,
@@ -18,6 +19,7 @@ import {
   MERGED_SOURCE_REASON,
   mergeReplacesLinkText,
   PICKER_REASON_MERGED,
+  STATUS_REFUSED_MERGED_SOURCE,
 } from "../../src/lib/tickets/lifecycle-copy";
 
 const THIS = "t-this";
@@ -142,6 +144,19 @@ describe("activity copy (UI-SPEC Copywriting, Feed events)", () => {
       "Ann changed the status from Open to Resolved. (bulk change)",
     );
     expect(say({ ...base, batchId: null })).not.toContain("(bulk change)");
+  });
+});
+
+describe("copy rows added by Codex diff round 1, D1 (UI-SPEC Copywriting)", () => {
+  it("the status refusals on a merged source are exported constants with the rows' exact text", () => {
+    expect(STATUS_REFUSED_MERGED_SOURCE).toBe(
+      "Nothing was changed. This ticket was already merged, so its status can't change.",
+    );
+    expect(BULK_STATUS_REFUSED_MERGED_SOURCE).toBe(
+      "One of the selected tickets was already merged into another ticket, so its status can't change. Unselect it and try again.",
+    );
+    // "Status unavailable: merged source" reuses the one merged-source reason.
+    expect(MERGED_SOURCE_REASON).toBe("This ticket was already merged.");
   });
 });
 

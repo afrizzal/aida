@@ -8,7 +8,9 @@
 //   2. the actor's member row (findActiveMembership), refused with MEMBERSHIP_ENDED (D-01)
 //   3. the operation's references (assignee membership, tag in the organization)
 //   4. one SELECT … WHERE "organizationId" = actor org ORDER BY id FOR UPDATE over every ticket
-//   5. per locked ticket, in id order: apply, audit, hooks.afterItem (test seam only)
+//   5. a status change refuses the whole payload with MERGED_SOURCE when any locked ticket is a
+//      merged source (Phase 12, D-07, D-08; Codex diff critique round 1, D1)
+//   6. per locked ticket, in id order: apply, audit, hooks.afterItem (test seam only)
 //
 // Error contract (Codex review C5): a TicketMutationError rolls the transaction back and is
 // RETURNED as { ok: false, error: code }. Any other error (database, or one thrown by a test
@@ -71,7 +73,8 @@ export type TicketMutationErrorCode =
   | "TICKET_UNAVAILABLE"
   | "MEMBER_NOT_ACTIVE"
   | "TAG_MISSING"
-  | "MEMBERSHIP_ENDED";
+  | "MEMBERSHIP_ENDED"
+  | "MERGED_SOURCE";
 
 /** A refusal by the service. Rolled back and returned, never rethrown. */
 export class TicketMutationError extends Error {
@@ -109,6 +112,7 @@ interface LockedTicket {
   priority: TicketPriority;
   assigneeId: string | null;
   createdAt: Date;
+  mergedIntoTicketId: string | null;
 }
 
 const isNonEmptyString = (value: unknown): value is string =>
@@ -244,13 +248,21 @@ export async function runTicketMutation(
 
       // One statement locks every ticket in ascending id order (AIDA-48 concurrency).
       const locked = await tx.$queryRaw<LockedTicket[]>`
-        SELECT id, status, priority, "assigneeId", "createdAt"
+        SELECT id, status, priority, "assigneeId", "createdAt", "mergedIntoTicketId"
         FROM "Ticket"
         WHERE "organizationId" = ${orgId} AND id = ANY(${ids}::text[])
         ORDER BY id
         FOR UPDATE
       `;
       if (locked.length !== ids.length) throw new TicketMutationError("TICKET_UNAVAILABLE");
+
+      // A merged source stays CLOSED (D-07, D-08): reopening it would put it back in the inbox
+      // while its conversation, replies and CSAT live on the target. Read from the locked rows,
+      // so a status change that waited on a merge's lock sees the committed merge and is
+      // refused. Assignee, priority and tags stay changeable: they stay on the source (D-08).
+      if (resolved.kind === "status" && locked.some((t) => t.mergedIntoTicketId !== null)) {
+        throw new TicketMutationError("MERGED_SOURCE");
+      }
 
       // Tag links of the locked tickets, read after the lock so no other mutation changes them.
       const linked = new Set<string>();
