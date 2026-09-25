@@ -107,3 +107,71 @@ E2E, build, egress and the full integration suite were not run in this pass. The
 | `pnpm test:e2e` `ticket-relations`, `ticket-merge`, `snooze`, `activity-feed`, `public-status`, `a11y-contrast` (one process, host zone) | 0 | 39 passed |
 
 Build, egress, integration and the full E2E suite were not run in this pass. The orchestrator reruns the full gate.
+
+## Fix pass F3 (UI copy, merge confirm and E2E)
+
+**Scope:** UI-WR-05, UI-WR-06, UI-WR-07, the rest of UI-WR-08 and UI-IN-02 (`12-REVIEW-c.md`), plus UI-K34 (orchestrator dispositions, follow-up of run decision K34). All six were checked against the code at `75ed5c7` before editing, and all six still held. UI-WR-05's six strings were all still in the code without a row, and items 2 and 6 still showed "none", the raw enum key and "may have been saved". UI-WR-06's `?? "Related to"` fallback was still there. UI-WR-07: the picker still started empty after Back. UI-IN-02: the `default: return null` branch was still there. UI-K34: `pickerReason` still checked only `alreadyLinked` in link mode, and the Link item had no disabled state.
+**Where it ran:** main checkout, branch `v2/run-loop` (`workflow.use_worktrees` is `false`). Integration and E2E used Testcontainers on Colima. The host and the E2E server ran in Asia/Jakarta, with no `TZ` override in any run.
+**Result:** 6 of 6 fixed. No schema change, no migration, no new package. The public status page was not touched.
+**Method:** all new and extended tests were written first and run once against the unfixed code. E2E before-run: 6 failed, 29 passed. The 6 failures were the six new behaviour tests. Every coverage-only case passed, because those paths already worked. The test files were then reset, and each finding's tests went into the commit with its fix. At the end, every test file was byte-identical to the before-run version.
+
+| ID | Status | Commit | Test | Failing assertion seen before the fix |
+|----|--------|--------|------|------------------------------------|
+| UI-IN-02 | fixed (no reachable behaviour change) | b5d7a99 | none: dead code. The `never` check makes `typecheck` fail if a new code has no row. | n/a |
+| UI-WR-05 | fixed | d7cba59 | `tests/unit/activity-feed.test.ts` › "copy rows added by the review …": "each new row is one exported constant …", "the former member mid-sentence comes from its constant", "a missing status or priority reads as the missing-value row", "an unknown status or priority value uses the other row, never the raw key"; `ticket-relations.spec.ts` › "a removal call that never returns keeps focus on its remove button" now also asserts the text | Unit: first `Error: Cannot find module '../../src/lib/tickets/lifecycle-copy'`. With the constants in place and the label logic still old: `expected 'Ann changed the priority from none to…' to be 'Ann changed the priority from no valu…'` and `expected 'Ann changed the status from ARCHIVED …' to be 'Ann changed this ticket.'`. E2E `toHaveText`: Expected `"…The link may have been removed…"`, Received `"…The link may have been saved…"` |
+| UI-WR-06 | fixed | 0c2c528 | `tests/integration/ticket-picker.test.ts` › "linkLabel gives the current link from the current ticket's side, null when unlinked" and "linkLabel never reports a link of another organization"; the row-key checks (service and route) now list `linkLabel`; `ticket-merge.spec.ts` › "the confirmation names a link added after the page loaded"; unit `mergeReplacesLinkText` | Integration: `expected { alreadyLinked: true, …(1) } to deeply equal { alreadyLinked: true, …(1) }`, `expected [ [ …(3) ] ] to deeply equal [ [ …(3) ] ]`, `expected [ 'alreadyLinked', 'id', …(5) ] to deeply equal [ 'alreadyLinked', 'id', …(6) ]` (2×). E2E `toBeVisible` on `'The current link "Child of" between these tickets is replaced by "Duplicate of".'`: element(s) not found |
+| UI-WR-07 | fixed | d4d4e3d | `ticket-merge.spec.ts` › "Back from the confirm step shows the kept choice" and "after a rule refusal, Back asks for a new pick" | `toHaveValue` on the picker input: Expected `"28"`, Received `""`; `toBeDisabled` on "Review merge": Expected disabled, Received enabled |
+| UI-WR-08 | fixed (tests) | f1d30d1 | `ticket-merge.spec.ts` › new "a rule refusal names the rule, disables Merge tickets and focuses Back"; F2's "a merge call that never returns…" now also asserts Back disabled. `snooze.spec.ts` › new "a snooze call that never returns shows the outcome unknown callout" and "a custom time more than 365 days ahead is refused on the client"; F2's "a refused snooze keeps focus…" now also asserts the popover stays open with no success toast. "Too soon" stays covered by F2's UI-IN-03 test, and the failed link removal is covered by the UI-WR-05 row. Time-zone block: see below | Coverage only. These paths already worked, so every case passed in the before-run. Time-zone block, Asia/Jakarta host, no `TZ`, UI-WR-01 fix reverted locally and not committed: `toHaveAccessibleName` Expected `"Snoozed until Tue, Nov 10, 09:00. Change or wake."`, Received `"Snoozed until Wed, Nov 11, 02:00. Change or wake."` (1 failed, 2 passed). With the fix restored: 3 passed |
+| UI-K34 | fixed | f5bb311 | `ticket-relations.spec.ts` › "the link picker marks a merged source unavailable (run decision K34)" and "Link a ticket… is disabled on a merged source, with its reason (run decision K34)"; unit constants | `toHaveAttribute("aria-disabled", "true")` on the picker row: Expected `"true"`, Received `"false"`; on the "Link a ticket…" menu item: Expected `"true"`, Received `""` |
+
+### What changed
+
+- **UI-IN-02:** `mergeErrorMessage` maps all seven `MergeErrorCode` values and ends in `const unhandled: never = code`. `MergeFailure` lost its `rule` flag. Every returned refusal is a rule refusal: Back takes focus and "Merge tickets" stays disabled. A thrown error is still "Merge outcome unknown".
+- **UI-WR-05:** New `src/lib/tickets/lifecycle-copy.ts` (pure, client-safe). It exports `MERGED_BANNER_DATE_UNKNOWN`, `MERGED_COMPOSER_TARGET_UNAVAILABLE`, `MERGE_CONFIRM_DESCRIPTION` and `LINK_REMOVE_OUTCOME_UNKNOWN`. `activity-copy.ts` exports `ACTOR_FORMER_MEMBER_MID_SENTENCE` and `MISSING_VALUE`. The banner, composer line, merge dialog, linked-tickets row and feed use these constants verbatim. Status and priority feed rows go through `changeParts`:
+  - a missing value gives "no value";
+  - an unknown value or a non-string gives the "Feed events: other" row ("{actor} changed this ticket."), keeping the action's icon.
+- **UI-WR-06:** `searchTicketsForPicker` returns `linkLabel` (`RelationLabel | null`):
+  - It is computed with `relationLabel(type, relationSideFor(r, current.id))`.
+  - It comes from the same relation query as `alreadyLinked`. That query is filtered by `organizationId: actor.orgId` and the current ticket, and still runs after the membership check and the organization-scoped read of the current ticket.
+  - The allow-list comment in `ticket-picker.ts` and the route comment list the eight fields.
+  - The confirmation shows `mergeReplacesLinkText(reviewed.linkLabel ?? null)`, so with no label it shows the generic row, never a guessed type.
+  - The `linkLabels` prop chain (meta header → actions menu → merge dialog) is removed.
+- **UI-WR-07:** `TicketPicker` takes an optional controlled `query`/`onQueryChange`. `MergeFlow` holds the search text, so Back remounts step 1 with the same search, and the re-fetched rows show the chosen row checked. The confirm step renders a separate `reviewed` row. A rule refusal clears the picker's `target`, so after Back "Review merge" is disabled until the user picks again, and the refreshed rows show the refused ticket with its reason (for example "Already merged into another ticket").
+- **UI-K34:** `pickerReason` checks `mergedSource` first for both purposes and returns `PICKER_REASON_MERGED`. `TicketActionsMenu` disables "Link a ticket…" on a merged source and shows `MERGED_SOURCE_REASON` as a second 12px muted line, with the same markup as Merge. `mergeUnavailableReason` uses the same constant.
+- **UI-WR-08, time zones:** The viewer zone is chosen at module load: the first of Asia/Jakarta (deadline 02:00 UTC) and Pacific/Honolulu (19:00 UTC) whose rendering differs from the host zone's. Neither zone has daylight saving. All expected strings are computed for that zone. A guard test and an in-test `hostText !== local` check fail loudly if the block could not tell the two zones apart. On this Asia/Jakarta host, the block runs in Pacific/Honolulu.
+
+### UI-SPEC rows added (`12-UI-SPEC.md`, additive only; no approved row changed)
+
+1. Link remove outcome unknown: "The result is not known. The link may have been removed. Refresh the page to check before you try again." (UI-WR-05)
+2. Merge confirm description (sr): "Review what happens before you merge these tickets." (UI-WR-05)
+3. Merged banner, date unknown (fills {date}): "an earlier date" (UI-WR-05)
+4. Merged composer line, target unavailable: "Replies go on the ticket this one was merged into." (UI-WR-05)
+5. Actor: former member (mid-sentence): "a former member" (UI-WR-05)
+6. Feed events: missing value (fills {before} or {after}): "no value" (UI-WR-05)
+7. Merge replaces link, label unknown: 'The current link between these tickets is replaced by "Duplicate of".' (UI-WR-06)
+8. Link unavailable: merged source: "This ticket was already merged." (UI-K34)
+9. Picker reason: merged (link dialog): "Already merged into another ticket" (UI-K34)
+
+An "Amended … fix pass F3" note at the end of the spec records each row and the UI-WR-07 and K34 behaviour, including that a merged source is now also a link-dialog reason (Surface 2c said only "Already linked" applied).
+
+### Notes for the orchestrator (no change made here)
+
+- After UI-IN-02, the approved row "Merge error: unknown" and the 3a sentence "'Merge tickets' stays enabled only for the 'unknown' refusal" describe a path no code reaches. The rows were left unchanged, because approved rows are never edited. Removing or re-wording them is a spec decision.
+- The picker's `alreadyLinked`/`linkLabel` are read when the row is fetched. A link added between picking and confirming is still not shown. The server's merge replaces whatever link exists inside its transaction (Assumption 6), so only the wording of that line can be stale, never the result.
+- Coverage-only UI-WR-08 cases cannot be seen failing without breaking the product. Each was checked to assert the exact spec text or state.
+
+### Final commands (after all six commits)
+
+| Command | Exit | Counts |
+|---------|------|--------|
+| `pnpm lint` | 0 | 388 files checked, no fixes |
+| `pnpm typecheck` | 0 | clean |
+| `pnpm test` | 0 | 27 files, 273 tests passed |
+| `pnpm test:integration` `ticket-picker` (one process; before the fixes) | 1 | 4 failed, 6 passed (the seen-failing run) |
+| `pnpm test:integration` `ticket-picker`, `ticket-relations`, `ticket-merge`, `activity-feed` (one process) | 0 | 4 files, 77 tests passed |
+| `pnpm test:e2e` `ticket-relations`, `ticket-merge`, `snooze` (one process; before the fixes) | 1 | 6 failed, 29 passed (the seen-failing run) |
+| `pnpm test:e2e snooze.spec.ts --grep "viewer's time zone"` (UI-WR-01 fix reverted locally, host zone) | 1 | 1 failed, 2 passed |
+| `pnpm test:e2e snooze.spec.ts --grep "viewer's time zone"` (fix restored, host zone) | 0 | 3 passed |
+| `pnpm test:e2e` `ticket-relations`, `ticket-merge`, `snooze`, `activity-feed`, `public-status`, `a11y-contrast` (one process, host zone) | 0 | 48 passed |
+
+Intermediate runs: `ticket-merge.spec.ts` after UI-WR-07, 10 passed; `ticket-relations.spec.ts` after UI-K34, 9 passed. Build, egress, the full integration suite and the full E2E suite were not run in this pass. The orchestrator reruns the full gate.
