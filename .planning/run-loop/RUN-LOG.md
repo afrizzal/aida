@@ -926,3 +926,11 @@ Dipicu laporan pass F4. Cek A (25 GiB) dan B lolos; berhenti total tidak terpicu
 Gerbang ulang di `d61b370`: `lint` 0 (389), `typecheck` 0, `pnpm test` 0 (274), integration tanpa egress 0 (33 berkas, 290), E2E penuh 0 (163 lolos, 1 skip lama, 0 gagal), `build` 0, `audit --prod` 1 (baseline). Egress blocked (O-1).
 
 Kritik Codex putaran 2 (`fase12-diff-r2-tanya.md`, ekspor baru dari `2649830`; pindaian: hanya `.env.example`, string mirip kunci semuanya dummy yang dikenal, password container dev dan path rumah tidak ada). Log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Berjalan di latar.
+
+## Putaran 56 (2026-11-09, mulai 00.23 WIB)
+
+Dipicu selesainya Codex putaran 2. Log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Jawaban (`fase12-diff-r2-jawab.md`): tanpa HIGH; D1, D2, dan D5 dinyatakan tertutup di kode; fase dinilai layak masuk verifikasi dengan dua MEDIUM terlihat. Dicek ke kode, semuanya benar. R2-1 MEDIUM: `review()` di dialog merge jatuh ke baris lama bila pembacaan ulang gagal, dan link yang ditambah sesudah pembacaan ulang tetap diganti merge tanpa pernah ditampilkan. R2-2 MEDIUM: worker email mengambil subjek dan riwayat thread dari tiket yang dibacanya, jadi balasan yang ditulis di sumber terkirim di thread target, dan urutan in-flight bisa memakai subjek sumber dengan riwayat kosong. R2-3 LOW: sumber merge bisa muncul di view berbasis assignee sebagai baris CLOSED biasa.
+
+Keputusan K37 (menggantikan K36): balasan keluar tetap di thread email tiket tempat ia ditulis. Worker memakai asal `mergedFromTicketId ?? ticketId` untuk subjek, nomor, dan riwayat (`ticketId = asal OR mergedFromTicketId = asal`), sehingga hasilnya sama sebelum dan sesudah merge. Alasan: alasan K36 ("penerima sama") tidak menutup salah konteks thread dan urutan in-flight; aturan asal bersifat deterministik tanpa menolak merge. Bisa dibalik dengan mengembalikan pembacaan dari tiket saat ini.
+
+Disposisi di `12-REVIEW.md` (`493c156`). R2-3 ditunda ke visual pass (`deferred-items.md`; baris D3/K36 diganti). Pass F5 (R2-1 klien dan prasyarat server `LINK_CHANGED`, R2-2) berjalan di latar. Folder ekspor Codex dihapus. Sesudah F5: gerbang ulang, lalu Codex putaran 3 (terakhir) khusus untuk perubahan F4 dan F5, karena perubahan sesudah review harus direview (pelajaran Fase 10).
