@@ -163,3 +163,21 @@ None of these is claimed as passed. Empty stays empty.
 14. The ticket top bar (`src/components/tickets/ticket-meta-header.tsx:315`) uses `border-border` where DESIGN-SYSTEM asks for `border-border/70`. This predates Phase 12 (v1 commit `2d65bbc`) and Phase 12 did not change it. It is recorded here and not fixed in this plan.
 15. Baseline debt, unchanged and not made worse by Phase 12: `pnpm audit --prod` 7 critical and 52 high; the Windows-only `taskkill` E2E teardown; the honesty-invariants flakes (2/2 in this run, not claimed fixed); the Turbopack NFT build warning; the 1 skipped `uat-gaps` case.
 16. The 12-10 SUMMARY's statement "createdAt is the transaction start time" is wrong (gate attempt 1). The test is fixed (`65d4b7e`). The 12-10 SUMMARY itself is left as written; this file is the correction.
+
+## Rerun after the code review fixes (on `06279f9`)
+
+Run by the orchestrator after fixer passes F1, F2 and F3 (`12-REVIEW-FIX.md`). One command at a time, in this order, each writing its own log under `$TMPDIR` (`aida-12-fixgate-*.log`, outside the repo). Each exit code came from the command itself, never through a pipe. `pgrep -f 'artisan test'` found nothing before every command. The integration, E2E and build commands ran with `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`. No container was created, started, stopped or removed by hand; no compose stack was started.
+
+| Command | Exit | Result |
+|---------|------|--------|
+| `pnpm lint` | 0 | 388 files checked, no fixes |
+| `pnpm typecheck` | 0 | clean |
+| `pnpm test` | 0 | 27 files, 273 tests passed |
+| `pnpm test:integration --exclude tests/integration/egress-isolation.test.ts --reporter=verbose` | 0 | 32 files, 278 tests passed; `egress-isolation` appears only in the echoed command |
+| `pnpm test:e2e` (full suite) | 0 | 158 passed, 1 skipped (the existing `uat-gaps.spec.ts:17` skip), 0 failed, 0 flaky, 3.8 min; the Windows-only `taskkill` teardown message appears 3 times and did not fail the run |
+| `pnpm build` | 0 | built |
+| `pnpm audit --prod` | 1 | 7 critical, 52 high (same as the baseline) |
+
+Integration full and `pnpm test:egress` stay blocked (O-1); no `aida-egress-test` container exists. Compared with attempt 3 on `7c3bad3`: unit 268 to 273, integration 270 to 278, E2E 140 to 158 passed; nothing is worse.
+
+Gate item 7 of "Open items" (no E2E for the merge-refusal, rejected-call and snooze error callouts) is now covered by the F2 and F3 cases in `ticket-merge.spec.ts`, `snooze.spec.ts` and `ticket-relations.spec.ts`. The time-zone backstop is covered by the zone block in `snooze.spec.ts`, which picks a viewer zone different from the host zone. A visual pass is still open.
