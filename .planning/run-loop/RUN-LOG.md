@@ -910,3 +910,11 @@ Dipicu laporan pass F3. Cek A (25 GiB) dan B lolos; berhenti total tidak terpicu
 Gerbang ulang di `06279f9`, satu perintah pada satu waktu (`12-GATE.md`, `78c248b`): `lint` 0 (388), `typecheck` 0, `pnpm test` 0 (273), integration tanpa egress 0 (32 berkas, 278), E2E penuh 0 (158 lolos, 1 skip lama, 0 gagal), `build` 0, `audit --prod` 1 (7 critical, 52 high; baseline). Egress blocked (O-1). Butir terbuka 7 di gerbang (E2E callout error) kini tertutup.
 
 Kritik Codex atas diff Fase 12, putaran 1 (`fase12-diff-tanya.md`): ekspor baru dari `78c248b`; pindaian: satu-satunya dotfile rahasia adalah `.env.example`, 23 string mirip kunci semuanya dummy yang dikenal (`sk-test-DUMMYKEY…`, `sk-proj-ABCDEF…`, `AKIAIOSFODNN7EXAMPLE`, `sk-ant-ABCDEF…`, `sk-test-e2e-phase4-`, `sk-agent-workspace-like`), password container dev tidak ada, path rumah tidak ada. Log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Berjalan di latar.
+
+## Putaran 54 (2026-11-09, mulai 00.00 WIB)
+
+Dipicu selesainya Codex. Log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Jawaban putaran 1 (`fase12-diff-jawab.md`): 2 HIGH, 3 MEDIUM, 1 LOW; semua dicek ke kode dan benar. D1 HIGH: `runTicketMutation` tidak membaca `mergedIntoTicketId`, jadi perubahan status tunggal atau massal bisa membuka kembali sumber merge. D2 (Codex HIGH, run menilai MEDIUM karena hanya oracle keberadaan id tanpa isi): route pesan membaca tiket, setting email, dan berkas staged sebelum cek keanggotaan. D3: balasan QUEUED yang ikut dipindah merge terkirim dengan subjek dan thread target; penerimanya kontak yang sama karena merge menolak kontak berbeda (`merge.ts:181`). D4: pilihan merge yang disimpan tidak disegarkan dari baris picker baru. D5: halaman status dan route lampiran membaca penanda merge dan baris dalam dua statement (tanpa kebocoran; hanya thread kosong atau 404 sementara). D6: catatan gerbang basi.
+
+Keputusan K36: D3 tidak diubah. Sesudah merge, percakapan hidup di target, sama seperti email masuk (D-09); balasan yang antre sampai ke kontak yang sama dengan thread target. Dicatat di `deferred-items.md`; bisa ditinjau di pass email.
+
+Disposisi di `12-REVIEW.md` (`6e77100`). Pass F4 (D1, D2, D4, D5) berjalan di latar; D6 dikoreksi orkestrator sesudah F4. Folder ekspor Codex dihapus (path di bawah `$TMPDIR`, pola `tmp.*`). Sesudah F4: gerbang ulang, lalu kritik Codex putaran 2.
