@@ -222,7 +222,11 @@ describe("snooze refusals (D-12)", () => {
     const s = await seedContactTicket(orgId, { contactEmail });
     const t = await seedContactTicket(orgId, { contactEmail });
     expect(
-      await mergeTickets(prisma, owner, { sourceTicketId: s.id, targetTicketId: t.id }),
+      await mergeTickets(prisma, owner, {
+        sourceTicketId: s.id,
+        targetTicketId: t.id,
+        reviewedLinkLabel: null,
+      }),
     ).toMatchObject({ ok: true });
     const source = await prisma.ticket.findUniqueOrThrow({ where: { id: s.id } });
     expect(source.status).toBe("CLOSED");
@@ -461,7 +465,11 @@ describe("customer replies wake a snoozed ticket (D-14)", () => {
     const contactEmail = `snooze-${randomUUID()}@example.test`;
     const s = await seedContactTicket(orgId, { contactEmail });
     const t = await seedContactTicket(orgId, { contactEmail });
-    await mergeTickets(prisma, owner, { sourceTicketId: s.id, targetTicketId: t.id });
+    await mergeTickets(prisma, owner, {
+      sourceTicketId: s.id,
+      targetTicketId: t.id,
+      reviewedLinkLabel: null,
+    });
     const deadline = new Date(Date.now() + 2 * 60 * MIN);
     expect(await snoozeTicket(prisma, owner, { ticketId: t.id, until: deadline })).toMatchObject({
       ok: true,

@@ -33,6 +33,22 @@ export const MERGED_COMPOSER_TARGET_UNAVAILABLE =
 /** Copywriting "Merge confirm description (sr)". */
 export const MERGE_CONFIRM_DESCRIPTION = "Review what happens before you merge these tickets.";
 
+/**
+ * Copywriting "Merge error: link changed", shown after the "Nothing was changed." prefix: the
+ * link between the pair is not the one the confirm step named (Codex diff round 2, R2-1).
+ */
+export const MERGE_ERROR_LINK_CHANGED =
+  "The link between these tickets changed. Review the merge again.";
+
+/**
+ * Copywriting "Merge re-check failed": "Review merge" could not read the chosen ticket again
+ * (the read failed, access ended, or the ticket is no longer found), so the confirm step stays
+ * closed and the choice is kept (Codex diff round 2, R2-1).
+ */
+export function mergeRecheckFailedText(target: number): string {
+  return `Could not check #${target} again. Try again.`;
+}
+
 /** Copywriting "Link remove outcome unknown": a rejected removal call (P11 D2). */
 export const LINK_REMOVE_OUTCOME_UNKNOWN =
   "The result is not known. The link may have been removed. Refresh the page to check before you try again.";

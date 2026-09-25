@@ -20,6 +20,7 @@ import {
   mergeTickets,
   setAgentMessageObserverForTests,
 } from "@/lib/tickets/merge";
+import type { RelationLabel } from "@/lib/tickets/relation-pairs";
 import {
   seedContactTicket,
   seedMessage,
@@ -105,7 +106,11 @@ describe("mergeTickets (tracer)", () => {
     const before = await orgCounts(orgId);
 
     expect(
-      await mergeTickets(prisma, actor, { sourceTicketId: s.id, targetTicketId: t.id }),
+      await mergeTickets(prisma, actor, {
+        sourceTicketId: s.id,
+        targetTicketId: t.id,
+        reviewedLinkLabel: null,
+      }),
     ).toEqual({ ok: true, sourceTicketId: s.id, targetTicketId: t.id });
 
     const moved = await prisma.message.findMany({ where: { id: { in: sourceMessageIds } } });
@@ -167,12 +172,14 @@ async function snapshot(orgId: string) {
   };
 }
 
+/** reviewedLinkLabel is the link the case's reviewer saw (R2-1): stated at every call. */
 const merge = (
   actor: MergeActor,
   sourceTicketId: string,
   targetTicketId: string,
+  reviewedLinkLabel: RelationLabel | null,
   hooks?: MergeHooks,
-) => mergeTickets(prisma, actor, { sourceTicketId, targetTicketId }, hooks);
+) => mergeTickets(prisma, actor, { sourceTicketId, targetTicketId, reviewedLinkLabel }, hooks);
 
 async function auditActions(orgId: string, ticketId: string) {
   const rows = await prisma.ticketAuditEvent.findMany({
@@ -201,7 +208,7 @@ function heldMerge(actor: MergeActor, sourceTicketId: string, targetTicketId: st
   const pid = deferred<number>();
   const held = deferred<void>();
   const release = deferred<void>();
-  const run = merge(actor, sourceTicketId, targetTicketId, {
+  const run = merge(actor, sourceTicketId, targetTicketId, null, {
     onTransactionStart: async (tx) => pid.resolve(await backendPid(tx)),
     beforeCommit: async () => {
       held.resolve();
@@ -227,7 +234,7 @@ describe("mergeTickets: refusals change nothing (D-07, D-10)", () => {
     const { orgId, actor } = await seedActor();
     const { s } = await samePair(orgId);
     const before = await snapshot(orgId);
-    expect(await merge(actor, s.id, s.id)).toEqual({ ok: false, error: "SELF" });
+    expect(await merge(actor, s.id, s.id, null)).toEqual({ ok: false, error: "SELF" });
     expect(await snapshot(orgId)).toEqual(before);
   });
 
@@ -236,7 +243,7 @@ describe("mergeTickets: refusals change nothing (D-07, D-10)", () => {
     const { s, t } = await samePair(orgId);
     await prisma.member.deleteMany({ where: { userId: actor.userId, organizationId: orgId } });
     const before = await snapshot(orgId);
-    expect(await merge(actor, s.id, t.id)).toEqual({ ok: false, error: "MEMBERSHIP_ENDED" });
+    expect(await merge(actor, s.id, t.id, null)).toEqual({ ok: false, error: "MEMBERSHIP_ENDED" });
     expect(await snapshot(orgId)).toEqual(before);
   });
 
@@ -247,10 +254,10 @@ describe("mergeTickets: refusals change nothing (D-07, D-10)", () => {
       contactEmail:
         (await prisma.contact.findUniqueOrThrow({ where: { id: s.contactId } })).email ?? "",
     });
-    expect((await merge(actor, s.id, t.id)).ok).toBe(true);
+    expect((await merge(actor, s.id, t.id, null)).ok).toBe(true);
     await prisma.member.deleteMany({ where: { userId: actor.userId, organizationId: orgId } });
     const before = await snapshot(orgId);
-    expect(await merge(actor, s.id, u.id)).toEqual({ ok: false, error: "MEMBERSHIP_ENDED" });
+    expect(await merge(actor, s.id, u.id, null)).toEqual({ ok: false, error: "MEMBERSHIP_ENDED" });
     expect(await snapshot(orgId)).toEqual(before);
   });
 
@@ -262,11 +269,11 @@ describe("mergeTickets: refusals change nothing (D-07, D-10)", () => {
     const foreign = await seedContactTicket(other.orgId, { contactEmail });
     const before = await snapshot(orgId);
     const beforeOther = await snapshot(other.orgId);
-    expect(await merge(actor, s.id, foreign.id)).toEqual({
+    expect(await merge(actor, s.id, foreign.id, null)).toEqual({
       ok: false,
       error: "TICKET_UNAVAILABLE",
     });
-    expect(await merge(actor, foreign.id, s.id)).toEqual({
+    expect(await merge(actor, foreign.id, s.id, null)).toEqual({
       ok: false,
       error: "TICKET_UNAVAILABLE",
     });
@@ -278,7 +285,7 @@ describe("mergeTickets: refusals change nothing (D-07, D-10)", () => {
     const { orgId, actor } = await seedActor();
     const { s } = await samePair(orgId);
     const before = await snapshot(orgId);
-    expect(await merge(actor, s.id, randomUUID())).toEqual({
+    expect(await merge(actor, s.id, randomUUID(), null)).toEqual({
       ok: false,
       error: "TICKET_UNAVAILABLE",
     });
@@ -291,9 +298,9 @@ describe("mergeTickets: refusals change nothing (D-07, D-10)", () => {
     const s = await seedContactTicket(orgId, { contactEmail });
     const t = await seedContactTicket(orgId, { contactEmail });
     const u = await seedContactTicket(orgId, { contactEmail });
-    expect((await merge(actor, s.id, t.id)).ok).toBe(true);
+    expect((await merge(actor, s.id, t.id, null)).ok).toBe(true);
     const before = await snapshot(orgId);
-    expect(await merge(actor, s.id, u.id)).toEqual({ ok: false, error: "SOURCE_MERGED" });
+    expect(await merge(actor, s.id, u.id, null)).toEqual({ ok: false, error: "SOURCE_MERGED" });
     expect(await snapshot(orgId)).toEqual(before);
   });
 
@@ -303,9 +310,9 @@ describe("mergeTickets: refusals change nothing (D-07, D-10)", () => {
     const s = await seedContactTicket(orgId, { contactEmail });
     const t = await seedContactTicket(orgId, { contactEmail });
     const u = await seedContactTicket(orgId, { contactEmail });
-    expect((await merge(actor, t.id, u.id)).ok).toBe(true);
+    expect((await merge(actor, t.id, u.id, null)).ok).toBe(true);
     const before = await snapshot(orgId);
-    expect(await merge(actor, s.id, t.id)).toEqual({ ok: false, error: "TARGET_MERGED" });
+    expect(await merge(actor, s.id, t.id, null)).toEqual({ ok: false, error: "TARGET_MERGED" });
     expect(await snapshot(orgId)).toEqual(before);
   });
 
@@ -315,9 +322,9 @@ describe("mergeTickets: refusals change nothing (D-07, D-10)", () => {
     const s = await seedContactTicket(orgId, { contactEmail });
     const t = await seedContactTicket(orgId, { contactEmail });
     const u = await seedContactTicket(orgId, { contactEmail });
-    expect((await merge(actor, u.id, s.id)).ok).toBe(true);
+    expect((await merge(actor, u.id, s.id, null)).ok).toBe(true);
     const before = await snapshot(orgId);
-    expect(await merge(actor, s.id, t.id)).toEqual({ ok: false, error: "SOURCE_HAS_MERGES" });
+    expect(await merge(actor, s.id, t.id, null)).toEqual({ ok: false, error: "SOURCE_HAS_MERGES" });
     expect(await snapshot(orgId)).toEqual(before);
   });
 
@@ -331,7 +338,10 @@ describe("mergeTickets: refusals change nothing (D-07, D-10)", () => {
       withAttachment: true,
     });
     const before = await snapshot(orgId);
-    expect(await merge(actor, s.id, t.id)).toEqual({ ok: false, error: "DIFFERENT_CONTACTS" });
+    expect(await merge(actor, s.id, t.id, null)).toEqual({
+      ok: false,
+      error: "DIFFERENT_CONTACTS",
+    });
     expect(await snapshot(orgId)).toEqual(before);
   });
 });
@@ -346,7 +356,7 @@ describe("mergeTickets: provenance, links, adjacency and rollback", () => {
       where: { ticketId: { in: [s.id, t.id] } },
       select: { id: true, seq: true, createdAt: true },
     });
-    expect((await merge(actor, s.id, t.id)).ok).toBe(true);
+    expect((await merge(actor, s.id, t.id, null)).ok).toBe(true);
     const source = await prisma.ticket.findUniqueOrThrow({ where: { id: s.id } });
     const marker = source.mergeMessageSeq;
     if (marker === null) throw new Error("no marker");
@@ -365,7 +375,7 @@ describe("mergeTickets: provenance, links, adjacency and rollback", () => {
   it("a merge with no prior link writes neither RELATION_ADDED nor RELATION_REMOVED", async () => {
     const { orgId, actor } = await seedActor();
     const { s, t } = await samePair(orgId);
-    expect((await merge(actor, s.id, t.id)).ok).toBe(true);
+    expect((await merge(actor, s.id, t.id, null)).ok).toBe(true);
     expect(
       await prisma.ticketAuditEvent.count({
         where: { organizationId: orgId, action: { in: ["RELATION_ADDED", "RELATION_REMOVED"] } },
@@ -375,9 +385,10 @@ describe("mergeTickets: provenance, links, adjacency and rollback", () => {
     expect(await auditActions(orgId, t.id)).toEqual(["MERGED_FROM"]);
   });
 
-  for (const [oldType, reverse] of [
-    ["RELATED_TO", false],
-    ["CHILD_OF", true],
+  // The label is the one the confirm step showed from the source's side (R2-1).
+  for (const [oldType, reverse, reviewed] of [
+    ["RELATED_TO", false, "Related to"],
+    ["CHILD_OF", true, "Parent of"],
   ] as const) {
     it(`replaces an existing ${oldType} link by DUPLICATE_OF and audits both tickets`, async () => {
       const { orgId, actor } = await seedActor();
@@ -388,7 +399,7 @@ describe("mergeTickets: provenance, links, adjacency and rollback", () => {
         toTicketId: reverse ? s.id : t.id,
         createdById: actor.userId,
       });
-      expect((await merge(actor, s.id, t.id)).ok).toBe(true);
+      expect((await merge(actor, s.id, t.id, reviewed)).ok).toBe(true);
       const relations = await prisma.ticketRelation.findMany({ where: { organizationId: orgId } });
       expect(relations.map((r) => [r.type, r.fromTicketId, r.toTicketId])).toEqual([
         ["DUPLICATE_OF", s.id, t.id],
@@ -413,7 +424,7 @@ describe("mergeTickets: provenance, links, adjacency and rollback", () => {
     const contactEmail = email();
     const s = await seedContactTicket(orgId, { contactEmail, status: "CLOSED" });
     const t = await seedContactTicket(orgId, { contactEmail });
-    expect((await merge(actor, s.id, t.id)).ok).toBe(true);
+    expect((await merge(actor, s.id, t.id, null)).ok).toBe(true);
     expect(await auditActions(orgId, s.id)).toEqual(["MERGED_INTO"]);
     expect((await prisma.ticket.findUniqueOrThrow({ where: { id: s.id } })).status).toBe("CLOSED");
   });
@@ -423,7 +434,7 @@ describe("mergeTickets: provenance, links, adjacency and rollback", () => {
     const contactEmail = email();
     const s = await seedContactTicket(orgId, { contactEmail, status: "RESOLVED" });
     const t = await seedContactTicket(orgId, { contactEmail });
-    expect((await merge(actor, s.id, t.id)).ok).toBe(true);
+    expect((await merge(actor, s.id, t.id, null)).ok).toBe(true);
     const rows = await prisma.ticketAuditEvent.findMany({
       where: { organizationId: orgId, ticketId: s.id, action: "STATUS_CHANGED" },
     });
@@ -438,7 +449,7 @@ describe("mergeTickets: provenance, links, adjacency and rollback", () => {
     const s = await seedContactTicket(orgId, { contactEmail });
     const t = await seedContactTicket(orgId, { contactEmail, status: "CLOSED" });
     const targetBefore = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id } });
-    expect((await merge(actor, s.id, t.id)).ok).toBe(true);
+    expect((await merge(actor, s.id, t.id, null)).ok).toBe(true);
     expect(await prisma.ticket.findUniqueOrThrow({ where: { id: t.id } })).toEqual(targetBefore);
   });
 
@@ -446,7 +457,7 @@ describe("mergeTickets: provenance, links, adjacency and rollback", () => {
     const { orgId, actor } = await seedActor();
     const { s, t } = await samePair(orgId);
     await prisma.message.deleteMany({ where: { ticketId: s.id } });
-    expect((await merge(actor, s.id, t.id)).ok).toBe(true);
+    expect((await merge(actor, s.id, t.id, null)).ok).toBe(true);
     expect(await auditActions(orgId, s.id)).toEqual(["MERGED_INTO", "STATUS_CHANGED"]);
     expect(await auditActions(orgId, t.id)).toEqual(["MERGED_FROM"]);
   });
@@ -454,9 +465,9 @@ describe("mergeTickets: provenance, links, adjacency and rollback", () => {
   it("re-running the same merge returns SOURCE_MERGED and changes nothing", async () => {
     const { orgId, actor } = await seedActor();
     const { s, t } = await samePair(orgId);
-    expect((await merge(actor, s.id, t.id)).ok).toBe(true);
+    expect((await merge(actor, s.id, t.id, null)).ok).toBe(true);
     const before = await snapshot(orgId);
-    expect(await merge(actor, s.id, t.id)).toEqual({ ok: false, error: "SOURCE_MERGED" });
+    expect(await merge(actor, s.id, t.id, null)).toEqual({ ok: false, error: "SOURCE_MERGED" });
     expect(await snapshot(orgId)).toEqual(before);
   });
 
@@ -484,7 +495,7 @@ describe("mergeTickets: provenance, links, adjacency and rollback", () => {
       direction: "OUTBOUND",
       createdAt: at(4),
     });
-    expect((await merge(actor, s.id, t.id)).ok).toBe(true);
+    expect((await merge(actor, s.id, t.id, null)).ok).toBe(true);
     const ids = [s1.id, t2.id, s3.id, t4.id];
     const rows = await prisma.message.findMany({
       where: { ticketId: t.id, id: { in: ids } },
@@ -505,7 +516,7 @@ describe("mergeTickets: provenance, links, adjacency and rollback", () => {
       where: { id: { in: [s.id, t.id] } },
       data: { snoozedUntil: deadline },
     });
-    expect((await merge(actor, s.id, t.id)).ok).toBe(true);
+    expect((await merge(actor, s.id, t.id, null)).ok).toBe(true);
     expect(
       (await prisma.ticket.findUniqueOrThrow({ where: { id: s.id } })).snoozedUntil,
     ).toBeNull();
@@ -537,7 +548,7 @@ describe("mergeTickets: provenance, links, adjacency and rollback", () => {
     const before = await snapshot(orgId);
     const sentinel = new Error("merge rollback sentinel");
     await expect(
-      merge(actor, s.id, t.id, {
+      merge(actor, s.id, t.id, "Related to", {
         afterMove: () => {
           throw sentinel;
         },
@@ -557,7 +568,7 @@ describe("mergeTickets: races bound to recorded PIDs (D-08, D-10)", () => {
     const first = heldMerge(actor, a.id, t.id);
     await first.held;
     const second = pidHooks();
-    const run2 = merge(actor, a.id, u.id, second.hooks);
+    const run2 = merge(actor, a.id, u.id, null, second.hooks);
     run2.catch(() => {});
     await waitForBlockedBy(prisma, await first.pid, [await second.pid]);
     first.release();
@@ -574,7 +585,7 @@ describe("mergeTickets: races bound to recorded PIDs (D-08, D-10)", () => {
     const first = heldMerge(actor, a.id, t.id);
     await first.held;
     const second = pidHooks();
-    const run2 = merge(actor, t.id, a.id, second.hooks);
+    const run2 = merge(actor, t.id, a.id, null, second.hooks);
     run2.catch(() => {});
     await waitForBlockedBy(prisma, await first.pid, [await second.pid]);
     first.release();
@@ -606,7 +617,9 @@ describe("mergeTickets: races bound to recorded PIDs (D-08, D-10)", () => {
     const holderPid = await holder.pid;
     await holder.ready;
     const waiter = pidHooks();
-    const run = merge(actor, s.id, t.id, waiter.hooks);
+    // The reviewer saw this link (R2-1); a merge that reviewed no link is refused instead, see
+    // "forced order: a link inserted while the merge waits on the row locks…" below.
+    const run = merge(actor, s.id, t.id, "Related to", waiter.hooks);
     run.catch(() => {});
     await waitForBlockedBy(prisma, holderPid, [await waiter.pid]);
     holder.release();
@@ -620,6 +633,174 @@ describe("mergeTickets: races bound to recorded PIDs (D-08, D-10)", () => {
     expect(removed).toHaveLength(2);
     for (const r of removed)
       expect(r.before).toMatchObject({ relationId: linkId, type: "RELATED_TO" });
+  });
+});
+
+describe("mergeTickets: the reviewed link is a precondition (Codex diff round 2, R2-1)", () => {
+  const LINK_CHANGED = { ok: false, error: "LINK_CHANGED" };
+
+  /** Snapshot plus the plain audit count, so "no audit rows" is stated on its own. */
+  async function unchanged(orgId: string) {
+    return {
+      rows: await snapshot(orgId),
+      audit: await prisma.ticketAuditEvent.count({ where: { organizationId: orgId } }),
+    };
+  }
+
+  it("a link added between review and merge is refused: LINK_CHANGED, nothing changed, no audit rows", async () => {
+    const { orgId, actor } = await seedActor();
+    const { s, t } = await samePair(orgId);
+    // Reviewed with no link; another agent links the pair afterwards.
+    await seedRelation(prisma, orgId, {
+      type: "RELATED_TO",
+      fromTicketId: t.id,
+      toTicketId: s.id,
+      createdById: actor.userId,
+    });
+    const before = await unchanged(orgId);
+    expect(
+      await mergeTickets(prisma, actor, {
+        sourceTicketId: s.id,
+        targetTicketId: t.id,
+        reviewedLinkLabel: null,
+      }),
+    ).toEqual(LINK_CHANGED);
+    expect(await unchanged(orgId)).toEqual(before);
+  });
+
+  it("a link changed between review and merge is refused: LINK_CHANGED, nothing changed, no audit rows", async () => {
+    const { orgId, actor } = await seedActor();
+    const { s, t } = await samePair(orgId);
+    // Reviewed as "Related to"; the link is now CHILD_OF with the source as the child.
+    await seedRelation(prisma, orgId, {
+      type: "CHILD_OF",
+      fromTicketId: s.id,
+      toTicketId: t.id,
+      createdById: actor.userId,
+    });
+    const before = await unchanged(orgId);
+    expect(
+      await mergeTickets(prisma, actor, {
+        sourceTicketId: s.id,
+        targetTicketId: t.id,
+        reviewedLinkLabel: "Related to",
+      }),
+    ).toEqual(LINK_CHANGED);
+    expect(await unchanged(orgId)).toEqual(before);
+  });
+
+  it("the label is compared from the source's side: a CHILD_OF that turned around is refused", async () => {
+    const { orgId, actor } = await seedActor();
+    const { s, t } = await samePair(orgId);
+    // Reviewed as "Child of" (the source was the child); now the source is the parent.
+    await seedRelation(prisma, orgId, {
+      type: "CHILD_OF",
+      fromTicketId: t.id,
+      toTicketId: s.id,
+      createdById: actor.userId,
+    });
+    const before = await unchanged(orgId);
+    expect(
+      await mergeTickets(prisma, actor, {
+        sourceTicketId: s.id,
+        targetTicketId: t.id,
+        reviewedLinkLabel: "Child of",
+      }),
+    ).toEqual(LINK_CHANGED);
+    expect(await unchanged(orgId)).toEqual(before);
+  });
+
+  it("a link removed between review and merge is refused: LINK_CHANGED, nothing changed", async () => {
+    const { orgId, actor } = await seedActor();
+    const { s, t } = await samePair(orgId);
+    const before = await unchanged(orgId);
+    expect(
+      await mergeTickets(prisma, actor, {
+        sourceTicketId: s.id,
+        targetTicketId: t.id,
+        reviewedLinkLabel: "Related to",
+      }),
+    ).toEqual(LINK_CHANGED);
+    expect(await unchanged(orgId)).toEqual(before);
+  });
+
+  it("unchanged, no link reviewed and none now: the merge proceeds", async () => {
+    const { orgId, actor } = await seedActor();
+    const { s, t } = await samePair(orgId);
+    expect(
+      await mergeTickets(prisma, actor, {
+        sourceTicketId: s.id,
+        targetTicketId: t.id,
+        reviewedLinkLabel: null,
+      }),
+    ).toEqual({ ok: true, sourceTicketId: s.id, targetTicketId: t.id });
+  });
+
+  it("unchanged, the reviewed link is still there: the merge proceeds and replaces it", async () => {
+    const { orgId, actor } = await seedActor();
+    const { s, t } = await samePair(orgId);
+    // The source is the parent, so its side reads "Parent of".
+    const old = await seedRelation(prisma, orgId, {
+      type: "CHILD_OF",
+      fromTicketId: t.id,
+      toTicketId: s.id,
+      createdById: actor.userId,
+    });
+    expect(
+      await mergeTickets(prisma, actor, {
+        sourceTicketId: s.id,
+        targetTicketId: t.id,
+        reviewedLinkLabel: "Parent of",
+      }),
+    ).toEqual({ ok: true, sourceTicketId: s.id, targetTicketId: t.id });
+    const relations = await prisma.ticketRelation.findMany({ where: { organizationId: orgId } });
+    expect(relations.map((r) => [r.type, r.fromTicketId, r.toTicketId])).toEqual([
+      ["DUPLICATE_OF", s.id, t.id],
+    ]);
+    const removed = await prisma.ticketAuditEvent.findMany({
+      where: { organizationId: orgId, action: "RELATION_REMOVED" },
+    });
+    expect(removed).toHaveLength(2);
+    for (const r of removed) expect(r.before).toMatchObject({ relationId: old.id });
+  });
+
+  it("forced order: a link inserted while the merge waits on the row locks is read under the locks and refused", async () => {
+    const { orgId, actor } = await seedActor();
+    const { s, t } = await samePair(orgId);
+    const holder = holdTx(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Ticket" WHERE id = ANY(${[s.id, t.id]}::text[]) ORDER BY id FOR UPDATE`;
+      await tx.ticketRelation.create({
+        data: {
+          organizationId: orgId,
+          type: "RELATED_TO",
+          fromTicketId: s.id,
+          toTicketId: t.id,
+          createdById: actor.userId,
+        },
+        select: { id: true },
+      });
+    });
+    const holderPid = await holder.pid;
+    await holder.ready;
+    const waiter = pidHooks();
+    const run = mergeTickets(
+      prisma,
+      actor,
+      { sourceTicketId: s.id, targetTicketId: t.id, reviewedLinkLabel: null },
+      waiter.hooks,
+    );
+    run.catch(() => {});
+    await waitForBlockedBy(prisma, holderPid, [await waiter.pid]);
+    holder.release();
+    await holder.done;
+    const before = await unchanged(orgId);
+    expect(await run).toEqual(LINK_CHANGED);
+    expect(await unchanged(orgId)).toEqual(before);
+    const links = await prisma.ticketRelation.findMany({ where: { organizationId: orgId } });
+    expect(links.map((r) => r.type)).toEqual(["RELATED_TO"]);
+    expect(
+      (await prisma.ticket.findUniqueOrThrow({ where: { id: s.id } })).mergedIntoTicketId,
+    ).toBeNull();
   });
 });
 
@@ -650,7 +831,7 @@ describe("demo seed writes under the ticket row lock (reviews R2-2, R3-1)", () =
     seeding.catch(() => {});
     await held.promise;
     const waiter = pidHooks();
-    const run = merge(actor, s.id, t.id, waiter.hooks);
+    const run = merge(actor, s.id, t.id, null, waiter.hooks);
     run.catch(() => {});
     await waitForBlockedBy(prisma, await seedPid.promise, [await waiter.pid]);
     release.resolve();
@@ -714,7 +895,7 @@ describe("demo seed writes under the ticket row lock (reviews R2-2, R3-1)", () =
   it("(d) a merged source refuses the seed's status write and is unchanged", async () => {
     const { orgId, actor } = await seedActor();
     const { s, t } = await samePair(orgId);
-    expect((await merge(actor, s.id, t.id)).ok).toBe(true);
+    expect((await merge(actor, s.id, t.id, null)).ok).toBe(true);
     const before = await snapshot(orgId);
     await expect(finalizeDemoTicket(orgId, s.id, { status: "RESOLVED" })).rejects.toBeInstanceOf(
       DemoSeedTicketMergedError,
@@ -843,7 +1024,7 @@ describe("POST /api/tickets/{id}/messages on a merged source (review C1, C7, R3-
 
   it("refuses a public reply and an internal note with 409 MERGED_SOURCE, writes and stores nothing; the target accepts", async () => {
     const { orgId, actor, s, t } = await mergedPair();
-    expect((await merge(actor, s.id, t.id)).ok).toBe(true);
+    expect((await merge(actor, s.id, t.id, null)).ok).toBe(true);
     const before = await snapshot(orgId);
 
     const reply = await post(s.id, "public", "Reply to merged source", [
@@ -911,7 +1092,7 @@ describe("POST /api/tickets/{id}/messages on a merged source (review C1, C7, R3-
 
   it("an EACCES delete keeps the 409, is logged by key and code without content, and leaves that one file", async () => {
     const { orgId, actor, s, t } = await mergedPair();
-    expect((await merge(actor, s.id, t.id)).ok).toBe(true);
+    expect((await merge(actor, s.id, t.id, null)).ok).toBe(true);
     const marker = `CONTENT-MARKER-${randomUUID()}`;
     vi.spyOn(localFileStorage, "delete").mockRejectedValue(
       Object.assign(new Error("permission denied"), { code: "EACCES" }),

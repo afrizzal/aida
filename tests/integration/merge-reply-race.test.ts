@@ -164,7 +164,7 @@ function heldMerge(actor: MergeActor, s: Side, t: Side) {
   const done = mergeTickets(
     prisma,
     actor,
-    { sourceTicketId: s.id, targetTicketId: t.id },
+    { sourceTicketId: s.id, targetTicketId: t.id, reviewedLinkLabel: null },
     {
       onTransactionStart: async (tx) => pid.resolve(await backendPid(tx)),
       beforeCommit: async () => {
@@ -245,7 +245,11 @@ describe("replies to a merged source land on the target", () => {
   it("a follow-up through the source token posts to the target and reopens a RESOLVED target", async () => {
     const { actor, s, t, orgId } = await pair(true);
     expect(
-      await mergeTickets(prisma, actor, { sourceTicketId: s.id, targetTicketId: t.id }),
+      await mergeTickets(prisma, actor, {
+        sourceTicketId: s.id,
+        targetTicketId: t.id,
+        reviewedLinkLabel: null,
+      }),
     ).toMatchObject({ ok: true });
     await prisma.ticket.update({
       where: { id: t.id },
@@ -282,7 +286,11 @@ describe("replies to a merged source land on the target", () => {
 
   it("a follow-up through the target token behaves as before", async () => {
     const { actor, s, t, orgId } = await pair(false);
-    await mergeTickets(prisma, actor, { sourceTicketId: s.id, targetTicketId: t.id });
+    await mergeTickets(prisma, actor, {
+      sourceTicketId: s.id,
+      targetTicketId: t.id,
+      reviewedLinkLabel: null,
+    });
     const marker = `target-token-${randomUUID()}`;
     expect((await followUp(t.token, marker)).status).toBe(200);
     const rows = await messagesWithBody(orgId, marker);
@@ -303,7 +311,11 @@ describe("replies to a merged source land on the target", () => {
         emailMessageId: movedEmailId,
       },
     });
-    await mergeTickets(prisma, actor, { sourceTicketId: s.id, targetTicketId: t.id });
+    await mergeTickets(prisma, actor, {
+      sourceTicketId: s.id,
+      targetTicketId: t.id,
+      reviewedLinkLabel: null,
+    });
 
     const bySubject = await emailReply(orgId, `Re: question [#${s.number}]`);
     expect(await bySubject.run()).toBe("appended");
@@ -384,7 +396,7 @@ describe("merge and reply races (D-10): one lock order, no 40P01, no partial mer
       const merge = mergeTickets(
         prisma,
         actor,
-        { sourceTicketId: s.id, targetTicketId: t.id },
+        { sourceTicketId: s.id, targetTicketId: t.id, reviewedLinkLabel: null },
         { onTransactionStart: async (tx) => mergePid.resolve(await backendPid(tx)) },
       );
       await waitForBlockedBy(prisma, await replyPid.promise, [await mergePid.promise]);
@@ -428,7 +440,11 @@ describe("merge and reply races (D-10): one lock order, no 40P01, no partial mer
   it("Race 4: a reply to an already merged source waits behind an id-ordered holder of both rows, then lands once on the target", async () => {
     const { actor, s, t, orgId } = await pair(false);
     expect(
-      await mergeTickets(prisma, actor, { sourceTicketId: s.id, targetTicketId: t.id }),
+      await mergeTickets(prisma, actor, {
+        sourceTicketId: s.id,
+        targetTicketId: t.id,
+        reviewedLinkLabel: null,
+      }),
     ).toMatchObject({ ok: true });
     const holder = holdTx((tx) => lockTicketsInIdOrder(tx, orgId, [s.id, t.id]));
     const holderPid = await holder.pid;

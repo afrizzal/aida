@@ -12,11 +12,17 @@
 //   6. checks on the locked rows, in this order: SOURCE_MERGED, TARGET_MERGED,
 //      SOURCE_HAS_MERGES, DIFFERENT_CONTACTS (K33). Merge chains are refused (D-07), a
 //      documented limitation of this phase.
+//   6b. the current link of the pair is read under both row locks and compared with the link
+//      the user reviewed (input.reviewedLinkLabel: the label from the source's side, or null
+//      for none). Any difference (a link added, removed, or of another type or direction) is
+//      refused with LINK_CHANGED, so a merge never replaces a link the confirm step did not
+//      name (Codex diff round 2, R2-1). Every link writer locks the same pair first (WR-02), so
+//      the link cannot change between this read and the commit.
 //   7. mergedAt = clock_timestamp() and mergeMessageSeq = nextval of the Message seq sequence,
 //      both drawn after the two row locks (D-09 amended after review C1): every message insert
 //      on an existing ticket holds that ticket's row lock, so a message with a greater seq was
 //      written after the merge.
-//   8. an existing link of the pair is replaced (RELATION_REMOVED on both tickets), the
+//   8. the reviewed link of the pair, if any, is replaced (RELATION_REMOVED on both tickets), the
 //      source's messages move to the target with mergedFromTicketId = source (attachments
 //      follow their message: Attachment belongs to messageId only), hooks.afterMove, the source
 //      is closed with its merge fields, the DUPLICATE_OF link is inserted, and the audit rows
@@ -41,7 +47,12 @@
 // Relative imports only and no Next.js import: revalidation belongs to the server action.
 import type { Prisma, PrismaClient, TicketStatus } from "../../generated/prisma/client";
 import { findActiveMembership } from "../membership";
-import type { RelationType } from "./relation-pairs";
+import {
+  type RelationLabel,
+  type RelationType,
+  relationLabel,
+  relationSideFor,
+} from "./relation-pairs";
 import { recordTicketAudit } from "./ticket-audit";
 
 const TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: 30_000 } as const;
@@ -53,7 +64,8 @@ export type MergeErrorCode =
   | "SOURCE_MERGED"
   | "TARGET_MERGED"
   | "SOURCE_HAS_MERGES"
-  | "DIFFERENT_CONTACTS";
+  | "DIFFERENT_CONTACTS"
+  | "LINK_CHANGED";
 
 /** A refusal by the service. Rolled back and returned, never rethrown. */
 export class MergeError extends Error {
@@ -74,6 +86,12 @@ export interface MergeActor {
 export interface MergeInput {
   sourceTicketId: string;
   targetTicketId: string;
+  /**
+   * The link between the pair as the user reviewed it on the confirm step: its label from the
+   * source's side, or null when the pair was not linked. Required, so every caller states the
+   * precondition; a current link that differs is refused with LINK_CHANGED (R2-1).
+   */
+  reviewedLinkLabel: RelationLabel | null;
 }
 
 /** Test seams. Production callers never pass them. */
@@ -143,7 +161,7 @@ interface PairRelation {
 export async function mergeTickets(
   client: PrismaClient,
   actor: MergeActor,
-  { sourceTicketId, targetTicketId }: MergeInput,
+  { sourceTicketId, targetTicketId, reviewedLinkLabel }: MergeInput,
   hooks: MergeHooks = {},
 ): Promise<MergeResult> {
   try {
@@ -180,6 +198,24 @@ export async function mergeTickets(
       if (received) throw new MergeError("SOURCE_HAS_MERGES");
       if (source.contactId !== target.contactId) throw new MergeError("DIFFERENT_CONTACTS");
 
+      // R2-1: the link of the pair (one row per pair at most), read under both row locks. It
+      // must be the link the user reviewed; nothing has been written yet, so a refusal here
+      // rolls back nothing but the locks.
+      const existing: PairRelation | null = await tx.ticketRelation.findFirst({
+        where: {
+          organizationId: orgId,
+          OR: [
+            { fromTicketId: sourceTicketId, toTicketId: targetTicketId },
+            { fromTicketId: targetTicketId, toTicketId: sourceTicketId },
+          ],
+        },
+        select: { id: true, type: true, fromTicketId: true, toTicketId: true },
+      });
+      const currentLinkLabel = existing
+        ? relationLabel(existing.type, relationSideFor(existing, sourceTicketId))
+        : null;
+      if (currentLinkLabel !== reviewedLinkLabel) throw new MergeError("LINK_CHANGED");
+
       // D-09 amended (review C1): both markers are drawn after the two row locks.
       const clock = await tx.$queryRaw<{ now: Date }[]>`SELECT clock_timestamp() AS now`;
       const mergedAt = clock[0]?.now;
@@ -192,17 +228,7 @@ export async function mergeTickets(
       }
       const mergedAtIso = mergedAt.toISOString();
 
-      // A link of the pair is replaced (the pair index allows one row per pair).
-      const existing: PairRelation | null = await tx.ticketRelation.findFirst({
-        where: {
-          organizationId: orgId,
-          OR: [
-            { fromTicketId: sourceTicketId, toTicketId: targetTicketId },
-            { fromTicketId: targetTicketId, toTicketId: sourceTicketId },
-          ],
-        },
-        select: { id: true, type: true, fromTicketId: true, toTicketId: true },
-      });
+      // The reviewed link of the pair is replaced (the pair index allows one row per pair).
       if (existing) {
         await tx.ticketRelation.deleteMany({
           where: { id: existing.id, organizationId: orgId },

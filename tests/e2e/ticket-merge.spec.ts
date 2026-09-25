@@ -228,6 +228,7 @@ test.describe("Ticket merge", () => {
     const moved = await mergeTickets(prisma, await adminActor(), {
       sourceTicketId: target.id,
       targetTicketId: elsewhere.id,
+      reviewedLinkLabel: null,
     });
     expect(moved.ok).toBe(true);
     const before = await snapshot([source.id, target.id, elsewhere.id]);
@@ -273,6 +274,7 @@ test.describe("Ticket merge", () => {
     const moved = await mergeTickets(prisma, await adminActor(), {
       sourceTicketId: target.id,
       targetTicketId: elsewhere.id,
+      reviewedLinkLabel: null,
     });
     expect(moved.ok).toBe(true);
     await dialog.getByRole("button", { name: "Merge tickets" }).click();
@@ -368,6 +370,103 @@ test.describe("Ticket merge", () => {
     ).toBeVisible();
   });
 
+  test("a failed re-read keeps step 1 and the choice, says so and focuses Review merge (Codex diff round 2, R2-1)", async ({
+    page,
+  }) => {
+    const source = await seedTicket("recheck-source", "recheck");
+    const target = await seedTicket("recheck-target", "recheck");
+    const recheck = (url: URL) =>
+      url.pathname === "/api/tickets/picker" && url.searchParams.get("q") === `#${target.number}`;
+
+    await openTicket(page, source.id);
+    const dialog = await openMergeDialog(page);
+    await (await pickTarget(page, target.number)).click();
+    const review = dialog.getByRole("button", { name: "Review merge" });
+    const failed = `Could not check #${target.number} again. Try again.`;
+
+    // The re-read request fails (network error): no confirm step on the old row.
+    await page.route(recheck, (route) => route.abort());
+    await review.click();
+    await expect(dialog.getByRole("alert")).toHaveText(failed);
+    await expect(
+      dialog.getByRole("heading", { name: "Merge this ticket into another" }),
+    ).toBeVisible();
+    await expect(dialog.getByRole("heading", { name: /^Merge #\d+ into #\d+\?$/ })).toHaveCount(0);
+    const row = dialog.getByRole("option", { name: new RegExp(`^#${target.number}\\b`) });
+    await expect(row).toHaveAttribute("data-chosen", "true");
+    await expect(review).toBeEnabled();
+    await expect(review).toBeFocused();
+    await page.unroute(recheck);
+
+    // The re-read answers but no longer finds the row: the same callout, the choice kept.
+    await page.route(recheck, (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: '{"results":[]}' }),
+    );
+    await review.click();
+    await expect(dialog.getByRole("alert")).toHaveText(failed);
+    await expect(row).toHaveAttribute("data-chosen", "true");
+    await expect(review).toBeFocused();
+    await page.unroute(recheck);
+
+    // Trying again with a working read opens the confirm step and clears the callout.
+    await review.click();
+    await expect(
+      dialog.getByRole("heading", { name: `Merge #${source.number} into #${target.number}?` }),
+    ).toBeVisible();
+    await expect(dialog.getByRole("alert")).toHaveCount(0);
+  });
+
+  test("a link changed after Review is refused with LINK_CHANGED, and Back asks for a new review (Codex diff round 2, R2-1)", async ({
+    page,
+  }) => {
+    const source = await seedTicket("link-changed-source", "link-changed");
+    const target = await seedTicket("link-changed-target", "link-changed");
+
+    await openTicket(page, source.id);
+    const dialog = await reviewMerge(page, source, target);
+    await expect(dialog.getByText("The current link")).toHaveCount(0);
+
+    // Another agent links the pair after the review: the merge must not replace a link the
+    // agent never saw.
+    const linked = await addRelation(prisma, await adminActor(), {
+      ticketId: source.id,
+      otherTicketId: target.id,
+      choice: "is related to",
+    });
+    expect(linked.ok).toBe(true);
+    const before = await snapshot([source.id, target.id]);
+    const auditsBefore = await prisma.ticketAuditEvent.count({
+      where: { ticketId: { in: [source.id, target.id] } },
+    });
+
+    await dialog.getByRole("button", { name: "Merge tickets" }).click();
+    await expect(dialog.getByRole("alert")).toHaveText(
+      "Nothing was changed. The link between these tickets changed. Review the merge again.",
+    );
+    await expect(dialog.getByRole("button", { name: "Merge tickets" })).toBeDisabled();
+    await expect(dialog.getByRole("button", { name: "Back" })).toBeFocused();
+    expect(await snapshot([source.id, target.id])).toEqual(before);
+    expect(
+      await prisma.ticketAuditEvent.count({ where: { ticketId: { in: [source.id, target.id] } } }),
+    ).toBe(auditsBefore);
+
+    // UI-WR-07: the refused choice is cleared, so the user reviews again with the new link.
+    await dialog.getByRole("button", { name: "Back" }).click();
+    await expect(dialog.getByRole("button", { name: "Review merge" })).toBeDisabled();
+    await expect(dialog.locator('[data-chosen="true"]')).toHaveCount(0);
+    await dialog.getByRole("option", { name: new RegExp(`^#${target.number}\\b`) }).click();
+    await dialog.getByRole("button", { name: "Review merge" }).click();
+    await expect(
+      dialog.getByText(
+        'The current link "Related to" between these tickets is replaced by "Duplicate of".',
+      ),
+    ).toBeVisible();
+    await dialog.getByRole("button", { name: "Merge tickets" }).click();
+    await expect(page).toHaveURL(new RegExp(`/tickets/${target.id}$`));
+    const merged = await prisma.ticket.findUniqueOrThrow({ where: { id: source.id } });
+    expect(merged.mergedIntoTicketId).toBe(target.id);
+  });
+
   test("the status control is disabled on a merged source, with its reason (Codex diff round 1, D1)", async ({
     page,
   }) => {
@@ -376,6 +475,7 @@ test.describe("Ticket merge", () => {
     const merged = await mergeTickets(prisma, await adminActor(), {
       sourceTicketId: source.id,
       targetTicketId: target.id,
+      reviewedLinkLabel: null,
     });
     expect(merged.ok).toBe(true);
     const auditsBefore = await prisma.ticketAuditEvent.count({ where: { ticketId: source.id } });
@@ -424,6 +524,7 @@ test.describe("Ticket merge", () => {
     const merged = await mergeTickets(prisma, await adminActor(), {
       sourceTicketId: source.id,
       targetTicketId: target.id,
+      reviewedLinkLabel: null,
     });
     expect(merged.ok).toBe(true);
 
@@ -446,7 +547,7 @@ test.describe("Ticket merge", () => {
     const merged = await mergeTickets(
       prisma,
       { userId: admin.id, orgId },
-      { sourceTicketId: source.id, targetTicketId: target.id },
+      { sourceTicketId: source.id, targetTicketId: target.id, reviewedLinkLabel: null },
     );
     expect(merged.ok).toBe(true);
 
@@ -482,7 +583,7 @@ test.describe("Ticket merge", () => {
     const merged = await mergeTickets(
       prisma,
       { userId: admin.id, orgId },
-      { sourceTicketId: source.id, targetTicketId: target.id },
+      { sourceTicketId: source.id, targetTicketId: target.id, reviewedLinkLabel: null },
     );
     expect(merged.ok).toBe(true);
 

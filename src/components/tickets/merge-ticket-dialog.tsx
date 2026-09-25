@@ -26,7 +26,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { TicketStatus } from "@/generated/prisma/client";
-import { MERGE_CONFIRM_DESCRIPTION, mergeReplacesLinkText } from "@/lib/tickets/lifecycle-copy";
+import {
+  MERGE_CONFIRM_DESCRIPTION,
+  MERGE_ERROR_LINK_CHANGED,
+  mergeRecheckFailedText,
+  mergeReplacesLinkText,
+} from "@/lib/tickets/lifecycle-copy";
 import type { MergeErrorCode } from "@/lib/tickets/merge";
 
 export interface MergeSourceTicket {
@@ -61,6 +66,8 @@ export function mergeErrorMessage(code: MergeErrorCode, source: number, target: 
       return "One of these tickets is no longer available. Refresh the page and try again.";
     case "MEMBERSHIP_ENDED":
       return "Your access to this workspace has ended. Sign out, then sign in again.";
+    case "LINK_CHANGED":
+      return MERGE_ERROR_LINK_CHANGED;
     default: {
       const unhandled: never = code;
       return unhandled;
@@ -140,7 +147,10 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
   // button is busy. pickerKey remounts the picker, so its rows are fetched again.
   const [reviewing, setReviewing] = useState(false);
   const [pickerKey, setPickerKey] = useState(0);
+  // The number of the ticket whose re-read failed, for the step 1 callout (R2-1); null hides it.
+  const [recheckFailed, setRecheckFailed] = useState<number | null>(null);
   const reviewAbort = useRef<AbortController | null>(null);
+  const reviewRef = useRef<HTMLButtonElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
   const keepRef = useRef<HTMLButtonElement>(null);
 
@@ -159,11 +169,14 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
 
   /**
    * Re-reads the chosen ticket's row by its number just before the confirm step, so a link
-   * added after the rows were fetched is named there (D4). If the re-read fails, the newest row
-   * already on screen is used: the merge replaces any link in its own transaction and audits it
-   * (Assumption 6), so only the wording of that line could be old, never the result. If the
-   * fresh row is no longer eligible, the choice is cleared and the picker fetches its rows
-   * again, so the row shows its reason, as after a rule refusal (UI-WR-07).
+   * added after the rows were fetched is named there (D4). The confirm step opens only on a
+   * re-read that still finds the row (Codex diff round 2, R2-1): if the read fails, the
+   * membership ended, or the row is missing, step 1 stays with the choice kept, a callout says
+   * the ticket could not be checked, and "Review merge" takes focus so the user can try again.
+   * The link the confirm step names is then sent with the merge as its precondition. An
+   * aborted read (the dialog closed) stays silent. If the fresh row is no longer eligible, the
+   * choice is cleared and the picker fetches its rows again, so the row shows its reason, as
+   * after a rule refusal (UI-WR-07).
    */
   async function review() {
     if (!target) return;
@@ -171,8 +184,9 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
     reviewAbort.current?.abort();
     const controller = new AbortController();
     reviewAbort.current = controller;
+    setRecheckFailed(null);
     setReviewing(true);
-    let latest = chosen;
+    let latest: PickerRow | null = null;
     try {
       const result = await fetchPickerRows(
         `#${chosen.number}`,
@@ -181,12 +195,16 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
         controller.signal,
       );
       if (result.kind === "results") {
-        latest = result.rows.find((row) => row.id === chosen.id) ?? chosen;
+        latest = result.rows.find((row) => row.id === chosen.id) ?? null;
       }
     } catch {
       return; // aborted: the dialog closed
     } finally {
       if (!controller.signal.aborted) setReviewing(false);
+    }
+    if (latest === null) {
+      setRecheckFailed(chosen.number);
+      return;
     }
     if (pickerReason(latest, "merge") !== null) {
       setTarget(null);
@@ -199,6 +217,11 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
     setStep("confirm");
   }
 
+  // A failed re-read leaves step 1 with the choice kept; "Review merge" is enabled again and
+  // takes focus, because the busy (disabled) button had it (R2-1).
+  useEffect(() => {
+    if (recheckFailed !== null) reviewRef.current?.focus();
+  }, [recheckFailed]);
   // Focus moves to the step's first control on each change; after a rule refusal "Back" takes it.
   useEffect(() => {
     if (step === "confirm") backRef.current?.focus();
@@ -217,7 +240,10 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
     onPendingChange(true);
     startTransition(async () => {
       try {
-        const result = await mergeTicketAction(source.id, chosen.id);
+        // The link the confirm step named is sent as a precondition: the server refuses with
+        // LINK_CHANGED when the pair's link is no longer that one (Codex diff round 2, R2-1).
+        // linkLabel is set exactly when alreadyLinked is (UI-WR-06), so null means "no link".
+        const result = await mergeTicketAction(source.id, chosen.id, chosen.linkLabel ?? null);
         if (result.ok) {
           onPendingChange(false);
           onClose();
@@ -257,12 +283,23 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
           ticketId={source.id}
           purpose="merge"
           selected={target}
-          onSelect={(row) => setTarget(row)}
+          onSelect={(row) => {
+            setRecheckFailed(null);
+            setTarget(row);
+          }}
           query={query}
           onQueryChange={setQuery}
           onRows={refreshChoice}
           disabled={reviewing}
         />
+        {recheckFailed !== null && (
+          <div
+            role="alert"
+            className="rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-[13px] text-destructive"
+          >
+            {mergeRecheckFailedText(recheckFailed)}
+          </div>
+        )}
         <DialogFooter>
           <Button
             type="button"
@@ -274,6 +311,7 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
             Close
           </Button>
           <Button
+            ref={reviewRef}
             type="button"
             size="sm"
             className="text-[13px]"

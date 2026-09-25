@@ -289,7 +289,7 @@ test.describe("Bulk actions", () => {
     const merged = await mergeTickets(
       prisma,
       { userId: admin.id, orgId },
-      { sourceTicketId: source.id, targetTicketId: target.id },
+      { sourceTicketId: source.id, targetTicketId: target.id, reviewedLinkLabel: null },
     );
     expect(merged.ok).toBe(true);
     const auditsBefore = await prisma.ticketAuditEvent.count({

@@ -271,6 +271,7 @@ test.describe("Ticket relations", () => {
     const merged = await mergeTickets(prisma, await adminActor(), {
       sourceTicketId: source.id,
       targetTicketId: target.id,
+      reviewedLinkLabel: null,
     });
     expect(merged.ok).toBe(true);
     const before = await relationCounts([a.id, source.id]);
@@ -298,6 +299,7 @@ test.describe("Ticket relations", () => {
     const merged = await mergeTickets(prisma, await adminActor(), {
       sourceTicketId: source.id,
       targetTicketId: target.id,
+      reviewedLinkLabel: null,
     });
     expect(merged.ok).toBe(true);
 

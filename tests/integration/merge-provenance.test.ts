@@ -134,6 +134,7 @@ describe("status links after a merge (tracer)", () => {
     const merged = await mergeTickets(prisma, actor, {
       sourceTicketId: s.id,
       targetTicketId: t.id,
+      reviewedLinkLabel: null,
     });
     expect(merged).toEqual({ ok: true, sourceTicketId: s.id, targetTicketId: t.id });
     const m3 = await addMessage(t.id, "PUBLIC");
@@ -205,7 +206,11 @@ describe("two status links of one contact (D-09, D-10)", () => {
     const tToken = await tokenOf(t.id);
 
     expect(
-      await mergeTickets(prisma, actor, { sourceTicketId: s.id, targetTicketId: t.id }),
+      await mergeTickets(prisma, actor, {
+        sourceTicketId: s.id,
+        targetTicketId: t.id,
+        reviewedLinkLabel: null,
+      }),
     ).toMatchObject({ ok: true });
     const post = await addMessage(t.id, "PUBLIC");
 
@@ -240,7 +245,11 @@ describe("two status links of one contact (D-09, D-10)", () => {
       data: { organizationId: orgId, ticketId: s.id, score: 2, comment: "before" },
     });
     expect(
-      await mergeTickets(prisma, actor, { sourceTicketId: s.id, targetTicketId: t.id }),
+      await mergeTickets(prisma, actor, {
+        sourceTicketId: s.id,
+        targetTicketId: t.id,
+        reviewedLinkLabel: null,
+      }),
     ).toMatchObject({ ok: true });
 
     // CSAT stays one per ticket: the CLOSED source's token reads and updates the source's row.
@@ -296,7 +305,11 @@ describe("two status links of one contact (D-09, D-10)", () => {
     expect(before.attachments).toEqual([200, 404, 200, 404]);
 
     expect(
-      await mergeTickets(prisma, actor, { sourceTicketId: s.id, targetTicketId: t.id }),
+      await mergeTickets(prisma, actor, {
+        sourceTicketId: s.id,
+        targetTicketId: t.id,
+        reviewedLinkLabel: null,
+      }),
     ).toEqual({ ok: false, error: "DIFFERENT_CONTACTS" });
     expect(await snapshot()).toEqual(before);
   });
@@ -310,7 +323,11 @@ describe("two status links of one contact (D-09, D-10)", () => {
     await addMessage(t.id, "PUBLIC");
     const sToken = await tokenOf(s.id);
     expect(
-      await mergeTickets(prisma, actor, { sourceTicketId: s.id, targetTicketId: t.id }),
+      await mergeTickets(prisma, actor, {
+        sourceTicketId: s.id,
+        targetTicketId: t.id,
+        reviewedLinkLabel: null,
+      }),
     ).toMatchObject({ ok: true });
 
     expect(await pageIds(sToken)).toEqual([]);
@@ -323,7 +340,11 @@ describe("two status links of one contact (D-09, D-10)", () => {
     const contactEmail = email();
     const s = await seedContactTicket(orgId, { contactEmail });
     const t = await seedContactTicket(orgId, { contactEmail });
-    await mergeTickets(prisma, actor, { sourceTicketId: s.id, targetTicketId: t.id });
+    await mergeTickets(prisma, actor, {
+      sourceTicketId: s.id,
+      targetTicketId: t.id,
+      reviewedLinkLabel: null,
+    });
     const source = await prisma.ticket.findUniqueOrThrow({
       where: { id: s.id },
       select: { number: true, subject: true, mergedAt: true },

@@ -100,6 +100,7 @@ function mergeBetweenReads(actor: MergeActor, sourceId: string, targetId: string
       outcome.result = await mergeTickets(prisma, actor, {
         sourceTicketId: sourceId,
         targetTicketId: targetId,
+        reviewedLinkLabel: null,
       });
     },
   });

@@ -14,9 +14,11 @@ import {
   BULK_STATUS_REFUSED_MERGED_SOURCE,
   LINK_REMOVE_OUTCOME_UNKNOWN,
   MERGE_CONFIRM_DESCRIPTION,
+  MERGE_ERROR_LINK_CHANGED,
   MERGED_BANNER_DATE_UNKNOWN,
   MERGED_COMPOSER_TARGET_UNAVAILABLE,
   MERGED_SOURCE_REASON,
+  mergeRecheckFailedText,
   mergeReplacesLinkText,
   PICKER_REASON_MERGED,
   STATUS_REFUSED_MERGED_SOURCE,
@@ -157,6 +159,19 @@ describe("copy rows added by Codex diff round 1, D1 (UI-SPEC Copywriting)", () =
     );
     // "Status unavailable: merged source" reuses the one merged-source reason.
     expect(MERGED_SOURCE_REASON).toBe("This ticket was already merged.");
+  });
+});
+
+describe("copy rows added by Codex diff round 2, R2-1 (UI-SPEC Copywriting)", () => {
+  it("the link-changed merge refusal is an exported constant with the row's exact text", () => {
+    // Shown after the "Nothing was changed." prefix, as every "Merge error" row.
+    expect(MERGE_ERROR_LINK_CHANGED).toBe(
+      "The link between these tickets changed. Review the merge again.",
+    );
+  });
+
+  it("the failed re-read names the ticket with the row's exact text", () => {
+    expect(mergeRecheckFailedText(42)).toBe("Could not check #42 again. Try again.");
   });
 });
 

@@ -950,7 +950,11 @@ describe("runTicketMutation: a merged source keeps its status (Codex diff round 
   }
 
   async function merge(actor: TicketMutationActor, sourceId: string, targetId: string) {
-    return mergeTickets(prisma, actor, { sourceTicketId: sourceId, targetTicketId: targetId });
+    return mergeTickets(prisma, actor, {
+      sourceTicketId: sourceId,
+      targetTicketId: targetId,
+      reviewedLinkLabel: null,
+    });
   }
 
   async function sourceState(id: string) {
@@ -1030,7 +1034,7 @@ describe("runTicketMutation: a merged source keeps its status (Codex diff round 
     const mergeRun = mergeTickets(
       prisma,
       actor,
-      { sourceTicketId: source.id, targetTicketId: target.id },
+      { sourceTicketId: source.id, targetTicketId: target.id, reviewedLinkLabel: null },
       {
         async afterLock(tx) {
           mergePid.resolve(await backendPid(tx));

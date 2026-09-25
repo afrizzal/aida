@@ -20,6 +20,7 @@ import {
   mergeTickets,
   setAgentMessageObserverForTests,
 } from "@/lib/tickets/merge";
+import type { RelationLabel } from "@/lib/tickets/relation-pairs";
 import { removeRelation } from "@/lib/tickets/relations";
 import { setReopenObserverForTests } from "@/lib/tickets/reopen-on-reply";
 import { loadStatusPageData } from "@/lib/tickets/status-page-data";
@@ -238,14 +239,20 @@ interface HeldMerge {
  * write is done and both row locks are held. With a sentinel it throws that sentinel after
  * the release, so the whole merge rolls back.
  */
-function heldMerge(actor: MergeActor, s: Side, t: Side, sentinel?: Error): HeldMerge {
+function heldMerge(
+  actor: MergeActor,
+  s: Side,
+  t: Side,
+  reviewedLinkLabel: RelationLabel | null,
+  sentinel?: Error,
+): HeldMerge {
   const pid = deferred<number>();
   const atCommit = deferred<void>();
   const release = deferred<void>();
   const done = mergeTickets(
     prisma,
     actor,
-    { sourceTicketId: s.id, targetTicketId: t.id },
+    { sourceTicketId: s.id, targetTicketId: t.id, reviewedLinkLabel },
     {
       onTransactionStart: async (tx) => pid.resolve(await backendPid(tx)),
       beforeCommit: async () => {
@@ -260,12 +267,17 @@ function heldMerge(actor: MergeActor, s: Side, t: Side, sentinel?: Error): HeldM
 }
 
 /** A merge that only records its PID at transaction start. */
-function recordedMerge(actor: MergeActor, s: Side, t: Side) {
+function recordedMerge(
+  actor: MergeActor,
+  s: Side,
+  t: Side,
+  reviewedLinkLabel: RelationLabel | null,
+) {
   const pid = deferred<number>();
   const done = mergeTickets(
     prisma,
     actor,
-    { sourceTicketId: s.id, targetTicketId: t.id },
+    { sourceTicketId: s.id, targetTicketId: t.id, reviewedLinkLabel },
     { onTransactionStart: async (tx) => pid.resolve(await backendPid(tx)) },
   );
   done.catch(() => {});
@@ -344,7 +356,7 @@ describe("review C1: provenance is decided by seq under the lock, never by times
     reply.catch(() => {});
     const rPid = await recordedReplyPid.promise;
 
-    const merge = heldMerge(actor, s, t);
+    const merge = heldMerge(actor, s, t, null);
     await merge.atCommit;
     const mergePid = await merge.pid;
     releaseReply.resolve();
@@ -411,7 +423,7 @@ describe("review C1: provenance is decided by seq under the lock, never by times
     reply.catch(() => {});
     const fPid = await recordedFollowPid.promise;
 
-    const merge = heldMerge(actor, s, t);
+    const merge = heldMerge(actor, s, t, null);
     await merge.atCommit;
     const mergePid = await merge.pid;
     releaseFollow.resolve();
@@ -449,7 +461,11 @@ describe("review C1: provenance is decided by seq under the lock, never by times
     const equal = await addMessage(t.id, { attachment: true });
     const later = await addMessage(t.id, { attachment: true });
     expect(
-      await mergeTickets(prisma, actor, { sourceTicketId: s.id, targetTicketId: t.id }),
+      await mergeTickets(prisma, actor, {
+        sourceTicketId: s.id,
+        targetTicketId: t.id,
+        reviewedLinkLabel: null,
+      }),
     ).toMatchObject({ ok: true });
     const post = await addMessage(t.id, { attachment: true });
 
@@ -602,11 +618,11 @@ describe("review C10: two merges into one target racing a reply, and the second 
     await heldF.promise;
 
     // The first merge is the first waiter on T's row, blocked by F.
-    const first = recordedMerge(actor, s1, t);
+    const first = recordedMerge(actor, s1, t, null);
     const m1Pid = await first.pid;
     await waitForBlockedBy(prisma, fPid, [m1Pid]);
     // The second merge queues on T's row behind the first waiter (review R2-1).
-    const second = recordedMerge(actor, s2, t);
+    const second = recordedMerge(actor, s2, t, null);
     const m2Pid = await second.pid;
     await waitForBlockedBy(prisma, m1Pid, [m2Pid]);
     releaseF.resolve();
@@ -651,11 +667,11 @@ describe("review C10: two merges into one target racing a reply, and the second 
       const s1Before = await ticketRow(s1.id);
       const sentinel = rollsBack ? new Error(`c10-2c-sentinel-${randomUUID()}`) : undefined;
 
-      const first = heldMerge(actor, s1, t, sentinel);
+      const first = heldMerge(actor, s1, t, null, sentinel);
       await first.atCommit;
       const m1Pid = await first.pid;
       // The second merge is the only waiter on T's row.
-      const second = recordedMerge(actor, s2, t);
+      const second = recordedMerge(actor, s2, t, null);
       const m2Pid = await second.pid;
       await waitForBlockedBy(prisma, m1Pid, [m2Pid]);
 
@@ -755,7 +771,7 @@ describe("review C10: two merges into one target racing a reply, and the second 
     const attachmentsBefore = await prisma.attachment.count({ where: { organizationId: orgId } });
     const filesBefore = await filesUnderUploads();
 
-    const merge = heldMerge(actor, s, t);
+    const merge = heldMerge(actor, s, t, null);
     await merge.atCommit;
     const mergePid = await merge.pid;
 
@@ -815,11 +831,16 @@ async function removeAgainstMerge(order: RemoveOrder) {
   const audits = await auditTally([s.id, t.id]);
   const sentinel =
     order === "remove rolls back" ? new Error(`c10-3c-sentinel-${randomUUID()}`) : undefined;
+  // R2-1: the merge states the link it reviewed. Here it is the link the merge finds once it
+  // holds the row locks, so each order still reaches the path it pins (R replaced, or already
+  // gone). A reviewed link that no longer holds is refused with LINK_CHANGED, covered in
+  // ticket-merge.test.ts ("the reviewed link is a precondition").
+  const reviewedOnLock: RelationLabel | null = order === "remove commits" ? null : "Related to";
 
   let mergeDone: Promise<MergeResult>;
   let removal: Promise<unknown>;
   if (order === "merge holds") {
-    const merge = heldMerge(actor, s, t);
+    const merge = heldMerge(actor, s, t, "Related to");
     await merge.atCommit;
     const mergePid = await merge.pid;
     const recordedRemove = deferred<number>();
@@ -854,7 +875,7 @@ async function removeAgainstMerge(order: RemoveOrder) {
     removal.catch(() => {});
     await heldRemove.promise;
     const removePid = await recordedRemove.promise;
-    const merge = recordedMerge(actor, s, t);
+    const merge = recordedMerge(actor, s, t, reviewedOnLock);
     const mergePid = await merge.pid;
     await waitForBlockedBy(prisma, removePid, [mergePid]);
     releaseRemove.resolve();
