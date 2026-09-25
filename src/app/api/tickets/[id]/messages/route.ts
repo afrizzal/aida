@@ -27,6 +27,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
   const { db, orgId, session } = scoped;
 
+  // D-01 (Codex diff round 1, D2): getScopedDb does not check the member row, so a user removed
+  // from the organization whose session still names it is refused here, first, before the
+  // ticket, the body, the email settings or any file is read or staged. A removed member gets
+  // the same 403 for an existing id, a missing id and an invalid body, so this route is no
+  // oracle for the former organization's ticket ids. The check inside the transaction below
+  // stays: it covers a removal that commits after this read.
+  if (!(await findActiveMembership(db, session.user.id, orgId))) {
+    return NextResponse.json({ error: "MEMBERSHIP_ENDED" }, { status: 403 });
+  }
+
   const { id: ticketId } = await params;
 
   const ticket = await db.ticket.findFirst({ where: { id: ticketId } });
@@ -98,9 +108,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     outcome = await db.$transaction(async (tx) => {
       const observer = getAgentMessageObserver();
       if (observer?.onTransactionStart) await observer.onTransactionStart(tx);
-      // D-01 (review WR-03): getScopedDb does not check the member row, so a user removed from
-      // the organization whose session still names it is refused here, before the ticket lock
-      // and before anything is written or queued.
+      // D-01 (review WR-03): checked again inside the transaction, so a removal that commits
+      // after the first check above is still refused here, before the ticket lock and before
+      // anything is written or queued.
       if (!(await findActiveMembership(tx, session.user.id, orgId))) {
         return { ok: false as const, error: "MEMBERSHIP_ENDED" };
       }

@@ -948,6 +948,96 @@ describe("POST /api/tickets/{id}/messages on a merged source (review C1, C7, R3-
     expect(await storedFiles(orgId)).toEqual([]);
   });
 
+  describe("a removed member is refused before anything is read (Codex diff round 1, D2)", () => {
+    async function removedMember() {
+      const env = await mergedPair();
+      await prisma.member.deleteMany({
+        where: { userId: env.actor.userId, organizationId: env.orgId },
+      });
+      return env;
+    }
+
+    it("an existing id: 403 MEMBERSHIP_ENDED and no file is ever written, not even staged", async () => {
+      const { orgId, t } = await removedMember();
+      const before = await snapshot(orgId);
+      const save = vi.spyOn(localFileStorage, "save");
+
+      const reply = await post(t.id, "public", "Reply after removal", [pdf("early.pdf")]);
+      expect(reply.status).toBe(403);
+      expect(await reply.json()).toEqual({ error: "MEMBERSHIP_ENDED" });
+      expect(save).not.toHaveBeenCalled();
+      expect(await snapshot(orgId)).toEqual(before);
+      expect(routeEnv.sends).toEqual([]);
+    });
+
+    it("a missing id: the same 403 MEMBERSHIP_ENDED, never 404", async () => {
+      const { orgId } = await removedMember();
+      const before = await snapshot(orgId);
+
+      const reply = await post(randomUUID(), "public", "Reply to nothing", []);
+      expect(reply.status).toBe(403);
+      expect(await reply.json()).toEqual({ error: "MEMBERSHIP_ENDED" });
+      expect(await snapshot(orgId)).toEqual(before);
+    });
+
+    it("an invalid body: the same 403 MEMBERSHIP_ENDED, never 400 or 415", async () => {
+      const { orgId, t } = await removedMember();
+      const before = await snapshot(orgId);
+
+      const empty = await post(t.id, "public", "", []);
+      expect(empty.status).toBe(403);
+      expect(await empty.json()).toEqual({ error: "MEMBERSHIP_ENDED" });
+      const notAllowed = new File([Buffer.from("plain text, not an allowed type")], "x.txt", {
+        type: "text/plain",
+      });
+      const unsupported = await post(t.id, "internal", "With a bad file", [notAllowed]);
+      expect(unsupported.status).toBe(403);
+      expect(await unsupported.json()).toEqual({ error: "MEMBERSHIP_ENDED" });
+      const malformed = await POST(
+        new Request(`http://localhost/api/tickets/${t.id}/messages`, {
+          method: "POST",
+          headers: { "content-type": "multipart/form-data; boundary=missing" },
+          body: "not a form",
+        }),
+        { params: Promise.resolve({ id: t.id }) },
+      );
+      expect(malformed.status).toBe(403);
+      expect(await malformed.json()).toEqual({ error: "MEMBERSHIP_ENDED" });
+
+      expect(await snapshot(orgId)).toEqual(before);
+      expect(await storedFiles(orgId)).toEqual([]);
+    });
+
+    it("a removal that commits after the first check is still refused inside the transaction (WR-03 kept)", async () => {
+      const { orgId, actor, t } = await mergedPair();
+      setAgentMessageObserverForTests({
+        // Runs inside the route's transaction, after the first check passed: the removal
+        // commits on another connection before the in-transaction check reads the member row.
+        onTransactionStart: async () => {
+          await prisma.member.deleteMany({
+            where: { userId: actor.userId, organizationId: orgId },
+          });
+        },
+      });
+      const before = await snapshot(orgId);
+
+      const reply = await post(t.id, "public", "Reply during removal", [pdf("late.pdf")]);
+      expect(reply.status).toBe(403);
+      expect(await reply.json()).toEqual({ error: "MEMBERSHIP_ENDED" });
+      expect(await snapshot(orgId)).toEqual(before);
+      expect(routeEnv.sends).toEqual([]);
+      expect(await storedFiles(orgId)).toEqual([]);
+    });
+
+    it("an active member still gets the existing answers for a missing id and an empty body", async () => {
+      const { t } = await mergedPair();
+      expect((await post(randomUUID(), "public", "Reply to nothing", [])).status).toBe(404);
+      const empty = await post(t.id, "public", "", []);
+      expect(empty.status).toBe(400);
+      expect(await empty.json()).toEqual({ error: "empty_message" });
+    });
+  });
+
   it("two concurrent first public replies keep the first firstRespondedAt stamp (review WR-04)", async () => {
     const { t } = await mergedPair();
     expect(
