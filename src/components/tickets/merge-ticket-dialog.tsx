@@ -10,7 +10,12 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { mergeTicketAction } from "@/app/(app)/tickets/[id]/merge-actions";
 import { StatusChip } from "@/components/tickets/status-chip";
-import { type PickerRow, pickerReason, TicketPicker } from "@/components/tickets/ticket-picker";
+import {
+  fetchPickerRows,
+  type PickerRow,
+  pickerReason,
+  TicketPicker,
+} from "@/components/tickets/ticket-picker";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -131,10 +136,68 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
   const [query, setQuery] = useState("");
   const [failure, setFailure] = useState<MergeFailure | null>(null);
   const [, startTransition] = useTransition();
+  // "Review merge" re-reads the chosen row first (Codex diff round 1, D4); while it does, the
+  // button is busy. pickerKey remounts the picker, so its rows are fetched again.
+  const [reviewing, setReviewing] = useState(false);
+  const [pickerKey, setPickerKey] = useState(0);
+  const reviewAbort = useRef<AbortController | null>(null);
   const backRef = useRef<HTMLButtonElement>(null);
   const keepRef = useRef<HTMLButtonElement>(null);
 
   const eligible = target !== null && pickerReason(target, "merge") === null;
+
+  useEffect(() => () => reviewAbort.current?.abort(), []);
+
+  // The kept choice is a copy of a picker row. Whenever the picker shows newer rows (after Back,
+  // or a new search) the copy is replaced by the newest row with the same id, so alreadyLinked,
+  // linkLabel and the eligibility flags are never older than the list on screen (D4).
+  function refreshChoice(rows: PickerRow[]) {
+    setTarget((current) =>
+      current ? (rows.find((row) => row.id === current.id) ?? current) : current,
+    );
+  }
+
+  /**
+   * Re-reads the chosen ticket's row by its number just before the confirm step, so a link
+   * added after the rows were fetched is named there (D4). If the re-read fails, the newest row
+   * already on screen is used: the merge replaces any link in its own transaction and audits it
+   * (Assumption 6), so only the wording of that line could be old, never the result. If the
+   * fresh row is no longer eligible, the choice is cleared and the picker fetches its rows
+   * again, so the row shows its reason, as after a rule refusal (UI-WR-07).
+   */
+  async function review() {
+    if (!target) return;
+    const chosen = target;
+    reviewAbort.current?.abort();
+    const controller = new AbortController();
+    reviewAbort.current = controller;
+    setReviewing(true);
+    let latest = chosen;
+    try {
+      const result = await fetchPickerRows(
+        `#${chosen.number}`,
+        source.id,
+        "merge",
+        controller.signal,
+      );
+      if (result.kind === "results") {
+        latest = result.rows.find((row) => row.id === chosen.id) ?? chosen;
+      }
+    } catch {
+      return; // aborted: the dialog closed
+    } finally {
+      if (!controller.signal.aborted) setReviewing(false);
+    }
+    if (pickerReason(latest, "merge") !== null) {
+      setTarget(null);
+      setPickerKey((key) => key + 1);
+      return;
+    }
+    setTarget(latest);
+    setFailure(null);
+    setReviewed(latest);
+    setStep("confirm");
+  }
 
   // Focus moves to the step's first control on each change; after a rule refusal "Back" takes it.
   useEffect(() => {
@@ -190,12 +253,15 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
           </DialogDescription>
         </DialogHeader>
         <TicketPicker
+          key={pickerKey}
           ticketId={source.id}
           purpose="merge"
           selected={target}
           onSelect={(row) => setTarget(row)}
           query={query}
           onQueryChange={setQuery}
+          onRows={refreshChoice}
+          disabled={reviewing}
         />
         <DialogFooter>
           <Button
@@ -211,13 +277,11 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
             type="button"
             size="sm"
             className="text-[13px]"
-            disabled={!eligible}
-            onClick={() => {
-              setFailure(null);
-              setReviewed(target);
-              setStep("confirm");
-            }}
+            disabled={!eligible || reviewing}
+            aria-busy={reviewing || undefined}
+            onClick={() => void review()}
           >
+            {reviewing && <Loader2 className="mr-2 size-4 animate-spin" />}
             Review merge
           </Button>
         </DialogFooter>
@@ -271,9 +335,10 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
             The customer's status links keep working. Each one shows what it showed before, plus new
             replies.
           </li>
-          {/* The label comes with the picked row, read when it was picked, so a link added
-              after the page loaded is named correctly; with no label the generic row is used,
-              never a guessed type (review UI-WR-06). */}
+          {/* The label comes with the chosen row, re-read when "Review merge" was pressed, so
+              a link added after the page loaded or while this dialog was open is named
+              correctly (review UI-WR-06, Codex diff round 1 D4); with no label the generic row
+              is used, never a guessed type. */}
           {reviewed.alreadyLinked && <li>{mergeReplacesLinkText(reviewed.linkLabel ?? null)}</li>}
         </ul>
 

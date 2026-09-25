@@ -62,6 +62,43 @@ type SearchOutcome =
   | { query: string; kind: "error" }
   | { query: string; kind: "membership" };
 
+export type PickerFetchResult =
+  | { kind: "results"; rows: PickerRow[] }
+  | { kind: "error" }
+  | { kind: "membership" };
+
+/**
+ * One request to GET /api/tickets/picker. Shared by the picker's debounced search and by the
+ * merge dialog, which re-reads its chosen row when "Review merge" is pressed (Codex diff round 1,
+ * D4). Never throws except for an abort.
+ */
+export async function fetchPickerRows(
+  q: string,
+  ticketId: string,
+  purpose: PickerPurpose,
+  signal?: AbortSignal,
+): Promise<PickerFetchResult> {
+  try {
+    const params = new URLSearchParams({ q, ticketId, purpose });
+    const response = await fetch(`/api/tickets/picker?${params.toString()}`, {
+      signal,
+      cache: "no-store",
+    });
+    const body = (await response.json().catch(() => null)) as {
+      results?: PickerRow[];
+      error?: string;
+    } | null;
+    if (response.status === 403 && body?.error === "membership_ended") {
+      return { kind: "membership" };
+    }
+    if (!response.ok || !Array.isArray(body?.results)) return { kind: "error" };
+    return { kind: "results", rows: body.results };
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    return { kind: "error" };
+  }
+}
+
 interface TicketPickerProps {
   ticketId: string;
   purpose: PickerPurpose;
@@ -76,6 +113,11 @@ interface TicketPickerProps {
    */
   query?: string;
   onQueryChange?(query: string): void;
+  /**
+   * Called with every list of rows the picker shows, so a dialog can refresh the row it keeps
+   * as its choice from the newest copy (Codex diff round 1, D4).
+   */
+  onRows?(rows: PickerRow[]): void;
 }
 
 export function TicketPicker({
@@ -87,6 +129,7 @@ export function TicketPicker({
   inputRef,
   query: controlledQuery,
   onQueryChange,
+  onRows,
 }: TicketPickerProps) {
   const [ownQuery, setOwnQuery] = useState("");
   const query = controlledQuery ?? ownQuery;
@@ -96,34 +139,24 @@ export function TicketPicker({
   const currentQuery = useRef("");
   const trimmed = query.trim();
   currentQuery.current = trimmed;
+  // The latest callback, read when a response arrives, so a new function identity on each
+  // render of the dialog never restarts the search.
+  const onRowsRef = useRef(onRows);
+  onRowsRef.current = onRows;
 
   useEffect(() => {
     if (!meetsPickerMinimum(trimmed)) return;
     const controller = new AbortController();
     const timer = setTimeout(async () => {
-      const show = (next: SearchOutcome) => {
-        if (!controller.signal.aborted && currentQuery.current === trimmed) setOutcome(next);
-      };
+      let result: PickerFetchResult;
       try {
-        const params = new URLSearchParams({ q: trimmed, ticketId, purpose });
-        const response = await fetch(`/api/tickets/picker?${params.toString()}`, {
-          signal: controller.signal,
-          cache: "no-store",
-        });
-        const body = (await response.json().catch(() => null)) as {
-          results?: PickerRow[];
-          error?: string;
-        } | null;
-        if (response.status === 403 && body?.error === "membership_ended") {
-          show({ query: trimmed, kind: "membership" });
-        } else if (!response.ok || !Array.isArray(body?.results)) {
-          show({ query: trimmed, kind: "error" });
-        } else {
-          show({ query: trimmed, kind: "results", rows: body.results });
-        }
+        result = await fetchPickerRows(trimmed, ticketId, purpose, controller.signal);
       } catch {
-        show({ query: trimmed, kind: "error" });
+        return; // aborted: a newer query or an unmount owns the list now
       }
+      if (controller.signal.aborted || currentQuery.current !== trimmed) return;
+      setOutcome({ query: trimmed, ...result });
+      if (result.kind === "results") onRowsRef.current?.(result.rows);
     }, DEBOUNCE_MS);
     return () => {
       clearTimeout(timer);

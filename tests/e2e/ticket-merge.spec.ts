@@ -313,6 +313,61 @@ test.describe("Ticket merge", () => {
     await expect(dialog.getByText('The current link "Related to"')).toHaveCount(0);
   });
 
+  test("a link added while the dialog is open shows on the confirm step after Back and Review (Codex diff round 1, D4)", async ({
+    page,
+  }) => {
+    const source = await seedTicket("open-link-source", "open-link");
+    const target = await seedTicket("open-link-target", "open-link");
+
+    await openTicket(page, source.id);
+    const dialog = await reviewMerge(page, source, target);
+    await expect(dialog.getByText("The current link")).toHaveCount(0);
+
+    // Another agent links the pair while this dialog is open: the source is the child.
+    const linked = await addRelation(prisma, await adminActor(), {
+      ticketId: source.id,
+      otherTicketId: target.id,
+      choice: "is a child of",
+    });
+    expect(linked.ok).toBe(true);
+
+    await dialog.getByRole("button", { name: "Back" }).click();
+    await dialog.getByRole("button", { name: "Review merge" }).click();
+    await expect(
+      dialog.getByRole("heading", { name: `Merge #${source.number} into #${target.number}?` }),
+    ).toBeVisible();
+    await expect(
+      dialog.getByText(
+        'The current link "Child of" between these tickets is replaced by "Duplicate of".',
+      ),
+    ).toBeVisible();
+  });
+
+  test("a link added after the target was picked shows on the confirm step (Codex diff round 1, D4)", async ({
+    page,
+  }) => {
+    const source = await seedTicket("picked-link-source", "picked-link");
+    const target = await seedTicket("picked-link-target", "picked-link");
+
+    await openTicket(page, source.id);
+    const dialog = await openMergeDialog(page);
+    await (await pickTarget(page, target.number)).click();
+    // The picker rows were fetched before this link existed.
+    const linked = await addRelation(prisma, await adminActor(), {
+      ticketId: target.id,
+      otherTicketId: source.id,
+      choice: "is related to",
+    });
+    expect(linked.ok).toBe(true);
+
+    await dialog.getByRole("button", { name: "Review merge" }).click();
+    await expect(
+      dialog.getByText(
+        'The current link "Related to" between these tickets is replaced by "Duplicate of".',
+      ),
+    ).toBeVisible();
+  });
+
   test("the status control is disabled on a merged source, with its reason (Codex diff round 1, D1)", async ({
     page,
   }) => {
