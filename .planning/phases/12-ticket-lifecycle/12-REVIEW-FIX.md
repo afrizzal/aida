@@ -252,3 +252,83 @@ An "Amended … fix pass F4" note at the end of the spec records the D1 menu beh
 | `pnpm test:e2e` `ticket-merge`, `mutations`, `bulk-actions`, `public-status`, `ticket-relations` (one process, host zone) | 0 | 44 passed |
 
 Intermediate runs after each fix: D1 E2E 3 passed; `ticket-mutations` 33 passed; `ticket-merge` integration 43 passed; `ticket-merge` and `ticket-relations` E2E 24 passed; `status-read-snapshot` and `merge-provenance` 9 passed. Build, egress, the full integration suite and the full E2E suite were not run in this pass. The orchestrator reruns the full gate.
+
+## Fix pass F5 (Codex diff round 2)
+
+**Scope:** R2-1 and R2-2 from the dispositions table in `12-REVIEW.md` ("Codex critique of the phase diff (round 2)"). R2-3 was not touched. Both claims were checked against the code at `493c156` before editing, and both still held:
+- R2-1: `review()` fell back to the old row when the re-read failed or did not find the row (`latest = … ?? chosen`). `mergeTickets` replaced whatever link it found without comparing it with the link the confirm step named.
+- R2-2: `email-outbound-send.ts` took subject, number, recipient and history from `message.ticketId` (`ticketId: message.ticketId`, `message.ticket.subject`).
+
+**Where it ran:** main checkout, branch `v2/run-loop` (`workflow.use_worktrees` is `false`). Integration and E2E used Testcontainers on Colima. Host zone Asia/Jakarta, no `TZ` override.
+**Result:** 2 of 2 fixed. No schema change, no migration, no new package. The public status page was not touched and shows no target data.
+**Method:** the tests were written first and run once against the unfixed code. For R2-2, the test seam (`setOutboundSendObserverForTests`) was added first without the fix, so the in-flight run shows Codex's failure itself. Then the fix was made and the same tests run again.
+
+| ID | Status | Commit | Test | Failing assertion seen before the fix |
+|----|--------|--------|------|------------------------------------|
+| R2-1 | fixed (client and server, one commit) | d26f783 | `ticket-merge.test.ts` › "mergeTickets: the reviewed link is a precondition (Codex diff round 2, R2-1)": the cases "a link added between review and merge is refused…", "a link changed between review and merge is refused…", "the label is compared from the source's side…", "a link removed between review and merge is refused…" and "forced order: a link inserted while the merge waits on the row locks…". `ticket-merge.spec.ts`: "a failed re-read keeps step 1 and the choice, says so and focuses Review merge (Codex diff round 2, R2-1)" and "a link changed after Review is refused with LINK_CHANGED, and Back asks for a new review (Codex diff round 2, R2-1)". Unit: `activity-feed.test.ts` › "copy rows added by Codex diff round 2, R2-1" | Integration (5 of 5): `AssertionError: expected { ok: true, …(2) } to deeply equal { ok: false, error: 'LINK_CHANGED' }`. E2E: `toHaveText` Expected `"Could not check #2 again. Try again."`, element(s) not found; `toHaveText` Expected `"Nothing was changed. The link between these tickets changed. Review the merge again."`, element(s) not found. Unit: `AssertionError: expected undefined to be 'The link between these tickets change…'` |
+| R2-2 | fixed (run decision K37, replaces K36) | f3ae1e8 | `email-outbound-merge.test.ts` (new) › "(a) a reply queued on the source, then merged, then sent…" and "(b) in flight: the message is read before the merge and the history after it…" | (a) `AssertionError: expected 'Re: Lifecycle fixture 1fb7dcfd-dd99-4…' to be 'Re: Lifecycle fixture 727d6905-60a9-4…'` (the target's subject); (b) `AssertionError: expected undefined to be '<s1-b5d74e86-…'` (an empty `References` header) |
+
+Tests added as guards, not seen failing, because they pin behaviour that already held:
+- R2-1: "unchanged, no link reviewed and none now: the merge proceeds" and "unchanged, the reviewed link is still there: the merge proceeds and replaces it".
+- R2-2: "(c) a reply written on the target after the merge keeps the target's thread (regression guard)".
+
+No existing assertion was loosened or removed.
+
+### What changed
+
+- **R2-1, server:**
+  - `MergeInput` has a required `reviewedLinkLabel: RelationLabel | null`: the link label from the source's side, or null for no link.
+  - After the D-07 checks, under both row locks and before any write or marker draw, `mergeTickets` reads the pair's link and computes `relationLabel(type, relationSideFor(link, source))`. If that differs from the precondition, it refuses with the new `MergeErrorCode` `LINK_CHANGED`. The transaction rolls back, so nothing changes and no audit row is written.
+  - The read that was already in place moved up. The replace step uses the row it read.
+  - `mergeTicketAction(source, target, reviewedLinkLabel)` passes the precondition through. A missing or unknown value never equals a current link, so it is refused the same way.
+- **R2-1, callers:** every other caller states an explicit precondition:
+  - Every `mergeTickets` call in the integration and E2E tests and fixtures.
+  - The `merge` helper in `ticket-merge.test.ts`, which now takes the precondition as its fourth argument.
+  - `heldMerge` and `recordedMerge` in `merge-race-coverage.test.ts`.
+  - Linked-pair cases pass the label the merge finds under its locks:
+    - "replaces an existing … link": "Related to" and "Parent of".
+    - The rollback sentinel case and "a link insert holding both rows…": "Related to".
+    - `removeAgainstMerge`: "Related to", or null in the "remove commits" order, with a comment that points at the refusal cases.
+- **R2-1, client:**
+  - `review()` opens the confirm step only when the re-read returns results that still contain the chosen row.
+  - If the read fails, access has ended, or the row is missing, step 1 stays with the choice kept. A destructive `role="alert"` callout shows `mergeRecheckFailedText(n)`, and "Review merge" (new `reviewRef`) takes focus. Picking a row or pressing Review again clears the callout.
+  - An aborted read (the dialog closed) still returns silently.
+  - The merge sends `chosen.linkLabel ?? null`. `linkLabel` is set exactly when `alreadyLinked` is (UI-WR-06).
+  - `mergeErrorMessage` maps `LINK_CHANGED` to `MERGE_ERROR_LINK_CHANGED`, and the `never` check is kept (UI-IN-02). This is a rule refusal: the callout shows, "Merge tickets" is disabled, Back takes focus, and the target is cleared (UI-WR-07).
+- **R2-2:**
+  - The origin is `message.mergedFromTicketId ?? message.ticketId`.
+  - Subject and number come from the origin ticket, read through `scopedDb(orgId).ticket.findFirst`.
+  - **Recipient:** read from the origin ticket's contact. Merge refuses different contacts (D-07, K33), so it is the same contact as the current ticket's. The message read no longer includes the contact.
+  - **History:** `OR: [{ ticketId: origin }, { mergedFromTicketId: origin }]`, excluding this message, `emailMessageId` not null, `orderBy createdAt asc`, through `scopedDb`.
+  - The header comment of the worker records K37.
+  - New test seam: `setOutboundSendObserverForTests({ afterMessageRead })`, awaited right after the message read.
+  - **SMTP in tests:** no existing test stubbed SMTP for this job; only the egress probe uses a stub SMTP container, and it was not run. The new file mocks `createSmtpTransport` with a fake `sendMail` that records each mail. No SMTP server is contacted.
+
+### UI-SPEC rows added (`12-UI-SPEC.md`, additive only; no approved row changed)
+
+1. Merge error: link changed (after the "Nothing was changed." prefix): "The link between these tickets changed. Review the merge again." (`MERGE_ERROR_LINK_CHANGED`)
+2. Merge re-check failed: "Could not check #{target} again. Try again." (`mergeRecheckFailedText`)
+
+An "Amended … fix pass F5" note at the end of the spec records the confirm-step rule. It replaces the F4 sentence "If that read fails, the newest row already on screen is used". The note also records the precondition and that it narrows Assumption 6: the merge replaces only the link the user reviewed.
+
+### Notes for the orchestrator (no change made here)
+
+- No existing integration file tests the outbound send job. The only other path is the egress probe (`egress-fixtures/probe.ts`), which was not run. `email-ingest.test.ts` (inbound) was run alongside as the existing email file.
+- The R2-2 row says a reply written on the target keeps "the target's thread". Under K37 that thread is `ticketId = target OR mergedFromTicketId = target`, so it also holds the messages moved into the target. Before K37 it held them too, and guard (c) pins it.
+- `12-REVIEW.md` says D3 (K36) was recorded in `deferred-items.md`, but that file has no outbound or K36 entry. With K37 there is nothing to defer. `RUN-LOG.md` still names K36; it was not edited, because it belongs to the orchestrator.
+- At the end of the run, the only container from these runs was Testcontainers' own `ryuk` reaper, which removes itself. No container was created, stopped or removed by hand.
+
+### Final commands (after both commits)
+
+| Command | Exit | Counts |
+|---------|------|--------|
+| `pnpm test:integration` `email-outbound-merge`, `ticket-merge -t "R2-1\|R2-2"` (before the fixes, R2-2 seam only) | 1 | 7 failed, 10 passed, 36 skipped (the seen-failing run) |
+| `pnpm test:e2e ticket-merge.spec.ts --grep R2-1` (before the fixes) | 1 | 2 failed |
+| `vitest run tests/unit/activity-feed.test.ts` (before the fix) | 1 | 1 failed, 15 passed |
+| `pnpm lint` | 0 | 390 files checked, no fixes |
+| `pnpm typecheck` | 0 | clean |
+| `pnpm test` | 0 | 27 files, 276 tests passed |
+| `pnpm test:integration` `ticket-merge`, `merge-provenance`, `merge-race-coverage`, `merge-reply-race`, `ticket-relations`, `ticket-mutations`, `snooze`, `status-read-snapshot`, `email-outbound-merge`, `email-ingest` (one process) | 0 | 10 files, 158 tests passed |
+| `pnpm test:e2e` `ticket-merge`, `ticket-relations`, `public-status`, `bulk-actions` (one process, host zone) | 0 | 41 passed |
+
+Intermediate runs: after R2-1, the eight touched integration files passed 149 of 149 and `ticket-merge.spec.ts` passed 17 of 17. After R2-2, `email-outbound-merge` passed 3 of 3. `bulk-actions.spec.ts` was added to the E2E run because its `mergeTickets` fixture call changed. Build, egress, the full integration suite and the full E2E suite were not run in this pass. The orchestrator reruns the full gate.
