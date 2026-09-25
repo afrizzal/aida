@@ -199,6 +199,34 @@ test.describe("Snooze", () => {
     await expect(dialog.getByRole("alert")).toHaveText(CLOSED_REASON);
     await expect(preset).toBeEnabled();
     await expect(preset).toBeFocused();
+    // Review UI-WR-08: a refusal keeps the popover open and shows no success toast.
+    await expect(page.getByRole("dialog", { name: "Snooze until" })).toBeVisible();
+    await expect(page.getByText(/It is hidden from the inbox until then\.$/)).toHaveCount(0);
+    const stored = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+    expect(stored.snoozedUntil).toBeNull();
+  });
+
+  test("a snooze call that never returns shows the outcome unknown callout (review UI-WR-08)", async ({
+    page,
+  }) => {
+    const ticket = await seedTicket("unknown");
+    await open(page, `/tickets/${ticket.id}`);
+    await page.getByRole("button", { name: "Snooze", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Snooze until" });
+    const preset = dialog.getByRole("button", { name: /^In 3 hours/ });
+    await expect(preset).toBeFocused();
+
+    // The server action posts to the page URL; aborting it makes the call reject (no code).
+    await page.route(`**/tickets/${ticket.id}`, (route) =>
+      route.request().method() === "POST" ? route.abort() : route.continue(),
+    );
+    await preset.click();
+    await expect(dialog.getByRole("alert")).toHaveText(
+      "The result is not known. The change may have been saved. Refresh the page to check before you try again.",
+    );
+    await expect(dialog).toBeVisible();
+    await expect(preset).toBeEnabled();
+    await expect(preset).toBeFocused();
     const stored = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
     expect(stored.snoozedUntil).toBeNull();
   });
@@ -242,31 +270,87 @@ test.describe("Snooze", () => {
     const stored = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
     expect(stored.snoozedUntil).toBeNull();
   });
+
+  test("a custom time more than 365 days ahead is refused on the client (review UI-WR-08)", async ({
+    page,
+  }) => {
+    const ticket = await seedTicket("too-far");
+    await open(page, `/tickets/${ticket.id}`);
+    await page.getByRole("button", { name: "Snooze", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Snooze until" });
+
+    // 400 days ahead in the browser's zone, past the 365-day bound.
+    const far = await page.evaluate(() => {
+      const d = new Date();
+      d.setDate(d.getDate() + 400);
+      const pad = (n: number) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    });
+    const date = dialog.getByLabel("Date");
+    const time = dialog.getByLabel("Time");
+    await date.fill(far);
+    await time.fill("09:00");
+    await dialog.getByRole("button", { name: "Snooze ticket" }).click();
+
+    const tooFar = "Pick a time within the next 365 days.";
+    await expect(dialog.getByRole("alert")).toHaveText(tooFar);
+    for (const field of [date, time]) {
+      await expect(field).toHaveAttribute("aria-invalid", "true");
+      await expect(field).toHaveAccessibleDescription(new RegExp(tooFar.replace(/\./g, "\\.")));
+    }
+    const stored = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+    expect(stored.snoozedUntil).toBeNull();
+  });
 });
 
-// UI-SPEC 4a (D-12), review UI-WR-01 and UI-WR-02: the browser is in Asia/Jakarta (UTC+7, no
-// daylight saving). The E2E server may run in another zone (CI and containers run in UTC), so
-// every assertion is what the browser user sees after mount, in the browser's zone.
+// UI-SPEC 4a (D-12), review UI-WR-01 and UI-WR-02: the browser runs in a viewer zone that shows
+// the deadline differently from the host zone. The E2E server inherits the host zone, so a label
+// rendered on the server in its own zone and never corrected after hydration fails here on any
+// host (review UI-WR-08: Asia/Jakarta, or Pacific/Honolulu when the host already shows Jakarta's
+// time). Both zones have no daylight saving. Every assertion is what the browser user sees after
+// mount, in the viewer's zone.
+const SHORT: Intl.DateTimeFormatOptions = {
+  weekday: "short",
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+};
+const HOST_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+/** Two days ahead at the given UTC hour, which is 09:00 in the matching viewer zone. */
+function deadlineAt(utcHour: number) {
+  const at = new Date();
+  at.setUTCDate(at.getUTCDate() + 2);
+  at.setUTCHours(utcHour, 0, 0, 0);
+  return at;
+}
+
+const VIEWER = [
+  { zone: "Asia/Jakarta", utcHour: 2 },
+  { zone: "Pacific/Honolulu", utcHour: 19 },
+].find(({ zone, utcHour }) => {
+  const at = deadlineAt(utcHour);
+  const format = (timeZone: string) =>
+    new Intl.DateTimeFormat("en-US", { ...SHORT, timeZone }).format(at);
+  return format(zone) !== format(HOST_ZONE);
+}) ?? { zone: "Asia/Jakarta", utcHour: 2 };
+
 test.describe("Snooze times in the viewer's time zone", () => {
-  const ZONE = "Asia/Jakarta";
+  const ZONE = VIEWER.zone;
   test.use({ timezoneId: ZONE });
 
-  const SHORT: Intl.DateTimeFormatOptions = {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  };
-
-  /** Two days ahead at 02:00 UTC, which is 09:00 in Jakarta. */
   function deadline() {
-    const at = new Date();
-    at.setUTCDate(at.getUTCDate() + 2);
-    at.setUTCHours(2, 0, 0, 0);
-    return at;
+    return deadlineAt(VIEWER.utcHour);
   }
+
+  test("the viewer zone shows the deadline differently from the host zone", () => {
+    const at = deadline();
+    const format = (timeZone: string) =>
+      new Intl.DateTimeFormat("en-US", { ...SHORT, timeZone }).format(at);
+    expect(format(ZONE)).not.toBe(format(HOST_ZONE));
+  });
 
   test("the snoozed chip's accessible name gives the deadline in the viewer's zone (review UI-WR-01)", async ({
     page,
@@ -276,6 +360,11 @@ test.describe("Snooze times in the viewer's time zone", () => {
     await prisma.ticket.update({ where: { id: ticket.id }, data: { snoozedUntil: until } });
     const local = new Intl.DateTimeFormat("en-US", { ...SHORT, timeZone: ZONE }).format(until);
     expect(local).toMatch(/, 09:00$/);
+    // The server renders in the host zone: this is the string a regression would announce.
+    const hostText = new Intl.DateTimeFormat("en-US", { ...SHORT, timeZone: HOST_ZONE }).format(
+      until,
+    );
+    expect(hostText).not.toBe(local);
 
     await open(page, `/tickets/${ticket.id}`);
     await expect(snoozedChipTrigger(page)).toContainText(`Snoozed until ${local}`);

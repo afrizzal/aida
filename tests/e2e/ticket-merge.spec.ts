@@ -209,7 +209,37 @@ test.describe("Ticket merge", () => {
     );
     await expect(dialog.getByRole("button", { name: "Merge tickets" })).toBeDisabled();
     await expect(dialog.getByRole("button", { name: "Keep tickets separate" })).toBeFocused();
+    // Review UI-WR-08: "Merge outcome unknown" leaves Back disabled too (UI-SPEC 3a).
+    await expect(dialog.getByRole("button", { name: "Back" })).toBeDisabled();
     expect(await snapshot([source.id, target.id])).toEqual(before);
+  });
+
+  test("a rule refusal names the rule, disables Merge tickets and focuses Back (review UI-WR-08)", async ({
+    page,
+  }) => {
+    const source = await seedTicket("refused-source", "refused");
+    const target = await seedTicket("refused-target", "refused");
+    const elsewhere = await seedTicket("refused-elsewhere", "refused");
+
+    await openTicket(page, source.id);
+    const dialog = await reviewMerge(page, source, target);
+
+    // The target is merged elsewhere behind the agent's back: the server refuses (D-07).
+    const moved = await mergeTickets(prisma, await adminActor(), {
+      sourceTicketId: target.id,
+      targetTicketId: elsewhere.id,
+    });
+    expect(moved.ok).toBe(true);
+    const before = await snapshot([source.id, target.id, elsewhere.id]);
+
+    await dialog.getByRole("button", { name: "Merge tickets" }).click();
+    await expect(dialog.getByRole("alert")).toHaveText(
+      `Nothing was changed. #${target.number} was merged into another ticket, so it can't receive a merge. Open #${target.number} to see where its conversation continues.`,
+    );
+    await expect(dialog.getByRole("button", { name: "Merge tickets" })).toBeDisabled();
+    await expect(dialog.getByRole("button", { name: "Back" })).toBeFocused();
+    await expect(dialog.getByRole("button", { name: "Keep tickets separate" })).toBeEnabled();
+    expect(await snapshot([source.id, target.id, elsewhere.id])).toEqual(before);
   });
 
   test("Back from the confirm step shows the kept choice (review UI-WR-07)", async ({ page }) => {
