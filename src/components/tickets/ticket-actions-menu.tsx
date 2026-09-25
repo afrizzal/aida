@@ -24,8 +24,6 @@ export interface TicketActionsMenuProps {
   ticketStatus: TicketStatus;
   mergedSource: boolean;
   hasReceivedMerges: boolean;
-  /** The current link label from this side, per other ticket id ("Merge replaces link"). */
-  linkLabels: Record<string, string>;
   /** A ref to the menu trigger, for a parent that also moves focus to it. */
   triggerRef?: RefObject<HTMLButtonElement | null>;
 }
@@ -46,7 +44,6 @@ export function TicketActionsMenu({
   ticketStatus,
   mergedSource,
   hasReceivedMerges,
-  linkLabels,
   triggerRef: parentTriggerRef,
 }: TicketActionsMenuProps) {
   const [linkOpen, setLinkOpen] = useState(false);
@@ -113,7 +110,6 @@ export function TicketActionsMenu({
           subject: ticketSubject,
           status: ticketStatus,
         }}
-        linkLabels={linkLabels}
         open={mergeOpen}
         onOpenChange={setMergeOpen}
         onCloseAutoFocus={returnFocusToTrigger}

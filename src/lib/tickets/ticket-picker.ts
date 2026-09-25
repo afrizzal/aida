@@ -8,14 +8,19 @@
 // returns nothing without querying; otherwise the existing searchTickets with limit 11, so that
 // leaving out the current ticket still leaves 10 rows.
 //
-// Only id, number, subject, status, alreadyLinked, sameContact and mergedSource leave this
-// function. It never selects message text or contact fields (UI-SPEC Assumption 3 confirmed).
-// Both dialogs use the same rows; purpose only names the caller.
+// Only id, number, subject, status, alreadyLinked, linkLabel, sameContact and mergedSource leave
+// this function. It never selects message text or contact fields (UI-SPEC Assumption 3
+// confirmed). linkLabel is the current link's label from the current ticket's side ("Parent of",
+// "Duplicate of", …), or null when the pair is not linked; it comes from the same relation read
+// as alreadyLinked, scoped to the actor's organization, so the merge confirmation never names a
+// stale or guessed link type (review UI-WR-06). Both dialogs use the same rows; purpose only
+// names the caller.
 //
 // Relative imports only and no Next.js import.
 import type { PrismaClient } from "../../generated/prisma/client";
 import { findActiveMembership } from "../membership";
 import { cut } from "../text/cut";
+import { type RelationLabel, relationLabel, relationSideFor } from "./relation-pairs";
 import { searchTickets, type TicketSearchRow } from "./search";
 
 export const PICKER_RESULT_LIMIT = 10;
@@ -42,6 +47,8 @@ export interface PickerTicketResult {
   subject: string;
   status: string;
   alreadyLinked: boolean;
+  /** The current link from the current ticket's side; null when the pair is not linked. */
+  linkLabel: RelationLabel | null;
   sameContact: boolean;
   mergedSource: boolean;
 }
@@ -122,12 +129,16 @@ export async function searchTicketsForPicker(
           { toTicketId: current.id, fromTicketId: { in: ids } },
         ],
       },
-      select: { fromTicketId: true, toTicketId: true },
+      select: { type: true, fromTicketId: true, toTicketId: true },
     }),
   ]);
   const detailById = new Map(details.map((d) => [d.id, d]));
-  const linked = new Set(
-    relations.map((r) => (r.fromTicketId === current.id ? r.toTicketId : r.fromTicketId)),
+  // One relation per unordered pair (TicketRelation_pair_key), so one label per other ticket.
+  const linkLabels = new Map(
+    relations.map((r) => {
+      const side = relationSideFor(r, current.id);
+      return [side === "from" ? r.toTicketId : r.fromTicketId, relationLabel(r.type, side)];
+    }),
   );
 
   return {
@@ -141,7 +152,8 @@ export async function searchTicketsForPicker(
           number: row.number,
           subject: row.subject,
           status: String(row.status),
-          alreadyLinked: linked.has(row.id),
+          alreadyLinked: linkLabels.has(row.id),
+          linkLabel: linkLabels.get(row.id) ?? null,
           sameContact: detail.contactId === current.contactId,
           mergedSource: detail.mergedIntoTicketId !== null,
         },

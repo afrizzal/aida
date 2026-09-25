@@ -21,7 +21,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { TicketStatus } from "@/generated/prisma/client";
-import { MERGE_CONFIRM_DESCRIPTION } from "@/lib/tickets/lifecycle-copy";
+import { MERGE_CONFIRM_DESCRIPTION, mergeReplacesLinkText } from "@/lib/tickets/lifecycle-copy";
 import type { MergeErrorCode } from "@/lib/tickets/merge";
 
 export interface MergeSourceTicket {
@@ -65,8 +65,6 @@ export function mergeErrorMessage(code: MergeErrorCode, source: number, target: 
 
 interface MergeTicketDialogProps {
   source: MergeSourceTicket;
-  /** The current link label from this ticket's side, per other ticket id (for "Merge replaces link"). */
-  linkLabels: Record<string, string>;
   open: boolean;
   onOpenChange(open: boolean): void;
   /** Where focus goes when the dialog closes (the menu trigger, UI-SPEC Surface 1). */
@@ -75,7 +73,6 @@ interface MergeTicketDialogProps {
 
 export function MergeTicketDialog({
   source,
-  linkLabels,
   open,
   onOpenChange,
   onCloseAutoFocus,
@@ -103,7 +100,6 @@ export function MergeTicketDialog({
         {open && (
           <MergeFlow
             source={source}
-            linkLabels={linkLabels}
             pending={pending}
             onPendingChange={setPending}
             onClose={() => onOpenChange(false)}
@@ -118,14 +114,13 @@ type MergeFailure = { kind: "refused"; message: string } | { kind: "unknown" };
 
 interface MergeFlowProps {
   source: MergeSourceTicket;
-  linkLabels: Record<string, string>;
   pending: boolean;
   onPendingChange(pending: boolean): void;
   onClose(): void;
 }
 
 /** Mounted per opening, so every opening starts on step 1 with an empty picker. */
-function MergeFlow({ source, linkLabels, pending, onPendingChange, onClose }: MergeFlowProps) {
+function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps) {
   const router = useRouter();
   const [step, setStep] = useState<"pick" | "confirm">("pick");
   const [target, setTarget] = useState<PickerRow | null>(null);
@@ -219,7 +214,6 @@ function MergeFlow({ source, linkLabels, pending, onPendingChange, onClose }: Me
   }
 
   if (!target) return null;
-  const replacedLabel = target.alreadyLinked ? linkLabels[target.id] : undefined;
   // Every refusal is a rule refusal and a rejected call has no known outcome: either way
   // "Merge tickets" stays disabled (UI-SPEC 3a).
   const mergeBlocked = failure !== null;
@@ -265,12 +259,10 @@ function MergeFlow({ source, linkLabels, pending, onPendingChange, onClose }: Me
             The customer's status links keep working. Each one shows what it showed before, plus new
             replies.
           </li>
-          {target.alreadyLinked && (
-            <li>
-              The current link "{replacedLabel ?? "Related to"}" between these tickets is replaced
-              by "Duplicate of".
-            </li>
-          )}
+          {/* The label comes with the picked row, read when it was picked, so a link added
+              after the page loaded is named correctly; with no label the generic row is used,
+              never a guessed type (review UI-WR-06). */}
+          {target.alreadyLinked && <li>{mergeReplacesLinkText(target.linkLabel ?? null)}</li>}
         </ul>
 
         <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 p-4 text-[13px] text-warning">

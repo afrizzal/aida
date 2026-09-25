@@ -54,6 +54,22 @@ async function pickTarget(page: Page, number: number) {
   return row;
 }
 
+async function adminActor() {
+  const admin = await prisma.user.findFirstOrThrow({ where: { email: ADMIN_EMAIL } });
+  return { userId: admin.id, orgId };
+}
+
+/** Opens the confirm step of source into target. */
+async function reviewMerge(page: Page, source: { number: number }, target: { number: number }) {
+  const dialog = await openMergeDialog(page);
+  await (await pickTarget(page, target.number)).click();
+  await dialog.getByRole("button", { name: "Review merge" }).click();
+  await expect(
+    dialog.getByRole("heading", { name: `Merge #${source.number} into #${target.number}?` }),
+  ).toBeVisible();
+  return dialog;
+}
+
 async function snapshot(ticketIds: string[]) {
   return {
     tickets: await prisma.ticket.findMany({
@@ -190,6 +206,31 @@ test.describe("Ticket merge", () => {
     await expect(dialog.getByRole("button", { name: "Merge tickets" })).toBeDisabled();
     await expect(dialog.getByRole("button", { name: "Keep tickets separate" })).toBeFocused();
     expect(await snapshot([source.id, target.id])).toEqual(before);
+  });
+
+  test("the confirmation names a link added after the page loaded (review UI-WR-06)", async ({
+    page,
+  }) => {
+    const source = await seedTicket("late-link-source", "late-link");
+    const target = await seedTicket("late-link-target", "late-link");
+
+    await openTicket(page, source.id);
+    await expect(page.getByRole("region", { name: "Linked tickets" })).toHaveCount(0);
+    // Another agent links the pair after this page loaded: the source is the child.
+    const linked = await addRelation(prisma, await adminActor(), {
+      ticketId: source.id,
+      otherTicketId: target.id,
+      choice: "is a child of",
+    });
+    expect(linked.ok).toBe(true);
+
+    const dialog = await reviewMerge(page, source, target);
+    await expect(
+      dialog.getByText(
+        'The current link "Child of" between these tickets is replaced by "Duplicate of".',
+      ),
+    ).toBeVisible();
+    await expect(dialog.getByText('The current link "Related to"')).toHaveCount(0);
   });
 
   test("a merged source shows the banner and no composer", async ({ page }) => {

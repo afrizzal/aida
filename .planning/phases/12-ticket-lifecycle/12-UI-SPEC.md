@@ -381,6 +381,7 @@ All copy is English, written fresh for AIDA, and final; the executor uses it ver
 | Merge pair labels | From / Into |
 | Merge consequences | All messages and attachments of #{source} move to #{target}. / #{source} is closed and marked as a duplicate of #{target}. / Tags, assignee and custom fields stay on #{source}. / The customer's status links keep working. Each one shows what it showed before, plus new replies. |
 | Merge replaces link | The current link "{label}" between these tickets is replaced by "Duplicate of". |
+| Merge replaces link, label unknown | The current link between these tickets is replaced by "Duplicate of". |
 | Merge cannot be undone | A merge can't be undone. |
 | Destructive confirmation: Merge | Buttons "Keep tickets separate" (outline) and "Merge tickets" (destructive); pending "Merging…" |
 | Merge done (toast) | Merged #{source} into #{target}. |
@@ -574,3 +575,4 @@ Token-only colours (no oklch/hex in new files; no new token); no new page-level 
 
 *Amended 2026-11-08 after code review fix pass F3 (`12-REVIEW-c.md`; additive rows only, no approved row changed):*
 - UI-WR-05: six rows added for strings that ran without a row: "Link remove outcome unknown", "Merge confirm description (sr)", "Merged banner, date unknown (fills {date})", "Merged composer line, target unavailable", "Actor: former member (mid-sentence)", "Feed events: missing value (fills {before} or {after})". A stored status or priority value with no header label uses the "Feed events: other" row; the raw value is never shown. Each string is one exported constant (`src/lib/tickets/lifecycle-copy.ts`, or `src/lib/tickets/activity-copy.ts` for the feed) checked by the copy-table unit test.
+- UI-WR-06: the picker rows carry the current link label from this ticket's side (`linkLabel`), and the "Merge replaces link" line uses it. With no known label the new row "Merge replaces link, label unknown" is used; a link type is never assumed.

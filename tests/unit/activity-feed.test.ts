@@ -15,6 +15,7 @@ import {
   MERGE_CONFIRM_DESCRIPTION,
   MERGED_BANNER_DATE_UNKNOWN,
   MERGED_COMPOSER_TARGET_UNAVAILABLE,
+  mergeReplacesLinkText,
 } from "../../src/lib/tickets/lifecycle-copy";
 
 const THIS = "t-this";
@@ -142,7 +143,7 @@ describe("activity copy (UI-SPEC Copywriting, Feed events)", () => {
   });
 });
 
-describe("copy rows added by the review (UI-SPEC Copywriting, review UI-WR-05)", () => {
+describe("copy rows added by the review (UI-SPEC Copywriting, review UI-WR-05, UI-WR-06)", () => {
   it("each new row is one exported constant with the row's exact text", () => {
     expect(ACTOR_FORMER_MEMBER_MID_SENTENCE).toBe("a former member");
     expect(MISSING_VALUE).toBe("no value");
@@ -153,6 +154,15 @@ describe("copy rows added by the review (UI-SPEC Copywriting, review UI-WR-05)",
     expect(MERGE_CONFIRM_DESCRIPTION).toBe("Review what happens before you merge these tickets.");
     expect(LINK_REMOVE_OUTCOME_UNKNOWN).toBe(
       "The result is not known. The link may have been removed. Refresh the page to check before you try again.",
+    );
+  });
+
+  it("names the replaced link when its label is known, and never makes one up (UI-WR-06)", () => {
+    expect(mergeReplacesLinkText("Child of")).toBe(
+      'The current link "Child of" between these tickets is replaced by "Duplicate of".',
+    );
+    expect(mergeReplacesLinkText(null)).toBe(
+      'The current link between these tickets is replaced by "Duplicate of".',
     );
   });
 

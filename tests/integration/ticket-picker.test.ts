@@ -22,6 +22,7 @@ import {
 const ROW_KEYS = [
   "alreadyLinked",
   "id",
+  "linkLabel",
   "mergedSource",
   "number",
   "sameContact",
@@ -161,7 +162,7 @@ describe("searchTicketsForPicker (AIDA-52, D-01)", () => {
     expect(result.ok && result.results.some((r) => r.id === current.id)).toBe(false);
   });
 
-  it("rows hold exactly the seven fields, with alreadyLinked, sameContact and mergedSource set from the data", async () => {
+  it("rows hold exactly the eight fields, with alreadyLinked, sameContact and mergedSource set from the data", async () => {
     const { orgId, actor } = await memberActor();
     const email = `same-${randomUUID()}@example.test`;
     const current = await seedContactTicket(orgId, { contactEmail: email });
@@ -220,6 +221,87 @@ describe("searchTicketsForPicker (AIDA-52, D-01)", () => {
       sameContact: false,
       mergedSource: false,
     });
+  });
+
+  it("linkLabel gives the current link from the current ticket's side, null when unlinked (review UI-WR-06)", async () => {
+    const { orgId, actor } = await memberActor();
+    const current = await seedTicket(orgId);
+    const parentOfThis = await seedTicket(orgId);
+    const childOfThis = await seedTicket(orgId);
+    const duplicateTarget = await seedTicket(orgId);
+    const duplicateSource = await seedTicket(orgId);
+    const related = await seedTicket(orgId);
+    const unlinked = await seedTicket(orgId);
+    const link = (type: "CHILD_OF" | "DUPLICATE_OF" | "RELATED_TO", from: string, to: string) =>
+      seedRelation(prisma, orgId, {
+        type,
+        fromTicketId: from,
+        toTicketId: to,
+        createdById: actor.userId,
+      });
+    await link("CHILD_OF", current.id, parentOfThis.id);
+    await link("CHILD_OF", childOfThis.id, current.id);
+    await link("DUPLICATE_OF", current.id, duplicateTarget.id);
+    await link("DUPLICATE_OF", duplicateSource.id, current.id);
+    await link("RELATED_TO", related.id, current.id);
+    // A link between two other tickets says nothing about the current one.
+    await link("CHILD_OF", unlinked.id, related.id);
+
+    const labelOf = async (n: number) => {
+      const r = await searchTicketsForPicker(prisma, actor, {
+        q: `#${n}`,
+        ticketId: current.id,
+        purpose: "merge",
+      });
+      if (!r.ok) throw new Error("expected ok");
+      expect(r.results).toHaveLength(1);
+      return { alreadyLinked: r.results[0].alreadyLinked, linkLabel: r.results[0].linkLabel };
+    };
+
+    expect(await labelOf(parentOfThis.number)).toEqual({
+      alreadyLinked: true,
+      linkLabel: "Child of",
+    });
+    expect(await labelOf(childOfThis.number)).toEqual({
+      alreadyLinked: true,
+      linkLabel: "Parent of",
+    });
+    expect(await labelOf(duplicateTarget.number)).toEqual({
+      alreadyLinked: true,
+      linkLabel: "Duplicate of",
+    });
+    expect(await labelOf(duplicateSource.number)).toEqual({
+      alreadyLinked: true,
+      linkLabel: "Has duplicate",
+    });
+    expect(await labelOf(related.number)).toEqual({
+      alreadyLinked: true,
+      linkLabel: "Related to",
+    });
+    expect(await labelOf(unlinked.number)).toEqual({ alreadyLinked: false, linkLabel: null });
+  });
+
+  it("linkLabel never reports a link of another organization (review UI-WR-06)", async () => {
+    const x = await memberActor();
+    const y = await memberActor();
+    const current = await seedTicket(x.orgId);
+    const other = await seedTicket(x.orgId);
+    // A relation row of organization y that names x's tickets must not count for x.
+    await seedRelation(prisma, y.orgId, {
+      type: "CHILD_OF",
+      fromTicketId: current.id,
+      toTicketId: other.id,
+      createdById: y.actor.userId,
+    });
+
+    const r = await searchTicketsForPicker(prisma, x.actor, {
+      q: `#${other.number}`,
+      ticketId: current.id,
+      purpose: "merge",
+    });
+    expect(r.ok && r.results.map((row) => [row.id, row.alreadyLinked, row.linkLabel])).toEqual([
+      [other.id, false, null],
+    ]);
   });
 
   it("never returns another organization's ticket by number or by word", async () => {

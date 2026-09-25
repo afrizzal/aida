@@ -18,6 +18,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import type { TicketStatus } from "@/generated/prisma/client";
+import type { RelationLabel } from "@/lib/tickets/relation-pairs";
 
 export type PickerPurpose = "link" | "merge";
 
@@ -27,6 +28,8 @@ export interface PickerRow {
   subject: string;
   status: TicketStatus;
   alreadyLinked: boolean;
+  /** The current link from this ticket's side, null when the pair is not linked (UI-WR-06). */
+  linkLabel: RelationLabel | null;
   sameContact: boolean;
   mergedSource: boolean;
 }
