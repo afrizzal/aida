@@ -1,7 +1,13 @@
 // Phase 12 copy rows that a code review found without a UI-SPEC Copywriting row, or that more
-// than one component shows (review UI-WR-05 and UI-WR-06). Each string is one exported constant
-// used verbatim, and the copy-table unit test checks each against its row. Pure and
-// client-safe: server and client components import it. Relative imports only.
+// than one component shows (review UI-WR-05, UI-WR-06 and run decision K34). Each string is one
+// exported constant used verbatim, and the copy-table unit test checks each against its row.
+// Pure and client-safe: server and client components import it. Relative imports only.
+
+/** Copywriting "Merge unavailable: merged source" and "Link unavailable: merged source" (K34). */
+export const MERGED_SOURCE_REASON = "This ticket was already merged.";
+
+/** Copywriting "Picker reason: merged", in the merge dialog and, since K34, the link dialog. */
+export const PICKER_REASON_MERGED = "Already merged into another ticket";
 
 /** Copywriting "Merged banner, date unknown": fills {date} when the merge time is not stored. */
 export const MERGED_BANNER_DATE_UNKNOWN = "an earlier date";

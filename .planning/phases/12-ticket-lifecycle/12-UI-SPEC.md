@@ -344,6 +344,7 @@ All copy is English, written fresh for AIDA, and final; the executor uses it ver
 | Menu items | Link a ticket… / Merge into another ticket… |
 | Merge unavailable: merged source | This ticket was already merged. |
 | Merge unavailable: has received merges | Other tickets were merged into this one, so it can't be merged again. |
+| Link unavailable: merged source | This ticket was already merged. |
 | Linked tickets label | Linked tickets |
 | Relation labels (this side) | Duplicate of / Has duplicate / Child of / Parent of / Related to |
 | Remove link (aria-label) | Remove the link "{label} #{n}" |
@@ -374,6 +375,7 @@ All copy is English, written fresh for AIDA, and final; the executor uses it ver
 | Picker reason: already linked | Already linked |
 | Picker reason: different customer | Different customer. Tickets of different customers can't be merged. |
 | Picker reason: merged | Already merged into another ticket |
+| Picker reason: merged (link dialog) | Already merged into another ticket |
 | Merge pick title / description | Merge this ticket into another / Pick the ticket that keeps the conversation. #{source} will be closed as its duplicate. |
 | Merge dismiss / back | Close / Back |
 | Merge confirm title | Merge #{source} into #{target}? |
@@ -577,3 +579,4 @@ Token-only colours (no oklch/hex in new files; no new token); no new page-level 
 - UI-WR-05: six rows added for strings that ran without a row: "Link remove outcome unknown", "Merge confirm description (sr)", "Merged banner, date unknown (fills {date})", "Merged composer line, target unavailable", "Actor: former member (mid-sentence)", "Feed events: missing value (fills {before} or {after})". A stored status or priority value with no header label uses the "Feed events: other" row; the raw value is never shown. Each string is one exported constant (`src/lib/tickets/lifecycle-copy.ts`, or `src/lib/tickets/activity-copy.ts` for the feed) checked by the copy-table unit test.
 - UI-WR-06: the picker rows carry the current link label from this ticket's side (`linkLabel`), and the "Merge replaces link" line uses it. With no known label the new row "Merge replaces link, label unknown" is used; a link type is never assumed.
 - UI-WR-07 (no new copy): "Back" from the confirm step shows step 1 with the same search text and the chosen row checked. After a rule refusal the refused ticket is no longer the chosen row, so "Review merge" stays disabled until the user picks again; the refreshed rows show the refused ticket with its reason when one applies.
+- UI-K34 (run decision K34; the server refuses a new link on a merged source with `TICKET_UNAVAILABLE` since fix pass F1): two rows added. "Link a ticket…" in "More ticket actions" is disabled (not hidden) on a merged source and shows "Link unavailable: merged source" as its second 12px muted line, the same way Merge shows its reason. The link dialog's picker shows a merged source disabled with "Picker reason: merged (link dialog)", the same text as the merge dialog's row; this replaces "only Already linked applies" in Surface 2c. A merge target is not a merged source and keeps both.

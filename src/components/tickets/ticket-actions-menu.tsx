@@ -2,7 +2,8 @@
 
 // "More ticket actions" in the ticket top bar (UI-SPEC Surface 1): Link a ticket… and Merge into
 // another ticket…. The Merge item stays visible but disabled, with its reason, on a merged source
-// and on a ticket that has received merges (D-07); the server refuses both anyway.
+// and on a ticket that has received merges (D-07). The Link item is disabled the same way on a
+// merged source (run decision K34). The server refuses all of these anyway.
 
 import { Ellipsis, Link2, Merge } from "lucide-react";
 import { type RefObject, useRef, useState } from "react";
@@ -16,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { TicketStatus } from "@/generated/prisma/client";
+import { MERGED_SOURCE_REASON } from "@/lib/tickets/lifecycle-copy";
 
 export interface TicketActionsMenuProps {
   ticketId: string;
@@ -30,7 +32,7 @@ export interface TicketActionsMenuProps {
 
 /** The Copywriting "Merge unavailable" reason, or null when Merge is offered. */
 export function mergeUnavailableReason(mergedSource: boolean, hasReceivedMerges: boolean) {
-  if (mergedSource) return "This ticket was already merged.";
+  if (mergedSource) return MERGED_SOURCE_REASON;
   if (hasReceivedMerges) {
     return "Other tickets were merged into this one, so it can't be merged again.";
   }
@@ -49,6 +51,8 @@ export function TicketActionsMenu({
   const [linkOpen, setLinkOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const mergeReason = mergeUnavailableReason(mergedSource, hasReceivedMerges);
+  // The Copywriting "Link unavailable: merged source" reason (K34); a merge target keeps Link.
+  const linkReason = mergedSource ? MERGED_SOURCE_REASON : null;
   const ownTriggerRef = useRef<HTMLButtonElement>(null);
   const triggerRef = parentTriggerRef ?? ownTriggerRef;
 
@@ -75,9 +79,18 @@ export function TicketActionsMenu({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-[240px]">
-          <DropdownMenuItem className="gap-2 text-[13px]" onSelect={() => setLinkOpen(true)}>
+          <DropdownMenuItem
+            disabled={linkReason !== null}
+            onSelect={() => setLinkOpen(true)}
+            className="items-start gap-2 text-[13px]"
+          >
             <Link2 className="size-4" />
-            Link a ticket…
+            <span className="flex flex-col">
+              <span>Link a ticket…</span>
+              {linkReason && (
+                <span className="text-[12px] text-muted-foreground">{linkReason}</span>
+              )}
+            </span>
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={mergeReason !== null}

@@ -18,6 +18,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import type { TicketStatus } from "@/generated/prisma/client";
+import { PICKER_REASON_MERGED } from "@/lib/tickets/lifecycle-copy";
 import type { RelationLabel } from "@/lib/tickets/relation-pairs";
 
 export type PickerPurpose = "link" | "merge";
@@ -43,10 +44,14 @@ export function meetsPickerMinimum(query: string): boolean {
   return NUMBER_QUERY.test(q) ? true : q.length >= 2;
 }
 
-/** The Copywriting "Picker reason" for an ineligible row, or null when the row can be chosen. */
+/**
+ * The Copywriting "Picker reason" for an ineligible row, or null when the row can be chosen. A
+ * merged source can neither be linked (run decision K34: the server refuses it with
+ * TICKET_UNAVAILABLE) nor merge again, so both dialogs show it as merged.
+ */
 export function pickerReason(row: PickerRow, purpose: PickerPurpose): string | null {
+  if (row.mergedSource) return PICKER_REASON_MERGED;
   if (purpose === "link") return row.alreadyLinked ? "Already linked" : null;
-  if (row.mergedSource) return "Already merged into another ticket";
   if (!row.sameContact)
     return "Different customer. Tickets of different customers can't be merged.";
   return null;

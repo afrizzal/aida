@@ -15,7 +15,9 @@ import {
   MERGE_CONFIRM_DESCRIPTION,
   MERGED_BANNER_DATE_UNKNOWN,
   MERGED_COMPOSER_TARGET_UNAVAILABLE,
+  MERGED_SOURCE_REASON,
   mergeReplacesLinkText,
+  PICKER_REASON_MERGED,
 } from "../../src/lib/tickets/lifecycle-copy";
 
 const THIS = "t-this";
@@ -143,7 +145,7 @@ describe("activity copy (UI-SPEC Copywriting, Feed events)", () => {
   });
 });
 
-describe("copy rows added by the review (UI-SPEC Copywriting, review UI-WR-05, UI-WR-06)", () => {
+describe("copy rows added by the review (UI-SPEC Copywriting, review UI-WR-05, UI-WR-06, K34)", () => {
   it("each new row is one exported constant with the row's exact text", () => {
     expect(ACTOR_FORMER_MEMBER_MID_SENTENCE).toBe("a former member");
     expect(MISSING_VALUE).toBe("no value");
@@ -155,6 +157,8 @@ describe("copy rows added by the review (UI-SPEC Copywriting, review UI-WR-05, U
     expect(LINK_REMOVE_OUTCOME_UNKNOWN).toBe(
       "The result is not known. The link may have been removed. Refresh the page to check before you try again.",
     );
+    expect(MERGED_SOURCE_REASON).toBe("This ticket was already merged.");
+    expect(PICKER_REASON_MERGED).toBe("Already merged into another ticket");
   });
 
   it("names the replaced link when its label is known, and never makes one up (UI-WR-06)", () => {

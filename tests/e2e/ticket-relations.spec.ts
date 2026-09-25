@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
+import { mergeTickets } from "../../src/lib/tickets/merge";
 import { addRelation } from "../../src/lib/tickets/relations";
 import { ADMIN_EMAIL } from "./global-setup";
 import { createTicket, orgId, prisma } from "./support/db";
@@ -10,12 +11,12 @@ test.use({ storageState: path.resolve(__dirname, ".auth/admin.json") });
 
 const ts = Date.now();
 
-async function seedTicket(label: string) {
+async function seedTicket(label: string, contactLabel = label) {
   const ticket = await createTicket(orgId, {
     subject: `E2E Relations ${label} ${ts}`,
     priority: "NORMAL",
     body: `Seed body for ${label}`,
-    contact: { email: `relations-${label}-${ts}@example.com` },
+    contact: { email: `relations-${contactLabel}-${ts}@example.com` },
     direction: "INBOUND",
   });
   return prisma.ticket.findUniqueOrThrow({
@@ -261,6 +262,65 @@ test.describe("Ticket relations", () => {
         where: { OR: [{ fromTicketId: a.id }, { toTicketId: a.id }] },
       }),
     ).toBe(1);
+  });
+
+  test("the link picker marks a merged source unavailable (run decision K34)", async ({ page }) => {
+    const a = await seedTicket("k34-picker-a");
+    const source = await seedTicket("k34-picker-source", "k34-picker");
+    const target = await seedTicket("k34-picker-target", "k34-picker");
+    const merged = await mergeTickets(prisma, await adminActor(), {
+      sourceTicketId: source.id,
+      targetTicketId: target.id,
+    });
+    expect(merged.ok).toBe(true);
+    const before = await relationCounts([a.id, source.id]);
+
+    await openTicket(page, a.id);
+    const dialog = await openLinkDialog(page);
+    await dialog.getByPlaceholder("Search by number or subject…").fill(String(source.number));
+    const row = pickerRow(page, source.number);
+    await expect(row).toHaveAttribute("aria-disabled", "true");
+    await expect(row).toContainText("Already merged into another ticket");
+    await row.click({ force: true });
+    await expect(dialog.getByRole("button", { name: "Link tickets" })).toBeDisabled();
+
+    // The merge target still takes new links.
+    await dialog.getByPlaceholder("Search by number or subject…").fill(String(target.number));
+    await expect(pickerRow(page, target.number)).not.toHaveAttribute("aria-disabled", "true");
+    expect(await relationCounts([a.id, source.id])).toEqual(before);
+  });
+
+  test("Link a ticket… is disabled on a merged source, with its reason (run decision K34)", async ({
+    page,
+  }) => {
+    const source = await seedTicket("k34-menu-source", "k34-menu");
+    const target = await seedTicket("k34-menu-target", "k34-menu");
+    const merged = await mergeTickets(prisma, await adminActor(), {
+      sourceTicketId: source.id,
+      targetTicketId: target.id,
+    });
+    expect(merged.ok).toBe(true);
+
+    await openTicket(page, source.id);
+    await menuTrigger(page).click();
+    const linkItem = page.getByRole("menuitem", { name: /Link a ticket…/ });
+    await expect(linkItem).toHaveAttribute("aria-disabled", "true");
+    await expect(linkItem).toContainText("This ticket was already merged.");
+    // Shown the same way as Merge's reason: a second line in the disabled item.
+    const mergeItem = page.getByRole("menuitem", { name: /Merge into another ticket…/ });
+    await expect(mergeItem).toHaveAttribute("aria-disabled", "true");
+    await expect(mergeItem).toContainText("This ticket was already merged.");
+    await linkItem.click({ force: true });
+    await expect(page.getByRole("dialog", { name: "Link a ticket" })).toHaveCount(0);
+
+    // The target is not a merged source, so it keeps the Link action.
+    await page.keyboard.press("Escape");
+    await openTicket(page, target.id);
+    await menuTrigger(page).click();
+    await expect(page.getByRole("menuitem", { name: /Link a ticket…/ })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
   });
 
   test("closing the Link dialog returns focus to the menu trigger (review UI-WR-03)", async ({
