@@ -2,6 +2,10 @@ import { ArrowUpRight, Merge } from "lucide-react";
 import Link from "next/link";
 import { LocalDateTime } from "@/components/tickets/local-date-time";
 import { Button } from "@/components/ui/button";
+import {
+  MERGED_BANNER_DATE_UNKNOWN,
+  MERGED_COMPOSER_TARGET_UNAVAILABLE,
+} from "@/lib/tickets/lifecycle-copy";
 
 export interface MergeTargetRef {
   id: string;
@@ -19,7 +23,7 @@ export function MergedSourceBanner({
   target: MergeTargetRef | null;
   mergedAt: Date | null;
 }) {
-  const date = mergedAt ? <LocalDateTime value={mergedAt} /> : "an earlier date";
+  const date = mergedAt ? <LocalDateTime value={mergedAt} /> : MERGED_BANNER_DATE_UNKNOWN;
   // UI-SPEC E5 (review UI-IN-05): the banner wraps, so on a narrow pane the button moves below
   // the text instead of squeezing it (the text asks for 240px before the button wraps). The
   // icon sits in a 20px box, the height of one 13px line, instead of an off-scale offset.
@@ -71,7 +75,7 @@ export function MergedComposerLine({ target }: { target: MergeTargetRef | null }
           </Button>
         </>
       ) : (
-        <p className="min-w-0">Replies go on the ticket this one was merged into.</p>
+        <p className="min-w-0">{MERGED_COMPOSER_TARGET_UNAVAILABLE}</p>
       )}
     </div>
   );

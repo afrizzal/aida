@@ -365,6 +365,7 @@ All copy is English, written fresh for AIDA, and final; the executor uses it ver
 | Link error: membership ended | Your access to this workspace has ended. Sign out, then sign in again. |
 | Link error: unknown | The link could not be saved. Wait a moment and try again. |
 | Link outcome unknown | The result is not known. The link may have been saved. Refresh the page to check before you try again. |
+| Link remove outcome unknown | The result is not known. The link may have been removed. Refresh the page to check before you try again. |
 | Picker placeholder | Search by number or subject… |
 | Picker start | Type a ticket number, or at least 2 letters of the subject. |
 | Picker searching | Searching tickets… |
@@ -376,6 +377,7 @@ All copy is English, written fresh for AIDA, and final; the executor uses it ver
 | Merge pick title / description | Merge this ticket into another / Pick the ticket that keeps the conversation. #{source} will be closed as its duplicate. |
 | Merge dismiss / back | Close / Back |
 | Merge confirm title | Merge #{source} into #{target}? |
+| Merge confirm description (sr) | Review what happens before you merge these tickets. |
 | Merge pair labels | From / Into |
 | Merge consequences | All messages and attachments of #{source} move to #{target}. / #{source} is closed and marked as a duplicate of #{target}. / Tags, assignee and custom fields stay on #{source}. / The customer's status links keep working. Each one shows what it showed before, plus new replies. |
 | Merge replaces link | The current link "{label}" between these tickets is replaced by "Duplicate of". |
@@ -394,7 +396,9 @@ All copy is English, written fresh for AIDA, and final; the executor uses it ver
 | Merge outcome unknown | The result is not known. The tickets may have been merged. Refresh the page to check before you try again. |
 | Merged banner | This ticket was merged into #{target} on {date}. Its conversation continues there. / button "Open #{target}" |
 | Merged banner, target unavailable | This ticket was merged into another ticket on {date}. |
+| Merged banner, date unknown (fills {date}) | an earlier date |
 | Merged composer line | Replies go on #{target}, where this conversation continues. / button "Open #{target}" |
+| Merged composer line, target unavailable | Replies go on the ticket this one was merged into. |
 | Moved from | Moved from #{source} |
 | Snooze trigger / chip | Snooze / Snoozed until {time} |
 | Snooze trigger disabled: closed / merged | Closed tickets can't be snoozed. Reopen the ticket first. / This ticket was merged, so it can't be snoozed. |
@@ -423,6 +427,7 @@ All copy is English, written fresh for AIDA, and final; the executor uses it ver
 | Feed list label (sr) | Ticket activity |
 | Feed empty | No messages or activity yet. |
 | Actor: system / former member | The system / A former member |
+| Actor: former member (mid-sentence) | a former member |
 | Bulk suffix | (bulk change) |
 | Feed events: status | {actor} changed the status from {before} to {after}. |
 | Feed events: assignee | {actor} assigned this ticket to {name}. / {actor} removed the assignee. |
@@ -434,6 +439,7 @@ All copy is English, written fresh for AIDA, and final; the executor uses it ver
 | Feed events: snooze | {actor} snoozed this ticket until {time}. |
 | Feed events: wake | {actor} woke this ticket. (USER) / The snooze ended. (SYSTEM) |
 | Feed events: other | {actor} changed this ticket. |
+| Feed events: missing value (fills {before} or {after}) | no value |
 | Feed missing references | a ticket that is no longer available / a deleted tag |
 | Public merged label | Combined |
 | Public merged notice | This request was combined with another one of yours. New messages in the combined request, including any you send here, also appear on this page. |
@@ -565,3 +571,6 @@ Token-only colours (no oklch/hex in new files; no new token); no new page-level 
 **Approval:** pending
 
 *Amended 2026-11-08 after Codex plan review cycle 1 (C5) and the round 1 plan check:* the server code `HIERARCHY_TOO_DEEP` (the ancestor walk reached its bound) has its own copy row, "Link error: hierarchy too deep".
+
+*Amended 2026-11-08 after code review fix pass F3 (`12-REVIEW-c.md`; additive rows only, no approved row changed):*
+- UI-WR-05: six rows added for strings that ran without a row: "Link remove outcome unknown", "Merge confirm description (sr)", "Merged banner, date unknown (fills {date})", "Merged composer line, target unavailable", "Actor: former member (mid-sentence)", "Feed events: missing value (fills {before} or {after})". A stored status or priority value with no header label uses the "Feed events: other" row; the raw value is never shown. Each string is one exported constant (`src/lib/tickets/lifecycle-copy.ts`, or `src/lib/tickets/activity-copy.ts` for the feed) checked by the copy-table unit test.

@@ -14,10 +14,14 @@ import {
 
 export const ACTOR_SYSTEM = "The system";
 export const ACTOR_FORMER_MEMBER = "A former member";
+/** Copywriting "Actor: former member (mid-sentence)": the same marker inside a sentence. */
+export const ACTOR_FORMER_MEMBER_MID_SENTENCE = "a former member";
 export const BULK_SUFFIX = "(bulk change)";
 export const MISSING_TICKET = "a ticket that is no longer available";
 export const MISSING_TAG = "a deleted tag";
 export const FEED_EMPTY = "No messages or activity yet.";
+/** Copywriting "Feed events: missing value": fills {before} or {after} when no value is stored. */
+export const MISSING_VALUE = "no value";
 
 export type ActivityIconName =
   | "CircleDot"
@@ -94,9 +98,29 @@ function str(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
-function label(map: Record<string, string>, value: unknown): string {
+/**
+ * The header label of a known value, MISSING_VALUE when none is stored, or null for a value
+ * with no label. A caller turns null into the "other" row, so a raw enum key is never shown
+ * (review UI-WR-05).
+ */
+function label(map: Record<string, string>, value: unknown): string | null {
+  if (value === null || value === undefined) return MISSING_VALUE;
   const key = str(value);
-  return key === null ? "none" : (map[key] ?? key);
+  return key !== null && Object.hasOwn(map, key) ? map[key] : null;
+}
+
+/** "{actor} changed the {field} from {before} to {after}.", or the "other" row. */
+function changeParts(
+  field: "status" | "priority",
+  map: Record<string, string>,
+  event: ActivityEventInput,
+  context: ActivityContext,
+  actor: string,
+): ActivityPart[] {
+  const before = label(map, event.before[field]);
+  const after = label(map, event.after[field]);
+  if (before === null || after === null) return OTHER.describe(event, context, actor);
+  return [text(`${actor} changed the ${field} from ${before} to ${after}.`)];
 }
 
 function ticketRef(context: ActivityContext, id: unknown): ActivityPart {
@@ -145,29 +169,22 @@ const OTHER: CopyRow = {
 export const ACTIVITY_COPY: Record<TicketAuditAction, CopyRow> = {
   STATUS_CHANGED: {
     icon: "CircleDot",
-    describe: (event, _context, actor) => [
-      text(
-        `${actor} changed the status from ${label(STATUS_LABELS, event.before.status)} to ${label(STATUS_LABELS, event.after.status)}.`,
-      ),
-    ],
+    describe: (event, context, actor) =>
+      changeParts("status", STATUS_LABELS, event, context, actor),
   },
   ASSIGNEE_CHANGED: {
     icon: "UserRound",
     describe: (event, context, actor) => {
       const assignee = str(event.after.assigneeId);
       if (assignee === null) return [text(`${actor} removed the assignee.`)];
-      // Mid-sentence, the former-member marker starts lower case.
-      const name = memberName(context, assignee) ?? "a former member";
+      const name = memberName(context, assignee) ?? ACTOR_FORMER_MEMBER_MID_SENTENCE;
       return [text(`${actor} assigned this ticket to ${name}.`)];
     },
   },
   PRIORITY_CHANGED: {
     icon: "Flag",
-    describe: (event, _context, actor) => [
-      text(
-        `${actor} changed the priority from ${label(PRIORITY_LABELS, event.before.priority)} to ${label(PRIORITY_LABELS, event.after.priority)}.`,
-      ),
-    ],
+    describe: (event, context, actor) =>
+      changeParts("priority", PRIORITY_LABELS, event, context, actor),
   },
   TAG_ADDED: {
     icon: "Tag",

@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { removeRelationAction } from "@/app/(app)/tickets/[id]/relation-actions";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { LINK_REMOVE_OUTCOME_UNKNOWN } from "@/lib/tickets/lifecycle-copy";
 import type { RelationLabel } from "@/lib/tickets/relation-pairs";
 import type { RelationErrorCode } from "@/lib/tickets/relations";
 
@@ -121,10 +122,9 @@ export function LinkedTicketsRow({ ticketId, relations, fallbackFocusRef }: Link
           setFocusRequest({ kind: "failed", relationId: chip.relationId });
         }
       } catch {
-        // No returned code: the outcome is not known (P11 D2).
-        setError(
-          "The result is not known. The link may have been saved. Refresh the page to check before you try again.",
-        );
+        // No returned code: the outcome is not known (P11 D2). This is a removal, so the
+        // link may have been removed, not saved (review UI-WR-05).
+        setError(LINK_REMOVE_OUTCOME_UNKNOWN);
         setFocusRequest({ kind: "failed", relationId: chip.relationId });
       } finally {
         setPendingId(null);

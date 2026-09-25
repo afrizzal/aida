@@ -2,12 +2,20 @@ import { describe, expect, it } from "vitest";
 import { TicketAuditAction } from "../../src/generated/prisma/enums";
 import {
   ACTIVITY_COPY,
+  ACTOR_FORMER_MEMBER_MID_SENTENCE,
   type ActivityContext,
   type ActivityEventInput,
   describeEvent,
+  MISSING_VALUE,
   partsToText,
 } from "../../src/lib/tickets/activity-copy";
 import { buildActivityFeed } from "../../src/lib/tickets/activity-feed";
+import {
+  LINK_REMOVE_OUTCOME_UNKNOWN,
+  MERGE_CONFIRM_DESCRIPTION,
+  MERGED_BANNER_DATE_UNKNOWN,
+  MERGED_COMPOSER_TARGET_UNAVAILABLE,
+} from "../../src/lib/tickets/lifecycle-copy";
 
 const THIS = "t-this";
 const OTHER = "t-other";
@@ -131,6 +139,52 @@ describe("activity copy (UI-SPEC Copywriting, Feed events)", () => {
       "Ann changed the status from Open to Resolved. (bulk change)",
     );
     expect(say({ ...base, batchId: null })).not.toContain("(bulk change)");
+  });
+});
+
+describe("copy rows added by the review (UI-SPEC Copywriting, review UI-WR-05)", () => {
+  it("each new row is one exported constant with the row's exact text", () => {
+    expect(ACTOR_FORMER_MEMBER_MID_SENTENCE).toBe("a former member");
+    expect(MISSING_VALUE).toBe("no value");
+    expect(MERGED_BANNER_DATE_UNKNOWN).toBe("an earlier date");
+    expect(MERGED_COMPOSER_TARGET_UNAVAILABLE).toBe(
+      "Replies go on the ticket this one was merged into.",
+    );
+    expect(MERGE_CONFIRM_DESCRIPTION).toBe("Review what happens before you merge these tickets.");
+    expect(LINK_REMOVE_OUTCOME_UNKNOWN).toBe(
+      "The result is not known. The link may have been removed. Refresh the page to check before you try again.",
+    );
+  });
+
+  it("the former member mid-sentence comes from its constant", () => {
+    expect(say({ action: "ASSIGNEE_CHANGED", after: { assigneeId: "u-gone" } })).toBe(
+      `Ann assigned this ticket to ${ACTOR_FORMER_MEMBER_MID_SENTENCE}.`,
+    );
+  });
+
+  it("a missing status or priority reads as the missing-value row (UI-WR-05 item 2)", () => {
+    expect(say({ action: "PRIORITY_CHANGED", before: {}, after: { priority: "HIGH" } })).toBe(
+      "Ann changed the priority from no value to High.",
+    );
+    expect(say({ before: { status: "OPEN" }, after: { status: null } })).toBe(
+      "Ann changed the status from Open to no value.",
+    );
+  });
+
+  it("an unknown status or priority value uses the other row, never the raw key (UI-WR-05 item 2)", () => {
+    const status = say({ before: { status: "ARCHIVED" }, after: { status: "OPEN" } });
+    expect(status).toBe("Ann changed this ticket.");
+    expect(status).not.toContain("ARCHIVED");
+    const priority = say({
+      action: "PRIORITY_CHANGED",
+      before: { priority: "LOW" },
+      after: { priority: "CRITICAL" },
+    });
+    expect(priority).toBe("Ann changed this ticket.");
+    expect(priority).not.toContain("CRITICAL");
+    expect(say({ before: { status: 3 }, after: { status: "OPEN" } })).toBe(
+      "Ann changed this ticket.",
+    );
   });
 });
 

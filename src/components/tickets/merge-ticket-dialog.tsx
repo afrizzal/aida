@@ -21,6 +21,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { TicketStatus } from "@/generated/prisma/client";
+import { MERGE_CONFIRM_DESCRIPTION } from "@/lib/tickets/lifecycle-copy";
 import type { MergeErrorCode } from "@/lib/tickets/merge";
 
 export interface MergeSourceTicket {
@@ -229,9 +230,7 @@ function MergeFlow({ source, linkLabels, pending, onPendingChange, onClose }: Me
         <DialogTitle className="text-[15px] font-semibold tracking-tight">
           Merge #{source.number} into #{target.number}?
         </DialogTitle>
-        <DialogDescription className="sr-only">
-          Review what happens before you merge these tickets.
-        </DialogDescription>
+        <DialogDescription className="sr-only">{MERGE_CONFIRM_DESCRIPTION}</DialogDescription>
       </DialogHeader>
 
       <div className="min-w-0 space-y-4">

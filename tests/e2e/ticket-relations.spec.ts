@@ -250,6 +250,10 @@ test.describe("Ticket relations", () => {
     });
     await remove.click();
     await expect(linkedRow(page).getByRole("alert")).toBeVisible();
+    // Review UI-WR-05 item 6: a removal, so the link may have been removed, not saved.
+    await expect(linkedRow(page).getByRole("alert")).toHaveText(
+      "The result is not known. The link may have been removed. Refresh the page to check before you try again.",
+    );
     await expect(remove).toBeEnabled();
     await expect(remove).toBeFocused();
     expect(
