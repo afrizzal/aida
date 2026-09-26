@@ -135,3 +135,94 @@ Take a QUEUED reply written on S and sent after the customer's post-merge reply 
 _Reviewed: 2026-11-09_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: deep_
+
+## Follow-up: F7 (a58b3ed, 38afb4a, 6d842ba)
+
+**Reviewed:** 2026-11-09 · **Scope:** `src/lib/worker/jobs/email-outbound-send.ts`, `tests/integration/email-outbound-merge.test.ts`, F7 section of `12-REVIEW-FIX.md` · **Counts:** critical 0, warning 1, info 3 · **Status:** issues_found
+
+**What holds:**
+
+- **WR-02 (`seq: { lt: message.seq }`, `email-outbound-send.ts:105`) is correct.**
+  - `message.seq` comes from the full-row `findUnique`.
+  - Every insert draws `seq` under its ticket's row lock, and a merge keeps it. So the bound is stable across attempts and across a merge, for a source origin and a target origin alike.
+  - The bound also excludes the message itself, so dropping `id: { not }` is safe. A reply delivered but then marked FAILED cannot pull in a customer answer to itself, because that answer has a higher `seq`.
+  - Manual "Retry" (`actions.ts:76-91`) re-enqueues the same row, so it gets the same headers.
+- **The parent is always inside the bounded history.** `lastInbound` is chosen from the bounded rows, so it can never fall outside the bound.
+- **Organization scoping is unchanged.** All reads still go through `scopedDb`.
+- **The tests can fail.** Tests (e) and (f) fail against the code before their fixes, and no earlier assertion was loosened. Test (f) would also catch a wrong `createdAt` bound: the parent's `createdAt` is the wall clock, while the reply's is the synthetic 2026-11-01.
+
+**What is wrong:** the WR-01 union is correct when the parent's chain and the thread do not share ids, which is the merge case. It is wrong in the ordinary case where they do (WR-03 below).
+
+### Warnings
+
+#### WR-03: For any thread longer than 10 messages, the WR-01 union puts References out of order, and the cap then drops newer ids
+
+**File:** `src/lib/worker/jobs/email-outbound-send.ts:112-119` (with `ingest-message.ts:99-105`, `compose-outbound.ts:54`)
+**Issue:**
+
+- **Where it happens:**
+  - The parent's `emailReferences` normally share ids with the ticket's own ids: a customer's References name the agent replies and the earlier messages of the same ticket.
+  - Ingest keeps only the **last 10** of them. So once a thread has more than 10 email-bearing messages, the parent's chain is a middle slice of `ownIds`, not a prefix of it. The same happens whenever a mail client trims References; Outlook, for example, sends the root plus the last few.
+  - `[...new Set([...parentRefs, ...ownIds])]` keeps first-seen order. That puts the slice first and the oldest own ids after it.
+- **Example:** a never-merged ticket with own ids x1..x14, where the parent is x13 and its stored refs are x3..x12.
+  - The union is `[x3..x12, x1, x2, x13, x14]`.
+  - `composeMail` keeps the last 10: `[x7..x12, x1, x2, x13, x14]`.
+  - Before F7 it was `x5..x14` in time order.
+- **Why it breaks threading:** clients that thread by References (the JWZ algorithm: Thunderbird, mutt, Apple Mail) link each entry as the child of the one before it. The order above therefore claims "x1 is a reply to x12", which corrupts or contradicts the thread tree.
+- **The comment and the fix note are both wrong for this case:**
+  - The comment at `:116-118` says the own ids "survive the cap first (the newest ten when there are more)". In the example x5 and x6 are dropped while x1 and x2 are kept.
+  - The F7 note says the order changes only when the customer's References "skip an earlier id". The ingest cap makes that true of every thread longer than 10.
+- **No test covers it:** test (f) only covers a parent chain with no ids in common with the thread.
+
+**Fix:** take only the part of the parent's chain that is not already in the ticket's own ids, and keep the own ids in time order:
+```ts
+const own = new Set(ownIds);
+const parentChain = (lastInbound?.emailReferences ?? []).filter((id) => !own.has(id));
+const references = [...new Set([...parentChain, ...ownIds])];
+```
+This keeps (f) green: s1..s3, then t1, t2 and the parent. For a never-merged ticket it gives exactly the pre-F7 list.
+
+Add a test with a never-merged ticket:
+1. Seed 13 email-bearing messages.
+2. Ingest a customer reply whose References are the last 10 of them, the way ingest stores them.
+3. Queue and send a reply.
+4. Assert `references` equals the chronological last 10 of the thread's ids.
+
+### Info
+
+#### IN-05: The history is ordered by `createdAt`, but the bound uses `seq`, the order messages were actually written
+
+**File:** `src/lib/worker/jobs/email-outbound-send.ts:108`; `tests/integration/email-outbound-merge.test.ts:115-130`
+**Issue:**
+
+- **In production:** `createdAt` defaults to the transaction start time, which is fixed before the row lock is taken (`status-visibility.ts:12-14`). So two inbounds that wait on the same ticket lock can sort by `createdAt` in the opposite order from `seq`. `lastInbound`, and with it In-Reply-To and the parent chain, is then not the latest message written. The `seq` tiebreak only fixes exact ties.
+- **In the fixtures:** they already mix two clocks. `queuedReply` uses a synthetic `createdAt` (2026-11-01), while ingested replies get the wall clock. In (f), the reply's `createdAt` is earlier than its parent's even though its `seq` is higher.
+
+**Fix:** use `orderBy: { seq: "asc" }`. `seq` is the order messages were written, a merge keeps it, and it is the same key the bound uses.
+
+#### IN-06: Test (g) only fails without the fix if Postgres happens to return the rows in the wrong order
+
+**File:** `tests/integration/email-outbound-merge.test.ts:393-431`
+**Issue:**
+
+- As the F7 note admits, (g) failed before the fix only because of the access path and the heap layout. The first two versions passed against the unfixed code.
+- After the fix it cannot fail by mistake, because the order is total.
+- As a guard against removing the tiebreak, it depends on Postgres's access path: a VACUUM that frees space, a plan change or a different page fill can return the tied rows in `seq` order anyway, and the regression goes unseen.
+
+**Fix:** keep (g), and either label it "best-effort" in its title or add a check that does not depend on the plan, for example a unit test that spies on `findMany` and asserts its `orderBy` includes `seq`. If IN-05 is adopted (`seq` as the only key), a fixture where `createdAt` order and `seq` order disagree makes a reliable test.
+
+#### IN-07: The parent chain carries up to 10 sender-supplied ids into the reply to the contact, not checked against the organization's messages
+
+**File:** `src/lib/worker/jobs/email-outbound-send.ts:119`; `src/lib/channels/email/ingest-message.ts:192, 217`
+**Issue:**
+
+- Ingest assigns a header-matched mail to the ticket's contact whatever its `From:` says.
+- So anyone who knows one Message-ID of the thread can now put up to 10 arbitrary ids into the References of the agent's next reply to the real contact. Before F7 it was one id, their own Message-ID.
+- **No header injection:** nodemailer splits and brackets References.
+- **No cross-organization data:** AIDA does not look these values up; they come from the sender, so no data it holds for another organization is exposed. They can, however, steer how the contact's mail client threads the reply.
+
+**Fix (optional, folds into WR-03's filter):** keep only parent refs that are the Message-ID of a message in this organization. Use one `scopedDb` `findMany({ where: { emailMessageId: { in: parentRefs } }, select: { emailMessageId: true } })` and filter on the result. That keeps the merge case (the S ids are rows on T) and drops foreign and invented ids.
+
+---
+
+_Follow-up reviewed: 2026-11-09 · Reviewer: Claude (gsd-code-reviewer) · Depth: deep_

@@ -157,3 +157,16 @@ No Codex round is left for this topic, so commit `0c98bef` (R3-1, K38) was revie
 | F6-IN-02 | Fix: order the history by `(createdAt, seq)` | F7 |
 | F6-IN-03 | No change: the public status page (what a token holder may see, D-09) and the send job (which email thread a reply joins, K38) answer different questions; noted in the worker header | F7 (comment) |
 | F6-IN-04 | Fix: the describe title names K38; header comment rewrapped | F7 |
+
+### Follow-up review of fix pass F7
+
+Same reviewer, commits `a58b3ed`, `38afb4a`, `6d842ba` (section "Follow-up: F7" in `12-REVIEW-F6.md`): 0 critical, 1 warning, 3 info. The seq bound (F6-WR-02) is confirmed correct. Checked against the code:
+
+| ID | Disposition | Pass |
+|----|-------------|------|
+| F7-WR-03 | Fix: the parent-chain union (F6-WR-01) breaks References order in every thread longer than 10 messages, because ingest stores only the last 10 parent ids and they overlap the ticket's own ids. Take from the parent chain only ids that are not already the ticket's own ids, then the own ids in order; for a never-merged ticket this gives exactly the list before F7. Test: a never-merged 13-message thread | F8 |
+| F7-IN-05 | Fix: order the history by `seq` alone, the order messages were written under the row lock; a fixture where `createdAt` and `seq` disagree makes a test that does not depend on the query plan | F8 |
+| F7-IN-06 | Covered by the IN-05 test; test (g) stays as a best-effort guard | F8 |
+| F7-IN-07 | Fix: keep only parent ids that are the Message-ID of a message in this organization (`scopedDb`), so sender-supplied ids never reach the reply | F8 |
+
+Stop rule for this topic (run decision K39): if the review of F8 finds another warning, the parent-chain change is reverted to the reviewed state after F6-WR-02 (thread's own ids, bounded by `seq`), and the post-merge inbound edge is deferred.
