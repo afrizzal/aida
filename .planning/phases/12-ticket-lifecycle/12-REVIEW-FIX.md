@@ -432,3 +432,46 @@ The tie only shows when the access path returns the later message first. The fir
 | `pnpm test:integration email-outbound-merge ticket-merge merge-provenance email-ingest` (one process) | 0 | 4 files, 69 tests passed (67 at F6, plus (f) and (g)) |
 
 Before every Docker command, `pgrep -f 'artisan test'` printed nothing. Egress, E2E and build were not run. The only container left from these runs was Testcontainers' own `ryuk` reaper, which removes itself. No container was created, stopped or removed by hand. `aida-dev-db` was already running and was not touched.
+
+## Fix pass F8 (review of F7)
+
+**Scope:** F7-WR-03, F7-IN-05, F7-IN-06 and F7-IN-07 from the section "Follow-up: F7" in `12-REVIEW-F6.md`, as disposed in `12-REVIEW.md` ("Follow-up review of fix pass F7"). Only `src/lib/worker/jobs/email-outbound-send.ts` and `tests/integration/email-outbound-merge.test.ts` were changed. `compose-outbound.ts` and its 10-entry cap were not touched. Before editing, the claims were checked against the code at `f1deb67`, and they still held: `References` was `[...new Set([...parentRefs, ...ownIds])]` with no filter, and the history was ordered by `(createdAt, seq)`.
+
+**Where it ran:** main checkout, branch `v2/run-loop` (`workflow.use_worktrees` is `false`). Integration tests used Testcontainers on Colima. The SMTP transport is the file's fake. No SMTP server was contacted and no email was sent. The customer replies in (h) and (i) go through the real `ingestMessage`, with no mock.
+**Result:** 4 of 4 done. No schema change, no migration, no new package.
+**Method:** one cycle per commit. The tests were written first and run against the code as it stood, where they failed. Then the fix was made and the same file was run again.
+
+| ID | Status | Commit | Test | Failing assertion seen before the fix |
+|----|--------|--------|------|------------------------------------|
+| F7-WR-03 | fixed | b133dbb | `email-outbound-merge.test.ts` › "(h) a never-merged thread longer than 10 messages: References is the last 10 of the thread's ids in time order (F7-WR-03)" (new). 13 email-bearing messages x1..x13 on a never-merged ticket; the customer reply goes through `ingestMessage` with all 13 ids in References, and the test asserts that ingest stored the last 10 (x4..x13) | `AssertionError` at the `References` assertion (line 460): Expected `"<x5-…> … <x13-…> <reply-…>"`, Received `"<x8-…> <x9-…> <x10-…> <x11-…> <x12-…> <x13-…> <x1-…> <x2-…> <x3-…> <reply-…>"`. Run: 2 failed ((h) and (i)), 7 passed |
+| F7-IN-07 | fixed | b133dbb | same file › "(i) ids in the parent's References that are not a message of this organization never reach References (F7-IN-07)" (new). Merge case; the post-merge customer reply in the source's old thread names `s1, invented, s2, foreign, s3`, where `foreign` is the Message-ID of a message in a second organization and `invented` belongs to no message | `AssertionError` at the `References` assertion (line 497): Expected `"<s1-…> <s2-…> <s3-…> <t1-…> <t2-…> <reply-…>"`, Received `"<s1-…> <invented-…> <s2-…> <foreign-…> <s3-…> <t1-…> <t2-…> <reply-…>"`. Same run as (h) |
+| F7-IN-05 | fixed | f8ea0e3 | same file › "(j) createdAt and seq disagree: the history follows seq, the order the messages were written (F7-IN-05)" (new). The message written first (lower seq, which the test asserts) has the later `createdAt` | `AssertionError` at the `References` assertion (line 542): Expected `"<written-first-…> <written-second-…>"`, Received `"<written-second-…> <written-first-…>"`. Run: 1 failed, 9 passed |
+| F7-IN-06 | fixed (test) | f8ea0e3 | (j) is the test that does not depend on the query plan: `createdAt` order and `seq` order are opposite, so ordering by `createdAt` fails whatever order the table returns. (g) is kept, assertions unchanged, and its title now starts with "best-effort:" | Covered by the (j) failure above |
+
+No existing assertion was loosened or removed. Cases (a) to (g) were not changed apart from the (g) title, and they passed in every run of this pass. (f), the merge case, keeps its expectation `s1 s2 s3 t1 t2 parent`.
+
+### What changed
+
+- **F7-WR-03 and F7-IN-07** (one change, one commit): `References` is the parent's chain, then the thread's own ids in `seq` order, de-duplicated with order kept. The parent's chain is the last inbound's stored `emailReferences`, filtered in its own order to ids that are (1) not among the thread's own ids and (2) the `emailMessageId` of a message in this organization. Check (2) is one `scopedDb` `message.findMany({ where: { emailMessageId: { in: parentRefs } }, select: { emailMessageId: true } })`, and it only runs when check (1) leaves an id. A ticket that was never merged therefore gets exactly its own ids in order, the list before F7. The one exception is when the customer's References name a message of another ticket in this organization, which then comes first. Because the chain no longer overlaps the own ids and the own ids come last, the comment now states which ids survive the cap: the own ids first (the newest ten when there are more), then the chain fills whatever room is left, its oldest ids dropped first. The header comment says the same.
+- **F7-IN-05:** `orderBy: { seq: "asc" }`. The bound `seq: { lt: message.seq }` and the K38 clause are unchanged. `seq` is a global autoincrement drawn at insert under the ticket row lock (`schema.prisma`, `Message.seq`), and a merge keeps it, so the order is total.
+- **Tests:** the file header names F8. (h), (i) and (j) are new, and (g) is retitled.
+
+### Note for the orchestrator (no change made here)
+
+- The chained-merge note from F6 still stands (`merge.ts` overwrites `mergedFromTicketId` when a merged target is merged again).
+- Check (2) accepts any message of the organization, as the disposition says, not only messages of this ticket. Customer-supplied ids that name another ticket of the same organization therefore still reach `References`. They are ids AIDA already holds for this organization, and they go to the contact who sent them.
+
+### Final commands (on the committed fix content)
+
+| Command | Exit | Counts |
+|---------|------|--------|
+| `pnpm test:integration email-outbound-merge`, before the WR-03/IN-07 fix ((h) and (i) added) | 1 | 2 failed, 7 passed |
+| same, after the WR-03/IN-07 fix | 0 | 9 passed |
+| same, before the IN-05 fix ((j) added, (g) retitled) | 1 | 1 failed, 9 passed |
+| same, after the IN-05 fix | 0 | 10 passed |
+| `pnpm lint` | 0 | 390 files checked, no fixes |
+| `pnpm typecheck` | 0 | clean |
+| `pnpm test` | 0 | 27 files, 276 tests passed |
+| `pnpm test:integration email-outbound-merge ticket-merge merge-provenance email-ingest` (one process) | 0 | 4 files, 72 tests passed (69 at F7, plus (h), (i) and (j)) |
+
+Before every Docker command, `pgrep -f 'artisan test'` printed nothing. Egress, E2E and build were not run. After the runs, no vitest process remained, and the only container left from them was Testcontainers' own `ryuk` reaper, which removes itself. No container was created, stopped or removed by hand. `aida-dev-db` was already running and was not touched.
