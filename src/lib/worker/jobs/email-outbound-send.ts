@@ -27,7 +27,8 @@
 //     history before a merge gets the same thread as a retry that reads it after (K37 let
 //     ticketId = origin take the moved messages too; Codex diff round 3, R3-1).
 //   - In-Reply-To is the last inbound of that history. References is that parent's stored
-//     References, then the history's ids (F6-WR-01, RFC 5322 §3.6.4).
+//     References, cut to the ids that are not in the history and are messages of this
+//     organization, then the history's ids (F6-WR-01, F7-WR-03, F7-IN-07, RFC 5322 §3.6.4).
 //   - A reply the customer sends in the source's old email thread after a merge is created on
 //     the target (ingest follows the moved messages, D-09) with mergedFromTicketId null, so it
 //     joins the target's thread. A target reply then answers it, and its References start with
@@ -112,13 +113,33 @@ export async function emailOutboundSendHandler(data: { messageId: string }): Pro
   // The parent: the last inbound of the thread written before this reply.
   const lastInbound = [...priorMessages].reverse().find((m) => m.direction === "INBOUND");
   const inReplyTo = lastInbound?.emailMessageId ?? undefined;
-  // References (F6-WR-01, RFC 5322 §3.6.4): the parent's stored References (its chain, as ingest
-  // saved it, already capped to 10), then the thread's own ids (the parent's Message-ID among
-  // them), de-duplicated in first-seen order. These are header values the customer's mail
-  // carried, like the inbound Message-IDs already in the list. composeMail keeps the LAST 10
-  // entries (D-23), so the thread's own ids survive the cap first (the newest ten when there are
-  // more), and the parent's chain fills what room is left, its oldest ids dropped first.
-  const references = [...new Set([...(lastInbound?.emailReferences ?? []), ...ownIds])];
+  // References (F6-WR-01, F7-WR-03, F7-IN-07, RFC 5322 §3.6.4): the parent's chain, then the
+  // thread's own ids in order (the parent's Message-ID among them), de-duplicated in first-seen
+  // order. The parent's chain is its stored References (as ingest saved them, the last 10)
+  // with two filters, both keeping the order:
+  //   - ids already among the thread's own ids are dropped. They are normally a middle slice of
+  //     the own ids (ingest keeps the last 10; clients trim), and putting them first would put
+  //     the own ids out of time order (F7-WR-03). So a ticket that was never merged gets exactly
+  //     its own ids in order, as before F6-WR-01, unless the customer named a message of another
+  //     ticket of this organization.
+  //   - only ids that are the Message-ID of a message in this organization are kept (scopedDb),
+  //     so ids the sender invented or took from elsewhere never reach the reply (F7-IN-07). The
+  //     source ids after a merge are messages on the target and stay.
+  // composeMail keeps the LAST 10 entries (D-23). The own ids come last, so they survive first,
+  // the newest ten when there are more; the parent's chain gets whatever room is left, and its
+  // oldest ids are dropped first.
+  const own = new Set(ownIds);
+  const parentRefs = (lastInbound?.emailReferences ?? []).filter((id) => !own.has(id));
+  let parentChain: string[] = [];
+  if (parentRefs.length > 0) {
+    const known = await db.message.findMany({
+      where: { emailMessageId: { in: parentRefs } },
+      select: { emailMessageId: true },
+    });
+    const knownIds = new Set(known.map((m) => m.emailMessageId));
+    parentChain = parentRefs.filter((id) => knownIds.has(id));
+  }
+  const references = [...new Set([...parentChain, ...ownIds])];
 
   const branding = await getBrandingSettings(db, message.ticket.organization.name);
 

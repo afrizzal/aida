@@ -429,4 +429,75 @@ describe("email-outbound-send keeps the thread of the ticket the reply was writt
     expect(mail.references).toBe([first, second].join(" "));
     expect(mail.inReplyTo).toBe(second);
   });
+
+  it("(h) a never-merged thread longer than 10 messages: References is the last 10 of the thread's ids in time order (F7-WR-03)", async () => {
+    const { orgId, contactEmail, t } = await seedPair();
+    const tag = randomUUID();
+    // Thirteen email-bearing messages on a ticket that is never merged.
+    const threadIds: string[] = [];
+    for (let i = 1; i <= 13; i++) {
+      const inbound = i % 2 === 1;
+      const id = `<x${i}-${tag}@${inbound ? "customer" : "outbound-merge"}.test>`;
+      threadIds.push(id);
+      await emailMessage(orgId, t.id, inbound ? "INBOUND" : "OUTBOUND", id);
+    }
+    // The customer answers the last one and names the whole thread; ingest keeps the last 10.
+    const parent = await customerReply(orgId, contactEmail, {
+      inReplyTo: threadIds[12],
+      references: threadIds,
+    });
+    expect(parent.row.ticketId).toBe(t.id);
+    expect(parent.row.mergedFromTicketId).toBeNull();
+    expect(parent.row.emailReferences).toEqual(threadIds.slice(-10));
+
+    const replyId = await queuedReply(orgId, t.id);
+    await emailOutboundSendHandler({ messageId: replyId });
+
+    expect(transport.sent).toHaveLength(1);
+    const [mail] = transport.sent;
+    expect(mail.inReplyTo).toBe(parent.emailMessageId);
+    // The same list as before F6-WR-01: the thread's own ids in time order, the last 10 kept.
+    expect(mail.references).toBe([...threadIds, parent.emailMessageId].slice(-10).join(" "));
+  });
+
+  it("(i) ids in the parent's References that are not a message of this organization never reach References (F7-IN-07)", async () => {
+    const { orgId, actor, contactEmail, s, t } = await seedPair();
+    const ids = await seedThreads(orgId, s.id, t.id);
+    // A Message-ID that exists, but in another organization.
+    const other = await seedOrgWithMembers(prisma, ["admin"]);
+    const otherTicket = await seedContactTicket(other.orgId, {
+      contactEmail: `outbound-merge-other-${randomUUID()}@example.test`,
+    });
+    const foreign = `<foreign-${randomUUID()}@other-org.test>`;
+    await emailMessage(other.orgId, otherTicket.id, "INBOUND", foreign);
+    // A Message-ID no message has.
+    const invented = `<invented-${randomUUID()}@nowhere.test>`;
+    const merged = await mergeTickets(prisma, actor, {
+      sourceTicketId: s.id,
+      targetTicketId: t.id,
+      reviewedLinkLabel: null,
+    });
+    expect(merged.ok).toBe(true);
+
+    // The customer answers in the source's old thread; the sender put both ids in References.
+    const parent = await customerReply(orgId, contactEmail, {
+      inReplyTo: ids.s3,
+      references: [ids.s1, invented, ids.s2, foreign, ids.s3],
+    });
+    expect(parent.row.ticketId).toBe(t.id);
+    expect(parent.row.emailReferences).toEqual([ids.s1, invented, ids.s2, foreign, ids.s3]);
+
+    const replyId = await queuedReply(orgId, t.id);
+    await emailOutboundSendHandler({ messageId: replyId });
+
+    expect(transport.sent).toHaveLength(1);
+    const [mail] = transport.sent;
+    expect(mail.inReplyTo).toBe(parent.emailMessageId);
+    // The source ids are messages of this organization and stay, in the parent's order.
+    expect(mail.references).toBe(
+      [ids.s1, ids.s2, ids.s3, ids.t1, ids.t2, parent.emailMessageId].join(" "),
+    );
+    expect(mail.references).not.toContain(invented);
+    expect(mail.references).not.toContain(foreign);
+  });
 });
