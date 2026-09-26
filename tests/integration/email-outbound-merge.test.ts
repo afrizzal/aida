@@ -347,4 +347,39 @@ describe("email-outbound-send keeps the thread of the ticket the reply was writt
     const sent = await prisma.message.findUniqueOrThrow({ where: { id: replyId } });
     expect(sent.deliveryStatus).toBe("SENT");
   });
+
+  it("(f) a customer reply in the source's old thread after the merge: a target reply answers it and References carries its chain first (F6-WR-01)", async () => {
+    const { orgId, actor, contactEmail, s, t } = await seedPair();
+    const ids = await seedThreads(orgId, s.id, t.id);
+    const merged = await mergeTickets(prisma, actor, {
+      sourceTicketId: s.id,
+      targetTicketId: t.id,
+      reviewedLinkLabel: null,
+    });
+    expect(merged.ok).toBe(true);
+
+    // Ingest finds the moved source message by header and creates the reply on the target with
+    // mergedFromTicketId null; its stored References are the source's ids.
+    const parent = await customerReply(orgId, contactEmail, {
+      inReplyTo: ids.s3,
+      references: [ids.s1, ids.s2, ids.s3],
+    });
+    expect(parent.row.ticketId).toBe(t.id);
+    expect(parent.row.mergedFromTicketId).toBeNull();
+    expect(parent.row.emailReferences).toEqual([ids.s1, ids.s2, ids.s3]);
+
+    const replyId = await queuedReply(orgId, t.id);
+    await emailOutboundSendHandler({ messageId: replyId });
+
+    expect(transport.sent).toHaveLength(1);
+    const [mail] = transport.sent;
+    expect(mail.subject).toBe(`Re: ${t.subject} [#${t.number}]`);
+    expect(mail.inReplyTo).toBe(parent.emailMessageId);
+    // RFC 5322 §3.6.4: the parent's References, then the ticket's own ids (the parent's own
+    // Message-ID among them), de-duplicated with the order kept.
+    expect(mail.references).toBe(
+      [ids.s1, ids.s2, ids.s3, ids.t1, ids.t2, parent.emailMessageId].join(" "),
+    );
+    expect(mail.to).toBe(contactEmail);
+  });
 });
