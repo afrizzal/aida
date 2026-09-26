@@ -213,3 +213,19 @@ Same procedure as the reruns above (logs `aida-12-fixgate3-*.log` under `$TMPDIR
 | `pnpm audit --prod` | 1 | 7 critical, 52 high (baseline) |
 
 Integration full and `pnpm test:egress` stay blocked (O-1). Nothing is worse than the rerun on `d61b370`.
+
+## Rerun after fix pass F7 (on `d427c56`): E2E red once
+
+Same procedure (logs `aida-12-fixgate5-*.log` under `$TMPDIR`).
+
+| Command | Exit | Result |
+|---------|------|--------|
+| `pnpm lint` | 0 | 390 files checked |
+| `pnpm typecheck` | 0 | clean |
+| `pnpm test` | 0 | 27 files, 276 tests passed |
+| `pnpm test:integration --exclude tests/integration/egress-isolation.test.ts --reporter=verbose` | 0 | 304 tests passed |
+| `pnpm test:e2e` (full suite) | **1** | 164 passed, **1 failed**, 1 skipped (existing). Failed: `snooze.spec.ts:106` "a closed ticket that is not snoozed shows the disabled trigger": after `trigger.hover()`, `getByRole('tooltip')` was not found within 7.5 s |
+| `pnpm build` | 0 | built |
+| `pnpm audit --prod` | 1 | 7 critical, 52 high (baseline) |
+
+F7 changed only `src/lib/worker/jobs/email-outbound-send.ts` and its integration test, not the snooze UI. The same case passed in every earlier full run (on `7c3bad3`, `06279f9`, `d61b370`, `4acce90`, `34cf40b`). Rerun of the spec alone right after, `pnpm test:e2e tests/e2e/snooze.spec.ts --repeat-each=3`: exit 0, 45 passed. Recorded as an observed flake of the hover tooltip in the full suite, not as a pass; it stays an open item until the next full runs show whether it recurs.
