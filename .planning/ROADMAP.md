@@ -299,7 +299,25 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 1. Custom states migrate existing data without loss, admins can manage them, and every reader of status, including the `sla-flag` worker, reasons about the group.
 2. Each SLA due time moves by exactly the paused time across repeated pauses, and the real SLA worker raises no flag while a ticket is paused.
 
-**Plans:** 0 plans
+**Plans:** 17 plans
+
+- [ ] 12.1-01-PLAN.md — One hand-edited migration (state model, data move, saved views v2, pause start, organization trigger, enum dropped), default-state create path, lock helper without a state join, shared state helpers and fixtures (Wave 1)
+- [ ] 12.1-02-PLAN.md — State colour tokens with contrast proven, colour and copy modules, StateChip, StateDot, PublicGroupChip and the paused SLA chip (Wave 1)
+- [ ] 12.1-03-PLAN.md — Migration test on populated data in its own container: no loss, pause start, saved-view conversion and rollback, Insight aggregates equal (AIDA-56, AIDA-57) (Wave 2)
+- [ ] 12.1-04-PLAN.md — Shared state-transition service (group effects, SLA pause accounting, injected clock) and single and bulk state change on state ids (Wave 2)
+- [ ] 12.1-05-PLAN.md — Reply reopen, auto-close and email matching on groups and roles; public status loader returns the group only (Wave 2)
+- [ ] 12.1-06-PLAN.md — sla-flag worker on group OPEN and not paused; pause proofs with the real worker, restart and two PID-bound race orders (AIDA-57) (Wave 3)
+- [ ] 12.1-07-PLAN.md — Merge on the mergeClose role with the pending pause closed, snooze by group, demo seed on states, Phase 12 suites migrated (Wave 3)
+- [ ] 12.1-08-PLAN.md — Admin state service (create, rename, recolour, reorder, default, delete with same-group replacement) with the D-15 lock protocol and race proofs (AIDA-97) (Wave 3)
+- [ ] 12.1-09-PLAN.md — Public status page group label and CSAT eligibility by group (Wave 3)
+- [ ] 12.1-10-PLAN.md — Filter grammar version 2, state= URL contract with the legacy redirect, list query and loader, grouped Status filter and missing-status notice (Wave 2)
+- [ ] 12.1-11-PLAN.md — Picker, palette, merge dialog, actions menu and contact page on state names and colours (Wave 2)
+- [ ] 12.1-12-PLAN.md — Ticket statuses settings page, dialogs and server actions (AIDA-97) (Wave 4)
+- [ ] 12.1-13-PLAN.md — Ticket page: grouped top-bar picker, paused SLA chip, snooze control by group, feed rows with state names and the deleted marker (Wave 3)
+- [ ] 12.1-14-PLAN.md — Inbox rows, bulk Status picker and saved views with missing state references (Wave 3)
+- [ ] 12.1-15-PLAN.md — Old chip deleted, existing E2E specs migrated, whole-repo typecheck and lint green (Wave 5)
+- [ ] 12.1-16-PLAN.md — New E2E for every admin action, picker, paused chip, bulk, public label and missing states; contrast of the new palette in both themes (Wave 6)
+- [ ] 12.1-17-PLAN.md — Phase gate, reader-matrix and requirement evidence, §9 checklist, README note, open items (Wave 7)
 
 ### Phase 12.2: Ticket Lifecycle — knowledge from resolved work
 
@@ -449,7 +467,7 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 | 10. Team | v2.0 | 0/16 | Parked (Codex plan review cycle 3 left HIGH findings; owner decision) | - |
 | 11. Inbox | v2.0 | 9/9 | Verified: human_needed (visual, dark mode, 360px and screen-reader checks open) | - |
 | 12. Ticket Lifecycle (relations, merge, snooze, activity) | v2.0 | 10/10 | Verified: human_needed (visual, dark mode, layout widths and screen-reader checks open; AIDA-53 audit wording is owner item 12-o1) | - |
-| 12.1. Ticket Lifecycle (custom states, SLA pause) | v2.0 | 0/0 | Not started | - |
+| 12.1. Ticket Lifecycle (custom states, SLA pause) | v2.0 | 0/17 | Planned | - |
 | 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 0/0 | Not started | - |
 | 13. Integrations | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
 | 14. Projects Foundation | v2.0 | 0/0 | Not started | - |
