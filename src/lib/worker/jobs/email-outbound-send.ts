@@ -19,7 +19,7 @@
 //     (D-07, K33), so it is the same contact as the ticket the message is on now.
 //   - History for References / In-Reply-To (K38): every email-bearing message with
 //     (ticketId = origin AND mergedFromTicketId IS NULL) OR mergedFromTicketId = origin, written
-//     before this reply (seq < message.seq, F6-WR-02), oldest first (createdAt, then seq). The
+//     before this reply (seq < message.seq, F6-WR-02), in seq order, as written (F7-IN-05). The
 //     first term is the messages written on the origin that never moved; the second is the
 //     origin's messages after a merge moved them. So the messages a merge moves into a target
 //     stay in the source's thread and never enter the target's: a long source history cannot
@@ -105,8 +105,10 @@ export async function emailOutboundSendHandler(data: { messageId: string }): Pro
       seq: { lt: message.seq },
       emailMessageId: { not: null },
     },
-    // createdAt can tie (a merge keeps it), so seq breaks the tie (F6-IN-02).
-    orderBy: [{ createdAt: "asc" }, { seq: "asc" }],
+    // seq alone (F7-IN-05): the order the messages were written under the row lock, kept by a
+    // merge, and the key of the bound above. createdAt is fixed when the transaction starts,
+    // before the lock, so two writers on one ticket can get it in the opposite order.
+    orderBy: { seq: "asc" },
     select: { emailMessageId: true, direction: true, emailReferences: true },
   });
   const ownIds = priorMessages.map((m) => m.emailMessageId).filter((id): id is string => !!id);

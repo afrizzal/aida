@@ -2,8 +2,8 @@
 // decision K38, refines K37): an outbound reply keeps the email thread of the ticket it was
 // written on, also when that ticket is merged between queueing and sending, and a ticket's
 // thread is the messages written on it, never the ones moved in by a merge. Fix pass F7 adds
-// the review of F6 (F6-WR-01, F6-WR-02, F6-IN-01, F6-IN-02). Real Postgres through
-// Testcontainers. Only the SMTP transport is a test double that records each mail: no SMTP
+// the review of F6 (F6-WR-01, F6-WR-02, F6-IN-01, F6-IN-02), fix pass F8 the review of F7
+// (F7-WR-03, F7-IN-05, F7-IN-06, F7-IN-07). Real Postgres through Testcontainers. Only the SMTP transport is a test double that records each mail: no SMTP
 // server is contacted and no email is sent.
 import { randomUUID } from "node:crypto";
 import { simpleParser } from "mailparser";
@@ -390,7 +390,7 @@ describe("email-outbound-send keeps the thread of the ticket the reply was writt
     expect(mail.to).toBe(contactEmail);
   });
 
-  it("(g) two messages with the same createdAt are ordered by seq, whatever order the table returns them in (F6-IN-02)", async () => {
+  it("(g) best-effort: two messages with the same createdAt are ordered by seq, whatever order the table returns them in (F6-IN-02)", async () => {
     const { orgId, t } = await seedPair();
     const tag = randomUUID();
     // The first message (lower seq) has the greater Message-ID, so a read in the order of the
@@ -499,5 +499,47 @@ describe("email-outbound-send keeps the thread of the ticket the reply was writt
     );
     expect(mail.references).not.toContain(invented);
     expect(mail.references).not.toContain(foreign);
+  });
+
+  it("(j) createdAt and seq disagree: the history follows seq, the order the messages were written (F7-IN-05)", async () => {
+    const { orgId, t } = await seedPair();
+    const tag = randomUUID();
+    // As two inbounds that wait on the same ticket lock: createdAt is fixed when each
+    // transaction starts, seq when each row is written. The message written first (lower seq)
+    // has the later createdAt, so the two orders are opposite and no query plan can make an
+    // order by createdAt return them by seq.
+    const earlierTime = nextTime();
+    const laterTime = nextTime();
+    const writtenFirst = `<written-first-${tag}@customer.test>`;
+    const writtenSecond = `<written-second-${tag}@customer.test>`;
+    const seqs: bigint[] = [];
+    for (const [emailMessageId, createdAt] of [
+      [writtenFirst, laterTime],
+      [writtenSecond, earlierTime],
+    ] as const) {
+      const row = await prisma.message.create({
+        data: {
+          organizationId: orgId,
+          ticketId: t.id,
+          direction: "INBOUND",
+          visibility: "PUBLIC",
+          bodyMarkdown: `Order ${emailMessageId}`,
+          bodyHtml: `<p>Order ${emailMessageId}</p>`,
+          emailMessageId,
+          createdAt,
+        },
+        select: { seq: true },
+      });
+      seqs.push(row.seq);
+    }
+    expect(seqs[0] < seqs[1]).toBe(true);
+    const replyId = await queuedReply(orgId, t.id);
+
+    await emailOutboundSendHandler({ messageId: replyId });
+
+    expect(transport.sent).toHaveLength(1);
+    const [mail] = transport.sent;
+    expect(mail.references).toBe([writtenFirst, writtenSecond].join(" "));
+    expect(mail.inReplyTo).toBe(writtenSecond);
   });
 });
