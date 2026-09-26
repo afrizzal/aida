@@ -942,3 +942,11 @@ Dipicu laporan pass F5. Cek A (25 GiB) dan B lolos; berhenti total tidak terpicu
 Gerbang ulang di `4acce90`: `lint` 0 (390), `typecheck` 0, `pnpm test` 0 (276), integration tanpa egress 0 (34 berkas, 300), E2E penuh 0 (165 lolos, 1 skip lama, 0 gagal), `build` 0, `audit --prod` 1 (baseline). Egress blocked (O-1).
 
 Kritik Codex putaran 3, terakhir (`fase12-diff-r3-tanya.md`, ekspor baru dari `4dfde68`; pindaian sama dengan putaran 2: hanya `.env.example`, string mirip kunci semuanya dummy yang dikenal, password container dev dan path rumah tidak ada). Berjalan di latar.
+
+## Putaran 58 (2026-11-09, mulai 00.45 WIB)
+
+Dipicu selesainya Codex putaran 3 (terakhir untuk topik diff Fase 12). Log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Tanpa HIGH; R2-1 dinyatakan tertutup, R2-2 tertutup untuk thread sumber; fase dinilai layak masuk verifikasi. Dicek ke kode: R3-1 MEDIUM benar (riwayat `ticketId = asal` ikut mengambil pesan yang dipindah ke target, sehingga balasan di target ber-thread ke inbound sumber; test (c) justru menetapkan itu), R3-2 LOW (asal hilang menyelesaikan job tanpa kirim) dan R3-3 LOW (tanpa indeks untuk `mergedFromTicketId = asal`) benar di kode.
+
+Keputusan K38 (memperhalus K37): thread email sebuah tiket adalah pesan yang ditulis di tiket itu, `(ticketId = asal AND mergedFromTicketId IS NULL) OR mergedFromTicketId = asal`. Alasan: K37 benar untuk sumber tetapi mencampur thread target; aturan ini sama sebelum dan sesudah merge untuk kedua sisi. Bisa dibalik dengan satu klausa. R3-2 dan R3-3 ditunda (`deferred-items.md`): tidak ada jalur hapus tiket di aplikasi, dan indeks butuh migrasi serta ukuran nyata.
+
+Karena tidak ada putaran Codex keempat, perbaikan F6 direview oleh code reviewer independen sebelum gerbang ulang, agar tidak ada perubahan pasca-review yang lolos tanpa review. Disposisi di `12-REVIEW.md` (`13fda37`). Folder ekspor Codex dihapus. Pass F6 berjalan di latar.
