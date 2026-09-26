@@ -332,3 +332,50 @@ An "Amended … fix pass F5" note at the end of the spec records the confirm-ste
 | `pnpm test:e2e` `ticket-merge`, `ticket-relations`, `public-status`, `bulk-actions` (one process, host zone) | 0 | 41 passed |
 
 Intermediate runs: after R2-1, the eight touched integration files passed 149 of 149 and `ticket-merge.spec.ts` passed 17 of 17. After R2-2, `email-outbound-merge` passed 3 of 3. `bulk-actions.spec.ts` was added to the E2E run because its `mergeTickets` fixture call changed. Build, egress, the full integration suite and the full E2E suite were not run in this pass. The orchestrator reruns the full gate.
+
+## Fix pass F6 (Codex diff round 3)
+
+**Scope:** R3-1 only, from the dispositions table in `12-REVIEW.md` ("Codex critique of the phase diff (round 3, last)"), run decision K38 (refines K37). R3-2 and R3-3 were not touched, and neither were the merge service and the UI. Before editing, the claim was checked against the code at `13fda37` and still held: the history read was `OR: [{ ticketId: originTicketId }, { mergedFromTicketId: originTicketId }]`, so a target's thread also took every message moved into it.
+
+**Where it ran:** main checkout, branch `v2/run-loop` (`workflow.use_worktrees` is `false`). Integration tests used Testcontainers on Colima. The SMTP transport is the file's fake (`vi.mock` of `createSmtpTransport`). No SMTP server was contacted and no email was sent.
+**Result:** 1 of 1 fixed. No schema change, no migration, no new package.
+**Method:** the tests were changed and added first, then run once against the unfixed code, where they failed. After that the fix was made and the same file was run again.
+
+| ID | Status | Commit | Test | Failing assertion seen before the fix |
+|----|--------|--------|------|------------------------------------|
+| R3-1 | fixed (run decision K38, refines K37) | 0c98bef | `email-outbound-merge.test.ts` › "(c) a reply written on the target after the merge keeps the target's own thread (K38)" (corrected), "(d) a source with a long history merged into the target: a target reply keeps the target's ids in References (K38)" (new), "(e) a target reply whose first send fails before the merge and is retried after it keeps the same References and In-Reply-To (K38)" (new) | (c) `AssertionError: expected '<s1-…' to be '<t1-…'`, Expected `"<t1-…> <t2-…>"`, Received `"<s1-…> <t1-…> <s2-…> <t2-…> <s3-…>"` (line 225, `References`). (d) `AssertionError: expected '<s3-…' to be '<t1-…'`, Received `"<s3-…> … <s12-…>"`: ten source ids, both target ids pushed out by the cap (line 259). (e) `AssertionError: expected '<s1-…' to be '<t1-…'` at `expect(retry.references).toBe(first.references)` (line 295): the failed first send before the merge carried `<t1> <t2>`, the retry after it carried `<s1> <t1> <s2> <t2> <s3>` |
+
+Cases (a) and (b) were not changed, and they passed both before and after the fix. Test (c) used to assert `References` `s1 t1 s2 t2 s3` and `In-Reply-To` `s3`. It now asserts `t1 t2` and `t1`. This is a stricter expectation that replaces one the old code met, not a looser one. No other assertion was changed or removed.
+
+### What changed
+
+- **`src/lib/worker/jobs/email-outbound-send.ts`:**
+  - The history `where` is now `OR: [{ ticketId: origin, mergedFromTicketId: null }, { mergedFromTicketId: origin }]`. It still excludes this message, keeps `emailMessageId` not null and `orderBy createdAt asc`, and still reads through `scopedDb`.
+  - The origin is still `mergedFromTicketId ?? ticketId`.
+  - The header comment now records K38. It also records the known edge: after a merge, an inbound reply the customer sends in the source's old email thread is created on the target (ingest follows `mergedIntoTicketId`) with `mergedFromTicketId` null, so it counts in the target's thread.
+- **`tests/integration/email-outbound-merge.test.ts`:**
+  - The fake transport now also records every attempt in `attempts` and can refuse the next send (`failNext`). Nothing about `sent` changed for cases (a) and (b).
+  - `afterEach` resets both fields and restores the `console.error` spy that (e) uses.
+  - (c) is corrected as described above.
+  - (d) seeds `t1` and `t2`, then twelve newer email-bearing source messages, merges, and checks that a target reply's `References` is exactly `t1 t2` with no source id in it.
+  - (e) runs a target reply that fails once before the merge (the handler rethrows and the message becomes `FAILED`), merges, then runs the retry. The retry has the same `References`, `In-Reply-To` and subject as the failed attempt and ends `SENT`.
+
+### Note for the orchestrator (no change made here)
+
+- **Chained merges are still open.** Say A merges into B, then B merges into C. The merge sets `mergedFromTicketId = B` on every row whose `ticketId` is B. That includes A's messages, which overwrites their `A`. Two things follow:
+  - B's thread is B's own messages before the second merge, and B's plus A's after it. A B reply that fails before B→C and is retried after it would get different headers.
+  - A queued reply written on A would take B as its origin.
+- This comes from the merge service (`merge.ts` move step), which is outside this pass and was not changed. The old K37 clause had the same overwrite.
+
+### Final commands (on the committed fix content)
+
+| Command | Exit | Counts |
+|---------|------|--------|
+| `pnpm test:integration email-outbound-merge` (before the fix, tests changed and added) | 1 | 3 failed, 2 passed (the seen-failing run) |
+| `pnpm test:integration email-outbound-merge` (after the fix) | 0 | 5 passed |
+| `pnpm lint` | 0 | 390 files checked, no fixes |
+| `pnpm typecheck` | 0 | clean |
+| `pnpm test` | 0 | 27 files, 276 tests passed |
+| `pnpm test:integration email-outbound-merge ticket-merge merge-provenance email-ingest` (one process) | 0 | 4 files, 67 tests passed |
+
+Before every Docker command, `pgrep -f 'artisan test'` printed nothing. Egress, E2E and build were not run. The only container left from these runs was Testcontainers' own `ryuk` reaper, which removes itself. No container was created, stopped or removed by hand. `aida-dev-db` was already running before this pass and was not touched.
