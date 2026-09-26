@@ -48,10 +48,10 @@ IDs continue at AIDA-25. AIDA-18 keeps its v1 ID.
 
 ## Ticket lifecycle
 
-- [ ] **AIDA-52** `v2` — Tickets can be linked as `duplicate_of`, `related_to` or `child_of`. [Charter, SEED-003] Accept: links are unique per pair, org-scoped, and shown from both sides.
+- [x] **AIDA-52** `v2` — Tickets can be linked as `duplicate_of`, `related_to` or `child_of`. [Charter, SEED-003] Accept: links are unique per pair, org-scoped, and shown from both sides.
 - [ ] **AIDA-53** `v2` — An agent can merge one ticket into another. [Charter, SEED-003] Accept: messages and attachments move; the source closes as a duplicate; confirmation is required; a full `AuditEvent` is written; no hard delete. Each status link keeps working but shows only what its holder could see before the merge plus replies addressed to that holder, tested with two contacts across the status page, attachments, follow-up and CSAT. If that rule cannot be met, merging tickets of different contacts is refused.
-- [ ] **AIDA-54** `v2` — A ticket can be snoozed until a date or the next customer reply. [Charter, SEED-003] Accept: a pg-boss job and the inbound reply paths both wake it; the inbox has a snoozed filter; auto-close skips snoozed tickets.
-- [ ] **AIDA-55** `v2` — A ticket shows a unified activity feed of merges, snoozes, relations, state changes and assignments. [SEED-003, plane-inspiration §4] Accept: the feed renders in order and is org-scoped.
+- [x] **AIDA-54** `v2` — A ticket can be snoozed until a date or the next customer reply. [Charter, SEED-003] Accept: a pg-boss job and the inbound reply paths both wake it; the inbox has a snoozed filter; auto-close skips snoozed tickets.
+- [x] **AIDA-55** `v2` — A ticket shows a unified activity feed of merges, snoozes, relations, state changes and assignments. [SEED-003, plane-inspiration §4] Accept: the feed renders in order and is org-scoped.
 - [ ] **AIDA-56** `v2` — Tickets move from the fixed status enum to org-defined states grouped into `open`, `pending`, `resolved` and `closed`, without data loss. [Charter, SEED-004] Accept: a migration test on populated data gives every organization its default state set; every reader of status reasons about the group, each one tested: filters, chips, the raw SQL in `src/lib/worker/jobs/sla-flag.ts`, Insight SQL, the public status page, stored saved-view filters, auto-close and demo fixtures.
 - [ ] **AIDA-97** `v2` — Admins can create, rename, recolor, reorder and set the default ticket state, and can remove a state only after its tickets are reassigned. [Charter, SEED-004] Accept: an admin gate on the server; org-scoped with an unmocked isolation test; E2E covers each action.
 - [ ] **AIDA-57** `v2` — SLA clocks pause while a ticket sits in a `pending`-group state. [Charter, SEED-004] Accept: after several pauses of controlled length, each timer's due time has moved by exactly the paused time, including across a worker restart; the real `sla-flag` worker raises no flag while a ticket is paused and flags correctly after it resumes; tickets already pending at migration time get a defined, tested pause start, with no retroactive deadline change.
@@ -171,10 +171,10 @@ Clean-room rule for this and every later section: `PIAGAM.md` → Clean-room. So
 | AIDA-49 | Phase 11 | Complete (acceptance verified, `11-VERIFICATION.md`; phase visual sign-off pending) |
 | AIDA-50 | Phase 11 | Complete (acceptance verified, `11-VERIFICATION.md`; phase visual sign-off pending) |
 | AIDA-51 | Phase 11 | Complete (acceptance verified; no customer notice built, D-19, owner item O-2 open; phase visual sign-off pending) |
-| AIDA-52 | Phase 12 | Pending |
-| AIDA-53 | Phase 12 | Pending |
-| AIDA-54 | Phase 12 | Pending |
-| AIDA-55 | Phase 12 | Pending |
+| AIDA-52 | Phase 12 | Complete (acceptance verified, `12-VERIFICATION.md`; phase visual sign-off pending) |
+| AIDA-53 | Phase 12 | Pending: implemented and verified except the clause "a full `AuditEvent` is written"; the merge audit is in `TicketAuditEvent` (owner item 12-o1) |
+| AIDA-54 | Phase 12 | Complete (acceptance verified, `12-VERIFICATION.md`; phase visual sign-off pending) |
+| AIDA-55 | Phase 12 | Complete (acceptance verified, `12-VERIFICATION.md`; phase visual sign-off pending) |
 | AIDA-56 | Phase 12.1 | Pending |
 | AIDA-57 | Phase 12.1 | Pending |
 | AIDA-97 | Phase 12.1 | Pending |

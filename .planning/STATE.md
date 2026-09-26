@@ -4,11 +4,11 @@ milestone: v2.0
 milestone_name: Helpdesk & Projects
 current_phase: 12
 current_phase_name: ticket-lifecycle
-status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phase 11 verified human_needed; Phase 12 (split into 12, 12.1, 12.2; K32) planned with 9 plans, plan checker passed; Codex plan review next
-stopped_at: Phase 12 executed (10/10); code review next
+status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11 and 12 verified human_needed; Phase 12.1 (custom states and SLA pause) next
+stopped_at: Phase 12 verified human_needed; Phase 12.1 not started
 last_updated: "2026-11-08T15:06:29.465Z"
-last_activity: 2026-11-08
-last_activity_desc: Phase 12 executed, 10/10 plans; gate on 7c3bad3 green except audit at baseline (egress blocked, O-1); code review next
+last_activity: 2026-11-09
+last_activity_desc: Phase 12 verified human_needed (15/16; 12-o1 open); final gate on db55e8d green except audit at baseline; egress blocked (O-1)
 state_head: 422432b0504b57bd51b96d7ebddc8196ca7c87c5
 progress:
   total_phases: 12
@@ -62,6 +62,7 @@ Items deferred during v2.0 (run loop):
 | Category | Item | Status |
 |----------|------|--------|
 | verification_gap | Phase 11 — `11-VERIFICATION.md` (2026-11-08) | `human_needed` — no code gap; AIDA-47 to 51 verified. Open for a human: visual approval and dark mode of the Phase 11 screens, the 360px and long-text backstops (11-04 to 11-08), the 11-06 backstop of a bulk status change moving tickets out of the filter, and the D-14 screen-reader check of single-letter keys. Also open: full `pnpm test:integration` and `pnpm test:egress` (blocked, O-1); owner item O-2 (auto-close customer notice) |
+| verification_gap | Phase 12 — `12-VERIFICATION.md` (2026-11-09) | `human_needed` — no code gap; AIDA-52, 54 and 55 verified; AIDA-53 verified except the "full `AuditEvent`" clause (owner item 12-o1). Open for a human: visual pass and dark mode of the Phase 12 screens (UI-SPEC E1 to E11), layout widths, screen-reader check, the Asia/Jakarta time-zone check, the deferred copy decisions (IN-06, R2-3), and the two judgment-tier privacy rules in plans 12-01 and 12-04. Full integration and `test:egress` blocked (O-1). |
 
 Items acknowledged and deferred at milestone close on 2026-09-13 (override closeout; 23 items reported by `gsd-tools query audit-open`, plus AIDA-18):
 
