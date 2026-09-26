@@ -996,3 +996,7 @@ Keputusan K40: state default harus di group OPEN. Alasan: tiket baru yang mulai 
 Keputusan K41: state hanya bisa dihapus bila tidak dipakai, atau dengan pengganti di group yang sama yang menerima semua tiket dan perannya; group OPEN, RESOLVED, dan CLOSED selalu punya minimal satu state. Alasan: reassignment dalam satu group tidak punya efek samping lifecycle (resolvedAt, flag, jeda SLA), jadi penghapusan massal tidak bisa diam-diam membuka, menyelesaikan, atau menjeda tiket. AIDA-97 tetap terpenuhi. Bisa dibalik dengan mengizinkan pengganti lintas group lewat layanan transisi bersama.
 
 Langkah 3: `12.1-CONTEXT.md` ditulis tangan (D-01 sampai D-19), memuat batas manusia, item owner (O-1, 12-o1, O-3), instruksi planner, aturan owner, dan Larangan verbatim. Folder ekspor Codex dihapus. Berikutnya: langkah 4, `/gsd-ui-phase 12.1`.
+
+## Putaran 66 (2026-11-09, mulai 01.42 WIB)
+
+Cek A (25 GiB) dan B lolos; berhenti total tidak terpicu; tidak ada proses `artisan test`. Butir: Fase 12.1 langkah 4, `/gsd-ui-phase 12.1` dijalankan menurut workflow-nya tanpa AskUserQuestion: init (`ui_phase` true, `ui_safety_gate` true, belum ada UI-SPEC, CONTEXT ada, riset tidak ada), lalu UI researcher berjalan di latar dengan CONTEXT, DESIGN-SYSTEM, dan UI-SPEC Fase 12 sebagai bacaan wajib. Sesudahnya: UI checker, probe UI-consideration, commit.
