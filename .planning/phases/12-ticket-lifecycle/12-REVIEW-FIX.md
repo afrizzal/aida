@@ -379,3 +379,56 @@ Cases (a) and (b) were not changed, and they passed both before and after the fi
 | `pnpm test:integration email-outbound-merge ticket-merge merge-provenance email-ingest` (one process) | 0 | 4 files, 67 tests passed |
 
 Before every Docker command, `pgrep -f 'artisan test'` printed nothing. Egress, E2E and build were not run. The only container left from these runs was Testcontainers' own `ryuk` reaper, which removes itself. No container was created, stopped or removed by hand. `aida-dev-db` was already running before this pass and was not touched.
+
+## Fix pass F7 (review of F6)
+
+**Scope:** F6-WR-01, F6-WR-02, F6-IN-01, F6-IN-02, F6-IN-03 (comment only) and F6-IN-04 from `12-REVIEW-F6.md`, as disposed in `12-REVIEW.md` ("Independent review of fix pass F6"). Only `src/lib/worker/jobs/email-outbound-send.ts` and `tests/integration/email-outbound-merge.test.ts` were changed. Both warnings were checked against the code at `0c98bef` before editing, and both still held: the history query had no bound against the reply, and `References` was the thread's own ids only.
+
+**Where it ran:** main checkout, branch `v2/run-loop` (`workflow.use_worktrees` is `false`). Integration tests used Testcontainers on Colima. The SMTP transport is the file's fake. No SMTP server was contacted and no email was sent. The customer replies in (e) and (f) go through the real `ingestMessage` (mailparser, header thread-match), with no mock.
+**Result:** 6 of 6 done: 5 fixed, IN-03 as a comment. No schema change, no migration, no new package.
+**Method:** one cycle per commit. The test was written first and run against the code as it stood, where it failed. Then the fix was made and the same file was run again.
+
+| ID | Status | Commit | Test | Failing assertion seen before the fix |
+|----|--------|--------|------|------------------------------------|
+| F6-WR-02 | fixed | a58b3ed | `email-outbound-merge.test.ts` › "(e) a target reply whose first send fails before the merge and is retried after it…" (extended: after the merge and before the retry, a customer reply in the source's old thread is ingested and lands on the target with `mergedFromTicketId` null) | `AssertionError` at `expect(retry.references).toBe(first.references)` (line 342): Expected `"<t1-…> <t2-…>"`, Received `"<t1-…> <t2-…> <reply-…@customer.test>"`. 1 failed, 4 passed |
+| F6-WR-01 | fixed | 38afb4a | `email-outbound-merge.test.ts` › "(f) a customer reply in the source's old thread after the merge: a target reply answers it and References carries its chain first (F6-WR-01)" (new) | `AssertionError` at the `References` assertion (line 380): Expected `"<s1-…> <s2-…> <s3-…> <t1-…> <t2-…> <reply-…>"`, Received `"<t1-…> <t2-…> <reply-…>"`. The `In-Reply-To` assertion just before it already passed. 1 failed, 5 passed |
+| F6-IN-02 | fixed | 6d842ba | `email-outbound-merge.test.ts` › "(g) two messages with the same createdAt are ordered by seq, whatever order the table returns them in (F6-IN-02)" (new) | `AssertionError` at the `References` assertion (line 427): Expected `"<tie-b-…> <tie-a-…>"`, Received `"<tie-a-…> <tie-b-…>"`. 1 failed, 6 passed. See the note below: the first two versions of this test passed against the unfixed code |
+| F6-IN-01 | fixed (test only) | 6d842ba | (e): `first.messageId` equals the `emailMessageId` saved by the failed attempt, `retry.messageId` equals `first.messageId`, and `References` never names it. `SentMail` gained `messageId` | Not seen failing: a guard. The reuse already held (`message.emailMessageId ?? buildOutboundMessageId`) |
+| F6-IN-03 | comment | 6d842ba | none | Not applicable. One line in the worker header: the status page answers what a token holder may see (D-09), this job answers which thread a reply joins (K38) |
+| F6-IN-04 | fixed | 6d842ba | none | Not applicable. The describe title is now "(R2-2 K37, R3-1 K38)", and the header comment is rewrapped at 100 |
+
+No existing assertion was loosened or removed. Cases (a) to (d) were not changed, and they passed in every run of this pass.
+
+### What changed
+
+- **F6-WR-02:** the history `where` keeps the K38 clause `(ticketId = origin AND mergedFromTicketId IS NULL) OR mergedFromTicketId = origin`, keeps `emailMessageId` not null and still reads through `scopedDb`. It adds `seq: { lt: message.seq }`. `message.seq` comes from the existing `findUnique`, which returns every scalar column. `seq` is drawn at insert and a merge keeps it, so the bound is the same on every attempt. It also excludes the message itself, so `id: { not: message.id }` was removed. The (e) assertion `References` never names its own Message-ID pins that.
+- **F6-WR-01:** `In-Reply-To` stays the last inbound in the bounded history. `References` is now `[...new Set([...(lastInbound?.emailReferences ?? []), ...ownIds])]`: the parent's stored References (as ingest saved them, already capped to 10), then the thread's own ids, the parent's Message-ID among them, in first-seen order. `composeMail` is unchanged and still keeps the last 10 entries. The comment says what survives the cap: the thread's own ids first (the newest ten when there are more), then whatever room is left goes to the parent's chain, oldest ids dropped first. For a thread with no merge, when the customer's References only name ids of the thread, the set of ids is the same as before. The order changes only if those References skip an earlier id or list the ids in another order: the ids they name then come first. The header comment no longer says that a target reply threads on the target's own messages only. It now describes the post-merge source-thread reply and how its chain is carried.
+- **F6-IN-02:** `orderBy: [{ createdAt: "asc" }, { seq: "asc" }]`.
+- **Tests:** the new helper `customerReply` builds a real RFC message with `MailComposer`, runs it through `ingestMessage`, asserts `"appended"`, and returns the stored row.
+
+### Note on the IN-02 test
+
+The tie only shows when the access path returns the later message first. The first version of (g) changed `bodyHtml` on the first message. It passed against the unfixed code, because that update is HOT and the index entry keeps the old row position. The second version also gave the first message the greater Message-ID. It passed too. The third version creates the first message with a placeholder Message-ID and then sets the real one. That update changes an indexed column, so it writes new index entries after the second message's, and the test failed against the unfixed code as shown above. Whether the unfixed query returns the wrong order depends on the plan Postgres picks, so the seen-failing evidence holds for this database and this data. After the fix the order is total and does not depend on the plan.
+
+### Note for the orchestrator (no change made here)
+
+- The chained-merge note from F6 still stands: `merge.ts` overwrites `mergedFromTicketId` when a merged target is merged again. Nothing in this pass changed that.
+- `emailReferences` is customer header data. It now goes into `References` of a reply to the ticket's contact, as the inbound Message-IDs already did. mailparser splits the header into ids and ingest caps it to 10. No new egress, and the recipient is unchanged.
+
+### Final commands (on the committed fix content)
+
+| Command | Exit | Counts |
+|---------|------|--------|
+| `pnpm test:integration email-outbound-merge` before WR-02 fix | 1 | 1 failed, 4 passed |
+| same, after WR-02 fix | 0 | 5 passed |
+| same, before WR-01 fix (test (f) added) | 1 | 1 failed, 5 passed |
+| same, after WR-01 fix | 0 | 6 passed |
+| same, before IN-02 fix (test (g), versions 1 and 2) | 0 | 7 passed (test did not show the tie) |
+| same, before IN-02 fix (test (g), version 3) | 1 | 1 failed, 6 passed |
+| same, after IN-02 fix | 0 | 7 passed |
+| `pnpm lint` | 0 | 390 files checked, no fixes |
+| `pnpm typecheck` | 0 | clean |
+| `pnpm test` | 0 | 27 files, 276 tests passed |
+| `pnpm test:integration email-outbound-merge ticket-merge merge-provenance email-ingest` (one process) | 0 | 4 files, 69 tests passed (67 at F6, plus (f) and (g)) |
+
+Before every Docker command, `pgrep -f 'artisan test'` printed nothing. Egress, E2E and build were not run. The only container left from these runs was Testcontainers' own `ryuk` reaper, which removes itself. No container was created, stopped or removed by hand. `aida-dev-db` was already running and was not touched.
