@@ -1012,3 +1012,13 @@ Cek A dan B lolos; berhenti total tidak terpicu; tidak ada proses `artisan test`
 ## Putaran 69 (2026-11-09, mulai 02.01 WIB)
 
 Cek A (25 GiB) dan B lolos; berhenti total tidak terpicu; tidak ada proses `artisan test`. Butir: Fase 12.1 langkah 5, `/gsd-plan-phase 12.1 --skip-research --no-reversibility-gates` dijalankan menurut workflow-nya tanpa AskUserQuestion: init (riset mati di config, plan checker hidup, granularity coarse, requirement AIDA-56, 97, 57); hook plan:pre aktif: pattern-mapper, kontribusi planner (ai-integration, assumption-delta, schema-gate, security ASVS 1), gerbang UI dan drift; probe edge tanpa SPEC (`edge-probe.cjs`): 12 kategori applicable (AIDA-56 adjacency, empty, ordering; AIDA-97 plus idempotency dan concurrency; AIDA-57 plus encoding). Pattern mapper berjalan di latar; sesudahnya planner.
+
+## Putaran 70 (2026-11-09, mulai 02.10 WIB)
+
+Pattern mapper selesai: `12.1-PATTERNS.md` (71 berkas, 66 dengan analog; matriks 48 baris pembaca status). Enam temuan yang menyalahi CONTEXT dicek ke kode dan benar: ada jalur kedua pembuatan organisasi (`src/app/(auth)/setup/actions.ts:55-62` memanggil `auth.api.createOrganization` langsung) dan sekitar 15 fixture test yang membuat organisasi sendiri; kontrak privasi audit melarang teks bebas dan snapshot harus datar (`ticket-audit.ts:5-7`), jadi snapshot nama di D-11 tidak boleh; join `TicketState` di dalam lock tiket akan ikut mengunci baris state; `runTicketMutation` punya statement lock sendiri; harness integration hanya bisa migrasi ke kepala (`global-setup.ts:33`); FK komposit pertama di skema.
+
+Keputusan K42: penghapusan state menjadi soft delete (`deletedAt`), sehingga baris tetap ada untuk FK dan nama riwayat; audit baru menyimpan kunci datar `stateId` dan `stateGroup` saja; nama unik hanya di antara state aktif. Alasan: mematuhi kontrak audit tanpa teks bebas, dan nama riwayat tetap terbaca. K41 (pengganti satu group) tetap. Bisa dibalik dengan hard delete plus snapshot di tabel lain.
+
+Keputusan K43: state default dan konfigurasi dibuat oleh trigger database `AFTER INSERT ON "organization"`, karena ada dua jalur aplikasi dan banyak fixture yang menyisipkan organisasi langsung; migrasi mengisi organisasi lama dengan SQL yang sama. Alasan: satu titik yang tidak bisa terlewat. Bisa dibalik dengan helper aplikasi di setiap jalur.
+
+Amandemen dicatat di `12.1-CONTEXT.md` (bagian "Amendments after pattern mapping"), termasuk protokol lock untuk soft delete (penulis membaca state tujuan `FOR SHARE`; lock tiket memakai `FOR UPDATE OF` alias tiket) dan database tersendiri untuk test migrasi. Berikutnya: planner.
