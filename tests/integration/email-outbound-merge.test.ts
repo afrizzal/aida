@@ -1,6 +1,7 @@
-// Phase 12, Codex diff round 2, R2-2 (run decision K37, replaces K36): an outbound reply keeps
-// the email thread of the ticket it was written on, also when that ticket is merged between
-// queueing and sending. Real Postgres through Testcontainers. Only the SMTP transport is a
+// Phase 12, Codex diff round 2, R2-2 (run decision K37, replaces K36) and round 3, R3-1 (run
+// decision K38, refines K37): an outbound reply keeps the email thread of the ticket it was
+// written on, also when that ticket is merged between queueing and sending, and a ticket's
+// thread is the messages written on it, never the ones moved in by a merge. Real Postgres through Testcontainers. Only the SMTP transport is a
 // test double that records each mail: no SMTP server is contacted and no email is sent.
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -22,13 +23,24 @@ interface SentMail {
   references?: string;
 }
 
-const transport = vi.hoisted(() => ({ sent: [] as SentMail[] }));
+// sent: the mails the fake accepted. attempts: every mail handed to it, a refused one included.
+// failNext: how many of the next sends the fake refuses (it throws, as a failed SMTP send).
+const transport = vi.hoisted(() => ({
+  sent: [] as SentMail[],
+  attempts: [] as SentMail[],
+  failNext: 0,
+}));
 
 // The worker imports this module by a relative path; the alias resolves to the same file, so
 // the worker gets this fake transport.
 vi.mock("@/lib/channels/email/smtp-client", () => ({
   createSmtpTransport: () => ({
     sendMail: async (mail: SentMail) => {
+      transport.attempts.push(mail);
+      if (transport.failNext > 0) {
+        transport.failNext -= 1;
+        throw new Error("fake SMTP refused the send");
+      }
       transport.sent.push(mail);
       return { messageId: "fake" };
     },
@@ -37,7 +49,10 @@ vi.mock("@/lib/channels/email/smtp-client", () => ({
 
 afterEach(() => {
   transport.sent.length = 0;
+  transport.attempts.length = 0;
+  transport.failNext = 0;
   setOutboundSendObserverForTests(null);
+  vi.restoreAllMocks();
 });
 
 async function seedPair() {
@@ -189,7 +204,7 @@ describe("email-outbound-send keeps the thread of the ticket the reply was writt
     expect(mail.to).toBe(contactEmail);
   });
 
-  it("(c) a reply written on the target after the merge keeps the target's thread (regression guard)", async () => {
+  it("(c) a reply written on the target after the merge keeps the target's own thread (K38)", async () => {
     const { orgId, actor, contactEmail, s, t } = await seedPair();
     const ids = await seedThreads(orgId, s.id, t.id);
     const merged = await mergeTickets(prisma, actor, {
@@ -205,9 +220,83 @@ describe("email-outbound-send keeps the thread of the ticket the reply was writt
     expect(transport.sent).toHaveLength(1);
     const [mail] = transport.sent;
     expect(mail.subject).toBe(`Re: ${t.subject} [#${t.number}]`);
-    // The target's thread holds every message now on it, the moved ones included, in time order.
-    expect(mail.references).toBe([ids.s1, ids.t1, ids.s2, ids.t2, ids.s3].join(" "));
-    expect(mail.inReplyTo).toBe(ids.s3);
+    // K38: the target's thread is the messages written on the target. The messages moved in
+    // from the source belong to the source's thread and never appear here.
+    expect(mail.references).toBe([ids.t1, ids.t2].join(" "));
+    expect(mail.inReplyTo).toBe(ids.t1);
     expect(mail.to).toBe(contactEmail);
+  });
+
+  it("(d) a source with a long history merged into the target: a target reply keeps the target's ids in References (K38)", async () => {
+    const { orgId, actor, contactEmail, t, s } = await seedPair();
+    const tag = randomUUID();
+    const t1 = `<t1-${tag}@customer.test>`;
+    const t2 = `<t2-${tag}@outbound-merge.test>`;
+    await emailMessage(orgId, t.id, "INBOUND", t1);
+    await emailMessage(orgId, t.id, "OUTBOUND", t2);
+    // Twelve email-bearing source messages, all newer than the target's: more than the
+    // 10-entry References cap, so a thread that took them in would push out t1 and t2.
+    const sourceIds: string[] = [];
+    for (let i = 1; i <= 12; i++) {
+      const inbound = i % 2 === 1;
+      const id = `<s${i}-${tag}@${inbound ? "customer" : "outbound-merge"}.test>`;
+      sourceIds.push(id);
+      await emailMessage(orgId, s.id, inbound ? "INBOUND" : "OUTBOUND", id);
+    }
+    const merged = await mergeTickets(prisma, actor, {
+      sourceTicketId: s.id,
+      targetTicketId: t.id,
+      reviewedLinkLabel: null,
+    });
+    expect(merged.ok).toBe(true);
+    const replyId = await queuedReply(orgId, t.id);
+
+    await emailOutboundSendHandler({ messageId: replyId });
+
+    expect(transport.sent).toHaveLength(1);
+    const [mail] = transport.sent;
+    expect(mail.subject).toBe(`Re: ${t.subject} [#${t.number}]`);
+    expect(mail.references).toBe([t1, t2].join(" "));
+    expect(mail.inReplyTo).toBe(t1);
+    for (const id of sourceIds) expect(mail.references).not.toContain(id);
+    expect(mail.to).toBe(contactEmail);
+  });
+
+  it("(e) a target reply whose first send fails before the merge and is retried after it keeps the same References and In-Reply-To (K38)", async () => {
+    const { orgId, actor, contactEmail, s, t } = await seedPair();
+    const ids = await seedThreads(orgId, s.id, t.id);
+    const replyId = await queuedReply(orgId, t.id);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    transport.failNext = 1;
+    await expect(emailOutboundSendHandler({ messageId: replyId })).rejects.toThrow(
+      "fake SMTP refused the send",
+    );
+    expect(transport.sent).toHaveLength(0);
+    expect(transport.attempts).toHaveLength(1);
+    const [first] = transport.attempts;
+    expect(first.references).toBe([ids.t1, ids.t2].join(" "));
+    expect(first.inReplyTo).toBe(ids.t1);
+    const failed = await prisma.message.findUniqueOrThrow({ where: { id: replyId } });
+    expect(failed.deliveryStatus).toBe("FAILED");
+
+    const merged = await mergeTickets(prisma, actor, {
+      sourceTicketId: s.id,
+      targetTicketId: t.id,
+      reviewedLinkLabel: null,
+    });
+    expect(merged.ok).toBe(true);
+
+    // The pg-boss retry: the same job runs again on the same message.
+    await emailOutboundSendHandler({ messageId: replyId });
+
+    expect(transport.sent).toHaveLength(1);
+    const [retry] = transport.sent;
+    expect(retry.references).toBe(first.references);
+    expect(retry.inReplyTo).toBe(first.inReplyTo);
+    expect(retry.subject).toBe(first.subject);
+    expect(retry.to).toBe(contactEmail);
+    const sent = await prisma.message.findUniqueOrThrow({ where: { id: replyId } });
+    expect(sent.deliveryStatus).toBe("SENT");
   });
 });

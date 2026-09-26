@@ -6,8 +6,9 @@
 // Worker-bundleable (esbuild) — every import below is relative to src/lib/worker/jobs/, i.e.
 // TWO levels up to src/lib/ then down, exactly like heartbeat.ts's `import { prisma } from "../../db"`.
 //
-// Thread of a merged ticket (Phase 12, run decision K37, replaces K36; Codex diff round 2,
-// R2-2): a reply keeps the email thread of the ticket it was written on, its ORIGIN.
+// Thread of a merged ticket (Phase 12, run decision K38, refines K37 which replaced K36; Codex
+// diff rounds 2 and 3, R2-2 and R3-1): a reply keeps the email thread of the ticket it was
+// written on, its ORIGIN, and a ticket's email thread is the messages written on it.
 //   - origin = message.mergedFromTicketId ?? message.ticketId. A merge (D-08) moves a QUEUED
 //     reply to the target and sets mergedFromTicketId to the source, so a reply written on the
 //     source still names the source after the merge; a reply written on the target after the
@@ -16,12 +17,18 @@
 //     thread the customer already has.
 //   - Recipient: the origin ticket's contact. A merge refuses tickets of different contacts
 //     (D-07, K33), so it is the same contact as the ticket the message is on now.
-//   - History for References / In-Reply-To: every email-bearing message with ticketId = origin
-//     OR mergedFromTicketId = origin, except this one, oldest first. Before a merge the origin's
-//     messages match the first term and after it the second, so a send that read the message
-//     before a merge and the history after it gets the same thread as one that read both on
-//     either side of the merge. A target's thread also holds the messages moved into it, as
-//     before K37.
+//   - History for References / In-Reply-To (K38): every email-bearing message with
+//     (ticketId = origin AND mergedFromTicketId IS NULL) OR mergedFromTicketId = origin, except
+//     this one, oldest first. The first term is the messages written on the origin that never
+//     moved; the second is the origin's messages after a merge moved them. So the messages a
+//     merge moves into a target stay in the source's thread and never enter the target's: a
+//     reply on the target threads on the target's own messages only, a long source history
+//     cannot push the target's ids out of the 10-entry References cap, and a send that read the
+//     history before a merge gets the same thread as a retry that reads it after (K37 let
+//     ticketId = origin take the moved messages too; Codex diff round 3, R3-1).
+//   - Known edge: an inbound reply the customer sends in the source's old email thread after a
+//     merge is created on the target (ingest follows mergedIntoTicketId, D-09) with
+//     mergedFromTicketId null, so it counts in the target's thread, not the source's.
 // Every read after the message lookup goes through scopedDb(message.organizationId).
 
 import { getBrandingSettings } from "../../branding/settings";
@@ -58,7 +65,7 @@ export async function emailOutboundSendHandler(data: { messageId: string }): Pro
   if (message.direction !== "OUTBOUND" || message.visibility !== "PUBLIC") return;
 
   const db = scopedDb(message.organizationId);
-  // K37: the ticket the reply was written on (see the header).
+  // K37/K38: the ticket the reply was written on (see the header).
   const originTicketId = message.mergedFromTicketId ?? message.ticketId;
   const origin = await db.ticket.findFirst({
     where: { id: originTicketId },
@@ -78,12 +85,15 @@ export async function emailOutboundSendHandler(data: { messageId: string }): Pro
     await db.message.update({ where: { id: message.id }, data: { emailMessageId: messageId } });
   }
 
-  // Threading headers (D-23): every prior email-bearing message of the origin's thread (K37),
+  // Threading headers (D-23): every prior email-bearing message of the origin's thread (K38),
   // EXCLUDING this one (a retry may already carry its own emailMessageId from a prior failed
   // attempt, which would otherwise self-reference in the chain).
   const priorMessages = await db.message.findMany({
     where: {
-      OR: [{ ticketId: originTicketId }, { mergedFromTicketId: originTicketId }],
+      OR: [
+        { ticketId: originTicketId, mergedFromTicketId: null },
+        { mergedFromTicketId: originTicketId },
+      ],
       id: { not: message.id },
       emailMessageId: { not: null },
     },
