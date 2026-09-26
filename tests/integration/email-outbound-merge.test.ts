@@ -3,8 +3,9 @@
 // written on, also when that ticket is merged between queueing and sending, and a ticket's
 // thread is the messages written on it, never the ones moved in by a merge. Fix pass F7 adds
 // the review of F6 (F6-WR-01, F6-WR-02, F6-IN-01, F6-IN-02), fix pass F8 the review of F7
-// (F7-WR-03, F7-IN-05, F7-IN-06, F7-IN-07). Real Postgres through Testcontainers. Only the SMTP transport is a test double that records each mail: no SMTP
-// server is contacted and no email is sent.
+// (F7-WR-03, F7-IN-05, F7-IN-06, F7-IN-07). Real Postgres through Testcontainers. Only the SMTP
+// transport is a test double that records each mail: no SMTP server is contacted and no email
+// is sent.
 import { randomUUID } from "node:crypto";
 import { simpleParser } from "mailparser";
 // nodemailer's MailComposer is not re-exported from the package root (as in email-ingest.test.ts).

@@ -135,7 +135,9 @@ export async function emailOutboundSendHandler(data: { messageId: string }): Pro
   let parentChain: string[] = [];
   if (parentRefs.length > 0) {
     const known = await db.message.findMany({
-      where: { emailMessageId: { in: parentRefs } },
+      // Same bound as the history (F8-IN-08): a message written after this reply never joins
+      // the chain, so a retry stays identical when mail is ingested out of order.
+      where: { emailMessageId: { in: parentRefs }, seq: { lt: message.seq } },
       select: { emailMessageId: true },
     });
     const knownIds = new Set(known.map((m) => m.emailMessageId));
