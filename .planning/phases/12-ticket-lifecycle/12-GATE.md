@@ -197,3 +197,19 @@ Same procedure as the rerun on `06279f9` (one command at a time, own logs under 
 | `pnpm audit --prod` | 1 | 7 critical, 52 high (baseline) |
 
 Integration full and `pnpm test:egress` stay blocked (O-1). Nothing is worse than the rerun on `06279f9`.
+
+## Rerun after Codex diff round 2 fixes (on `4acce90`)
+
+Same procedure as the reruns above (logs `aida-12-fixgate3-*.log` under `$TMPDIR`).
+
+| Command | Exit | Result |
+|---------|------|--------|
+| `pnpm lint` | 0 | 390 files checked, no fixes |
+| `pnpm typecheck` | 0 | clean |
+| `pnpm test` | 0 | 27 files, 276 tests passed |
+| `pnpm test:integration --exclude tests/integration/egress-isolation.test.ts --reporter=verbose` | 0 | 34 files, 300 tests passed; `egress-isolation` appears only in the echoed command |
+| `pnpm test:e2e` (full suite) | 0 | 165 passed, 1 skipped (the existing `uat-gaps.spec.ts:17` skip), 0 failed, 0 flaky, 4.0 min; `taskkill` noise 3 times |
+| `pnpm build` | 0 | built |
+| `pnpm audit --prod` | 1 | 7 critical, 52 high (baseline) |
+
+Integration full and `pnpm test:egress` stay blocked (O-1). Nothing is worse than the rerun on `d61b370`.
