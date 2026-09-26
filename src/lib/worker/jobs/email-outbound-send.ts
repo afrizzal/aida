@@ -18,8 +18,8 @@
 //   - Recipient: the origin ticket's contact. A merge refuses tickets of different contacts
 //     (D-07, K33), so it is the same contact as the ticket the message is on now.
 //   - History for References / In-Reply-To (K38): every email-bearing message with
-//     (ticketId = origin AND mergedFromTicketId IS NULL) OR mergedFromTicketId = origin, except
-//     this one, oldest first. The first term is the messages written on the origin that never
+//     (ticketId = origin AND mergedFromTicketId IS NULL) OR mergedFromTicketId = origin, written
+//     before this reply (seq < message.seq, F6-WR-02), oldest first. The first term is the messages written on the origin that never
 //     moved; the second is the origin's messages after a merge moved them. So the messages a
 //     merge moves into a target stay in the source's thread and never enter the target's: a
 //     reply on the target threads on the target's own messages only, a long source history
@@ -85,16 +85,19 @@ export async function emailOutboundSendHandler(data: { messageId: string }): Pro
     await db.message.update({ where: { id: message.id }, data: { emailMessageId: messageId } });
   }
 
-  // Threading headers (D-23): every prior email-bearing message of the origin's thread (K38),
-  // EXCLUDING this one (a retry may already carry its own emailMessageId from a prior failed
-  // attempt, which would otherwise self-reference in the chain).
+  // Threading headers (D-23): every email-bearing message of the origin's thread (K38) written
+  // BEFORE this reply, seq < message.seq (F6-WR-02). seq is drawn at insert under the ticket
+  // row lock and a merge keeps it, so the bound is the same on every attempt: a retry gets the
+  // headers of the first attempt even when mail lands on the ticket in between, and never
+  // names a message the agent had not seen. It also excludes this message, which a retry
+  // already carries an emailMessageId for (no self-reference in the chain).
   const priorMessages = await db.message.findMany({
     where: {
       OR: [
         { ticketId: originTicketId, mergedFromTicketId: null },
         { mergedFromTicketId: originTicketId },
       ],
-      id: { not: message.id },
+      seq: { lt: message.seq },
       emailMessageId: { not: null },
     },
     orderBy: { createdAt: "asc" },

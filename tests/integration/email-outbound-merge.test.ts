@@ -4,8 +4,12 @@
 // thread is the messages written on it, never the ones moved in by a merge. Real Postgres through Testcontainers. Only the SMTP transport is a
 // test double that records each mail: no SMTP server is contacted and no email is sent.
 import { randomUUID } from "node:crypto";
+import { simpleParser } from "mailparser";
+// nodemailer's MailComposer is not re-exported from the package root (as in email-ingest.test.ts).
+import MailComposer from "nodemailer/lib/mail-composer/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MessageDirection } from "@/generated/prisma/client";
+import { deriveEmailMessageId, ingestMessage } from "@/lib/channels/email/ingest-message";
 import { saveEmailSettings } from "@/lib/channels/email/settings";
 import { prisma } from "@/lib/db";
 import { scopedDb } from "@/lib/scoped-db";
@@ -55,12 +59,14 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+const SELF_ADDRESS = "support@outbound-merge.test";
+
 async function seedPair() {
   const { orgId, users } = await seedOrgWithMembers(prisma, ["admin"]);
   const actor: MergeActor = { userId: users[0].id, orgId };
   await saveEmailSettings(scopedDb(orgId), orgId, {
     enabled: true,
-    fromAddress: "support@outbound-merge.test",
+    fromAddress: SELF_ADDRESS,
     smtpHost: "fake-smtp.invalid",
     smtpPort: 2525,
     smtpSecure: false,
@@ -127,6 +133,36 @@ async function queuedReply(orgId: string, ticketId: string): Promise<string> {
     select: { id: true },
   });
   return row.id;
+}
+
+/**
+ * A customer reply through the real ingest path (mailparser, header thread-match, D-09): the
+ * In-Reply-To and References headers are the customer's. Returns its Message-ID and the row.
+ */
+async function customerReply(
+  orgId: string,
+  contactEmail: string,
+  headers: { inReplyTo: string; references: string[] },
+) {
+  const buf = await new MailComposer({
+    from: contactEmail,
+    to: SELF_ADDRESS,
+    subject: "Re: my question",
+    text: `Customer reply ${randomUUID()}`,
+    messageId: `<reply-${randomUUID()}@customer.test>`,
+    inReplyTo: headers.inReplyTo,
+    references: headers.references,
+  })
+    .compile()
+    .build();
+  const parsed = await simpleParser(buf);
+  const emailMessageId = deriveEmailMessageId(buf, parsed.messageId);
+  expect(await ingestMessage(orgId, buf, SELF_ADDRESS, emailMessageId)).toBe("appended");
+  const row = await prisma.message.findFirstOrThrow({
+    where: { organizationId: orgId, emailMessageId },
+    select: { ticketId: true, mergedFromTicketId: true, emailReferences: true },
+  });
+  return { emailMessageId, row };
 }
 
 /** The source's thread S1 (in), S2 (out), S3 (in) and the target's T1 (in), T2 (out). */
@@ -287,6 +323,17 @@ describe("email-outbound-send keeps the thread of the ticket the reply was writt
     });
     expect(merged.ok).toBe(true);
 
+    // F6-WR-02: mail lands on the target between the two attempts. The customer answers in the
+    // source's old thread; ingest finds the moved source message and puts the reply on the
+    // target with mergedFromTicketId null. It came after the reply was written, so the retry
+    // must not take it into its history.
+    const late = await customerReply(orgId, contactEmail, {
+      inReplyTo: ids.s3,
+      references: [ids.s1, ids.s2, ids.s3],
+    });
+    expect(late.row.ticketId).toBe(t.id);
+    expect(late.row.mergedFromTicketId).toBeNull();
+
     // The pg-boss retry: the same job runs again on the same message.
     await emailOutboundSendHandler({ messageId: replyId });
 
@@ -294,6 +341,7 @@ describe("email-outbound-send keeps the thread of the ticket the reply was writt
     const [retry] = transport.sent;
     expect(retry.references).toBe(first.references);
     expect(retry.inReplyTo).toBe(first.inReplyTo);
+    expect(retry.references).not.toContain(late.emailMessageId);
     expect(retry.subject).toBe(first.subject);
     expect(retry.to).toBe(contactEmail);
     const sent = await prisma.message.findUniqueOrThrow({ where: { id: replyId } });
