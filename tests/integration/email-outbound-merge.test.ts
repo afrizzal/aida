@@ -1,8 +1,10 @@
 // Phase 12, Codex diff round 2, R2-2 (run decision K37, replaces K36) and round 3, R3-1 (run
 // decision K38, refines K37): an outbound reply keeps the email thread of the ticket it was
 // written on, also when that ticket is merged between queueing and sending, and a ticket's
-// thread is the messages written on it, never the ones moved in by a merge. Real Postgres through Testcontainers. Only the SMTP transport is a
-// test double that records each mail: no SMTP server is contacted and no email is sent.
+// thread is the messages written on it, never the ones moved in by a merge. Fix pass F7 adds
+// the review of F6 (F6-WR-01, F6-WR-02, F6-IN-01, F6-IN-02). Real Postgres through
+// Testcontainers. Only the SMTP transport is a test double that records each mail: no SMTP
+// server is contacted and no email is sent.
 import { randomUUID } from "node:crypto";
 import { simpleParser } from "mailparser";
 // nodemailer's MailComposer is not re-exported from the package root (as in email-ingest.test.ts).
@@ -23,6 +25,7 @@ import { seedContactTicket, seedOrgWithMembers } from "../support/lifecycle-fixt
 interface SentMail {
   to: unknown;
   subject: string;
+  messageId?: string;
   inReplyTo?: string;
   references?: string;
 }
@@ -183,7 +186,7 @@ async function seedThreads(orgId: string, sId: string, tId: string) {
   return ids;
 }
 
-describe("email-outbound-send keeps the thread of the ticket the reply was written on (R2-2, K37)", () => {
+describe("email-outbound-send keeps the thread of the ticket the reply was written on (R2-2 K37, R3-1 K38)", () => {
   it("(a) a reply queued on the source, then merged, then sent: the source's subject and references", async () => {
     const { orgId, actor, contactEmail, s, t } = await seedPair();
     const ids = await seedThreads(orgId, s.id, t.id);
@@ -342,6 +345,10 @@ describe("email-outbound-send keeps the thread of the ticket the reply was writt
     expect(retry.references).toBe(first.references);
     expect(retry.inReplyTo).toBe(first.inReplyTo);
     expect(retry.references).not.toContain(late.emailMessageId);
+    // F6-IN-01: the retry reuses the Message-ID the first attempt saved, and never names itself.
+    expect(first.messageId).toBe(failed.emailMessageId);
+    expect(retry.messageId).toBe(first.messageId);
+    expect(retry.references?.split(" ")).not.toContain(retry.messageId);
     expect(retry.subject).toBe(first.subject);
     expect(retry.to).toBe(contactEmail);
     const sent = await prisma.message.findUniqueOrThrow({ where: { id: replyId } });
@@ -381,5 +388,45 @@ describe("email-outbound-send keeps the thread of the ticket the reply was writt
       [ids.s1, ids.s2, ids.s3, ids.t1, ids.t2, parent.emailMessageId].join(" "),
     );
     expect(mail.to).toBe(contactEmail);
+  });
+
+  it("(g) two messages with the same createdAt are ordered by seq, whatever order the table returns them in (F6-IN-02)", async () => {
+    const { orgId, t } = await seedPair();
+    const tag = randomUUID();
+    // The first message (lower seq) has the greater Message-ID, so a read in the order of the
+    // (organizationId, emailMessageId) index also returns the second message first.
+    const first = `<tie-b-${tag}@customer.test>`;
+    const second = `<tie-a-${tag}@customer.test>`;
+    const at = nextTime();
+    const rows: string[] = [];
+    for (const emailMessageId of [`<tie-pending-${tag}@customer.test>`, second]) {
+      const row = await prisma.message.create({
+        data: {
+          organizationId: orgId,
+          ticketId: t.id,
+          direction: "INBOUND",
+          visibility: "PUBLIC",
+          bodyMarkdown: `Tie ${emailMessageId}`,
+          bodyHtml: `<p>Tie ${emailMessageId}</p>`,
+          emailMessageId,
+          createdAt: at,
+        },
+        select: { id: true },
+      });
+      rows.push(row.id);
+    }
+    // The first message gets its Message-ID now. An update of an indexed column writes a new row
+    // version, and new index entries, after the second message's, so a table scan or an index
+    // scan that does not sort on seq returns the second message first. createdAt and seq are
+    // unchanged.
+    await prisma.message.update({ where: { id: rows[0] }, data: { emailMessageId: first } });
+    const replyId = await queuedReply(orgId, t.id);
+
+    await emailOutboundSendHandler({ messageId: replyId });
+
+    expect(transport.sent).toHaveLength(1);
+    const [mail] = transport.sent;
+    expect(mail.references).toBe([first, second].join(" "));
+    expect(mail.inReplyTo).toBe(second);
   });
 });
