@@ -934,3 +934,11 @@ Dipicu selesainya Codex putaran 2. Log: `model: gpt-6.1-terra`, `reasoning effor
 Keputusan K37 (menggantikan K36): balasan keluar tetap di thread email tiket tempat ia ditulis. Worker memakai asal `mergedFromTicketId ?? ticketId` untuk subjek, nomor, dan riwayat (`ticketId = asal OR mergedFromTicketId = asal`), sehingga hasilnya sama sebelum dan sesudah merge. Alasan: alasan K36 ("penerima sama") tidak menutup salah konteks thread dan urutan in-flight; aturan asal bersifat deterministik tanpa menolak merge. Bisa dibalik dengan mengembalikan pembacaan dari tiket saat ini.
 
 Disposisi di `12-REVIEW.md` (`493c156`). R2-3 ditunda ke visual pass (`deferred-items.md`; baris D3/K36 diganti). Pass F5 (R2-1 klien dan prasyarat server `LINK_CHANGED`, R2-2) berjalan di latar. Folder ekspor Codex dihapus. Sesudah F5: gerbang ulang, lalu Codex putaran 3 (terakhir) khusus untuk perubahan F4 dan F5, karena perubahan sesudah review harus direview (pelajaran Fase 10).
+
+## Putaran 57 (2026-11-09, mulai 00.38 WIB)
+
+Dipicu laporan pass F5. Cek A (25 GiB) dan B lolos; berhenti total tidak terpicu; tidak ada proses `artisan test`. F5 selesai: R2-1 `d26f783` (merge mewajibkan `reviewedLinkLabel`; link yang berbeda di bawah row lock ditolak `LINK_CHANGED`; langkah konfirmasi hanya sesudah pembacaan ulang yang berhasil), R2-2 `f3ae1e8` (K37: subjek, nomor, penerima, dan riwayat thread dari tiket asal `mergedFromTicketId ?? ticketId`, lewat `scopedDb`); status `4acce90`. Test yang terlihat gagal lebih dulu tercatat untuk keduanya. Dicek di kode: `merge.ts:217` dan `email-outbound-send.ts:62-67`. Catatan F5 bahwa `deferred-items.md` tidak lagi memuat baris D3/K36 memang disengaja: baris itu dihapus saat K37 menggantikan K36.
+
+Gerbang ulang di `4acce90`: `lint` 0 (390), `typecheck` 0, `pnpm test` 0 (276), integration tanpa egress 0 (34 berkas, 300), E2E penuh 0 (165 lolos, 1 skip lama, 0 gagal), `build` 0, `audit --prod` 1 (baseline). Egress blocked (O-1).
+
+Kritik Codex putaran 3, terakhir (`fase12-diff-r3-tanya.md`, ekspor baru dari `4dfde68`; pindaian sama dengan putaran 2: hanya `.env.example`, string mirip kunci semuanya dummy yang dikenal, password container dev dan path rumah tidak ada). Berjalan di latar.
