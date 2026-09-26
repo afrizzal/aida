@@ -144,3 +144,16 @@ Question `fase12-diff-r3-tanya.md`, answer `fase12-diff-r3-jawab.md` (export of 
 | R3-1 | MEDIUM | Holds: the history clause `ticketId = origin` (`email-outbound-send.ts:84`) also takes every message moved into a target, so a reply written on the target threads on the source's last inbound; test (c) in `email-outbound-merge.test.ts:207-209` asserts exactly that. With a long source history the 10-entry `References` cap (`compose-outbound.ts:54`) can push out every target id | Fix (run decision K38, refines K37): a ticket's email thread is the messages written on it, `(ticketId = origin AND mergedFromTicketId IS NULL) OR mergedFromTicketId = origin`. Test (c) is corrected to the target's own ids (a stricter expectation, not a looser one), plus a long-source case and a target reply that fails before the merge and is retried after it. Reviewed by an independent code reviewer, since no Codex round is left | F6 |
 | R3-2 | LOW | Holds in code: a missing origin ticket ends the job without sending or marking the message failed (`:63-66`). No application path deletes tickets (AIDA-53: no hard delete) | No change; recorded in `deferred-items.md` | none |
 | R3-3 | LOW | Holds in code: no index serves `mergedFromTicketId = origin`, and the worker loads the whole history before the 10-entry cap | No change: a new index needs a migration and a measured need; recorded in `deferred-items.md` | none |
+
+## Independent review of fix pass F6 (`12-REVIEW-F6.md`)
+
+No Codex round is left for this topic, so commit `0c98bef` (R3-1, K38) was reviewed by an independent code reviewer: 0 critical, 2 warning, 4 info. The reviewer confirms the K38 clause returns the right rows for a source, a target and a never-merged ticket, stays inside the organization, and that tests (c), (d) and (e) fail against the old query. Each claim was checked against the code.
+
+| ID | Disposition | Pass |
+|----|-------------|------|
+| F6-WR-01 | Fix: a customer reply in the source's old thread after a merge lands on the target with `mergedFromTicketId` null; the next target reply then names it in In-Reply-To but drops its ancestors from References. `References` becomes the parent's stored `emailReferences`, then the ticket's own ids, de-duplicated with order kept (RFC 5322 §3.6.4). Integration test pins the case | F7 |
+| F6-WR-02 | Fix: bound the history by `seq < message.seq`, so a retry gets the headers of the first attempt even when mail arrives between attempts; test (e) extended with a message landing between the attempts | F7 |
+| F6-IN-01 | Fix: test (e) asserts the retry reuses the Message-ID | F7 |
+| F6-IN-02 | Fix: order the history by `(createdAt, seq)` | F7 |
+| F6-IN-03 | No change: the public status page (what a token holder may see, D-09) and the send job (which email thread a reply joins, K38) answer different questions; noted in the worker header | F7 (comment) |
+| F6-IN-04 | Fix: the describe title names K38; header comment rewrapped | F7 |
