@@ -229,3 +229,24 @@ Same procedure (logs `aida-12-fixgate5-*.log` under `$TMPDIR`).
 | `pnpm audit --prod` | 1 | 7 critical, 52 high (baseline) |
 
 F7 changed only `src/lib/worker/jobs/email-outbound-send.ts` and its integration test, not the snooze UI. The same case passed in every earlier full run (on `7c3bad3`, `06279f9`, `d61b370`, `4acce90`, `34cf40b`). Rerun of the spec alone right after, `pnpm test:e2e tests/e2e/snooze.spec.ts --repeat-each=3`: exit 0, 45 passed. Recorded as an observed flake of the hover tooltip in the full suite, not as a pass; it stays an open item until the next full runs show whether it recurs.
+
+## Rerun after fix pass F8 (on `1714009`)
+
+Same procedure (logs `aida-12-fixgate6-*.log`): `lint` 0 (390), `typecheck` 0, `pnpm test` 0 (276), integration without egress 0 (307), E2E full 0 (165 passed, 1 skipped existing, 0 failed, 0 flaky; the snooze tooltip case passed), `build` 0, `audit --prod` 1 (baseline).
+
+## Final gate (on `db55e8d`, the head after every review fix)
+
+The result that counts for verification. Same procedure (one command at a time, logs `aida-12-fixgate7-*.log` under `$TMPDIR`, exit codes from the commands themselves, `pgrep -f 'artisan test'` empty before each, Docker env for integration, E2E and build, no container handled by hand, no compose stack).
+
+| Command | Exit | Result |
+|---------|------|--------|
+| `pnpm lint` | 0 | 390 files checked, no fixes |
+| `pnpm typecheck` | 0 | clean |
+| `pnpm test` | 0 | 27 files, 276 tests passed |
+| `pnpm test:integration --exclude tests/integration/egress-isolation.test.ts --reporter=verbose` | 0 | 34 files, 307 tests passed; `egress-isolation` appears only in the echoed command |
+| `pnpm test:e2e` (full suite) | 0 | 165 passed, 1 skipped (the existing `uat-gaps.spec.ts:17` skip), 0 failed, 0 flaky, 4.0 min; `taskkill` noise 3 times |
+| `pnpm build` | 0 | built |
+| `pnpm audit --prod` | 1 | 7 critical, 52 high (baseline, unchanged) |
+| Integration full, `pnpm test:egress` | not run | blocked (owner O-1); no `aida-egress-test` container exists |
+
+The snooze tooltip flake seen once on `d427c56` did not recur in the two full runs after it; it stays listed as an observed flake. Compared with the first gate on `7c3bad3`: unit 268 to 276, integration 270 to 307, E2E 140 to 165 passed; nothing is worse.
