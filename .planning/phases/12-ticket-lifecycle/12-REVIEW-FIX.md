@@ -475,3 +475,10 @@ No existing assertion was loosened or removed. Cases (a) to (g) were not changed
 | `pnpm test:integration email-outbound-merge ticket-merge merge-provenance email-ingest` (one process) | 0 | 4 files, 72 tests passed (69 at F7, plus (h), (i) and (j)) |
 
 Before every Docker command, `pgrep -f 'artisan test'` printed nothing. Egress, E2E and build were not run. After the runs, no vitest process remained, and the only container left from them was Testcontainers' own `ryuk` reaper, which removes itself. No container was created, stopped or removed by hand. `aida-dev-db` was already running and was not touched.
+
+## Orchestrator fix after the second follow-up review (F8-IN-08, F8-IN-10)
+
+| ID | Status | Commit | Evidence |
+|----|--------|--------|----------|
+| F8-IN-08 | fixed | `eae5843` | Exactly the reviewer's proposed bound `seq: { lt: message.seq }` on the parent-chain lookup. No dedicated test for the out-of-order ingest case, so this fix was never seen failing. `pnpm lint` 0, `pnpm typecheck` 0, `email-outbound-merge` + `email-ingest` in one process 0 (16 tests) |
+| F8-IN-10 | fixed | same | Test header rewrapped |
