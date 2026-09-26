@@ -950,3 +950,11 @@ Dipicu selesainya Codex putaran 3 (terakhir untuk topik diff Fase 12). Log: `mod
 Keputusan K38 (memperhalus K37): thread email sebuah tiket adalah pesan yang ditulis di tiket itu, `(ticketId = asal AND mergedFromTicketId IS NULL) OR mergedFromTicketId = asal`. Alasan: K37 benar untuk sumber tetapi mencampur thread target; aturan ini sama sebelum dan sesudah merge untuk kedua sisi. Bisa dibalik dengan satu klausa. R3-2 dan R3-3 ditunda (`deferred-items.md`): tidak ada jalur hapus tiket di aplikasi, dan indeks butuh migrasi serta ukuran nyata.
 
 Karena tidak ada putaran Codex keempat, perbaikan F6 direview oleh code reviewer independen sebelum gerbang ulang, agar tidak ada perubahan pasca-review yang lolos tanpa review. Disposisi di `12-REVIEW.md` (`13fda37`). Folder ekspor Codex dihapus. Pass F6 berjalan di latar.
+
+## Putaran 59 (2026-11-09, mulai 00.49 WIB)
+
+Dipicu laporan pass F6. Cek A (25 GiB) dan B lolos; berhenti total tidak terpicu; tidak ada proses `artisan test`. F6: R3-1 diperbaiki (`0c98bef`, K38; status `34cf40b`); sebelum perbaikan 3 test gagal (balasan target memuat id sumber; pada riwayat sumber panjang kedua id target terdorong keluar oleh batas 10; retry sesudah merge memberi References berbeda). Catatan F6 tentang merge berantai (A ke B lalu B ke C) dicek ke kode: tidak terjangkau, karena tiket yang sudah menerima merge ditolak sebagai sumber (`SOURCE_HAS_MERGES`, `merge.ts:198`).
+
+Review independen atas `0c98bef` (`12-REVIEW-F6.md`, `92ea9f6`): 0 critical, 2 warning, 4 info. F6-WR-01: sesudah balasan pelanggan di thread lama sumber mendarat di target, balasan target berikutnya menyebut induknya di In-Reply-To tetapi membuang leluhurnya dari References. F6-WR-02: riwayat tanpa batas "sebelum balasan ini", sehingga retry bisa memungut surat yang tiba di antara percobaan. Keduanya benar di kode; diperbaiki di pass F7 bersama empat info kecil.
+
+Gerbang ulang di `34cf40b` (sesudah F6): `lint` 0, `typecheck` 0, `pnpm test` 0 (276), integration tanpa egress 0 (302), E2E penuh 0 (165 lolos, 1 skip lama, 0 gagal), `build` 0, `audit --prod` 1 (baseline). Pass F7 berjalan di latar; sesudahnya review singkat atas F7 dan gerbang ulang.
