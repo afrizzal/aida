@@ -170,3 +170,13 @@ Same reviewer, commits `a58b3ed`, `38afb4a`, `6d842ba` (section "Follow-up: F7" 
 | F7-IN-07 | Fix: keep only parent ids that are the Message-ID of a message in this organization (`scopedDb`), so sender-supplied ids never reach the reply | F8 |
 
 Stop rule for this topic (run decision K39): if the review of F8 finds another warning, the parent-chain change is reverted to the reviewed state after F6-WR-02 (thread's own ids, bounded by `seq`), and the post-merge inbound edge is deferred.
+
+### Second follow-up review (fix pass F8)
+
+Same reviewer, commits `b133dbb`, `f8ea0e3` (section "Follow-up 2: F8" in `12-REVIEW-F6.md`): 0 critical, **0 warning**, 3 info. K39 is not triggered; the parent-chain change stays. Verified by the reviewer: a never-merged ticket gets exactly its own ids in `seq` order, the merge case keeps the source ids first, the organization check holds, ordering is by `seq` alone, and tests (h), (i), (j) can fail with nothing weakened.
+
+| ID | Disposition |
+|----|-------------|
+| F8-IN-08 | Fix by the orchestrator, exactly the reviewer's proposed line: the parent-chain lookup gets the same `seq < message.seq` bound, so a retry stays identical when mail is ingested out of order and the header comment is true |
+| F8-IN-09 | No change: the organization-wide existence check tells the recipient which ids they supplied exist; low value, and ingest already exposes more. Recorded in `deferred-items.md` |
+| F8-IN-10 | Fix by the orchestrator: rewrap the test header line |

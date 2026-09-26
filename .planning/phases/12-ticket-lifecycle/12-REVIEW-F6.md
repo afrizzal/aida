@@ -226,3 +226,73 @@ Add a test with a never-merged ticket:
 ---
 
 _Follow-up reviewed: 2026-11-09 · Reviewer: Claude (gsd-code-reviewer) · Depth: deep_
+
+## Follow-up 2: F8 (b133dbb, f8ea0e3)
+
+**Reviewed:** 2026-11-09 · **Scope:** `src/lib/worker/jobs/email-outbound-send.ts`, `tests/integration/email-outbound-merge.test.ts`, F8 section of `12-REVIEW-FIX.md`, stop rule K39 in `12-REVIEW.md` · **Counts:** critical 0, **warning 0**, info 3 · **Status:** issues_found (info only)
+
+**K39:** this follow-up finds **no warning**. Nothing below is a warning, so the stop rule is not triggered.
+
+**What holds:**
+
+- **WR-03 is fixed.**
+  - `parentRefs` drops every id already in the bounded own history (`:133`). For a ticket that was never merged, the stored chain (the last 10 the customer named) is a subset of the own ids, so `parentChain` is empty.
+  - `references` is then exactly the own ids in `seq` order. This is the pre-F7 list, now in `seq` order instead of `createdAt` order, which is the intended F7-IN-05 change.
+  - In the merge case the S ids are not own ids of T, so they stay in the parent's order, ahead of T's ids. Test (f) keeps `s1 s2 s3 t1 t2 parent`.
+- **IN-07 is fixed.**
+  - The existence check is a `scopedDb` `findMany` (`:137-142`), so `organizationId` is added to the query.
+  - Test (i) seeds the "foreign" id as a real message in a second organization, so an unscoped check would keep it and the test would fail. The invented id covers the "no such message" side.
+- **IN-05 is fixed.** `orderBy: { seq: "asc" }` (`:111`) uses the same key as the bound. Demo-seed messages, which are back-dated, carry no `emailMessageId` and never enter the history.
+- **IN-06 is fixed.** Test (j) writes the lower-`seq` row with the later `createdAt` and asserts `seqs[0] < seqs[1]`. Ordering by `createdAt` therefore fails it whatever the query plan, on both References and In-Reply-To.
+- **The new tests can fail.**
+  - (h) fails on the F7 union, giving `x8..x13 x1 x2 x3 reply`.
+  - (h) would also fail with only the organization filter, because x4..x13 are all known.
+  - (i) fails without the organization filter, and with an unscoped one.
+  - (j) fails on ordering by `createdAt`.
+- **Nothing was weakened.** Cases (a) to (f) are unchanged, and (g) changed only its title.
+
+### Info
+
+#### IN-08: The parent-chain lookup has no `seq` bound, so retries are not always identical and a later message can be named
+
+**File:** `src/lib/worker/jobs/email-outbound-send.ts:93-99, 137-142`
+**Issue:**
+
+- The own history is bounded by `seq < message.seq`, but the lookup that decides which parent ids are kept checks the whole organization as it is at send time.
+- **Example:** the customer sends M1 and then M2, which references M1, and the poller ingests M2 first.
+  - M2 becomes the parent.
+  - On the first attempt M1 is unknown and dropped.
+  - On a retry after M1 has been ingested, M1 is known and enters References. M1 is also a message written after the reply.
+- The comment at `:93-99` says the bound is "the same on every attempt" and that the reply "never names a message the agent had not seen". In this narrow case both claims are false.
+- The effect is one extra, RFC-correct References entry, so this is not a warning.
+
+**Fix:** add the same bound to the lookup:
+```ts
+where: { emailMessageId: { in: parentRefs }, seq: { lt: message.seq } }
+```
+The merge case is unaffected, since the S ids have a lower `seq` than any post-merge reply. Alternatively, soften the comment.
+
+#### IN-09: The organization-wide existence filter tells a sender which Message-IDs exist in the organization
+
+**File:** `src/lib/worker/jobs/email-outbound-send.ts:137-142`
+**Issue:**
+
+- Only ids that exist as messages in this organization survive into References. A sender's References can name any ticket, of any contact.
+- Whoever receives the agent's reply, which is the ticket's contact, therefore learns which of up to 10 supplied Message-IDs exist in this organization's helpdesk.
+- This is weak:
+  - It needs a human agent to reply.
+  - The ids must already be known.
+  - Ingest's header match already lets a sender who knows one id append to that id's ticket (`thread-match.ts:53-57`, `ingest-message.ts:192`), which reveals much more and predates this change.
+- The F8 note already records that ids of other tickets in the same organization can reach References.
+
+**Fix (optional):** narrow the lookup to the parent's ticket. Add `ticketId` to the history `select` and use `where: { emailMessageId: { in: parentRefs }, ticketId: lastInbound.ticketId, seq: { lt: message.seq } }`. After a merge the S ids are rows on T, the parent's ticket, so (f) and (i) keep passing. This also closes IN-08.
+
+#### IN-10: Test header line 6 is over 100 characters again
+
+**File:** `tests/integration/email-outbound-merge.test.ts:6`
+**Issue:** The F8 edit put an unwrapped line back into the header (155 characters). This partly undoes F6-IN-04.
+**Fix:** re-wrap the line at 100 characters.
+
+---
+
+_Follow-up 2 reviewed: 2026-11-09 · Reviewer: Claude (gsd-code-reviewer) · Depth: deep_
