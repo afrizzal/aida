@@ -141,3 +141,167 @@ describe("design-tokens (DESIGN-SYSTEM.md §2/§3/§9 mechanical enforcement)", 
     expect(dangling).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// Phase 12.1 state palette (D-14; UI-SPEC Color, contrast gate item 2). Deterministic contrast
+// from the values committed in globals.css, in both themes.
+//
+// Formula sources:
+// - OKLCH to OKLab (polar to Cartesian), then OKLab to LMS to linear sRGB with the matrices of
+//   Björn Ottosson, "A perceptual color space for image processing" (2020).
+// - Linear sRGB to gamma-encoded sRGB (IEC 61966-2-1) for compositing, because browsers
+//   composite a translucent background over the surface in encoded sRGB.
+// - WCAG 2 relative luminance and contrast ratio ((L1 + 0.05) / (L2 + 0.05)).
+// Out-of-gamut channels are clipped to [0, 1], as a browser does on an sRGB display.
+// ---------------------------------------------------------------------------------------------
+
+const GLOBALS_CSS = fs.readFileSync(path.join(PROJECT_ROOT, "src/app/globals.css"), "utf-8");
+
+const STATE_TOKEN_KEYS = [
+  "indigo",
+  "blue",
+  "teal",
+  "green",
+  "amber",
+  "orange",
+  "red",
+  "pink",
+  "purple",
+  "gray",
+] as const;
+
+const SURFACES = ["--background", "--card", "--muted", "--accent"] as const;
+
+function cssBlock(selector: ":root" | ".dark" | "@theme inline"): string {
+  const start = GLOBALS_CSS.indexOf(`${selector} {`);
+  if (start < 0) throw new Error(`globals.css has no ${selector} block`);
+  const end = GLOBALS_CSS.indexOf("}", start);
+  return GLOBALS_CSS.slice(start, end);
+}
+
+function tokenValue(block: string, name: string): string | null {
+  const escaped = name.replace(/[-]/g, "\\-");
+  const match = block.match(new RegExp(`(?:^|\\s)${escaped}:\\s*([^;]+);`));
+  return match ? match[1].trim() : null;
+}
+
+type Rgb = [number, number, number];
+
+function parseOklch(value: string): [number, number, number] {
+  const match = value.match(/^oklch\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*\)$/);
+  if (!match) throw new Error(`not a plain oklch() value: ${value}`);
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function oklchToLinearSrgb([l, c, h]: [number, number, number]): Rgb {
+  const hr = (h * Math.PI) / 180;
+  const a = c * Math.cos(hr);
+  const b = c * Math.sin(hr);
+  const l_ = (l + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m_ = (l - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s_ = (l - 0.0894841775 * a - 1.291485548 * b) ** 3;
+  return [
+    4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_,
+    -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_,
+    -0.0041960863 * l_ - 0.7034186147 * m_ + 1.707614701 * s_,
+  ];
+}
+
+const clip = (x: number) => Math.min(1, Math.max(0, x));
+const encode = (x: number) => (x <= 0.0031308 ? 12.92 * x : 1.055 * x ** (1 / 2.4) - 0.055);
+const decode = (x: number) => (x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4);
+
+function encodedSrgb(value: string): Rgb {
+  const lin = oklchToLinearSrgb(parseOklch(value));
+  return [encode(clip(lin[0])), encode(clip(lin[1])), encode(clip(lin[2]))];
+}
+
+function luminance(rgb: Rgb): number {
+  const [r, g, b] = rgb.map(decode);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrast(a: Rgb, b: Rgb): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+function composite(top: Rgb, alpha: number, bottom: Rgb): Rgb {
+  return [0, 1, 2].map((i) => alpha * top[i] + (1 - alpha) * bottom[i]) as Rgb;
+}
+
+describe("state palette tokens (Phase 12.1, D-14)", () => {
+  const themes = [
+    { theme: "light", block: cssBlock(":root") },
+    { theme: "dark", block: cssBlock(".dark") },
+  ] as const;
+
+  for (const { theme, block } of themes) {
+    for (const key of STATE_TOKEN_KEYS) {
+      it(`--state-${key} (${theme}) clears 4.5:1 as text on its /10 tint over --background, --card, --muted and --accent`, () => {
+        const tokenRaw = tokenValue(block, `--state-${key}`);
+        expect(tokenRaw, `--state-${key} missing in ${theme}`).not.toBeNull();
+        const token = encodedSrgb(tokenRaw as string);
+        for (const surface of SURFACES) {
+          const surfaceRaw = tokenValue(block, surface);
+          expect(surfaceRaw, `${surface} missing in ${theme}`).not.toBeNull();
+          const tint = composite(token, 0.1, encodedSrgb(surfaceRaw as string));
+          const ratio = contrast(token, tint);
+          expect(
+            ratio,
+            `--state-${key} on ${surface} (${theme}) = ${ratio.toFixed(2)}`,
+          ).toBeGreaterThanOrEqual(4.5);
+        }
+      });
+    }
+
+    it(`--primary-foreground on solid --primary (${theme}, the indigo-filled pair) clears 4.5:1`, () => {
+      const fg = tokenValue(block, "--primary-foreground");
+      const bg = tokenValue(block, "--primary");
+      expect(fg).not.toBeNull();
+      expect(bg).not.toBeNull();
+      const ratio = contrast(encodedSrgb(fg as string), encodedSrgb(bg as string));
+      expect(ratio, `indigo-filled (${theme}) = ${ratio.toFixed(2)}`).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+
+  it("every tinted key of state-colors.ts has a token in :root, .dark and @theme inline", async () => {
+    const { STATE_COLOR_KEYS } = await import("../../src/lib/tickets/state-colors");
+    const tinted = STATE_COLOR_KEYS.filter((k) => k !== "indigo-filled");
+    expect(tinted).toEqual([...STATE_TOKEN_KEYS]);
+    const root = cssBlock(":root");
+    const dark = cssBlock(".dark");
+    const themeInline = cssBlock("@theme inline");
+    for (const key of tinted) {
+      expect(tokenValue(root, `--state-${key}`), `:root --state-${key}`).toMatch(/^oklch\(/);
+      expect(tokenValue(dark, `--state-${key}`), `.dark --state-${key}`).toMatch(/^oklch\(/);
+      expect(tokenValue(themeInline, `--color-state-${key}`)).toBe(`var(--state-${key})`);
+    }
+  });
+
+  it("state-colors.ts maps keys to the UI-SPEC classes, with the gray fallback for an unknown key", async () => {
+    const { STATE_COLOR_KEYS, stateColorClasses, STATE_COLORS } = await import(
+      "../../src/lib/tickets/state-colors"
+    );
+    expect([...STATE_COLOR_KEYS]).toEqual([
+      "indigo-filled",
+      "indigo",
+      "blue",
+      "teal",
+      "green",
+      "amber",
+      "orange",
+      "red",
+      "pink",
+      "purple",
+      "gray",
+    ]);
+    expect(stateColorClasses("amber").chip).toBe(
+      "bg-state-amber/10 text-state-amber border border-state-amber/20",
+    );
+    expect(stateColorClasses("indigo-filled").chip).toBe(
+      "bg-primary text-primary-foreground border border-transparent",
+    );
+    expect(stateColorClasses("violet")).toEqual(STATE_COLORS.gray);
+  });
+});
