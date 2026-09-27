@@ -5,10 +5,10 @@ milestone_name: Helpdesk & Projects
 current_phase: 12
 current_phase_name: ticket-lifecycle
 status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11 and 12 verified human_needed; Phase 12.1 (custom states and SLA pause) next
-stopped_at: Phase 12 verified human_needed; Phase 12.1 not started
+stopped_at: Phase 12.1 planned (17 plans, 7 waves); execution next
 last_updated: "2026-11-08T15:06:29.465Z"
 last_activity: 2026-11-09
-last_activity_desc: Phase 12 verified human_needed (15/16; 12-o1 open); final gate on db55e8d green except audit at baseline; egress blocked (O-1)
+last_activity_desc: Phase 12.1 planned, 17 plans in 7 waves; Codex plan review converged after cycle 2 (K29); execution next
 state_head: 422432b0504b57bd51b96d7ebddc8196ca7c87c5
 progress:
   total_phases: 12
