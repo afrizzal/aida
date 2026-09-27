@@ -6,17 +6,19 @@ import type {
   MessageVisibility,
   PrismaClient,
   TicketRelationType,
-  TicketStatus,
 } from "../../src/generated/prisma/client";
 import { prisma as globalPrisma } from "../../src/lib/db";
 import { createTicket } from "../../src/lib/tickets/create-ticket";
+import { type LegacyStatusKey, stateUpdateData } from "./inbox-fixtures";
 
-export { seedOrgWithMembers, seedTicket } from "./inbox-fixtures";
+export { seedOrgWithMembers, seedTicket, stateIdFor } from "./inbox-fixtures";
+export type { LegacyStatusKey };
 
 export interface SeedContactTicketOptions {
   /** Two tickets seeded with the same email share one Contact row. */
   contactEmail: string;
-  status?: TicketStatus;
+  /** Legacy key of one of the five migrated states; written as its state id (pause invariant). */
+  status?: LegacyStatusKey;
   createdAt?: Date;
 }
 
@@ -37,8 +39,7 @@ export async function seedContactTicket(
     contact: { email: options.contactEmail },
     direction: "INBOUND",
   });
-  const data: Record<string, unknown> = {};
-  if (options.status !== undefined) data.status = options.status;
+  const data: Record<string, unknown> = await stateUpdateData(orgId, { status: options.status });
   if (options.createdAt !== undefined) data.createdAt = options.createdAt;
   if (Object.keys(data).length > 0) {
     await globalPrisma.ticket.update({ where: { id: created.id }, data });

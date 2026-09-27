@@ -1,11 +1,15 @@
-import type { MessageDirection, Prisma, TicketPriority } from "@/generated/prisma/client";
+import type { MessageDirection, TicketPriority } from "@/generated/prisma/client";
 import { findOrCreateContact } from "@/lib/contacts/find-or-create-contact";
 import { renderMarkdown } from "@/lib/markdown/render";
 import { getBoss } from "@/lib/queue/boss-client";
 import { scopedDb } from "@/lib/scoped-db";
 import { computeDueTimestamps, getSlaTargets } from "@/lib/tickets/sla";
 import { generateStatusToken } from "@/lib/tickets/status-token";
-import { readStateConfigForShare, shareLockActiveState } from "@/lib/tickets/ticket-states";
+import {
+  readStateConfigForShare,
+  type StateQueryClient,
+  shareLockActiveState,
+} from "@/lib/tickets/ticket-states";
 
 export type CreateTicketInput = {
   subject: string;
@@ -49,9 +53,9 @@ export class DefaultStateUnavailableError extends Error {
 /** Test-only hooks into the create transaction (race proofs, review C7). */
 export interface CreateTicketObserver {
   /** Awaited as the very first statement of the transaction, before any lock. */
-  onTransactionStart?(tx: Prisma.TransactionClient): Promise<void> | void;
+  onTransactionStart?(tx: StateQueryClient): Promise<void> | void;
   /** Awaited right after the config and default-state share locks. */
-  afterStateLocks?(tx: Prisma.TransactionClient): Promise<void> | void;
+  afterStateLocks?(tx: StateQueryClient): Promise<void> | void;
 }
 
 let createTicketObserver: CreateTicketObserver | null = null;

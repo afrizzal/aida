@@ -110,13 +110,17 @@ export type MergeResult =
   | { ok: true; sourceTicketId: string; targetTicketId: string }
   | { ok: false; error: MergeErrorCode };
 
-/** One row locked by lockTicketsInIdOrder. */
+/** One row locked by lockTicketsInIdOrder: Ticket columns only, never a TicketState column. */
 export interface LockedTicketRow {
   id: string;
   mergedIntoTicketId: string | null;
   contactId: string;
-  status: TicketStatus;
+  stateId: string;
   snoozedUntil: Date | null;
+  slaPausedAt: Date | null;
+  slaPausedMs: bigint;
+  firstResponseDueAt: Date;
+  resolutionDueAt: Date;
 }
 
 /** Any client that can run a tagged raw query: an interactive transaction client. */
@@ -130,6 +134,11 @@ export interface LockClient {
  * SQL collation on the other). Returns the locked rows in id order; a missing id or another
  * organization's id is simply absent. Every merge and every customer reply path (12-04) locks
  * through this helper (lock-order contract, D-08, D-10).
+ * Phase 12.1 (D-15 amended): the statement reads the Ticket table alone (stateId, the pause
+ * columns slaPausedAt and slaPausedMs, and both deadlines) and never joins TicketState, so a
+ * ticket lock never locks a state row. Callers that need a role or a target state take its
+ * locks first, in the order of src/lib/tickets/ticket-states.ts: TicketStateConfig, then
+ * TicketState, then these ticket rows.
  */
 export async function lockTicketsInIdOrder(
   tx: LockClient,
@@ -139,7 +148,8 @@ export async function lockTicketsInIdOrder(
   const unique = [...new Set(ids)];
   if (unique.length === 0) return [];
   return tx.$queryRaw<LockedTicketRow[]>`
-    SELECT id, "mergedIntoTicketId", "contactId", status::text AS status, "snoozedUntil"
+    SELECT id, "mergedIntoTicketId", "contactId", "stateId", "snoozedUntil", "slaPausedAt",
+      "slaPausedMs", "firstResponseDueAt", "resolutionDueAt"
     FROM "Ticket"
     WHERE "organizationId" = ${orgId} AND id = ANY(${unique}::text[])
     ORDER BY id
