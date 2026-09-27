@@ -1,10 +1,11 @@
-import type { MessageDirection, TicketPriority } from "@/generated/prisma/client";
+import type { MessageDirection, Prisma, TicketPriority } from "@/generated/prisma/client";
 import { findOrCreateContact } from "@/lib/contacts/find-or-create-contact";
 import { renderMarkdown } from "@/lib/markdown/render";
 import { getBoss } from "@/lib/queue/boss-client";
 import { scopedDb } from "@/lib/scoped-db";
 import { computeDueTimestamps, getSlaTargets } from "@/lib/tickets/sla";
 import { generateStatusToken } from "@/lib/tickets/status-token";
+import { readStateConfigForShare, shareLockActiveState } from "@/lib/tickets/ticket-states";
 
 export type CreateTicketInput = {
   subject: string;
@@ -33,12 +34,43 @@ export type CreateTicketResult = {
   messageId: string;
 };
 
+/**
+ * Thrown inside the create transaction when the organization's default state (newStateId) is
+ * missing or soft-deleted, so nothing is created. Under the config share lock the admin protocol
+ * cannot cause it; it guards against a writer that locks the state without the config.
+ */
+export class DefaultStateUnavailableError extends Error {
+  constructor(orgId: string) {
+    super(`The default ticket state of organization ${orgId} is not available`);
+    this.name = "DefaultStateUnavailableError";
+  }
+}
+
+/** Test-only hooks into the create transaction (race proofs, review C7). */
+export interface CreateTicketObserver {
+  /** Awaited as the very first statement of the transaction, before any lock. */
+  onTransactionStart?(tx: Prisma.TransactionClient): Promise<void> | void;
+  /** Awaited right after the config and default-state share locks. */
+  afterStateLocks?(tx: Prisma.TransactionClient): Promise<void> | void;
+}
+
+let createTicketObserver: CreateTicketObserver | null = null;
+
+/**
+ * Test seam only (as setStatusReadObserverForTests): lets a race test record the backend PID
+ * and hold the share locks of a create. Production never sets it.
+ */
+export function setCreateTicketObserverForTests(observer: CreateTicketObserver | null): void {
+  createTicketObserver = observer;
+}
+
 // single-org v1: callers resolve orgId; public intake uses organization.findFirstOrThrow (plan 11).
 /**
  * The ONE code path that creates tickets — reused by the agent "New Ticket" flow and the
  * public web form. Atomically: links/creates a Contact by normalized email, increments the
  * per-org ticket counter, stamps SLA due timestamps from priority, and stores a sanitized
- * initial Message — all inside a single transaction.
+ * initial Message — all inside a single transaction. The ticket starts in the organization's
+ * default state (TicketStateConfig.newStateId, D-11), read under the role-writer locks.
  */
 export async function createTicket(
   orgId: string,
@@ -47,6 +79,14 @@ export async function createTicket(
   const db = scopedDb(orgId);
 
   const result = await db.$transaction(async (tx) => {
+    if (createTicketObserver?.onTransactionStart) await createTicketObserver.onTransactionStart(tx);
+    // Role-writer lock order (D-15 amended, review C7): the configuration row FOR SHARE, then the
+    // default state FOR SHARE, before the contact, the counter and the ticket.
+    const config = await readStateConfigForShare(tx, orgId);
+    const defaultState = await shareLockActiveState(tx, orgId, config.newStateId);
+    if (!defaultState) throw new DefaultStateUnavailableError(orgId);
+    if (createTicketObserver?.afterStateLocks) await createTicketObserver.afterStateLocks(tx);
+
     const contact = await findOrCreateContact(tx, input.contact);
 
     const counter = await (
@@ -81,6 +121,7 @@ export async function createTicket(
         number: counter.lastNumber,
         statusToken: generateStatusToken(),
         subject: input.subject,
+        stateId: config.newStateId,
         priority: input.priority,
         contactId: contact.id,
         firstResponseTargetMinutes: targets.firstResponseMinutes,
