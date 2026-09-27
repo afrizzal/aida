@@ -348,3 +348,20 @@ describe("state-copy: Surfaces 5 and 6", () => {
     expect(copy.PUBLIC_MERGED_LABEL).toBe("Combined");
   });
 });
+
+describe("state-copy: paused chip helpers (Surface 5, D-18)", () => {
+  it("pausedChipLabel picks the overdue row only when the breach flag is set", () => {
+    expect(copy.pausedChipLabel(false)).toBe("SLA paused");
+    expect(copy.pausedChipLabel(true)).toBe("SLA paused, overdue");
+  });
+
+  it("slaPausedTitle formats the pause start with the chip's title formatter options", () => {
+    const pausedAt = new Date("2026-11-09T08:30:00.000Z");
+    const time = pausedAt.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+    expect(copy.slaPausedTitle(pausedAt)).toBe(
+      `SLA timers are paused while this ticket is in a Pending status. Paused since ${time}.`,
+    );
+    expect(copy.slaPausedTitle(pausedAt.toISOString())).toBe(copy.slaPausedTitle(pausedAt));
+    expect(time).toMatch(/^Nov \d+, 2026, \d+:\d{2}\s?[AP]M$/);
+  });
+});

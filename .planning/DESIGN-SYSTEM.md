@@ -56,6 +56,23 @@ Semua nilai dark ada di `globals.css`. Jangan duplikat — gunakan token yang sa
 3. **`--primary` as a solid button/badge BACKGROUND with `--primary-foreground` text** — 4.29:1 (dark, full opacity) → darkened `0.585` → `0.54`, now ~5.2:1.
 4. **A lighter violet (`#716ee4`) as a background in light mode** — this was `Button`'s default variant `hover:bg-primary/80`: an OPACITY-based hover blends toward whatever sits behind the button, which LIGHTENS the effective color in light mode (near-white page bg) and dropped contrast to 3.98:1. Fixed by changing the hover mechanism to a `color-mix` DARKEN (`hover:bg-[color-mix(in_oklch,var(--primary),black_15%)]`) in both `button.tsx` and `badge.tsx` — this always darkens regardless of theme/backdrop, so hover only improves contrast now.
 
+### State palette (Phase 12.1)
+
+Ten categorical tokens for ticket state chips and dots (D-14). Each is defined in `:root`, `.dark` and `@theme inline` (`--color-state-KEY: var(--state-KEY)`) in `src/app/globals.css`. A state's colour is data chosen by an admin, not accent. `tests/unit/design-tokens.test.ts` proves at least 4.5:1 for each token as text on its own `/10` tint over `--background`, `--card`, `--muted` and `--accent` in both themes, and for `--primary-foreground` on solid `--primary` (the eleventh key, "Indigo, filled"). A failing value is fixed at the token (lightness only, same hue and chroma), never per component.
+
+| Token | Light (`:root`) | Dark (`.dark`) |
+|-------|-----------------|----------------|
+| `--state-indigo` | `oklch(0.48 0.20 277)` | `oklch(0.80 0.13 277)` |
+| `--state-blue` | `oklch(0.48 0.16 250)` | `oklch(0.80 0.12 250)` |
+| `--state-teal` | `oklch(0.48 0.09 195)` | `oklch(0.80 0.11 195)` |
+| `--state-green` | `oklch(0.48 0.13 150)` | `oklch(0.80 0.15 150)` |
+| `--state-amber` | `oklch(0.50 0.12 70)` | `oklch(0.82 0.14 80)` |
+| `--state-orange` | `oklch(0.50 0.15 45)` | `oklch(0.80 0.13 50)` |
+| `--state-red` | `oklch(0.50 0.19 25)` | `oklch(0.80 0.12 22)` |
+| `--state-pink` | `oklch(0.49 0.19 350)` | `oklch(0.80 0.12 350)` |
+| `--state-purple` | `oklch(0.48 0.20 305)` | `oklch(0.80 0.13 305)` |
+| `--state-gray` | `oklch(0.47 0.02 279)` | `oklch(0.80 0.02 279)` |
+
 **Do not reintroduce `text-primary`/`text-sidebar-primary` for TEXT on a dark or tinted surface** — use `text-primary-emphasis`/`text-sidebar-primary-emphasis` instead (see §1's rule of thumb). `text-primary` remains correct when paired with `bg-primary`+`text-primary-foreground` (i.e., primary as the background).
 
 ---
@@ -167,13 +184,15 @@ Elevated card (dialog, modal, form):
 
 ### 4.7 Badges / Status Indicators
 
-Gunakan palette brand untuk status tiket:
-```tsx
-// Pending/warning: amber (oklch sekitar 0.75 0.18 85)
-// Resolved: emerald (oklch sekitar 0.72 0.17 155)
-// Closed: muted-foreground
-// Open: primary (indigo)
-```
+Ticket states use the state palette (§2 "State palette (Phase 12.1)"):
+
+- Chips and dots take their classes only from `src/lib/tickets/state-colors.ts` (`stateColorClasses(key).chip` / `.dot`, rendered by `StateChip` and `StateDot`). No component writes `bg-state-*` / `text-state-*` itself, and an unknown key falls back to gray.
+- The chip always shows the state name; colour is never the only signal. Tinted keys: `bg-state-KEY/10 text-state-KEY border border-state-KEY/20`.
+- "Indigo, filled" (`indigo-filled`) uses `--primary` with `--primary-foreground` (`bg-primary text-primary-foreground`).
+- The public status page shows only the group (`PublicGroupChip`), in four fixed colours: Open indigo, Pending amber, Resolved green, Closed gray.
+- The paused SLA chip is neutral (`bg-muted text-muted-foreground border-border`), never a state colour.
+
+> Migration note (Phase 12.1): the earlier status palette note (amber, emerald, muted, indigo by enum value, as used by `StatusChip`) is replaced by the state palette above; `StatusChip` is removed in plan 12.1-15.
 
 ---
 

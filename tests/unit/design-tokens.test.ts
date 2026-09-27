@@ -1,3 +1,4 @@
+/// <reference types="node" />
 // Mechanical enforcement of DESIGN-SYSTEM.md §2/§3/§9's token rule (07-09.1 Task 3, D-3):
 // components must use CSS design tokens, never a hardcoded oklch()/hex color literal, and must
 // use explicit `text-[Npx]` sizing, never Tailwind's named text-size scale (`text-lg`, `text-xl`,

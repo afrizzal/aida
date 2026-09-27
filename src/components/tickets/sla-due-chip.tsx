@@ -1,17 +1,39 @@
-import { AlertTriangle, CircleAlert, Clock } from "lucide-react";
+import { AlertTriangle, CircleAlert, CirclePause, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { formatDueDuration } from "@/lib/tickets/format-duration";
+import { pausedChipLabel, slaPausedTitle } from "@/lib/tickets/state-copy";
 import { cn } from "@/lib/utils";
 
 export function SlaDueChip({
   dueAt,
   isAtRisk,
   isBreached,
+  pausedAt,
 }: {
   dueAt: Date | string;
   isAtRisk: boolean;
   isBreached: boolean;
+  /** Ticket.slaPausedAt: set while the ticket is in a Pending-group state (D-16, D-18). */
+  pausedAt?: Date | string | null;
 }) {
+  // Paused first (D-18, UI-SPEC Surface 5): while the SLA is paused the deadline has not moved
+  // yet, so neither the elapsed-time check nor the countdown is evaluated, and the chip never
+  // reads as running or newly overdue. A breach flag set before the pause stays visible.
+  if (pausedAt) {
+    return (
+      <Badge
+        title={slaPausedTitle(pausedAt)}
+        className={cn(
+          "h-5 gap-1 px-2 py-0.5 text-[12px]",
+          "bg-muted text-muted-foreground border border-border",
+        )}
+      >
+        <CirclePause className="size-3" />
+        {pausedChipLabel(isBreached)}
+      </Badge>
+    );
+  }
+
   // Explicit locale + options: a bare toLocaleString() renders en-US on the server and the
   // OS locale on the client, which produced a React hydration mismatch on non-en-US machines.
   const fullTimestamp = new Date(dueAt).toLocaleString("en-US", {
