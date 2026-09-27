@@ -307,7 +307,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 - [ ] 12.1-04-PLAN.md — Shared state-transition service (group effects, SLA pause accounting, injected clock) and single and bulk state change on state ids (Wave 2)
 - [ ] 12.1-05-PLAN.md — Reply reopen, auto-close and email matching on groups and roles; public status loader returns the group only (Wave 2)
 - [ ] 12.1-06-PLAN.md — sla-flag worker on group OPEN and not paused; pause proofs with the real worker, restart and two PID-bound race orders (AIDA-57) (Wave 3)
-- [ ] 12.1-07-PLAN.md — Merge on the mergeClose role with the pending pause closed, snooze by group, demo seed on states, Phase 12 suites migrated (Wave 3)
+- [ ] 12.1-07-PLAN.md — Merge on the mergeClose role with the pending pause closed, snooze by group, demo seed on states, Phase 12 suites migrated (Wave 4)
 - [ ] 12.1-08-PLAN.md — Admin state service (create, rename, recolour, reorder, default, delete with same-group replacement) with the D-15 lock protocol and race proofs (AIDA-97) (Wave 3)
 - [ ] 12.1-09-PLAN.md — Public status page group label and CSAT eligibility by group (Wave 3)
 - [ ] 12.1-10-PLAN.md — Filter grammar version 2, state= URL contract with the legacy redirect, list query and loader, grouped Status filter and missing-status notice (Wave 2)
