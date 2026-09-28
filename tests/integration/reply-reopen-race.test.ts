@@ -18,7 +18,7 @@ import { prisma } from "@/lib/db";
 import { AUTO_CLOSE_DAYS_KEY, AUTO_CLOSE_ENABLED_AT_KEY } from "@/lib/tickets/auto-close-settings";
 import { reopenOnCustomerReply, setReopenObserverForTests } from "@/lib/tickets/reopen-on-reply";
 import { autoCloseHandler, closeResolvedTicketIfQuiet } from "@/lib/worker/jobs/auto-close";
-import { seedOrgWithMembers, seedTicket } from "../support/inbox-fixtures";
+import { seedOrgWithMembers, seedTicket, stateIdFor } from "../support/inbox-fixtures";
 import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -126,8 +126,17 @@ async function statusReply(ticketId: string) {
 async function ticketState(id: string) {
   return prisma.ticket.findUniqueOrThrow({
     where: { id },
-    select: { status: true, resolvedAt: true },
+    select: { stateId: true, resolvedAt: true, slaPausedAt: true },
   });
+}
+
+/** The organization's reopen role (TicketStateConfig.reopenStateId; the migrated Open state). */
+async function reopenStateId(orgId: string): Promise<string> {
+  const config = await prisma.ticketStateConfig.findUniqueOrThrow({
+    where: { organizationId: orgId },
+    select: { reopenStateId: true },
+  });
+  return config.reopenStateId;
 }
 
 function autoClosedCount(ticketId: string) {
@@ -167,7 +176,7 @@ describe("reply versus auto-close and agent resolve (D-17, Codex review C6)", ()
     await holder.done;
     const result = await job;
 
-    expect((await ticketState(t.id)).status).toBe("OPEN");
+    expect((await ticketState(t.id)).stateId).toBe(await reopenStateId(orgId));
     expect(result.organizations.find((o) => o.orgId === orgId)?.closed).toBe(0);
     expect(lines.filter((l) => l.includes(`org=${orgId}`))[0]).toContain("closed=0");
     expect(await autoClosedCount(t.id)).toBe(0);
@@ -198,7 +207,7 @@ describe("reply versus auto-close and agent resolve (D-17, Codex review C6)", ()
     expect(await reply).toBe("appended");
 
     const state = await ticketState(t.id);
-    expect(state.status).toBe("OPEN");
+    expect(state.stateId).toBe(await reopenStateId(orgId));
     expect(state.resolvedAt).toBeNull();
     const msg = await prisma.message.findFirstOrThrow({
       where: { emailMessageId: mail.emailMessageId },
@@ -232,7 +241,7 @@ describe("reply versus auto-close and agent resolve (D-17, Codex review C6)", ()
     expect(await reply).toBe(200);
 
     const state = await ticketState(t.id);
-    expect(state.status).toBe("OPEN");
+    expect(state.stateId).toBe(await reopenStateId(orgId));
     expect(state.resolvedAt).toBeNull();
     const msg = await prisma.message.findFirstOrThrow({
       where: { ticketId: t.id, bodyMarkdown: followUp.body },
@@ -244,11 +253,12 @@ describe("reply versus auto-close and agent resolve (D-17, Codex review C6)", ()
   it("(c-email) email reply during an uncommitted agent resolve: the ticket ends OPEN", async () => {
     const { orgId } = await seedOrgWithMembers(prisma, ["owner"]);
     const t = await seedTicket(orgId, { status: "OPEN" });
+    const resolvedStateId = await stateIdFor(orgId, "RESOLVED");
 
     const holder = holdTx((tx) =>
       tx.ticket.update({
         where: { id: t.id },
-        data: { status: "RESOLVED", resolvedAt: new Date() },
+        data: { stateId: resolvedStateId, resolvedAt: new Date() },
         select: { id: true },
       }),
     );
@@ -270,7 +280,7 @@ describe("reply versus auto-close and agent resolve (D-17, Codex review C6)", ()
     expect(await reply).toBe("appended");
 
     const state = await ticketState(t.id);
-    expect(state.status).toBe("OPEN");
+    expect(state.stateId).toBe(await reopenStateId(orgId));
     expect(state.resolvedAt).toBeNull();
     const msg = await prisma.message.findFirstOrThrow({
       where: { emailMessageId: mail.emailMessageId },
@@ -281,11 +291,12 @@ describe("reply versus auto-close and agent resolve (D-17, Codex review C6)", ()
   it("(c-status) status-page follow-up during an uncommitted agent resolve: the ticket ends OPEN", async () => {
     const { orgId } = await seedOrgWithMembers(prisma, ["owner"]);
     const t = await seedTicket(orgId, { status: "OPEN" });
+    const resolvedStateId = await stateIdFor(orgId, "RESOLVED");
 
     const holder = holdTx((tx) =>
       tx.ticket.update({
         where: { id: t.id },
-        data: { status: "RESOLVED", resolvedAt: new Date() },
+        data: { stateId: resolvedStateId, resolvedAt: new Date() },
         select: { id: true },
       }),
     );
@@ -307,7 +318,7 @@ describe("reply versus auto-close and agent resolve (D-17, Codex review C6)", ()
     expect(await reply).toBe(200);
 
     const state = await ticketState(t.id);
-    expect(state.status).toBe("OPEN");
+    expect(state.stateId).toBe(await reopenStateId(orgId));
     expect(state.resolvedAt).toBeNull();
     const msg = await prisma.message.findFirstOrThrow({
       where: { ticketId: t.id, bodyMarkdown: followUp.body },
@@ -322,10 +333,42 @@ describe("reply versus auto-close and agent resolve (D-17, Codex review C6)", ()
     const mail = await emailReply(orgId, t.number, { "Auto-Submitted": "auto-replied" });
     expect(await mail.run()).toBe("appended");
 
-    expect((await ticketState(t.id)).status).toBe("CLOSED");
+    expect((await ticketState(t.id)).stateId).toBe(await stateIdFor(orgId, "CLOSED"));
     const msg = await prisma.message.findFirstOrThrow({
       where: { emailMessageId: mail.emailMessageId },
     });
     expect(msg.triggeredReopen).toBe(false);
+  });
+});
+
+describe("customer reply reopens by group into the reopen role (Phase 12.1, D-11)", () => {
+  it("reopens a ticket in a second CLOSED-group state into the reopen role", async () => {
+    const { orgId } = await seedOrgWithMembers(prisma, ["owner"]);
+    const duplicate = await prisma.ticketState.create({
+      data: {
+        organizationId: orgId,
+        name: "Closed - duplicate",
+        colorToken: "gray",
+        group: "CLOSED",
+        sortOrder: 5,
+      },
+    });
+    const t = await seedTicket(orgId, { stateId: duplicate.id, resolvedAt: new Date() });
+
+    const followUp = await statusReply(t.id);
+    expect(await followUp.run()).toBe(200);
+
+    const state = await ticketState(t.id);
+    expect(state.stateId).toBe(await reopenStateId(orgId));
+    expect(state.stateId).toBe(await stateIdFor(orgId, "OPEN"));
+    expect(state.resolvedAt).toBeNull();
+    const msg = await prisma.message.findFirstOrThrow({
+      where: { ticketId: t.id, bodyMarkdown: followUp.body },
+    });
+    expect(msg.triggeredReopen).toBe(true);
+    // The reopen writes no STATUS_CHANGED row (as in Phase 11; triggeredReopen records it).
+    expect(
+      await prisma.ticketAuditEvent.count({ where: { ticketId: t.id, action: "STATUS_CHANGED" } }),
+    ).toBe(0);
   });
 });

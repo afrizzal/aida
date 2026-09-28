@@ -1,31 +1,48 @@
-// The reopen decision for a customer reply (Phase 11, D-17 and its 11-04 amendment). Both
-// customer-reply paths call it inside the transaction that appends the reply:
+// The reopen decision for a customer reply (Phase 11 D-17 and its 11-04 amendment, moved onto
+// ticket states in Phase 12.1, D-11 Customer reply row). Both customer-reply paths call it inside
+// the transaction that appends the reply:
 //   - src/lib/channels/email/ingest-message.ts (an email threaded onto a ticket)
 //   - src/app/api/public/status/[token]/follow-up/route.ts (the public status page)
+// Both callers call resolveReplyTicket first and reopenOnCustomerReply second.
 //
-// Order, always:
-//   1. automatic mail returns false at once: it never reopens (D-13)
+// Group rule (D-11): a reply on a ticket whose state is in group RESOLVED or CLOSED moves it to
+// the organization's reopen role (TicketStateConfig.reopenStateId, group OPEN) and clears
+// resolvedAt. A ticket in group OPEN or PENDING keeps its state and its SLA pause. The reopen
+// source group is never PENDING, so no pause column moves. The reopen writes no STATUS_CHANGED
+// row (as in Phase 11): Message.triggeredReopen records it.
+//
+// Lock order (D-15 amended, frozen in ticket-states.ts): TicketStateConfig FOR SHARE, then the
+// reopen state FOR SHARE, then the ticket row. resolveReplyTicket takes the two share locks as
+// its first statements, before SAVEPOINT reply_resolve (so a ROLLBACK TO the savepoint never
+// releases them) and before any ticket lock. While the config row is share-locked no role can be
+// re-pointed and no role state soft-deleted (both need the row FOR UPDATE).
+//
+// Order inside reopenOnCustomerReply, always:
+//   1. automatic mail returns false at once: it never reopens and never wakes (D-13)
 //   2. the test observer, when one is set (test seam, never set in production)
-//   3. SELECT … FOR UPDATE on the one ticket row. Both callers run resolveReplyTicket first, which
-//      already holds this row's lock (lockTicketsInIdOrder), so this is a second, re-entrant lock
-//      in the same transaction and never waits; it is kept because it is the read the snooze
-//      deadline of step 5 comes from (review IN-02)
-//   4. one conditional UPDATE from RESOLVED or CLOSED to OPEN with resolvedAt null
-//   5. the snooze wake (12-05, D-14): a conditional UPDATE clears snoozedUntil and WOKEN (SYSTEM)
-//      is written only when it changed a row, with the deadline read under the lock in step 3
-// The returned row count of step 4 decides triggeredReopen.
+//   3. the config row read again FOR SHARE for reopenStateId (already held: it does not wait)
+//   4. SELECT … FOR UPDATE on the one ticket row. resolveReplyTicket already holds this row's
+//      lock (lockTicketsInIdOrder), so this is a second, re-entrant lock in the same transaction
+//      and never waits; it is kept because it is the read the snooze deadline of step 6 comes
+//      from (review IN-02)
+//   5. one conditional UPDATE to reopenStateId with resolvedAt null, only when the current state
+//      is in group RESOLVED or CLOSED (EXISTS on TicketState with the organization term)
+//   6. the snooze wake (12-05, D-14): a conditional UPDATE clears snoozedUntil and WOKEN (SYSTEM)
+//      is written only when it changed a row, with the deadline read under the lock in step 4
+// The returned row count of step 5 decides triggeredReopen.
 //
 // Why the row lock comes first: a conditional UPDATE alone skips a row that fails its WHERE on
 // the statement snapshot without waiting, so it would miss an agent's resolve that is still
 // uncommitted. Waiting on the row lock first (in resolveReplyTicket, before this function runs)
-// makes the UPDATE read the committed status. The auto-close job's conditional close waits on
-// this lock too and re-checks RESOLVED afterwards, so a customer reply always wins: the ticket
-// ends OPEN.
+// makes the UPDATE read the committed state. The auto-close job's conditional close waits on
+// this lock too and re-checks group RESOLVED afterwards, so a customer reply always wins: the
+// ticket ends in the reopen state.
 //
 // Relative imports only: the worker bundles the ingest path.
 
 import { lockTicketsInIdOrder } from "./merge";
 import { recordTicketAudit, type TicketAuditTx } from "./ticket-audit";
+import { readStateConfigForShare, shareLockActiveState } from "./ticket-states";
 
 /** Any transaction client that runs tagged raw SQL: prisma, scopedDb or their tx clients. */
 export interface ReopenTx {
@@ -123,12 +140,27 @@ async function readMergedInto(
 }
 
 /**
+ * The organization's reopen role points at a missing or soft-deleted state. Cannot happen while
+ * the config row is share-locked (re-pointing a role and soft-deleting a role state both need the
+ * row FOR UPDATE), so it means corrupt data and is thrown, never refused (D-15 amended).
+ */
+export class ReopenStateUnavailableError extends Error {
+  readonly code = "REOPEN_STATE_UNAVAILABLE";
+  constructor(orgId: string, stateId: string) {
+    super(`reopen state ${stateId} of organization ${orgId} is missing or deleted`);
+    this.name = "ReopenStateUnavailableError";
+  }
+}
+
+/**
  * Decides, inside the reply's transaction and under the row lock, which ticket a customer reply
  * lands on (D-09, D-10). Returns the effective ticket (the token's ticket, or its merge target)
  * with its row locked, or TICKET_UNAVAILABLE. Callers write nothing before it returns, so every
  * reply insert draws its Message.seq under the effective ticket's row lock (review C1).
  *
- * Order (no lock cycle with mergeTickets can form):
+ * Order (no lock cycle with mergeTickets or a state admin operation can form):
+ *   0. readStateConfigForShare, then shareLockActiveState on the reopen state (D-15 amended:
+ *      config, state, ticket), before the savepoint so a rollback to it keeps both locks
  *   1. SAVEPOINT reply_resolve
  *   2. an unlocked read of the token ticket's mergedIntoTicketId (organization predicate)
  *   3. lockTicketsInIdOrder (12-03, the one ascending-id statement mergeTickets uses): the
@@ -145,6 +177,9 @@ export async function resolveReplyTicket(
 ): Promise<ResolveReplyResult> {
   const hooks = observer;
   const ref = { orgId, ticketId: tokenTicketId };
+  const config = await readStateConfigForShare(tx, orgId);
+  const reopenState = await shareLockActiveState(tx, orgId, config.reopenStateId);
+  if (!reopenState) throw new ReopenStateUnavailableError(orgId, config.reopenStateId);
   await tx.$executeRawUnsafe("SAVEPOINT reply_resolve");
   if (hooks?.beforeLock) {
     observedBeforeLock.add(tx);
@@ -200,8 +235,10 @@ async function finish(tx: ResolveTx, ticketId: string): Promise<ResolveReplyResu
 }
 
 /**
- * Reopens a RESOLVED or CLOSED ticket for a customer reply and wakes it when snoozed (D-14).
- * Returns whether it reopened (the wake does not change the result).
+ * Moves a ticket in group RESOLVED or CLOSED to the organization's reopen state for a customer
+ * reply and wakes it when snoozed (D-14). Returns whether it reopened (the wake does not change
+ * the result). Callers call resolveReplyTicket first (it takes the config and reopen-state share
+ * locks and the ticket row lock).
  */
 export async function reopenOnCustomerReply(
   tx: ReopenTx & TicketAuditTx,
@@ -212,6 +249,8 @@ export async function reopenOnCustomerReply(
     await observer.beforeLock(tx, { orgId, ticketId });
   }
 
+  // Already share-locked by resolveReplyTicket, so this read does not wait.
+  const { reopenStateId } = await readStateConfigForShare(tx, orgId);
   const locked = await tx.$queryRaw<{ snoozedUntil: Date | null }[]>`
     SELECT "snoozedUntil" FROM "Ticket"
     WHERE "id" = ${ticketId} AND "organizationId" = ${orgId}
@@ -219,10 +258,15 @@ export async function reopenOnCustomerReply(
   `;
   const changed = await tx.$executeRaw`
     UPDATE "Ticket"
-    SET "status" = 'OPEN', "resolvedAt" = NULL, "updatedAt" = ${new Date()}
+    SET "stateId" = ${reopenStateId}, "resolvedAt" = NULL, "updatedAt" = ${new Date()}
     WHERE "id" = ${ticketId}
       AND "organizationId" = ${orgId}
-      AND "status" IN ('RESOLVED', 'CLOSED')
+      AND EXISTS (
+        SELECT 1 FROM "TicketState" s
+        WHERE s.id = "Ticket"."stateId"
+          AND s."organizationId" = ${orgId}
+          AND s."group" IN ('RESOLVED', 'CLOSED')
+      )
   `;
 
   // The snooze wake (12-05, D-14): a real customer reply ends a snooze. The deadline is the one
