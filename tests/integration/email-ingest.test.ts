@@ -6,6 +6,7 @@ import MailComposer from "nodemailer/lib/mail-composer/index.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import { deriveEmailMessageId, ingestMessage } from "@/lib/channels/email/ingest-message";
 import { prisma } from "@/lib/db";
+import { stateIdFor } from "../support/inbox-fixtures";
 
 // Helper to seed a test organization. Better Auth's organization model has no @default()
 // on `id`/`createdAt` — BA manages them internally, so we provide them here for tests
@@ -74,6 +75,12 @@ describe("email-ingest", () => {
     expect(tickets).toHaveLength(1);
     ticket1Id = tickets[0].id;
     ticket1Number = tickets[0].number;
+    // Phase 12.1 (D-11 Create ticket row): a new ticket starts in the organization's newStateId.
+    const config = await prisma.ticketStateConfig.findUniqueOrThrow({
+      where: { organizationId: orgId },
+    });
+    expect(tickets[0].stateId).toBe(config.newStateId);
+    expect(tickets[0].stateId).toBe(await stateIdFor(orgId, "NEW"));
 
     const message = await prisma.message.findFirst({ where: { emailMessageId: emailMessageId1 } });
     expect(message).not.toBeNull();
@@ -156,10 +163,10 @@ describe("email-ingest", () => {
     expect(message).toBeNull();
   });
 
-  it("6. reply to a RESOLVED ticket reopens it (triggeredReopen marker)", async () => {
+  it("6. reply to a ticket in Resolved reopens it into the reopen state (triggeredReopen marker)", async () => {
     await prisma.ticket.update({
       where: { id: ticket1Id },
-      data: { status: "RESOLVED", resolvedAt: new Date() },
+      data: { stateId: await stateIdFor(orgId, "RESOLVED"), resolvedAt: new Date() },
     });
 
     const emailMessageId1 = await deriveIdFor(fixture1);
@@ -176,10 +183,82 @@ describe("email-ingest", () => {
     expect(result).toBe("appended");
 
     const ticket = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket1Id } });
-    expect(ticket.status).toBe("OPEN");
+    const config = await prisma.ticketStateConfig.findUniqueOrThrow({
+      where: { organizationId: orgId },
+    });
+    expect(ticket.stateId).toBe(config.reopenStateId);
+    expect(ticket.stateId).toBe(await stateIdFor(orgId, "OPEN"));
     expect(ticket.resolvedAt).toBeNull();
 
     const message = await prisma.message.findFirst({ where: { emailMessageId: emailMessageId6 } });
     expect(message?.triggeredReopen).toBe(true);
+  });
+
+  it("7. reply matched by header to a ticket in Pending keeps Pending, its slaPausedAt and its deadlines", async () => {
+    const pausedAt = new Date("2026-11-01T10:00:00.000Z");
+    const pendingId = await stateIdFor(orgId, "PENDING");
+    await prisma.ticket.update({
+      where: { id: ticket1Id },
+      data: { stateId: pendingId, resolvedAt: null, slaPausedAt: pausedAt },
+    });
+    const before = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket1Id } });
+
+    const emailMessageId1 = await deriveIdFor(fixture1);
+    const fixture7 = await buildFixture({
+      messageId: "<fixture7@test.local>",
+      subject: "Re: Order issue",
+      from: "customer1@example.com",
+      text: "Here is the information you asked for.",
+      inReplyTo: emailMessageId1,
+    });
+    const emailMessageId7 = await deriveIdFor(fixture7);
+    expect(await ingestMessage(orgId, fixture7, SELF_ADDRESS, emailMessageId7)).toBe("appended");
+
+    const after = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket1Id } });
+    expect(after.stateId).toBe(pendingId);
+    expect(after.slaPausedAt?.toISOString()).toBe(pausedAt.toISOString());
+    expect(after.slaPausedMs).toBe(before.slaPausedMs);
+    expect(after.firstResponseDueAt.toISOString()).toBe(before.firstResponseDueAt.toISOString());
+    expect(after.resolutionDueAt.toISOString()).toBe(before.resolutionDueAt.toISOString());
+    expect(after.resolvedAt).toBeNull();
+    const message = await prisma.message.findFirst({ where: { emailMessageId: emailMessageId7 } });
+    expect(message?.triggeredReopen).toBe(false);
+    expect(
+      await prisma.ticketAuditEvent.count({
+        where: { ticketId: ticket1Id, action: "STATUS_CHANGED" },
+      }),
+    ).toBe(0);
+  });
+
+  it("8. automatic reply matched to a snoozed ticket in Resolved neither reopens nor wakes it", async () => {
+    const resolvedId = await stateIdFor(orgId, "RESOLVED");
+    const resolvedAt = new Date("2026-11-02T10:00:00.000Z");
+    const snoozedUntil = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    await prisma.ticket.update({
+      where: { id: ticket1Id },
+      data: { stateId: resolvedId, resolvedAt, slaPausedAt: null, snoozedUntil },
+    });
+
+    const emailMessageId1 = await deriveIdFor(fixture1);
+    const fixture8 = await buildFixture({
+      messageId: "<fixture8@test.local>",
+      subject: "Re: Order issue",
+      from: "customer1@example.com",
+      text: "I am out of office.",
+      inReplyTo: emailMessageId1,
+      headers: { "Auto-Submitted": "auto-replied" },
+    });
+    const emailMessageId8 = await deriveIdFor(fixture8);
+    expect(await ingestMessage(orgId, fixture8, SELF_ADDRESS, emailMessageId8)).toBe("appended");
+
+    const after = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket1Id } });
+    expect(after.stateId).toBe(resolvedId);
+    expect(after.resolvedAt?.toISOString()).toBe(resolvedAt.toISOString());
+    expect(after.snoozedUntil?.toISOString()).toBe(snoozedUntil.toISOString());
+    const message = await prisma.message.findFirst({ where: { emailMessageId: emailMessageId8 } });
+    expect(message?.triggeredReopen).toBe(false);
+    expect(
+      await prisma.ticketAuditEvent.count({ where: { ticketId: ticket1Id, action: "WOKEN" } }),
+    ).toBe(0);
   });
 });

@@ -114,7 +114,7 @@ export async function ingestMessage(
     }
   }
 
-  let matchedTicket: { id: string; status: string; contactId: string } | null = null;
+  let matchedTicket: { id: string; contactId: string } | null = null;
   if (ticketId) {
     matchedTicket = await db.ticket.findFirst({ where: { id: ticketId } });
   }
@@ -201,8 +201,10 @@ export async function ingestMessage(
       if (!resolved.ok) throw new ReplyTicketUnavailableError(matchedTicketId);
       const ticketIdToUpdate = resolved.ticketId;
 
-      // The reopen is decided here, under the ticket row lock, never from the status read
-      // above (D-17). Auto mail threads normally but never reopens (D-13).
+      // The reopen is decided here by the group of the ticket's state, under the ticket row
+      // lock (D-17; Phase 12.1 D-11): RESOLVED or CLOSED moves to the organization's reopen
+      // state. The match above reads no state. Auto mail threads normally but never reopens
+      // (D-13).
       const reopened = await reopenOnCustomerReply(tx, {
         orgId,
         ticketId: ticketIdToUpdate,

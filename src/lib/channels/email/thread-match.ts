@@ -41,7 +41,7 @@ type ThreadMatchDb = {
     findFirst(args: unknown): Promise<{ ticketId: string } | null>;
   };
   ticket: {
-    findFirst(args: unknown): Promise<{ id: string; status: string; contactId: string } | null>;
+    findFirst(args: unknown): Promise<{ id: string; contactId: string } | null>;
   };
 };
 
@@ -60,9 +60,9 @@ export async function findTicketIdByEmailMessageIds(
 export async function findTicketByNumber(
   db: ThreadMatchDb,
   number: number,
-): Promise<{ id: string; status: string; contactId: string } | null> {
+): Promise<{ id: string; contactId: string } | null> {
   return db.ticket.findFirst({
     where: { number },
-    select: { id: true, status: true, contactId: true },
+    select: { id: true, contactId: true },
   });
 }

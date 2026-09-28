@@ -371,4 +371,45 @@ describe("customer reply reopens by group into the reopen role (Phase 12.1, D-11
       await prisma.ticketAuditEvent.count({ where: { ticketId: t.id, action: "STATUS_CHANGED" } }),
     ).toBe(0);
   });
+
+  it("a follow-up on an Open ticket changes no state and writes no audit row", async () => {
+    const { orgId } = await seedOrgWithMembers(prisma, ["owner"]);
+    const openId = await stateIdFor(orgId, "OPEN");
+    const t = await seedTicket(orgId, { status: "OPEN" });
+    const auditBefore = await prisma.ticketAuditEvent.count({ where: { ticketId: t.id } });
+
+    const followUp = await statusReply(t.id);
+    expect(await followUp.run()).toBe(200);
+
+    const state = await ticketState(t.id);
+    expect(state.stateId).toBe(openId);
+    expect(state.resolvedAt).toBeNull();
+    expect(await prisma.ticketAuditEvent.count({ where: { ticketId: t.id } })).toBe(auditBefore);
+    const msg = await prisma.message.findFirstOrThrow({
+      where: { ticketId: t.id, bodyMarkdown: followUp.body },
+    });
+    expect(msg.triggeredReopen).toBe(false);
+  });
+
+  it("a follow-up on a Pending ticket keeps Pending, its slaPausedAt and its deadlines", async () => {
+    const { orgId } = await seedOrgWithMembers(prisma, ["owner"]);
+    const pendingId = await stateIdFor(orgId, "PENDING");
+    const t = await seedTicket(orgId, { status: "PENDING" });
+    const before = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id } });
+    expect(before.slaPausedAt).not.toBeNull();
+
+    const followUp = await statusReply(t.id);
+    expect(await followUp.run()).toBe(200);
+
+    const after = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id } });
+    expect(after.stateId).toBe(pendingId);
+    expect(after.slaPausedAt?.toISOString()).toBe(before.slaPausedAt?.toISOString());
+    expect(after.slaPausedMs).toBe(before.slaPausedMs);
+    expect(after.firstResponseDueAt.toISOString()).toBe(before.firstResponseDueAt.toISOString());
+    expect(after.resolutionDueAt.toISOString()).toBe(before.resolutionDueAt.toISOString());
+    const msg = await prisma.message.findFirstOrThrow({
+      where: { ticketId: t.id, bodyMarkdown: followUp.body },
+    });
+    expect(msg.triggeredReopen).toBe(false);
+  });
 });

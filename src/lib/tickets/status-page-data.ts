@@ -3,8 +3,12 @@
 // the token may see comes only from statusMessageWhere (12-01), the predicate the attachment
 // route shares, so the page and the attachment route cannot drift.
 //
-// A merged source never exposes its target: the header fields (number, subject, status) are
+// A merged source never exposes its target: the header fields (number, subject, group) are
 // always the token's own ticket, and only the merged flag tells the page a merge happened.
+//
+// Public label by group only (Phase 12.1, D-13): the loader selects only the group of the
+// ticket's state and returns it as group. It never selects or returns the state's name, colour
+// or id, so an internal name such as "Waiting on engineering" never reaches the public side.
 //
 // One snapshot (Codex diff critique round 1, D5): the token's merge marker and the message or
 // attachment rows are read in ONE interactive transaction at REPEATABLE READ, so both reads see
@@ -13,9 +17,10 @@
 // never a transient 404. The next request sees the merge. Plain reads only; no row is locked.
 // Relative imports only.
 
-import type { MessageVisibility, TicketStatus } from "../../generated/prisma/client";
+import type { MessageVisibility } from "../../generated/prisma/client";
 import { prisma } from "../db";
 import { isMessageVisibleForToken, statusMessageWhere } from "./status-visibility";
+import type { StateGroup } from "./ticket-states";
 
 export interface StatusPageAttachment {
   id: string;
@@ -39,7 +44,8 @@ export interface StatusPageData {
   ticketId: string;
   number: number;
   subject: string;
-  status: TicketStatus;
+  /** The group of the ticket's state; the only state information the public side gets. */
+  group: StateGroup;
   contact: { name: string | null; email: string };
   merged: boolean;
   mergedAt: Date | null;
@@ -74,7 +80,7 @@ export async function loadStatusPageData(token: string): Promise<StatusPageData 
         id: true,
         number: true,
         subject: true,
-        status: true,
+        state: { select: { group: true } },
         mergedIntoTicketId: true,
         mergedAt: true,
         mergeMessageSeq: true,
@@ -110,7 +116,7 @@ export async function loadStatusPageData(token: string): Promise<StatusPageData 
       ticketId: ticket.id,
       number: ticket.number,
       subject: ticket.subject,
-      status: ticket.status,
+      group: ticket.state.group,
       contact: ticket.contact,
       merged: ticket.mergedIntoTicketId !== null,
       mergedAt: ticket.mergedAt,
