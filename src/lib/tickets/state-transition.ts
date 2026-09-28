@@ -62,7 +62,10 @@ export interface ClosedPause {
  * than the pause start counts as 0.
  */
 export function closePause(
-  row: Pick<TransitionRow, "slaPausedAt" | "slaPausedMs" | "firstResponseDueAt" | "resolutionDueAt">,
+  row: Pick<
+    TransitionRow,
+    "slaPausedAt" | "slaPausedMs" | "firstResponseDueAt" | "resolutionDueAt"
+  >,
   now: Date,
 ): ClosedPause | null {
   if (row.slaPausedAt === null) return null;
