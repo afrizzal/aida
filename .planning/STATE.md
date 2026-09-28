@@ -5,7 +5,7 @@ milestone_name: Helpdesk & Projects
 current_phase: 12
 current_phase_name: ticket-lifecycle
 status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11 and 12 verified human_needed; Phase 12.1 (custom states and SLA pause) next
-stopped_at: Completed 12.1-04-PLAN.md (shared state transition with SLA pause, kind state in runTicketMutation, changeState and bulk state branch; forced-order merged-source case removed for 12.1-07)
+stopped_at: Completed 12.1-05-PLAN.md (reply reopen by group into the reopen role with config share locks first, auto-close on the RESOLVED group into the autoClose role, email matching without status, public status loader returns the group only)
 last_updated: "2026-11-08T15:06:29.465Z"
 last_activity: 2026-11-09
 last_activity_desc: Phase 12.1 planned, 17 plans in 7 waves; Codex plan review converged after cycle 2 (K29); execution next
