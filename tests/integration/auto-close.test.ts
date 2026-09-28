@@ -9,13 +9,14 @@ import {
   readAutoCloseSettings,
   saveAutoCloseDays,
 } from "@/lib/tickets/auto-close-settings";
+import { readLegacyStateIds } from "@/lib/tickets/ticket-states";
 import {
   type AutoCloseHandlerOptions,
   AutoCloseRunError,
   autoCloseHandler,
   closeResolvedTicketIfQuiet,
 } from "@/lib/worker/jobs/auto-close";
-import { seedOrgWithMembers, seedTicket } from "../support/inbox-fixtures";
+import { seedOrgWithMembers, seedTicket, stateIdFor } from "../support/inbox-fixtures";
 import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -73,11 +74,25 @@ async function resolvedTicket(orgId: string, resolvedAt: Date | null) {
   return seedTicket(orgId, { status: "RESOLVED", resolvedAt });
 }
 
+/**
+ * The ticket's state id, its group and resolvedAt. key is the legacy key (NEW to CLOSED) of the
+ * migrated state whose id equals the ticket's stateId in its own organization, or null for any
+ * other state, so `key` assertions compare state ids.
+ */
 async function ticketState(id: string) {
-  return prisma.ticket.findUniqueOrThrow({
+  const row = await prisma.ticket.findUniqueOrThrow({
     where: { id },
-    select: { status: true, resolvedAt: true },
+    select: {
+      organizationId: true,
+      stateId: true,
+      resolvedAt: true,
+      state: { select: { group: true } },
+    },
   });
+  const legacy = await readLegacyStateIds(prisma, row.organizationId);
+  const key =
+    (Object.keys(legacy) as (keyof typeof legacy)[]).find((k) => legacy[k] === row.stateId) ?? null;
+  return { stateId: row.stateId, group: row.state.group, resolvedAt: row.resolvedAt, key };
 }
 
 function autoClosedRows(ticketId: string) {
@@ -215,9 +230,9 @@ describe("autoCloseHandler isolates each organization (review WR-02)", () => {
     );
 
     // The failing organization's ticket is untouched; the later organization still ran.
-    expect((await ticketState(broken.id)).status).toBe("RESOLVED");
+    expect((await ticketState(broken.id)).key).toBe("RESOLVED");
     expect(await autoClosedRows(broken.id)).toHaveLength(0);
-    expect((await ticketState(quiet.id)).status).toBe("CLOSED");
+    expect((await ticketState(quiet.id)).key).toBe("CLOSED");
     expect(await autoClosedRows(quiet.id)).toHaveLength(1);
 
     expect(outcome).toBeInstanceOf(AutoCloseRunError);
@@ -245,7 +260,7 @@ describe("autoCloseHandler isolates each organization (review WR-02)", () => {
     // The run is idempotent: once the fault is gone, the next run closes the skipped ticket.
     const retry = await runJob(failing.orgId, now);
     expect(retry.org?.closed).toBe(1);
-    expect((await ticketState(broken.id)).status).toBe("CLOSED");
+    expect((await ticketState(broken.id)).key).toBe("CLOSED");
   });
 });
 
@@ -298,9 +313,9 @@ describe("autoCloseHandler (D-16 as amended, D-17, D-18, D-19)", () => {
     expect(lines).toEqual([`[auto-close] org=${orgId} closed=4 skippedWithoutResolvedAt=0`]);
 
     for (const t of [old, withAgentReply, withNote, withAutoMail]) {
-      expect((await ticketState(t.id)).status).toBe("CLOSED");
+      expect((await ticketState(t.id)).key).toBe("CLOSED");
     }
-    expect((await ticketState(recent.id)).status).toBe("RESOLVED");
+    expect((await ticketState(recent.id)).key).toBe("RESOLVED");
     expect(await autoClosedRows(recent.id)).toHaveLength(0);
   });
 
@@ -312,7 +327,7 @@ describe("autoCloseHandler (D-16 as amended, D-17, D-18, D-19)", () => {
 
     const { org } = await runJob(orgId, now);
     expect(org?.closed).toBe(0);
-    expect((await ticketState(t.id)).status).toBe("RESOLVED");
+    expect((await ticketState(t.id)).key).toBe("RESOLVED");
   });
 
   it("keeps resolvedAt, writes exactly one SYSTEM AUTO_CLOSED row and adds nothing when run again", async () => {
@@ -324,7 +339,7 @@ describe("autoCloseHandler (D-16 as amended, D-17, D-18, D-19)", () => {
 
     await runJob(orgId, now);
     const after = await ticketState(t.id);
-    expect(after.status).toBe("CLOSED");
+    expect(after.key).toBe("CLOSED");
     expect(after.resolvedAt?.toISOString()).toBe(resolvedAt.toISOString());
 
     const rows = await autoClosedRows(t.id);
@@ -334,8 +349,8 @@ describe("autoCloseHandler (D-16 as amended, D-17, D-18, D-19)", () => {
       actorType: "SYSTEM",
       actorUserId: null,
       action: "AUTO_CLOSED",
-      before: { status: "RESOLVED" },
-      after: { status: "CLOSED" },
+      before: { stateId: await stateIdFor(orgId, "RESOLVED"), stateGroup: "RESOLVED" },
+      after: { stateId: await stateIdFor(orgId, "CLOSED"), stateGroup: "CLOSED" },
       batchId: null,
     });
 
@@ -357,6 +372,8 @@ describe("autoCloseHandler (D-16 as amended, D-17, D-18, D-19)", () => {
     // 98 tickets with distinct resolvedAt (200 to 103 days ago, oldest first), then 7 that share
     // one resolvedAt newer than all of them: the 100-ticket boundary falls inside the tie group.
     const tieAt = daysAgo(now, 50);
+    const resolvedStateId = await stateIdFor(orgId, "RESOLVED");
+    const closedStateId = await stateIdFor(orgId, "CLOSED");
     const rows = [];
     for (let i = 1; i < 105; i += 1) {
       rows.push({
@@ -365,7 +382,7 @@ describe("autoCloseHandler (D-16 as amended, D-17, D-18, D-19)", () => {
         number: 10_000 + i,
         statusToken: randomUUID(),
         subject: `Cap fixture ${i}`,
-        status: "RESOLVED" as const,
+        stateId: resolvedStateId,
         priority: "NORMAL" as const,
         firstResponseTargetMinutes: 60,
         resolutionTargetMinutes: 480,
@@ -392,7 +409,7 @@ describe("autoCloseHandler (D-16 as amended, D-17, D-18, D-19)", () => {
     const run1 = await runJob(orgId, now);
     expect(run1.org?.closed).toBe(100);
     const closedAfter1 = await prisma.ticket.findMany({
-      where: { organizationId: orgId, status: "CLOSED" },
+      where: { organizationId: orgId, stateId: closedStateId },
       select: { id: true },
     });
     expect(new Set(closedAfter1.map((r) => r.id))).toEqual(new Set(expectedFirst));
@@ -400,7 +417,7 @@ describe("autoCloseHandler (D-16 as amended, D-17, D-18, D-19)", () => {
     const run2 = await runJob(orgId, now);
     expect(run2.org?.closed).toBe(5);
     expect(
-      await prisma.ticket.count({ where: { organizationId: orgId, status: "RESOLVED" } }),
+      await prisma.ticket.count({ where: { organizationId: orgId, stateId: resolvedStateId } }),
     ).toBe(0);
     expect(
       await prisma.ticketAuditEvent.count({
@@ -426,7 +443,7 @@ describe("autoCloseHandler (D-16 as amended, D-17, D-18, D-19)", () => {
       const result = await autoCloseHandler(undefined, { now, log: (l) => lines.push(l) });
       const own = lines.filter((l) => l.includes(`org=${orgId}`));
 
-      expect((await ticketState(t.id)).status).toBe("RESOLVED");
+      expect((await ticketState(t.id)).key).toBe("RESOLVED");
       expect(await autoClosedRows(t.id)).toHaveLength(0);
       expect(result.organizations.find((o) => o.orgId === orgId)).toBeUndefined();
       if (c.invalid) {
@@ -468,9 +485,9 @@ describe("autoCloseHandler (D-16 as amended, D-17, D-18, D-19)", () => {
     const { org, lines } = await runJob(orgId, now);
     expect(org).toMatchObject({ closed: 1, skippedWithoutResolvedAt: 1 });
     expect(lines).toEqual([`[auto-close] org=${orgId} closed=1 skippedWithoutResolvedAt=1`]);
-    expect((await ticketState(noResolvedAt.id)).status).toBe("RESOLVED");
-    expect((await ticketState(due.id)).status).toBe("CLOSED");
-    expect((await ticketState(otherTicket.id)).status).toBe("RESOLVED");
+    expect((await ticketState(noResolvedAt.id)).key).toBe("RESOLVED");
+    expect((await ticketState(due.id)).key).toBe("CLOSED");
+    expect((await ticketState(otherTicket.id)).key).toBe("RESOLVED");
     expect(await autoClosedRows(otherTicket.id)).toHaveLength(0);
   });
 });
@@ -490,7 +507,7 @@ describe("autoCloseHandler re-reads the setting under a lock for every close (Co
       });
 
       expect(saved).toMatchObject({ ok: true, days: Number(raw) });
-      expect((await ticketState(t.id)).status).toBe("RESOLVED");
+      expect((await ticketState(t.id)).key).toBe("RESOLVED");
       expect(await autoClosedRows(t.id)).toHaveLength(0);
       expect(org?.closed).toBe(0);
       expect(lines[0]).toContain("closed=0");
@@ -548,7 +565,7 @@ describe("setting change and close serialise in both orders (Codex reviews C8, C
     expect(await save).toEqual({ ok: true, days: 0, enabledAt: null });
     const { org, lines } = await job;
 
-    expect((await ticketState(t.id)).status).toBe("RESOLVED");
+    expect((await ticketState(t.id)).key).toBe("RESOLVED");
     expect(await autoClosedRows(t.id)).toHaveLength(0);
     expect(org).toMatchObject({ closed: 0, stoppedOff: true });
     expect(lines[0]).toContain("closed=0");
@@ -592,7 +609,7 @@ describe("setting change and close serialise in both orders (Codex reviews C8, C
     await holder;
     expect(await save).toEqual({ ok: true, days: 0, enabledAt: null });
 
-    expect((await ticketState(t.id)).status).toBe("CLOSED");
+    expect((await ticketState(t.id)).key).toBe("CLOSED");
     expect(await autoClosedRows(t.id)).toHaveLength(1);
     expect(await storedSettings(orgId)).toEqual({ days: "0", enabledAt: null });
 
@@ -638,7 +655,7 @@ describe("setting change and close serialise in both orders (Codex reviews C8, C
 
     expect(saveCommittedInHook).toBe(true);
     expect(first).toEqual({ closed: false, off: true });
-    expect((await ticketState(t.id)).status).toBe("RESOLVED");
+    expect((await ticketState(t.id)).key).toBe("RESOLVED");
     expect(await autoClosedRows(t.id)).toHaveLength(0);
     expect(await storedSettings(orgId)).toEqual({
       days: "7",
@@ -651,7 +668,105 @@ describe("setting change and close serialise in both orders (Codex reviews C8, C
       TX_OPTS,
     );
     expect(control).toEqual({ closed: true, off: false });
-    expect((await ticketState(t.id)).status).toBe("CLOSED");
+    expect((await ticketState(t.id)).key).toBe("CLOSED");
     expect(await autoClosedRows(t.id)).toHaveLength(1);
+  });
+});
+
+describe("auto-close reasons about the RESOLVED group and closes into the auto-close role (Phase 12.1, D-11)", () => {
+  async function addState(orgId: string, name: string, group: "RESOLVED" | "CLOSED") {
+    return prisma.ticketState.create({
+      data: { organizationId: orgId, name, colorToken: "green", group, sortOrder: 5 },
+      select: { id: true },
+    });
+  }
+
+  it("closes a quiet ticket in Resolved and one in 'Resolved - confirmed' into autoCloseStateId, keeps resolvedAt, audits ids only", async () => {
+    const now = new Date();
+    const { orgId } = await seedAdminOrg();
+    await setAutoClose(orgId, "7", daysAgo(now, 30));
+    const confirmed = await addState(orgId, "Resolved - confirmed", "RESOLVED");
+    const resolvedAt = daysAgo(now, 10);
+    const inResolved = await resolvedTicket(orgId, resolvedAt);
+    const inConfirmed = await seedTicket(orgId, { stateId: confirmed.id, resolvedAt });
+    const config = await prisma.ticketStateConfig.findUniqueOrThrow({
+      where: { organizationId: orgId },
+    });
+    const resolvedId = await stateIdFor(orgId, "RESOLVED");
+
+    const { org } = await runJob(orgId, now);
+    expect(org).toMatchObject({ closed: 2, skippedWithoutResolvedAt: 0 });
+
+    for (const [ticket, previous] of [
+      [inResolved, resolvedId],
+      [inConfirmed, confirmed.id],
+    ] as const) {
+      const after = await ticketState(ticket.id);
+      expect(after.stateId).toBe(config.autoCloseStateId);
+      expect(after.group).toBe("CLOSED");
+      expect(after.resolvedAt?.toISOString()).toBe(resolvedAt.toISOString());
+      const rows = await autoClosedRows(ticket.id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].before).toEqual({ stateId: previous, stateGroup: "RESOLVED" });
+      expect(rows[0].after).toEqual({ stateId: config.autoCloseStateId, stateGroup: "CLOSED" });
+    }
+  });
+
+  it("uses a second CLOSED-group state once the config's autoCloseStateId points at it", async () => {
+    const now = new Date();
+    const { orgId } = await seedAdminOrg();
+    await setAutoClose(orgId, "7", daysAgo(now, 30));
+    const archived = await addState(orgId, "Closed - archived", "CLOSED");
+    await prisma.ticketStateConfig.update({
+      where: { organizationId: orgId },
+      data: { autoCloseStateId: archived.id },
+    });
+    const t = await resolvedTicket(orgId, daysAgo(now, 10));
+
+    const { org } = await runJob(orgId, now);
+    expect(org?.closed).toBe(1);
+    const after = await ticketState(t.id);
+    expect(after.stateId).toBe(archived.id);
+    expect(after.key).toBeNull();
+    const rows = await autoClosedRows(t.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].after).toEqual({ stateId: archived.id, stateGroup: "CLOSED" });
+  });
+
+  it("never closes tickets in New, Open, Pending or Closed; counts RESOLVED-group tickets without resolvedAt", async () => {
+    const now = new Date();
+    const { orgId } = await seedAdminOrg();
+    await setAutoClose(orgId, "7", daysAgo(now, 30));
+    const confirmed = await addState(orgId, "Resolved - confirmed", "RESOLVED");
+    const old = daysAgo(now, 100);
+    const others = [];
+    for (const status of ["NEW", "OPEN", "PENDING", "CLOSED"] as const) {
+      others.push({ status, ticket: await seedTicket(orgId, { status, resolvedAt: old }) });
+    }
+    await resolvedTicket(orgId, null);
+    await seedTicket(orgId, { stateId: confirmed.id, resolvedAt: null });
+
+    const { org, lines } = await runJob(orgId, now);
+    expect(org).toMatchObject({ closed: 0, skippedWithoutResolvedAt: 2 });
+    expect(lines).toEqual([`[auto-close] org=${orgId} closed=0 skippedWithoutResolvedAt=2`]);
+    for (const { status, ticket } of others) {
+      expect((await ticketState(ticket.id)).key).toBe(status);
+      expect(await autoClosedRows(ticket.id)).toHaveLength(0);
+    }
+  });
+
+  it("closeResolvedTicketIfQuiet re-checks the group under the ticket lock: an Open ticket is not closed", async () => {
+    const now = new Date();
+    const { orgId } = await seedAdminOrg();
+    await setAutoClose(orgId, "7", daysAgo(now, 30));
+    const t = await seedTicket(orgId, { status: "OPEN", resolvedAt: daysAgo(now, 100) });
+
+    const outcome = await prisma.$transaction(
+      (tx) => closeResolvedTicketIfQuiet(tx, { orgId, ticketId: t.id, now }),
+      TX_OPTS,
+    );
+    expect(outcome).toEqual({ closed: false, off: false });
+    expect((await ticketState(t.id)).key).toBe("OPEN");
+    expect(await autoClosedRows(t.id)).toHaveLength(0);
   });
 });
