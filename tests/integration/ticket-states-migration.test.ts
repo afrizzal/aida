@@ -501,3 +501,98 @@ describe("fixture coverage check discriminates (review C8, review R2-3)", () => 
     expect(uncovered.some((u) => u.startsWith("SavedView.updatedAt"))).toBe(false);
   });
 });
+
+/** Full text of a Prisma or pg adapter error, including meta and the cause chain. */
+// Copied from tests/integration/lifecycle-schema.test.ts (lines 21-41).
+function errorText(err: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = err;
+  for (let depth = 0; current && depth < 5; depth++) {
+    const e = current as { code?: string; message?: string; meta?: unknown; cause?: unknown };
+    parts.push(String(e.code ?? ""), String(e.message ?? current), JSON.stringify(e.meta ?? {}));
+    current = e.cause;
+  }
+  return parts.join(" ");
+}
+
+/** Resolves with the error text when the promise rejects; fails the test when it resolves. */
+async function rejection(promise: PromiseLike<unknown>): Promise<string> {
+  try {
+    await promise;
+  } catch (err) {
+    return errorText(err);
+  }
+  throw new Error("expected the operation to be rejected");
+}
+
+describe("ticket_states migration, harness path: a malformed saved view rolls everything back (D-09, D-10)", () => {
+  const cases: { name: string; filters: string; expected: string }[] = [
+    {
+      name: "rollback_unknown",
+      filters: JSON.stringify({ version: 1, view: "all", statuses: ["ARCHIVED"] }),
+      expected: "has an unknown status value",
+    },
+    { name: "rollback_string", filters: JSON.stringify("oops"), expected: "has malformed filters" },
+    {
+      name: "rollback_version",
+      filters: JSON.stringify({ version: 3, view: "all", statuses: [] }),
+      expected: "has malformed filters",
+    },
+    {
+      name: "rollback_not_array",
+      filters: JSON.stringify({ version: 1, view: "all", statuses: "OPEN" }),
+      expected: "has malformed filters",
+    },
+  ];
+
+  for (const testCase of cases) {
+    it(`${testCase.name}: rejects with the view id and '${testCase.expected}', and changes nothing`, async () => {
+      const db = await baselineDatabase(testCase.name);
+      const t = FIXTURE_TIMESTAMP_VALUES;
+      const viewId = `view-${testCase.name}`;
+      await db.query(
+        `INSERT INTO "organization" ("id", "name", "slug", "createdAt") VALUES ('org-r', 'R', 'r', $1)`,
+        [t[0]],
+      );
+      await db.query(
+        `INSERT INTO "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt")
+         VALUES ('user-r', 'R Agent', 'agent@r.test', true, $1, $2)`,
+        [t[1], t[2]],
+      );
+      await db.query(
+        `INSERT INTO "Contact" ("id", "organizationId", "email", "createdAt", "updatedAt")
+         VALUES ('contact-r', 'org-r', 'c@r.test', $1, $2)`,
+        [t[3], t[4]],
+      );
+      await db.query(
+        `INSERT INTO "Ticket" ("id", "organizationId", "number", "statusToken", "subject", "status",
+           "contactId", "firstResponseTargetMinutes", "resolutionTargetMinutes", "firstResponseDueAt",
+           "resolutionDueAt", "createdAt", "updatedAt")
+         VALUES ('ticket-r', 'org-r', 1, 'token-r', 'R', 'PENDING', 'contact-r', 60, 480, $1, $2, $3, $4)`,
+        [t[5], t[6], t[7], t[8]],
+      );
+      await db.query(
+        `INSERT INTO "SavedView" ("id", "organizationId", "ownerUserId", "name", "visibility", "filters",
+           "position", "createdAt", "updatedAt")
+         VALUES ($1, 'org-r', 'user-r', 'Bad view', 'SHARED', $2::jsonb, 0, $3, $4)`,
+        [viewId, testCase.filters, t[9], t[10]],
+      );
+      const before = await snapshotTables(db);
+
+      const text = await rejection(applyMigrations(db, { only: STATES_MIGRATION }));
+      expect(text).toContain(viewId);
+      expect(text).toContain(testCase.expected);
+
+      const status = await db.query(
+        `SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'Ticket' AND column_name = 'status'`,
+      );
+      expect(status.rowCount).toBe(1);
+      const regclass = await db.query(`SELECT to_regclass('"TicketState"') AS r`);
+      expect(regclass.rows[0].r).toBeNull();
+      const enumType = await db.query(`SELECT 1 FROM pg_type WHERE typname = 'TicketStatus'`);
+      expect(enumType.rowCount).toBe(1);
+      expect(await snapshotTables(db)).toEqual(before);
+    });
+  }
+});

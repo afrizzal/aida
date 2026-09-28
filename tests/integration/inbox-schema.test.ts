@@ -10,7 +10,7 @@ import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
 
 type SavedViewVisibilityValue = "PRIVATE" | "SHARED";
 
-const STORED_FILTERS = { version: 1, view: "all", statuses: [] } as const;
+const STORED_FILTERS = { version: 2, view: "all", stateIds: [] } as const;
 
 function createView(
   orgId: string,
