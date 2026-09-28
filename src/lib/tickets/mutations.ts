@@ -1,4 +1,4 @@
-// The ONE ticket mutation service (Phase 11, D-07 and D-08). Assign, set status, set priority,
+// The ONE ticket mutation service (Phase 11, D-07 and D-08). Assign, set state, set priority,
 // add tag and remove tag all run here, for one ticket (the ticket page's actions, mode "single")
 // or for up to 100 tickets (the inbox bulk bar, mode "bulk"), inside one interactive transaction
 // that writes exactly one TicketAuditEvent per ticket.
@@ -6,11 +6,26 @@
 // Order inside the transaction, always:
 //   1. hooks.onTransactionStart (test seam only)
 //   2. the actor's member row (findActiveMembership), refused with MEMBERSHIP_ENDED (D-01)
-//   3. the operation's references (assignee membership, tag in the organization)
-//   4. one SELECT … WHERE "organizationId" = actor org ORDER BY id FOR UPDATE over every ticket
-//   5. a status change refuses the whole payload with MERGED_SOURCE when any locked ticket is a
+//   3. the operation's references (assignee membership, tag in the organization; for a state
+//      change the target state read FOR SHARE with shareLockActiveState, refused with
+//      STATE_NOT_FOUND when it is missing, soft-deleted or another organization's: D-15 amended,
+//      the state lock always precedes the ticket lock)
+//   4. one SELECT … FROM "Ticket" WHERE "organizationId" = actor org ORDER BY id FOR UPDATE over
+//      every ticket: one statement on the ticket table alone (no join, so no state row is
+//      locked), locking in ascending id and waiting for rows held by others. The sla-flag worker
+//      locks with SKIP LOCKED and never waits, so it cannot form a deadlock cycle with this
+//      statement (proven by the two-ticket races of plan 12.1-06 Task 3, review C6). Keep this
+//      order: those races depend on it. The statement is not lockTicketsInIdOrder because it
+//      also needs priority, assigneeId, createdAt and the SLA columns.
+//   5. a state change refuses the whole payload with MERGED_SOURCE when any locked ticket is a
 //      merged source (Phase 12, D-07, D-08; Codex diff critique round 1, D1)
-//   6. per locked ticket, in id order: apply, audit, hooks.afterItem (test seam only)
+//   6. the current groups of the locked tickets (readStateGroups), then `now`, read after the
+//      lock (hooks.clock in tests, D-16, D-17)
+//   7. per locked ticket, in id order: apply, audit, hooks.afterItem (test seam only)
+//
+// A state change goes through applyStateTransition (state-transition.ts): lifecycle effects
+// (resolvedAt, flags, SLA pause) fire only when the group changes (D-11, D-16). Its audit row is
+// STATUS_CHANGED with before and after equal to stateAuditSnapshot ({ stateId, stateGroup }).
 //
 // Error contract (Codex review C5): a TicketMutationError rolls the transaction back and is
 // RETURNED as { ok: false, error: code }. Any other error (database, or one thrown by a test
@@ -26,36 +41,37 @@
 // Relative imports only and no Next.js import: cache revalidation belongs to the server actions,
 // after this function returned success.
 import { randomUUID } from "node:crypto";
-import type { Prisma, TicketPriority, TicketStatus } from "../../generated/prisma/client";
+import type { Prisma, TicketPriority } from "../../generated/prisma/client";
 import { prisma } from "../db";
 import { findActiveMembership } from "../membership";
-import { computeDueTimestamps, DEFAULT_SLA_TARGETS, type SlaTargets } from "./sla";
+import { DEFAULT_SLA_TARGETS, type SlaTargets } from "./sla";
+import { applyStateTransition, pausedDueTimestamps } from "./state-transition";
 import type { TicketAuditSnapshot } from "./ticket-audit";
 import { recordTicketAudit } from "./ticket-audit";
+import {
+  readStateGroups,
+  type StateGroup,
+  shareLockActiveState,
+  stateAuditSnapshot,
+} from "./ticket-states";
 
 /** The most unique ticket ids one call may change (D-08). */
 export const MAX_BULK_TICKETS = 100;
 
 const TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: 30_000 } as const;
 
-const TICKET_STATUSES = [
-  "NEW",
-  "OPEN",
-  "PENDING",
-  "RESOLVED",
-  "CLOSED",
-] as const satisfies readonly TicketStatus[];
 const TICKET_PRIORITIES = [
   "LOW",
   "NORMAL",
   "HIGH",
   "URGENT",
 ] as const satisfies readonly TicketPriority[];
-const TERMINAL_STATUSES: readonly TicketStatus[] = ["RESOLVED", "CLOSED"];
+/** The longest state id accepted (ids are cuid or uuid strings; this only refuses absurd input). */
+const MAX_STATE_ID_LENGTH = 128;
 
 export type TicketOp =
   | { kind: "assign"; assigneeId: string | null }
-  | { kind: "status"; status: TicketStatus }
+  | { kind: "state"; stateId: string }
   | { kind: "priority"; priority: TicketPriority }
   | { kind: "addTag"; tagId: string }
   /** Find-or-create by name, then add. Used only by the ticket page's single addTag action. */
@@ -74,7 +90,8 @@ export type TicketMutationErrorCode =
   | "MEMBER_NOT_ACTIVE"
   | "TAG_MISSING"
   | "MEMBERSHIP_ENDED"
-  | "MERGED_SOURCE";
+  | "MERGED_SOURCE"
+  | "STATE_NOT_FOUND";
 
 /** A refusal by the service. Rolled back and returned, never rethrown. */
 export class TicketMutationError extends Error {
@@ -104,15 +121,21 @@ export interface TicketMutationHooks {
   onTransactionStart?(tx: Prisma.TransactionClient): Promise<void> | void;
   /** Awaited after each ticket was changed and audited (D-09). */
   afterItem?(tx: Prisma.TransactionClient, ticketId: string, index: number): Promise<void> | void;
+  /** The effective time, read once after the ticket lock (D-17). Defaults to new Date(). */
+  clock?(): Date;
 }
 
 interface LockedTicket {
   id: string;
-  status: TicketStatus;
+  stateId: string;
   priority: TicketPriority;
   assigneeId: string | null;
   createdAt: Date;
   mergedIntoTicketId: string | null;
+  slaPausedAt: Date | null;
+  slaPausedMs: bigint;
+  firstResponseDueAt: Date;
+  resolutionDueAt: Date;
 }
 
 const isNonEmptyString = (value: unknown): value is string =>
@@ -132,8 +155,8 @@ function validateInput(ticketIds: readonly string[], op: TicketOp): string[] {
     case "assign":
       valid = op.assigneeId === null || isNonEmptyString(op.assigneeId);
       break;
-    case "status":
-      valid = (TICKET_STATUSES as readonly string[]).includes(op.status);
+    case "state":
+      valid = isNonEmptyString(op.stateId) && op.stateId.length <= MAX_STATE_ID_LENGTH;
       break;
     case "priority":
       valid = (TICKET_PRIORITIES as readonly string[]).includes(op.priority);
@@ -155,7 +178,7 @@ function validateInput(ticketIds: readonly string[], op: TicketOp): string[] {
 /** The operation with its references resolved once for the whole payload. */
 type ResolvedOp =
   | { kind: "assign"; assigneeId: string | null }
-  | { kind: "status"; status: TicketStatus }
+  | { kind: "state"; stateId: string; group: StateGroup }
   | { kind: "priority"; priority: TicketPriority; targets: SlaTargets }
   | { kind: "addTag"; tagId: string }
   | { kind: "removeTag"; tagId: string };
@@ -178,8 +201,13 @@ async function resolveOp(
       }
       return { kind: "assign", assigneeId: op.assigneeId };
     }
-    case "status":
-      return { kind: "status", status: op.status };
+    case "state": {
+      // D-15 amended: the target state is share-locked before any ticket lock, so a concurrent
+      // soft delete either waits for this transaction or is seen here as gone.
+      const state = await shareLockActiveState(tx, orgId, op.stateId);
+      if (!state) throw new TicketMutationError("STATE_NOT_FOUND");
+      return { kind: "state", stateId: state.id, group: state.group };
+    }
     case "priority": {
       // Explicit organization predicate: tx is unscoped, so getSlaTargets (which relies on
       // scopedDb for the filter) must not be used here. Same fallback as getSlaTargets.
@@ -246,9 +274,11 @@ export async function runTicketMutation(
 
       const resolved = await resolveOp(tx, orgId, op);
 
-      // One statement locks every ticket in ascending id order (AIDA-48 concurrency).
+      // One statement on the ticket table alone locks every ticket in ascending id order
+      // (AIDA-48 concurrency; header step 4).
       const locked = await tx.$queryRaw<LockedTicket[]>`
-        SELECT id, status, priority, "assigneeId", "createdAt", "mergedIntoTicketId"
+        SELECT id, "stateId", priority, "assigneeId", "createdAt", "mergedIntoTicketId",
+          "slaPausedAt", "slaPausedMs", "firstResponseDueAt", "resolutionDueAt"
         FROM "Ticket"
         WHERE "organizationId" = ${orgId} AND id = ANY(${ids}::text[])
         ORDER BY id
@@ -256,11 +286,11 @@ export async function runTicketMutation(
       `;
       if (locked.length !== ids.length) throw new TicketMutationError("TICKET_UNAVAILABLE");
 
-      // A merged source stays CLOSED (D-07, D-08): reopening it would put it back in the inbox
+      // A merged source stays closed (D-07, D-08): reopening it would put it back in the inbox
       // while its conversation, replies and CSAT live on the target. Read from the locked rows,
-      // so a status change that waited on a merge's lock sees the committed merge and is
+      // so a state change that waited on a merge's lock sees the committed merge and is
       // refused. Assignee, priority and tags stay changeable: they stay on the source (D-08).
-      if (resolved.kind === "status" && locked.some((t) => t.mergedIntoTicketId !== null)) {
+      if (resolved.kind === "state" && locked.some((t) => t.mergedIntoTicketId !== null)) {
         throw new TicketMutationError("MERGED_SOURCE");
       }
 
@@ -274,11 +304,31 @@ export async function runTicketMutation(
         for (const link of links) linked.add(link.ticketId);
       }
 
+      // The current group of every locked ticket's state, read after the lock (the stateId
+      // cannot change under it). The composite foreign key guarantees each id is present.
+      const groups =
+        resolved.kind === "state"
+          ? await readStateGroups(
+              tx,
+              orgId,
+              locked.map((t) => t.stateId),
+            )
+          : new Map<string, StateGroup>();
+
       const batchId = mode === "bulk" ? randomUUID() : null;
-      const now = new Date();
+      // Read after the ticket lock (D-16): a transition that waited measures from when it runs.
+      const now = hooks.clock ? hooks.clock() : new Date();
 
       for (const [index, ticket] of locked.entries()) {
-        const change = await applyOp(tx, orgId, ticket, resolved, linked.has(ticket.id), now);
+        const change = await applyOp(
+          tx,
+          orgId,
+          ticket,
+          resolved,
+          linked.has(ticket.id),
+          now,
+          groups,
+        );
         await recordTicketAudit(tx, orgId, {
           ticketId: ticket.id,
           action: change.action,
@@ -316,6 +366,7 @@ async function applyOp(
   op: ResolvedOp,
   tagLinked: boolean,
   now: Date,
+  groups: ReadonlyMap<string, StateGroup>,
 ): Promise<AppliedChange> {
   switch (op.kind) {
     case "assign": {
@@ -328,29 +379,36 @@ async function applyOp(
         after: { assigneeId: op.assigneeId },
       };
     }
-    case "status": {
-      if (ticket.status !== op.status) {
-        await updateTicket(
-          tx,
-          orgId,
-          ticket.id,
-          TERMINAL_STATUSES.includes(op.status)
-            ? { status: op.status, resolvedAt: now, isAtRisk: false, isBreached: false }
-            : { status: op.status, resolvedAt: null },
-        );
+    case "state": {
+      const fromGroup = groups.get(ticket.stateId);
+      if (!fromGroup) throw new TicketMutationError("TICKET_UNAVAILABLE");
+      if (ticket.stateId !== op.stateId) {
+        const count = await applyStateTransition(tx, orgId, {
+          row: ticket,
+          fromGroup,
+          toStateId: op.stateId,
+          toGroup: op.group,
+          now,
+          policy: "by-group",
+        });
+        if (count !== 1) throw new TicketMutationError("TICKET_UNAVAILABLE");
       }
+      // A no-op (same state) writes before equal to after, as the Phase 11 contract requires.
       return {
         action: "STATUS_CHANGED",
-        before: { status: ticket.status },
-        after: { status: op.status },
+        before: stateAuditSnapshot(ticket.stateId, fromGroup),
+        after: stateAuditSnapshot(op.stateId, op.group),
       };
     }
     case "priority": {
       // Parity with the previous changePriority (Codex review C2): the same seven fields in one
       // write. The sla-flag job reads both target-minute columns for its at-risk threshold.
+      // The deadlines count the closed pauses (slaPausedMs); an open pause is added when it
+      // closes (D-16).
       if (ticket.priority !== op.priority) {
-        const { firstResponseDueAt, resolutionDueAt } = computeDueTimestamps(
+        const { firstResponseDueAt, resolutionDueAt } = pausedDueTimestamps(
           new Date(ticket.createdAt),
+          BigInt(ticket.slaPausedMs),
           op.targets.firstResponseMinutes,
           op.targets.resolutionMinutes,
         );

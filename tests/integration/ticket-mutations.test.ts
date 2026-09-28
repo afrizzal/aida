@@ -6,7 +6,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { mergeTickets } from "@/lib/tickets/merge";
 import { runTicketMutation, type TicketMutationActor } from "@/lib/tickets/mutations";
-import { seedOrgWithMembers, seedTicket } from "../support/inbox-fixtures";
+import { seedOrgWithMembers, seedTicket, stateIdFor } from "../support/inbox-fixtures";
 import { seedContactTicket } from "../support/lifecycle-fixtures";
 import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
 
@@ -27,6 +27,60 @@ function auditRows(orgId: string, ticketId?: string) {
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
 }
+
+const MINUTE = 60_000;
+
+describe("runTicketMutation: state and SLA pause (tracer)", () => {
+  it("New to Pending to Open: the pause measured by the injected clock moves both deadlines (pause)", async () => {
+    const { orgId, actor } = await seedActor();
+    const t = await seedTicket(orgId, { status: "NEW" });
+    const [pendingId, openId, newId] = await Promise.all([
+      stateIdFor(orgId, "PENDING"),
+      stateIdFor(orgId, "OPEN"),
+      stateIdFor(orgId, "NEW"),
+    ]);
+    const original = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id } });
+    expect(original.stateId).toBe(newId);
+    expect(original.slaPausedAt).toBeNull();
+    const t0 = new Date("2026-11-09T08:00:00.000Z");
+    const t1 = new Date(t0.getTime() + 90 * MINUTE);
+
+    const toPending = await runTicketMutation(
+      { actor, ticketIds: [t.id], op: { kind: "state", stateId: pendingId }, mode: "single" },
+      { clock: () => t0 },
+    );
+    expect(toPending).toEqual({ ok: true, count: 1, batchId: null });
+    const paused = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id } });
+    expect(paused.stateId).toBe(pendingId);
+    expect(paused.slaPausedAt?.toISOString()).toBe(t0.toISOString());
+    expect(paused.slaPausedMs).toBe(0n);
+    expect(paused.firstResponseDueAt.toISOString()).toBe(original.firstResponseDueAt.toISOString());
+    expect(paused.resolutionDueAt.toISOString()).toBe(original.resolutionDueAt.toISOString());
+
+    const toOpen = await runTicketMutation(
+      { actor, ticketIds: [t.id], op: { kind: "state", stateId: openId }, mode: "single" },
+      { clock: () => t1 },
+    );
+    expect(toOpen).toEqual({ ok: true, count: 1, batchId: null });
+    const resumed = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id } });
+    expect(resumed.stateId).toBe(openId);
+    expect(resumed.slaPausedAt).toBeNull();
+    expect(resumed.slaPausedMs).toBe(5_400_000n);
+    expect(resumed.firstResponseDueAt.getTime()).toBe(
+      original.firstResponseDueAt.getTime() + 90 * MINUTE,
+    );
+    expect(resumed.resolutionDueAt.getTime()).toBe(original.resolutionDueAt.getTime() + 90 * MINUTE);
+    expect(resumed.resolvedAt).toBeNull();
+
+    const rows = await auditRows(orgId, t.id);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.action)).toEqual(["STATUS_CHANGED", "STATUS_CHANGED"]);
+    expect(rows[0].before).toStrictEqual({ stateId: newId, stateGroup: "OPEN" });
+    expect(rows[0].after).toStrictEqual({ stateId: pendingId, stateGroup: "PENDING" });
+    expect(rows[1].before).toStrictEqual({ stateId: pendingId, stateGroup: "PENDING" });
+    expect(rows[1].after).toStrictEqual({ stateId: openId, stateGroup: "OPEN" });
+  });
+});
 
 describe("runTicketMutation: status (tracer)", () => {
   it("resolves a ticket, stamps resolvedAt, clears the flags and writes one STATUS_CHANGED row", async () => {
