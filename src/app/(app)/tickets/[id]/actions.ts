@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import type {
   CustomFieldType,
   TicketPriority,
-  TicketStatus,
   TriageCategory,
   TriageSentiment,
 } from "@/generated/prisma/client";
@@ -32,19 +31,21 @@ function afterSingle(ticketId: string, result: TicketMutationResult): MutationAc
 }
 
 /**
- * Moves a ticket to a new status through the one ticket mutation service (D-02, D-08), which
- * checks the actor's membership, stamps or clears `resolvedAt` and the SLA flags exactly as
- * before, and writes one TicketAuditEvent. The page is revalidated only after success.
+ * Moves a ticket to another state of its organization through the one ticket mutation service
+ * (D-02, D-08; Phase 12.1 D-11, D-16), which checks the actor's membership, share-locks the target
+ * state (STATE_NOT_FOUND when it is missing, soft-deleted or another organization's), applies the
+ * lifecycle effects only when the group changes (resolvedAt, the SLA flags and the SLA pause), and
+ * writes one TicketAuditEvent. The page is revalidated only after success.
  */
-export async function changeStatus(
+export async function changeState(
   ticketId: string,
-  status: TicketStatus,
+  stateId: string,
 ): Promise<MutationActionResult> {
   const actor = await getSessionActor();
   const result = await runTicketMutation({
     actor,
     ticketIds: [ticketId],
-    op: { kind: "status", status },
+    op: { kind: "state", stateId },
     mode: "single",
   });
   return afterSingle(ticketId, result);

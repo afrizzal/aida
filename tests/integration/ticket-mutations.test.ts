@@ -4,7 +4,6 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import { mergeTickets } from "@/lib/tickets/merge";
 import { runTicketMutation, type TicketMutationActor } from "@/lib/tickets/mutations";
 import { seedOrgWithMembers, seedTicket, stateIdFor } from "../support/inbox-fixtures";
 import { seedContactTicket } from "../support/lifecycle-fixtures";
@@ -69,7 +68,9 @@ describe("runTicketMutation: state and SLA pause (tracer)", () => {
     expect(resumed.firstResponseDueAt.getTime()).toBe(
       original.firstResponseDueAt.getTime() + 90 * MINUTE,
     );
-    expect(resumed.resolutionDueAt.getTime()).toBe(original.resolutionDueAt.getTime() + 90 * MINUTE);
+    expect(resumed.resolutionDueAt.getTime()).toBe(
+      original.resolutionDueAt.getTime() + 90 * MINUTE,
+    );
     expect(resumed.resolvedAt).toBeNull();
 
     const rows = await auditRows(orgId, t.id);
@@ -82,7 +83,7 @@ describe("runTicketMutation: state and SLA pause (tracer)", () => {
   });
 });
 
-describe("runTicketMutation: status (tracer)", () => {
+describe("runTicketMutation: state (migrated from status)", () => {
   it("resolves a ticket, stamps resolvedAt, clears the flags and writes one STATUS_CHANGED row", async () => {
     const { orgId, actor, admin } = await seedActor();
     const t = await seedTicket(orgId, { status: "OPEN" });
@@ -91,13 +92,17 @@ describe("runTicketMutation: status (tracer)", () => {
     const result = await runTicketMutation({
       actor,
       ticketIds: [t.id],
-      op: { kind: "status", status: "RESOLVED" },
+      op: { kind: "state", stateId: await stateIdFor(orgId, "RESOLVED") },
       mode: "single",
     });
 
     expect(result).toEqual({ ok: true, count: 1, batchId: null });
     const ticket = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id } });
-    expect(ticket.status).toBe("RESOLVED");
+    const [openId, resolvedId] = await Promise.all([
+      stateIdFor(orgId, "OPEN"),
+      stateIdFor(orgId, "RESOLVED"),
+    ]);
+    expect(ticket.stateId).toBe(resolvedId);
     expect(ticket.resolvedAt).toBeInstanceOf(Date);
     expect(ticket.isAtRisk).toBe(false);
     expect(ticket.isBreached).toBe(false);
@@ -109,15 +114,15 @@ describe("runTicketMutation: status (tracer)", () => {
       actorType: "USER",
       actorUserId: admin.id,
       batchId: null,
-      before: { status: "OPEN" },
-      after: { status: "RESOLVED" },
     });
+    expect(rows[0].before).toStrictEqual({ stateId: openId, stateGroup: "OPEN" });
+    expect(rows[0].after).toStrictEqual({ stateId: resolvedId, stateGroup: "RESOLVED" });
   });
 
-  it("repeating the same status is a no-op that still writes one row with before equal to after", async () => {
+  it("repeating the same state is a no-op that still writes one row with before equal to after", async () => {
     const { orgId, actor } = await seedActor();
     const t = await seedTicket(orgId, { status: "OPEN" });
-    const op = { kind: "status", status: "RESOLVED" } as const;
+    const op = { kind: "state", stateId: await stateIdFor(orgId, "RESOLVED") } as const;
 
     await runTicketMutation({ actor, ticketIds: [t.id], op, mode: "single" });
     const first = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id } });
@@ -129,8 +134,9 @@ describe("runTicketMutation: status (tracer)", () => {
     expect(second.updatedAt.toISOString()).toBe(first.updatedAt.toISOString());
     const rows = await auditRows(orgId, t.id);
     expect(rows).toHaveLength(2);
-    expect(rows[1].before).toEqual({ status: "RESOLVED" });
-    expect(rows[1].after).toEqual({ status: "RESOLVED" });
+    const resolved = { stateId: op.stateId, stateGroup: "RESOLVED" };
+    expect(rows[1].before).toStrictEqual(resolved);
+    expect(rows[1].after).toStrictEqual(resolved);
   });
 
   it("returns MEMBERSHIP_ENDED for an actor whose member row was deleted, and changes nothing", async () => {
@@ -141,13 +147,13 @@ describe("runTicketMutation: status (tracer)", () => {
     const result = await runTicketMutation({
       actor,
       ticketIds: [t.id],
-      op: { kind: "status", status: "RESOLVED" },
+      op: { kind: "state", stateId: await stateIdFor(orgId, "RESOLVED") },
       mode: "single",
     });
 
     expect(result).toEqual({ ok: false, error: "MEMBERSHIP_ENDED" });
     const ticket = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id } });
-    expect(ticket.status).toBe("OPEN");
+    expect(ticket.stateId).toBe(await stateIdFor(orgId, "OPEN"));
     expect(ticket.resolvedAt).toBeNull();
     expect(await auditRows(orgId)).toHaveLength(0);
   });
@@ -483,7 +489,7 @@ describe("runTicketMutation: bulk", () => {
     const result = await runTicketMutation({
       actor,
       ticketIds: tickets.map((t) => t.id),
-      op: { kind: "status", status: "PENDING" },
+      op: { kind: "state", stateId: await stateIdFor(orgId, "PENDING") },
       mode: "bulk",
     });
 
@@ -572,7 +578,7 @@ describe("runTicketMutation: rollback (D-09, Codex review C5)", () => {
     await runTicketMutation({
       actor,
       ticketIds: [ids[0]],
-      op: { kind: "status", status: "OPEN" },
+      op: { kind: "state", stateId: await stateIdFor(orgId, "OPEN") },
       mode: "single",
     });
     const auditBefore = await prisma.ticketAuditEvent.count({ where: { organizationId: orgId } });
@@ -615,7 +621,12 @@ describe("runTicketMutation: membership inside the transaction (D-01, Codex revi
     const before = await ticketSnapshot([t.id]);
 
     const result = await runTicketMutation(
-      { actor, ticketIds: [t.id], op: { kind: "status", status: "RESOLVED" }, mode: "single" },
+      {
+        actor,
+        ticketIds: [t.id],
+        op: { kind: "state", stateId: await stateIdFor(orgId, "RESOLVED") },
+        mode: "single",
+      },
       {
         async onTransactionStart() {
           // A separate, committed statement on another connection of the global client.
@@ -636,7 +647,12 @@ describe("runTicketMutation: membership inside the transaction (D-01, Codex revi
     const release = deferred<void>();
 
     const call = runTicketMutation(
-      { actor, ticketIds: [t.id], op: { kind: "status", status: "RESOLVED" }, mode: "single" },
+      {
+        actor,
+        ticketIds: [t.id],
+        op: { kind: "state", stateId: await stateIdFor(orgId, "RESOLVED") },
+        mode: "single",
+      },
       {
         async afterItem() {
           written.resolve();
@@ -672,7 +688,7 @@ describe("runTicketMutation: membership inside the transaction (D-01, Codex revi
     const result = await call;
     expect(result).toEqual({ ok: true, count: 1, batchId: null });
     const ticket = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id } });
-    expect(ticket.status).toBe("RESOLVED");
+    expect(ticket.stateId).toBe(await stateIdFor(orgId, "RESOLVED"));
     const rows = await auditRows(orgId, t.id);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ action: "STATUS_CHANGED", actorUserId: admin.id });
@@ -692,7 +708,7 @@ describe("runTicketMutation: refusals and dedupe (D-08, D-09)", () => {
     const result = await runTicketMutation({
       actor,
       ticketIds: [...ownIds, foreign.id],
-      op: { kind: "status", status: "CLOSED" },
+      op: { kind: "state", stateId: await stateIdFor(orgId, "CLOSED") },
       mode: "bulk",
     });
 
@@ -725,7 +741,12 @@ describe("runTicketMutation: refusals and dedupe (D-08, D-09)", () => {
     let transactionStarted = false;
 
     const result = await runTicketMutation(
-      { actor, ticketIds: ids, op: { kind: "status", status: "OPEN" }, mode: "bulk" },
+      {
+        actor,
+        ticketIds: ids,
+        op: { kind: "state", stateId: await stateIdFor(orgId, "OPEN") },
+        mode: "bulk",
+      },
       {
         onTransactionStart() {
           transactionStarted = true;
@@ -740,14 +761,14 @@ describe("runTicketMutation: refusals and dedupe (D-08, D-09)", () => {
 });
 
 describe("runTicketMutation: idempotency (AIDA-48)", () => {
-  it("a bulk status change to RESOLVED applied twice leaves every ticket as after the first run", async () => {
+  it("a bulk state change to Resolved applied twice leaves every ticket as after the first run", async () => {
     const { orgId, actor } = await seedActor();
     const ids = [
       (await seedTicket(orgId, { status: "OPEN" })).id,
       (await seedTicket(orgId, { status: "PENDING" })).id,
       (await seedTicket(orgId, { status: "NEW" })).id,
     ];
-    const op = { kind: "status", status: "RESOLVED" } as const;
+    const op = { kind: "state", stateId: await stateIdFor(orgId, "RESOLVED") } as const;
 
     const first = await runTicketMutation({ actor, ticketIds: ids, op, mode: "bulk" });
     const afterFirst = await ticketSnapshot(ids);
@@ -756,7 +777,7 @@ describe("runTicketMutation: idempotency (AIDA-48)", () => {
 
     expect(first.ok && second.ok).toBe(true);
     expect(afterSecond).toEqual(afterFirst);
-    for (const t of afterSecond) expect(t.status).toBe("RESOLVED");
+    for (const t of afterSecond) expect(t.stateId).toBe(op.stateId);
 
     const rows = await auditRows(orgId);
     expect(rows).toHaveLength(6);
@@ -795,7 +816,12 @@ describe("runTicketMutation: concurrency (AIDA-48, Codex review C6)", () => {
 
     const pidA = deferred<number>();
     const runA = runTicketMutation(
-      { actor, ticketIds: [a, b, c], op: { kind: "status", status: "PENDING" }, mode: "bulk" },
+      {
+        actor,
+        ticketIds: [a, b, c],
+        op: { kind: "state", stateId: await stateIdFor(orgId, "PENDING") },
+        mode: "bulk",
+      },
       {
         async onTransactionStart(tx) {
           pidA.resolve(await backendPid(tx));
@@ -988,12 +1014,14 @@ describe("runTicketMutation: addTagByName same-name race (Codex review R2-2)", (
 });
 
 // ---------------------------------------------------------------------------------------------
-// Codex diff critique round 1, D1: a merged source's status cannot change (Phase 12, D-07, D-08)
+// Codex diff critique round 1, D1: a merged source's state cannot change (Phase 12, D-07, D-08)
 // ---------------------------------------------------------------------------------------------
 
-describe("runTicketMutation: a merged source keeps its status (Codex diff round 1, D1)", () => {
-  // Not added to actorOrgIds: the merge writes its own audit rows (MERGED_INTO and others),
-  // whose keys the privacy case above does not list.
+describe("runTicketMutation: a merged source keeps its state (Codex diff round 1, D1)", () => {
+  // Not added to actorOrgIds (kept as before the migration to state ids). The merged source is
+  // seeded by a direct database update, not by mergeTickets: the merge body still writes the
+  // dropped status column until plan 12.1-07 migrates it. The forced-order case (a state change
+  // observed blocked by a held merge) needs a live merge and is restored by plan 12.1-07 Task 2.
   async function seedMergedPair() {
     const { orgId, users } = await seedOrgWithMembers(prisma, ["admin"]);
     const actor: TicketMutationActor = { userId: users[0].id, orgId };
@@ -1003,32 +1031,39 @@ describe("runTicketMutation: a merged source keeps its status (Codex diff round 
     return { orgId, actor, source, target };
   }
 
-  async function merge(actor: TicketMutationActor, sourceId: string, targetId: string) {
-    return mergeTickets(prisma, actor, {
-      sourceTicketId: sourceId,
-      targetTicketId: targetId,
-      reviewedLinkLabel: null,
+  /** Turns the source into a merged source (the three merge fields together, CLOSED state). */
+  async function markMerged(orgId: string, sourceId: string, targetId: string) {
+    await prisma.ticket.update({
+      where: { id: sourceId },
+      data: {
+        mergedIntoTicketId: targetId,
+        mergedAt: new Date("2026-11-09T09:00:00.000Z"),
+        mergeMessageSeq: 1n,
+        stateId: await stateIdFor(orgId, "CLOSED"),
+        slaPausedAt: null,
+      },
     });
+    return { ok: true };
   }
 
   async function sourceState(id: string) {
     return prisma.ticket.findUniqueOrThrow({
       where: { id },
-      select: { status: true, resolvedAt: true, mergedIntoTicketId: true, updatedAt: true },
+      select: { stateId: true, resolvedAt: true, mergedIntoTicketId: true, updatedAt: true },
     });
   }
 
-  it("single: a status change on a merged source is refused with MERGED_SOURCE and changes nothing", async () => {
+  it("single: a state change on a merged source is refused with MERGED_SOURCE and changes nothing", async () => {
     const { orgId, actor, source, target } = await seedMergedPair();
-    expect((await merge(actor, source.id, target.id)).ok).toBe(true);
+    expect((await markMerged(orgId, source.id, target.id)).ok).toBe(true);
     const before = await sourceState(source.id);
     const auditsBefore = await auditRows(orgId);
-    expect(before.status).toBe("CLOSED");
+    expect(before.stateId).toBe(await stateIdFor(orgId, "CLOSED"));
 
     const result = await runTicketMutation({
       actor,
       ticketIds: [source.id],
-      op: { kind: "status", status: "OPEN" },
+      op: { kind: "state", stateId: await stateIdFor(orgId, "OPEN") },
       mode: "single",
     });
 
@@ -1040,14 +1075,14 @@ describe("runTicketMutation: a merged source keeps its status (Codex diff round 
   it("bulk: one merged source in the batch refuses the whole batch with MERGED_SOURCE, nothing changed", async () => {
     const { orgId, actor, source, target } = await seedMergedPair();
     const plain = await seedTicket(orgId, { status: "OPEN" });
-    expect((await merge(actor, source.id, target.id)).ok).toBe(true);
+    expect((await markMerged(orgId, source.id, target.id)).ok).toBe(true);
     const before = await ticketSnapshot([plain.id, source.id, target.id]);
     const auditsBefore = await auditRows(orgId);
 
     const result = await runTicketMutation({
       actor,
       ticketIds: [plain.id, source.id],
-      op: { kind: "status", status: "PENDING" },
+      op: { kind: "state", stateId: await stateIdFor(orgId, "PENDING") },
       mode: "bulk",
     });
 
@@ -1058,7 +1093,7 @@ describe("runTicketMutation: a merged source keeps its status (Codex diff round 
 
   it("other operations on a merged source still apply: assignee, priority and tags stay on the source (D-08)", async () => {
     const { orgId, actor, source, target } = await seedMergedPair();
-    expect((await merge(actor, source.id, target.id)).ok).toBe(true);
+    expect((await markMerged(orgId, source.id, target.id)).ok).toBe(true);
     const tag = await prisma.tag.create({ data: { organizationId: orgId, name: "after-merge" } });
 
     const ops = [
@@ -1072,71 +1107,234 @@ describe("runTicketMutation: a merged source keeps its status (Codex diff round 
     }
     const after = await prisma.ticket.findUniqueOrThrow({ where: { id: source.id } });
     expect(after).toMatchObject({
-      status: "CLOSED",
+      stateId: await stateIdFor(orgId, "CLOSED"),
       mergedIntoTicketId: target.id,
       assigneeId: actor.userId,
       priority: "HIGH",
     });
     expect((await links(source.id)).map((l) => l.tagId)).toEqual([tag.id]);
   });
+});
 
-  it("forced order: a status change observed blocked by a held merge is refused after the merge commits", async () => {
-    const { orgId, actor, source, target } = await seedMergedPair();
-    const mergePid = deferred<number>();
-    const mergeHeld = deferred<void>();
-    const releaseMerge = deferred<void>();
-    const mergeRun = mergeTickets(
-      prisma,
+// ---------------------------------------------------------------------------------------------
+// Phase 12.1, plan 12.1-04: state changes reason about the group (AIDA-56, D-11, D-15 amended,
+// D-16, D-17), with refusals for missing states and ended memberships.
+// ---------------------------------------------------------------------------------------------
+
+/** The lifecycle columns a state change may touch, as comparable values. */
+async function lifecycle(id: string) {
+  const t = await prisma.ticket.findUniqueOrThrow({ where: { id } });
+  return {
+    stateId: t.stateId,
+    resolvedAt: t.resolvedAt?.toISOString() ?? null,
+    isAtRisk: t.isAtRisk,
+    isBreached: t.isBreached,
+    firstResponseDueAt: t.firstResponseDueAt.toISOString(),
+    resolutionDueAt: t.resolutionDueAt.toISOString(),
+    slaPausedAt: t.slaPausedAt?.toISOString() ?? null,
+    slaPausedMs: t.slaPausedMs.toString(),
+  };
+}
+
+describe("runTicketMutation: state group effects (12.1-04, D-11, D-16)", () => {
+  it("bulk New, Pending and Resolved to Closed: all three are group changes, one batchId, the pause closes", async () => {
+    const { orgId, actor } = await seedActor();
+    const t0 = new Date("2026-11-09T07:00:00.000Z");
+    const clockAt = new Date(t0.getTime() + 20 * MINUTE);
+    const earlierResolve = new Date("2026-11-08T07:00:00.000Z");
+    const nw = await seedTicket(orgId, { status: "NEW" });
+    const pending = await seedTicket(orgId, { status: "PENDING", slaPausedAt: t0 });
+    const resolved = await seedTicket(orgId, { status: "RESOLVED", resolvedAt: earlierResolve });
+    const ids = [nw.id, pending.id, resolved.id];
+    await prisma.ticket.updateMany({
+      where: { id: { in: ids } },
+      data: { isAtRisk: true, isBreached: true },
+    });
+    const pendingBefore = await prisma.ticket.findUniqueOrThrow({ where: { id: pending.id } });
+    const closedId = await stateIdFor(orgId, "CLOSED");
+
+    const result = await runTicketMutation(
+      { actor, ticketIds: ids, op: { kind: "state", stateId: closedId }, mode: "bulk" },
+      { clock: () => clockAt },
+    );
+
+    expect(result).toMatchObject({ ok: true, count: 3 });
+    if (!result.ok) return;
+    for (const id of ids) {
+      const t = await prisma.ticket.findUniqueOrThrow({ where: { id } });
+      expect(t.stateId).toBe(closedId);
+      expect(t.resolvedAt?.toISOString()).toBe(clockAt.toISOString());
+      expect(t.isAtRisk).toBe(false);
+      expect(t.isBreached).toBe(false);
+      expect(t.slaPausedAt).toBeNull();
+    }
+    const p = await prisma.ticket.findUniqueOrThrow({ where: { id: pending.id } });
+    expect(p.slaPausedMs).toBe(BigInt(20 * MINUTE));
+    expect(p.firstResponseDueAt.getTime()).toBe(
+      pendingBefore.firstResponseDueAt.getTime() + 20 * MINUTE,
+    );
+    expect(p.resolutionDueAt.getTime()).toBe(pendingBefore.resolutionDueAt.getTime() + 20 * MINUTE);
+
+    const rows = await auditRows(orgId);
+    expect(rows).toHaveLength(3);
+    expect(new Set(rows.map((r) => r.batchId))).toEqual(new Set([result.batchId]));
+    const groupsBefore = new Map(rows.map((r) => [r.ticketId, r.before]));
+    expect(groupsBefore.get(nw.id)).toStrictEqual({
+      stateId: await stateIdFor(orgId, "NEW"),
+      stateGroup: "OPEN",
+    });
+    expect(groupsBefore.get(pending.id)).toStrictEqual({
+      stateId: await stateIdFor(orgId, "PENDING"),
+      stateGroup: "PENDING",
+    });
+    expect(groupsBefore.get(resolved.id)).toStrictEqual({
+      stateId: await stateIdFor(orgId, "RESOLVED"),
+      stateGroup: "RESOLVED",
+    });
+    for (const r of rows)
+      expect(r.after).toStrictEqual({ stateId: closedId, stateGroup: "CLOSED" });
+  });
+
+  it("New to Open (both group OPEN) changes only stateId and writes STATUS_CHANGED (adjacency)", async () => {
+    const { orgId, actor } = await seedActor();
+    const t = await seedTicket(orgId, { status: "NEW" });
+    await prisma.ticket.update({
+      where: { id: t.id },
+      data: { isAtRisk: true, slaPausedMs: 120_000n },
+    });
+    const before = await lifecycle(t.id);
+    const openId = await stateIdFor(orgId, "OPEN");
+
+    const result = await runTicketMutation(
+      { actor, ticketIds: [t.id], op: { kind: "state", stateId: openId }, mode: "single" },
+      { clock: () => new Date("2026-11-09T10:00:00.000Z") },
+    );
+
+    expect(result).toEqual({ ok: true, count: 1, batchId: null });
+    expect(await lifecycle(t.id)).toEqual({ ...before, stateId: openId });
+    const rows = await auditRows(orgId, t.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].action).toBe("STATUS_CHANGED");
+    expect(rows[0].before).toStrictEqual({ stateId: before.stateId, stateGroup: "OPEN" });
+    expect(rows[0].after).toStrictEqual({ stateId: openId, stateGroup: "OPEN" });
+  });
+
+  it("STATE_NOT_FOUND for a soft-deleted state, another organization's state and an unknown id; nothing changed", async () => {
+    const { orgId, actor } = await seedActor();
+    const other = await seedOrgWithMembers(prisma, ["owner"]);
+    const t = await seedTicket(orgId, { status: "OPEN" });
+    const deleted = await prisma.ticketState.create({
+      data: {
+        organizationId: orgId,
+        name: `Gone ${randomUUID().slice(0, 8)}`,
+        colorToken: "gray",
+        group: "OPEN",
+        sortOrder: 9,
+        deletedAt: new Date("2026-11-09T06:00:00.000Z"),
+      },
+    });
+    const foreign = await stateIdFor(other.orgId, "RESOLVED");
+    const before = await lifecycle(t.id);
+
+    for (const stateId of [deleted.id, foreign, randomUUID()]) {
+      for (const mode of ["single", "bulk"] as const) {
+        const result = await runTicketMutation({
+          actor,
+          ticketIds: [t.id],
+          op: { kind: "state", stateId },
+          mode,
+        });
+        expect(result).toEqual({ ok: false, error: "STATE_NOT_FOUND" });
+      }
+    }
+    expect(await lifecycle(t.id)).toEqual(before);
+    expect(await auditRows(orgId)).toHaveLength(0);
+  });
+
+  it("MEMBERSHIP_ENDED for single and bulk before any state is read (an unknown state id is not reported)", async () => {
+    const { orgId, actor, admin } = await seedActor();
+    const tickets = [await seedTicket(orgId, { status: "OPEN" }), await seedTicket(orgId)];
+    const ids = tickets.map((t) => t.id);
+    const before = await Promise.all(ids.map(lifecycle));
+    const resolvedId = await stateIdFor(orgId, "RESOLVED");
+    await prisma.member.delete({ where: { id: admin.memberId } });
+
+    for (const stateId of [resolvedId, randomUUID()]) {
+      expect(
+        await runTicketMutation({
+          actor,
+          ticketIds: [ids[0]],
+          op: { kind: "state", stateId },
+          mode: "single",
+        }),
+      ).toEqual({ ok: false, error: "MEMBERSHIP_ENDED" });
+      expect(
+        await runTicketMutation({
+          actor,
+          ticketIds: ids,
+          op: { kind: "state", stateId },
+          mode: "bulk",
+        }),
+      ).toEqual({ ok: false, error: "MEMBERSHIP_ENDED" });
+    }
+    expect(await Promise.all(ids.map(lifecycle))).toEqual(before);
+    expect(await auditRows(orgId)).toHaveLength(0);
+  });
+
+  it("a priority change counts the closed pauses: createdAt plus 10 minutes plus the new targets (D-16)", async () => {
+    const { orgId, actor } = await seedActor();
+    const t = await seedTicket(orgId, { priority: "NORMAL" });
+    await prisma.ticket.update({
+      where: { id: t.id },
+      data: { slaPausedMs: 600_000n, isAtRisk: true, isBreached: true },
+    });
+
+    const result = await runTicketMutation({
       actor,
-      { sourceTicketId: source.id, targetTicketId: target.id, reviewedLinkLabel: null },
-      {
-        async afterLock(tx) {
-          mergePid.resolve(await backendPid(tx));
-          mergeHeld.resolve();
-          await releaseMerge.promise;
-        },
-      },
-    );
-    mergeRun.catch(() => {});
-    await mergeHeld.promise;
-
-    const statusPid = deferred<number>();
-    const statusRun = runTicketMutation(
-      { actor, ticketIds: [source.id], op: { kind: "status", status: "OPEN" }, mode: "single" },
-      {
-        async onTransactionStart(tx) {
-          statusPid.resolve(await backendPid(tx));
-        },
-      },
-    );
-    statusRun.catch(() => {});
-    // The status change waits on the source's row lock, which the merge holds.
-    await waitForBlockedBy(prisma, await mergePid.promise, [await statusPid.promise]);
-    const statusBefore = await sourceState(source.id);
-    expect(statusBefore.mergedIntoTicketId).toBeNull();
-
-    releaseMerge.resolve();
-    expect(await mergeRun).toEqual({
-      ok: true,
-      sourceTicketId: source.id,
-      targetTicketId: target.id,
+      ticketIds: [t.id],
+      op: { kind: "priority", priority: "HIGH" },
+      mode: "single",
     });
-    expect(await statusRun).toEqual({ ok: false, error: "MERGED_SOURCE" });
 
-    const after = await sourceState(source.id);
-    expect(after.status).toBe("CLOSED");
-    expect(after.mergedIntoTicketId).toBe(target.id);
-    const statusRows = await prisma.ticketAuditEvent.findMany({
-      where: { organizationId: orgId, ticketId: source.id, action: "STATUS_CHANGED" },
+    expect(result).toEqual({ ok: true, count: 1, batchId: null });
+    const after = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id } });
+    expect(after.priority).toBe("HIGH");
+    expect(after.firstResponseTargetMinutes).toBe(240);
+    expect(after.resolutionTargetMinutes).toBe(1440);
+    const base = after.createdAt.getTime() + 10 * MINUTE;
+    expect(after.firstResponseDueAt.getTime()).toBe(base + 240 * MINUTE);
+    expect(after.resolutionDueAt.getTime()).toBe(base + 1440 * MINUTE);
+    expect(after.slaPausedMs).toBe(600_000n);
+    expect(after.isAtRisk).toBe(false);
+    expect(after.isBreached).toBe(false);
+  });
+
+  it("every STATUS_CHANGED row of this file has exactly the keys stateId and stateGroup", async () => {
+    const rows = await prisma.ticketAuditEvent.findMany({
+      where: { organizationId: { in: [...actorOrgIds] }, action: "STATUS_CHANGED" },
     });
-    // Only the merge's own close (D-08), never an OPEN written after it.
-    expect(statusRows.map((row) => row.after)).toEqual([{ status: "CLOSED" }]);
+    expect(rows.length).toBeGreaterThan(5);
+    for (const row of rows) {
+      for (const snapshot of [row.before, row.after]) {
+        expect(Object.keys(snapshot as Record<string, unknown>).sort()).toEqual([
+          "stateGroup",
+          "stateId",
+        ]);
+      }
+    }
   });
 });
 
 describe("TicketAuditEvent content (AIDA-48 privacy prohibition)", () => {
   it("every audit row written in this file holds only allowed keys with id, enum, boolean or null values", async () => {
-    const ALLOWED = new Set(["status", "priority", "assigneeId", "tagId", "present"]);
+    const ALLOWED = new Set([
+      "stateId",
+      "stateGroup",
+      "priority",
+      "assigneeId",
+      "tagId",
+      "present",
+    ]);
     const rows = await prisma.ticketAuditEvent.findMany({
       where: { organizationId: { in: [...actorOrgIds] } },
     });

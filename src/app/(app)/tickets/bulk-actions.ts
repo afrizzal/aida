@@ -12,10 +12,10 @@ const id = z.string().min(1).max(128);
 // organization tags only (UI-SPEC Assumption 5).
 const bulkOpSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("assign"), assigneeId: id.nullable() }),
-  z.object({
-    kind: z.literal("status"),
-    status: z.enum(["NEW", "OPEN", "PENDING", "RESOLVED", "CLOSED"]),
-  }),
+  // A state of the actor's organization (Phase 12.1): the service share-locks it and refuses a
+  // missing, soft-deleted or foreign state with STATE_NOT_FOUND. The old status payload fails
+  // this schema and returns INVALID.
+  z.object({ kind: z.literal("state"), stateId: id }),
   z.object({ kind: z.literal("priority"), priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]) }),
   z.object({ kind: z.literal("addTag"), tagId: id }),
   z.object({ kind: z.literal("removeTag"), tagId: id }),
