@@ -165,3 +165,111 @@ describe("the CSAT route decides eligibility by the group of the state (D-11 CSA
     expect(await csatRows(t.id)).toBe(0);
   });
 });
+
+describe("CSAT eligibility for every group, merged sources and the data boundary (plan 12.1-09)", () => {
+  async function adminState(
+    orgId: string,
+    group: "OPEN" | "PENDING" | "RESOLVED" | "CLOSED",
+    name: string,
+    colorToken: string,
+  ) {
+    return prisma.ticketState.create({
+      data: { organizationId: orgId, name, colorToken, group, sortOrder: 7 },
+    });
+  }
+
+  it.each([
+    ["New", "NEW"],
+    ["Open", "OPEN"],
+    ["Pending", "PENDING"],
+    ["an admin PENDING-group state", "admin"],
+  ] as const)("a ticket in %s is refused with 409 not_eligible and no row", async (_label, key) => {
+    const { orgId } = await seedOrgWithMembers(prisma, ["owner"]);
+    const t =
+      key === "admin"
+        ? await seedTicket(orgId, {
+            stateId: (await adminState(orgId, "PENDING", "Waiting on customer docs", "amber")).id,
+          })
+        : await seedTicket(orgId, { status: key });
+
+    expect(await postCsat(await tokenOf(t.id))).toEqual({ status: 409, error: "not_eligible" });
+    expect(await csatRows(t.id)).toBe(0);
+  });
+
+  it.each([
+    ["Resolved", "RESOLVED"],
+    ["Closed", "CLOSED"],
+    ["an admin CLOSED-group state", "admin"],
+  ] as const)("a ticket in %s accepts a rating: 200 and one row", async (_label, key) => {
+    const { orgId } = await seedOrgWithMembers(prisma, ["owner"]);
+    const t =
+      key === "admin"
+        ? await seedTicket(orgId, {
+            stateId: (await adminState(orgId, "CLOSED", "Closed as duplicate", "gray")).id,
+            resolvedAt: new Date(),
+          })
+        : await seedTicket(orgId, { status: key, resolvedAt: new Date() });
+
+    expect(await postCsat(await tokenOf(t.id), 3)).toEqual({ status: 200, error: undefined });
+    expect(await csatRows(t.id)).toBe(1);
+  });
+
+  it("a merged source (seeded directly) is group CLOSED and merged, and its CSAT stays its own", async () => {
+    const { orgId } = await seedOrgWithMembers(prisma, ["owner"]);
+    const source = await seedTicket(orgId, { status: "OPEN" });
+    const target = await seedTicket(orgId, { status: "OPEN" });
+    const { contactId } = await prisma.ticket.findUniqueOrThrow({
+      where: { id: source.id },
+      select: { contactId: true },
+    });
+    await prisma.ticket.update({ where: { id: target.id }, data: { contactId } });
+    // One direct update, never the merge service (plan 12.1-07 migrates it): the three merge
+    // fields together (Ticket_merge_fields_check) and the organization's Closed state.
+    await prisma.ticket.update({
+      where: { id: source.id },
+      data: {
+        mergedIntoTicketId: target.id,
+        mergedAt: new Date(),
+        mergeMessageSeq: 1n,
+        stateId: await stateIdFor(orgId, "CLOSED"),
+        resolvedAt: new Date(),
+      },
+    });
+
+    const sToken = await tokenOf(source.id);
+    const data = await loadStatusPageData(sToken);
+    expect(data?.merged).toBe(true);
+    expect(data?.group).toBe("CLOSED");
+
+    expect(await postCsat(sToken, 5)).toEqual({ status: 200, error: undefined });
+    const row = await prisma.csatResponse.findUnique({ where: { ticketId: source.id } });
+    expect(row?.score).toBe(5);
+    expect(await csatRows(target.id)).toBe(0);
+    expect((await loadStatusPageData(sToken))?.csat).toEqual({ score: 5, comment: null });
+  });
+
+  it.each([
+    ["OPEN", "teal"],
+    ["PENDING", "pink"],
+    ["RESOLVED", "purple"],
+    ["CLOSED", "amber"],
+  ] as const)("the loader result of a ticket in an admin %s state carries no marker name, state id or colour key", async (group, colour) => {
+    const { orgId } = await seedOrgWithMembers(prisma, ["owner"]);
+    const marker = `Internal-marker-${randomUUID().slice(0, 13)}`; // 29 chars (name check: 1 to 40)
+    const state = await adminState(orgId, group, marker, colour);
+    const t = await seedTicket(orgId, {
+      stateId: state.id,
+      resolvedAt: group === "RESOLVED" || group === "CLOSED" ? new Date() : null,
+    });
+
+    const data = await loadStatusPageData(await tokenOf(t.id));
+    expect(data?.group).toBe(group);
+    const json = JSON.stringify(data);
+    expect(json).not.toContain(marker);
+    expect(json).not.toContain("Internal-marker");
+    expect(json).not.toContain(state.id);
+    expect(json).not.toContain(colour);
+    expect(json).not.toContain("colorToken");
+    expect(json).not.toContain("stateId");
+  });
+});
