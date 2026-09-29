@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { slaFlagHandler } from "@/lib/worker/jobs/sla-flag";
+import { type LegacyStatusKey, stateIdFor } from "../support/inbox-fixtures";
 
 // Helper to seed a test organization. Better Auth's organization model has no @default()
 // on `id` or `createdAt` — BA manages them internally, so we provide them here for tests.
@@ -20,7 +21,12 @@ async function seedOrgWithContact(label: string) {
 }
 
 type TicketOverrides = {
-  status?: "NEW" | "OPEN" | "PENDING" | "RESOLVED" | "CLOSED";
+  /** Legacy key of one of the five default states (the organization trigger creates them). */
+  state?: LegacyStatusKey;
+  /** A state id of the same organization; wins over state. */
+  stateId?: string;
+  /** Written as given; a PENDING-group state gets its pause start by default. */
+  slaPausedAt?: Date | null;
   firstResponseDueAt: Date;
   resolutionDueAt: Date;
   firstRespondedAt?: Date | null;
@@ -34,6 +40,14 @@ async function seedTicket(
   number: number,
   overrides: TicketOverrides,
 ) {
+  const key = overrides.state ?? "OPEN";
+  const stateId = overrides.stateId ?? (await stateIdFor(orgId, key));
+  const slaPausedAt =
+    overrides.slaPausedAt !== undefined
+      ? overrides.slaPausedAt
+      : overrides.stateId === undefined && key === "PENDING"
+        ? new Date()
+        : null;
   return prisma.ticket.create({
     data: {
       organizationId: orgId,
@@ -41,7 +55,8 @@ async function seedTicket(
       number,
       statusToken: randomUUID(),
       subject: `SLA flag test #${number}`,
-      status: overrides.status ?? "OPEN",
+      stateId,
+      slaPausedAt,
       priority: "NORMAL",
       firstResponseTargetMinutes: overrides.firstResponseTargetMinutes ?? 60,
       resolutionTargetMinutes: overrides.resolutionTargetMinutes ?? 480,
@@ -124,12 +139,12 @@ describe("slaFlagHandler", () => {
     const { org, contact } = await seedOrgWithContact("excluded-statuses");
     const now = Date.now();
     const resolved = await seedTicket(org.id, contact.id, 1, {
-      status: "RESOLVED",
+      state: "RESOLVED",
       firstResponseDueAt: new Date(now - 24 * 60 * MIN),
       resolutionDueAt: new Date(now - 24 * 60 * MIN),
     });
     const closed = await seedTicket(org.id, contact.id, 2, {
-      status: "CLOSED",
+      state: "CLOSED",
       firstResponseDueAt: new Date(now - 24 * 60 * MIN),
       resolutionDueAt: new Date(now - 24 * 60 * MIN),
     });
@@ -142,5 +157,81 @@ describe("slaFlagHandler", () => {
     expect(updatedResolved.isAtRisk).toBe(false);
     expect(updatedClosed.isBreached).toBe(false);
     expect(updatedClosed.isAtRisk).toBe(false);
+  });
+
+  it("group gate: overdue tickets in New, Open and an admin-created OPEN state are flagged; Pending, Resolved, Closed and a paused OPEN ticket are not", async () => {
+    const { org, contact } = await seedOrgWithContact("group-gate");
+    const now = new Date("2031-03-04T05:06:07.890Z");
+    const overdue = {
+      firstResponseDueAt: new Date(now.getTime() - 60 * MIN),
+      resolutionDueAt: new Date(now.getTime() - 30 * MIN),
+    };
+    const custom = await prisma.ticketState.create({
+      data: {
+        organizationId: org.id,
+        name: "Waiting on engineering",
+        colorToken: "indigo",
+        group: "OPEN",
+        sortOrder: 10,
+      },
+    });
+
+    const flagged = [
+      await seedTicket(org.id, contact.id, 1, { ...overdue, state: "NEW" }),
+      await seedTicket(org.id, contact.id, 2, { ...overdue, state: "OPEN" }),
+      await seedTicket(org.id, contact.id, 3, { ...overdue, stateId: custom.id }),
+    ];
+    const skipped = [
+      await seedTicket(org.id, contact.id, 4, { ...overdue, state: "PENDING" }),
+      await seedTicket(org.id, contact.id, 5, { ...overdue, state: "RESOLVED" }),
+      await seedTicket(org.id, contact.id, 6, { ...overdue, state: "CLOSED" }),
+      // Inconsistent data written directly: an OPEN-group ticket with an open pause.
+      await seedTicket(org.id, contact.id, 7, {
+        ...overdue,
+        state: "OPEN",
+        slaPausedAt: new Date(now.getTime() - 90 * MIN),
+      }),
+    ];
+    expect(
+      (await prisma.ticket.findUniqueOrThrow({ where: { id: skipped[0].id } })).slaPausedAt,
+    ).not.toBeNull();
+
+    await slaFlagHandler(undefined, { now });
+
+    for (const t of flagged) {
+      const row = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id } });
+      expect({ n: row.number, isBreached: row.isBreached, isAtRisk: row.isAtRisk }).toEqual({
+        n: t.number,
+        isBreached: true,
+        isAtRisk: true,
+      });
+    }
+    for (const t of skipped) {
+      const row = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id } });
+      expect({ n: row.number, isBreached: row.isBreached, isAtRisk: row.isAtRisk }).toEqual({
+        n: t.number,
+        isBreached: false,
+        isAtRisk: false,
+      });
+    }
+  });
+
+  it("group gate, at-risk pass: a paused ticket inside the 20 percent window is not marked at-risk", async () => {
+    const { org, contact } = await seedOrgWithContact("group-gate-at-risk");
+    const now = new Date("2031-03-04T05:06:07.890Z");
+    const soon = {
+      firstResponseDueAt: new Date(now.getTime() + 10 * MIN),
+      resolutionDueAt: new Date(now.getTime() + 8 * 60 * MIN),
+      firstResponseTargetMinutes: 60,
+    };
+    const open = await seedTicket(org.id, contact.id, 1, { ...soon, state: "OPEN" });
+    const pending = await seedTicket(org.id, contact.id, 2, { ...soon, state: "PENDING" });
+
+    await slaFlagHandler(undefined, { now });
+
+    expect((await prisma.ticket.findUniqueOrThrow({ where: { id: open.id } })).isAtRisk).toBe(true);
+    expect((await prisma.ticket.findUniqueOrThrow({ where: { id: pending.id } })).isAtRisk).toBe(
+      false,
+    );
   });
 });
