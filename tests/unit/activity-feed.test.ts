@@ -5,11 +5,13 @@ import {
   ACTOR_FORMER_MEMBER_MID_SENTENCE,
   type ActivityContext,
   type ActivityEventInput,
+  DELETED_STATUS_MARKER,
+  DELETED_STATUS_NO_NAME,
   describeEvent,
   MISSING_VALUE,
   partsToText,
 } from "../../src/lib/tickets/activity-copy";
-import { buildActivityFeed } from "../../src/lib/tickets/activity-feed";
+import { buildActivityFeed, referencedIds } from "../../src/lib/tickets/activity-feed";
 import {
   BULK_STATUS_REFUSED_MERGED_SOURCE,
   LINK_REMOVE_OUTCOME_UNKNOWN,
@@ -31,6 +33,11 @@ const context: ActivityContext = {
   tickets: { [THIS]: { id: THIS, number: 10 }, [OTHER]: { id: OTHER, number: 42 } },
   tags: { "tag-1": "billing" },
   members: { "u-ann": "Ann", "u-bo": "Bo" },
+  states: {
+    "s-triage": { name: "Triage", deleted: false },
+    "s-vendor": { name: "Waiting on vendor", deleted: true },
+    "s-done": { name: "Done", deleted: false },
+  },
 };
 
 function event(partial: Partial<ActivityEventInput>): ActivityEventInput {
@@ -229,6 +236,99 @@ describe("copy rows added by the review (UI-SPEC Copywriting, review UI-WR-05, U
     expect(say({ before: { status: 3 }, after: { status: "OPEN" } })).toBe(
       "Ann changed this ticket.",
     );
+  });
+});
+
+// Phase 12.1 (D-11 Feed row as amended by K42, UI-SPEC Surface 7): each side of a STATUS_CHANGED
+// row is filled on its own. Legacy sides hold { status }, new sides { stateId, stateGroup }.
+describe("status rows over states (UI-SPEC Surface 7)", () => {
+  it("the deleted-status copy rows are exported constants with the rows' exact text", () => {
+    expect(DELETED_STATUS_MARKER).toBe("(deleted status)");
+    expect(DELETED_STATUS_NO_NAME).toBe("a deleted status");
+  });
+
+  it("a legacy row keeps the enum labels", () => {
+    expect(say({ before: { status: "OPEN" }, after: { status: "PENDING" } })).toBe(
+      "Ann changed the status from Open to Pending.",
+    );
+  });
+
+  it("a new row reads both current names", () => {
+    expect(
+      say({
+        before: { stateId: "s-triage", stateGroup: "OPEN" },
+        after: { stateId: "s-done", stateGroup: "RESOLVED" },
+      }),
+    ).toBe("Ann changed the status from Triage to Done.");
+  });
+
+  it("a soft-deleted state reads its name with the marker", () => {
+    expect(
+      say({
+        before: { stateId: "s-vendor", stateGroup: "PENDING" },
+        after: { stateId: "s-triage", stateGroup: "OPEN" },
+      }),
+    ).toBe("Ann changed the status from Waiting on vendor (deleted status) to Triage.");
+  });
+
+  it("a state id the organization does not have reads 'a deleted status'", () => {
+    const row = say({
+      before: { stateId: "s-elsewhere", stateGroup: "OPEN" },
+      after: { stateId: "s-done", stateGroup: "RESOLVED" },
+    });
+    expect(row).toBe("Ann changed the status from a deleted status to Done.");
+    expect(row).not.toContain("s-elsewhere");
+  });
+
+  it("one legacy side and one new side are each filled by their own rule", () => {
+    expect(
+      say({ before: { status: "NEW" }, after: { stateId: "s-vendor", stateGroup: "PENDING" } }),
+    ).toBe("Ann changed the status from New to Waiting on vendor (deleted status).");
+    expect(
+      say({ before: { stateId: "s-triage", stateGroup: "OPEN" }, after: { status: "CLOSED" } }),
+    ).toBe("Ann changed the status from Triage to Closed.");
+  });
+
+  it("a side of neither shape gives the other row, never the raw value", () => {
+    expect(
+      say({ before: { status: 3 }, after: { stateId: "s-done", stateGroup: "RESOLVED" } }),
+    ).toBe("Ann changed this ticket.");
+    const numeric = say({
+      before: { stateId: 7 },
+      after: { stateId: "s-done", stateGroup: "RESOLVED" },
+    });
+    expect(numeric).toBe("Ann changed this ticket.");
+    const badGroup = say({
+      before: { stateId: "s-triage", stateGroup: "ARCHIVED" },
+      after: { stateId: "s-done", stateGroup: "RESOLVED" },
+    });
+    expect(badGroup).toBe("Ann changed this ticket.");
+    expect(badGroup).not.toContain("ARCHIVED");
+  });
+
+  it("a deletion-written row with a batchId keeps the (bulk change) suffix", () => {
+    expect(
+      say({
+        actorUserId: "u-bo",
+        batchId: "b-delete",
+        before: { stateId: "s-vendor", stateGroup: "PENDING" },
+        after: { stateId: "s-triage", stateGroup: "PENDING" },
+      }),
+    ).toBe(
+      "Bo changed the status from Waiting on vendor (deleted status) to Triage. (bulk change)",
+    );
+  });
+
+  it("referencedIds collects the state ids of both sides, as tag ids are collected", () => {
+    const refs = referencedIds([
+      {
+        before: { stateId: "s-a", stateGroup: "OPEN" },
+        after: { stateId: "s-b", stateGroup: "PENDING" },
+      },
+      { before: { status: "OPEN" }, after: { stateId: "s-a", stateGroup: "OPEN" } },
+      { before: { stateId: 7 }, after: {} },
+    ]);
+    expect(refs.stateIds.sort()).toEqual(["s-a", "s-b"]);
   });
 });
 

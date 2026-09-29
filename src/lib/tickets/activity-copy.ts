@@ -11,6 +11,7 @@ import {
   relationLabel,
   relationSideFor,
 } from "./relation-pairs";
+import { STATE_GROUP_KEYS } from "./state-copy";
 
 export const ACTOR_SYSTEM = "The system";
 export const ACTOR_FORMER_MEMBER = "A former member";
@@ -19,6 +20,10 @@ export const ACTOR_FORMER_MEMBER_MID_SENTENCE = "a former member";
 export const BULK_SUFFIX = "(bulk change)";
 export const MISSING_TICKET = "a ticket that is no longer available";
 export const MISSING_TAG = "a deleted tag";
+/** Copywriting "Deleted status marker": appended to a soft-deleted state's name (Phase 12.1, K42). */
+export const DELETED_STATUS_MARKER = "(deleted status)";
+/** Copywriting "Deleted status, no name": a state id that is not a state of the organization. */
+export const DELETED_STATUS_NO_NAME = "a deleted status";
 export const FEED_EMPTY = "No messages or activity yet.";
 /** Copywriting "Feed events: missing value": fills {before} or {after} when no value is stored. */
 export const MISSING_VALUE = "no value";
@@ -57,6 +62,11 @@ export interface ActivityContext {
   tickets: Record<string, { id: string; number: number }>;
   tags: Record<string, string>;
   members: Record<string, string>;
+  /**
+   * The organization's states named by the rows, soft-deleted ones included and flagged (Phase
+   * 12.1, K42). A state id missing here renders as DELETED_STATUS_NO_NAME.
+   */
+  states: Record<string, { name: string; deleted: boolean }>;
 }
 
 export interface DescribedEvent {
@@ -123,6 +133,35 @@ function changeParts(
   return [text(`${actor} changed the ${field} from ${before} to ${after}.`)];
 }
 
+/**
+ * One side of a STATUS_CHANGED row (Phase 12.1, UI-SPEC Surface 7), filled on its own: a legacy
+ * side ({ status }) reads its enum label; a new side ({ stateId, stateGroup }) reads the state's
+ * current name, with the deleted marker when the state is soft-deleted, or DELETED_STATUS_NO_NAME
+ * when the organization has no such state. Null (the "other" row) for a value of neither shape,
+ * so a raw stored value is never shown.
+ */
+function statusSide(snapshot: Record<string, unknown>, context: ActivityContext): string | null {
+  if (!Object.hasOwn(snapshot, "stateId")) return label(STATUS_LABELS, snapshot.status);
+  const stateId = str(snapshot.stateId);
+  const group = str(snapshot.stateGroup);
+  if (stateId === null || group === null) return null;
+  if (!(STATE_GROUP_KEYS as readonly string[]).includes(group)) return null;
+  const state = Object.hasOwn(context.states, stateId) ? context.states[stateId] : undefined;
+  if (!state) return DELETED_STATUS_NO_NAME;
+  return state.deleted ? `${state.name} ${DELETED_STATUS_MARKER}` : state.name;
+}
+
+function statusParts(
+  event: ActivityEventInput,
+  context: ActivityContext,
+  actor: string,
+): ActivityPart[] {
+  const before = statusSide(event.before, context);
+  const after = statusSide(event.after, context);
+  if (before === null || after === null) return OTHER.describe(event, context, actor);
+  return [text(`${actor} changed the status from ${before} to ${after}.`)];
+}
+
 function ticketRef(context: ActivityContext, id: unknown): ActivityPart {
   const key = str(id);
   const ticket = key === null ? undefined : context.tickets[key];
@@ -169,8 +208,7 @@ const OTHER: CopyRow = {
 export const ACTIVITY_COPY: Record<TicketAuditAction, CopyRow> = {
   STATUS_CHANGED: {
     icon: "CircleDot",
-    describe: (event, context, actor) =>
-      changeParts("status", STATUS_LABELS, event, context, actor),
+    describe: (event, context, actor) => statusParts(event, context, actor),
   },
   ASSIGNEE_CHANGED: {
     icon: "UserRound",

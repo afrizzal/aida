@@ -80,6 +80,11 @@ export interface FeedReferences {
   tickets: Record<string, { id: string; number: number }>;
   tags: Record<string, string>;
   members: Record<string, string>;
+  /**
+   * States named by STATUS_CHANGED rows (Phase 12.1, K42), soft-deleted ones included and
+   * flagged; an id that is not a state of this organization is absent ("a deleted status").
+   */
+  states: Record<string, { name: string; deleted: boolean }>;
 }
 
 function asSnapshot(value: unknown): Record<string, unknown> {
@@ -177,7 +182,7 @@ export async function loadTicketDetailData(
     after: asSnapshot(row.after),
   }));
   const refs = referencedIds(events);
-  const [refTickets, refTags] = await Promise.all([
+  const [refTickets, refTags, refStates] = await Promise.all([
     refs.ticketIds.length > 0
       ? db.ticket.findMany({
           where: { id: { in: refs.ticketIds } },
@@ -186,6 +191,14 @@ export async function loadTicketDetailData(
       : Promise.resolve([]),
     refs.tagIds.length > 0
       ? db.tag.findMany({ where: { id: { in: refs.tagIds } }, select: { id: true, name: true } })
+      : Promise.resolve([]),
+    // Through scopedDb, so a state id of another organization never resolves (T-12.1-47); no
+    // deletedAt filter, so a soft-deleted state keeps its name for the marker (K42).
+    refs.stateIds.length > 0
+      ? db.ticketState.findMany({
+          where: { id: { in: refs.stateIds } },
+          select: { id: true, name: true, deletedAt: true },
+        })
       : Promise.resolve([]),
   ]);
   // Users are named only when they are members of this organization now (D-18); the roster
@@ -200,6 +213,9 @@ export async function loadTicketDetailData(
     tickets: Object.fromEntries(refTickets.map((t) => [t.id, { id: t.id, number: t.number }])),
     tags: Object.fromEntries(refTags.map((t) => [t.id, t.name])),
     members,
+    states: Object.fromEntries(
+      refStates.map((s) => [s.id, { name: s.name, deleted: s.deletedAt !== null }]),
+    ),
   };
 
   return {

@@ -159,3 +159,95 @@ describe("activity feed: organization scope and name resolution (D-18)", () => {
     expect(result).toEqual({ status: "membership_ended" });
   });
 });
+
+// Phase 12.1 (D-11 Feed row as amended by K42, UI-SPEC Surface 7; T-12.1-47): state rows read the
+// state's current name in the ticket's organization, a soft-deleted state keeps its name with the
+// marker, and another organization's state never lends its name. The rename and the soft delete
+// are direct prisma updates (the admin service is plan 12.1-08's).
+describe("activity feed: state names over renames and deletions (Phase 12.1)", () => {
+  it("shows the renamed target and the soft-deleted source with the marker", async () => {
+    const { runTicketMutation } = await import("@/lib/tickets/mutations");
+    const a = await seedOrgWithMembers(prisma, ["owner"]);
+    const marker = randomUUID().slice(0, 8);
+    const ticket = await seedTicket(a.orgId, "states");
+    const source = await prisma.ticketState.create({
+      data: {
+        organizationId: a.orgId,
+        name: `Waiting on vendor ${marker}`,
+        colorToken: "amber",
+        group: "PENDING",
+        sortOrder: 9,
+      },
+    });
+    const target = await prisma.ticketState.create({
+      data: {
+        organizationId: a.orgId,
+        name: `Triage ${marker}`,
+        colorToken: "blue",
+        group: "OPEN",
+        sortOrder: 9,
+      },
+    });
+    const actor = { orgId: a.orgId, userId: a.users[0].id };
+    for (const stateId of [source.id, target.id]) {
+      const result = await runTicketMutation({
+        actor,
+        ticketIds: [ticket.id],
+        op: { kind: "state", stateId },
+        mode: "single",
+      });
+      expect(result).toMatchObject({ ok: true, count: 1 });
+    }
+    await prisma.ticketState.update({
+      where: { id: target.id },
+      data: { name: `Triage renamed ${marker}` },
+    });
+    await prisma.ticketState.update({ where: { id: source.id }, data: { deletedAt: new Date() } });
+
+    const { data, texts } = await feedTexts(a.users[0].id, a.orgId, ticket.id);
+    expect(data.feedReferences.states[source.id]).toEqual({
+      name: `Waiting on vendor ${marker}`,
+      deleted: true,
+    });
+    const last = texts.at(-1) ?? "";
+    expect(last).toContain(
+      `changed the status from Waiting on vendor ${marker} (deleted status) to Triage renamed ${marker}.`,
+    );
+    expect(texts.join("\n")).not.toContain(`Triage ${marker}.`);
+  });
+
+  it("a state id of another organization renders as 'a deleted status', never its name", async () => {
+    const a = await seedOrgWithMembers(prisma, ["owner"]);
+    const b = await seedOrgWithMembers(prisma, ["owner"]);
+    const marker = randomUUID().slice(0, 8);
+    const ticket = await seedTicket(a.orgId, "foreign-state");
+    const foreign = await prisma.ticketState.create({
+      data: {
+        organizationId: b.orgId,
+        name: `Foreign state ${marker}`,
+        colorToken: "red",
+        group: "OPEN",
+        sortOrder: 9,
+      },
+    });
+    const own = await prisma.ticketState.findFirstOrThrow({
+      where: { organizationId: a.orgId, group: "RESOLVED", deletedAt: null },
+    });
+    await recordTicketAudit(prisma, a.orgId, {
+      ticketId: ticket.id,
+      action: "STATUS_CHANGED",
+      before: { stateId: foreign.id, stateGroup: "OPEN" },
+      after: { stateId: own.id, stateGroup: "RESOLVED" },
+      actorType: "USER",
+      actorUserId: a.users[0].id,
+    });
+    const { data, texts } = await feedTexts(a.users[0].id, a.orgId, ticket.id);
+    expect(Object.hasOwn(data.feedReferences.states, foreign.id)).toBe(false);
+    expect(texts.at(-1)).toContain(`changed the status from a deleted status to ${own.name}.`);
+    // The ticket row carries a BigInt (slaPausedMs), so the replacer turns it into text.
+    const serialized = JSON.stringify(data, (_key, value) =>
+      typeof value === "bigint" ? value.toString() : value,
+    );
+    expect(serialized).not.toContain(`Foreign state ${marker}`);
+  });
+});

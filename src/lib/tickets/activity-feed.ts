@@ -58,10 +58,13 @@ export function referencedIds(events: readonly { before: unknown; after: unknown
   ticketIds: string[];
   tagIds: string[];
   userIds: string[];
+  stateIds: string[];
 } {
   const tickets = new Set<string>();
   const tags = new Set<string>();
   const users = new Set<string>();
+  // Phase 12.1 (K42): STATUS_CHANGED sides hold { stateId, stateGroup }; legacy sides hold none.
+  const states = new Set<string>();
   const ticketKeys = ["fromTicketId", "toTicketId", "sourceTicketId", "targetTicketId"];
   for (const event of events) {
     for (const snapshot of [event.before, event.after]) {
@@ -72,7 +75,13 @@ export function referencedIds(events: readonly { before: unknown; after: unknown
       }
       if (typeof record.tagId === "string") tags.add(record.tagId);
       if (typeof record.assigneeId === "string") users.add(record.assigneeId);
+      if (typeof record.stateId === "string") states.add(record.stateId);
     }
   }
-  return { ticketIds: [...tickets], tagIds: [...tags], userIds: [...users] };
+  return {
+    ticketIds: [...tickets],
+    tagIds: [...tags],
+    userIds: [...users],
+    stateIds: [...states],
+  };
 }
