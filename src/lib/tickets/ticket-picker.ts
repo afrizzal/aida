@@ -8,8 +8,11 @@
 // returns nothing without querying; otherwise the existing searchTickets with limit 11, so that
 // leaving out the current ticket still leaves 10 rows.
 //
-// Only id, number, subject, status, alreadyLinked, linkLabel, sameContact and mergedSource leave
-// this function. It never selects message text or contact fields (UI-SPEC Assumption 3
+// Only id, number, subject, stateName, colorToken, alreadyLinked, linkLabel, sameContact and
+// mergedSource leave this function. stateName and colorToken are the name and colour key of the
+// ticket's state, read through the composite relation (Phase 12.1, D-04: the state always belongs
+// to the ticket's organization) or the organization-scoped join in searchTickets; nothing else
+// about the state leaves (D-11 chips row). It never selects message text or contact fields (UI-SPEC Assumption 3
 // confirmed). linkLabel is the current link's label from the current ticket's side ("Parent of",
 // "Duplicate of", …), or null when the pair is not linked; it comes from the same relation read
 // as alreadyLinked, scoped to the actor's organization, so the merge confirmation never names a
@@ -45,7 +48,10 @@ export interface PickerTicketResult {
   id: string;
   number: number;
   subject: string;
-  status: string;
+  /** The name of the ticket's state (Phase 12.1, D-11). */
+  stateName: string;
+  /** The colour key of the ticket's state; the client renders an unknown key gray. */
+  colorToken: string;
   alreadyLinked: boolean;
   /** The current link from the current ticket's side; null when the pair is not linked. */
   linkLabel: RelationLabel | null;
@@ -72,7 +78,8 @@ interface CandidateRow {
   id: string;
   number: number;
   subject: string;
-  status: string;
+  stateName: string;
+  colorToken: string;
 }
 
 export async function searchTicketsForPicker(
@@ -103,9 +110,24 @@ export async function searchTicketsForPicker(
     if (!Number.isSafeInteger(n) || n > INT4_MAX) return { ok: true, results: [] };
     const row = await client.ticket.findFirst({
       where: { organizationId: actor.orgId, number: n },
-      select: { id: true, number: true, subject: true, status: true },
+      select: {
+        id: true,
+        number: true,
+        subject: true,
+        state: { select: { name: true, colorToken: true } },
+      },
     });
-    candidates = row ? [row] : [];
+    candidates = row
+      ? [
+          {
+            id: row.id,
+            number: row.number,
+            subject: row.subject,
+            stateName: row.state.name,
+            colorToken: row.state.colorToken,
+          },
+        ]
+      : [];
   } else if (q.length < PICKER_MIN_QUERY_LENGTH) {
     return { ok: true, results: [] };
   } else {
@@ -151,7 +173,8 @@ export async function searchTicketsForPicker(
           id: row.id,
           number: row.number,
           subject: row.subject,
-          status: String(row.status),
+          stateName: row.stateName,
+          colorToken: row.colorToken,
           alreadyLinked: linkLabels.has(row.id),
           linkLabel: linkLabels.get(row.id) ?? null,
           sameContact: detail.contactId === current.contactId,

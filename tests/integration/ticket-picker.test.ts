@@ -17,16 +17,18 @@ import {
   seedOrgWithMembers,
   seedRelation,
   seedTicket,
+  stateIdFor,
 } from "../support/lifecycle-fixtures";
 
 const ROW_KEYS = [
   "alreadyLinked",
+  "colorToken",
   "id",
   "linkLabel",
   "mergedSource",
   "number",
   "sameContact",
-  "status",
+  "stateName",
   "subject",
 ];
 
@@ -162,7 +164,7 @@ describe("searchTicketsForPicker (AIDA-52, D-01)", () => {
     expect(result.ok && result.results.some((r) => r.id === current.id)).toBe(false);
   });
 
-  it("rows hold exactly the eight fields, with alreadyLinked, sameContact and mergedSource set from the data", async () => {
+  it("rows hold exactly the nine fields, with alreadyLinked, sameContact and mergedSource set from the data", async () => {
     const { orgId, actor } = await memberActor();
     const email = `same-${randomUUID()}@example.test`;
     const current = await seedContactTicket(orgId, { contactEmail: email });
@@ -183,7 +185,7 @@ describe("searchTicketsForPicker (AIDA-52, D-01)", () => {
         mergedIntoTicketId: target.id,
         mergedAt: new Date(),
         mergeMessageSeq: BigInt(1),
-        status: "CLOSED",
+        stateId: await stateIdFor(orgId, "CLOSED"),
       },
     });
 
@@ -214,7 +216,8 @@ describe("searchTicketsForPicker (AIDA-52, D-01)", () => {
       alreadyLinked: false,
       sameContact: false,
       mergedSource: true,
-      status: "CLOSED",
+      stateName: "Closed",
+      colorToken: "gray",
     });
     expect(await byNumber(target.number)).toMatchObject({
       alreadyLinked: false,
@@ -326,6 +329,69 @@ describe("searchTicketsForPicker (AIDA-52, D-01)", () => {
       purpose: "link",
     });
     expect(byNumber.ok && byNumber.results.every((r) => r.id !== foreign.id)).toBe(true);
+  });
+
+  it("returns the name and colour of an admin-created state by number and by word; another organization never sees it (D-11 chips row)", async () => {
+    const x = await memberActor();
+    const y = await memberActor();
+    const word = uniqueWord();
+    const current = await seedTicket(x.orgId);
+    const vendor = await prisma.ticketState.create({
+      data: {
+        organizationId: x.orgId,
+        name: "Waiting on vendor",
+        colorToken: "orange",
+        group: "PENDING",
+        sortOrder: 5,
+      },
+    });
+    const waiting = await seedTicket(x.orgId, { stateId: vendor.id });
+    await prisma.ticket.update({ where: { id: waiting.id }, data: { subject: `Vendor ${word}` } });
+    const yCurrent = await seedTicket(y.orgId);
+
+    const byNumber = await searchTicketsForPicker(prisma, x.actor, {
+      q: `#${waiting.number}`,
+      ticketId: current.id,
+      purpose: "link",
+    });
+    expect(byNumber.ok && byNumber.results).toEqual([
+      expect.objectContaining({
+        id: waiting.id,
+        stateName: "Waiting on vendor",
+        colorToken: "orange",
+      }),
+    ]);
+
+    const byWord = await searchTicketsForPicker(prisma, x.actor, {
+      q: word,
+      ticketId: current.id,
+      purpose: "merge",
+    });
+    expect(byWord.ok && byWord.results).toEqual([
+      expect.objectContaining({
+        id: waiting.id,
+        stateName: "Waiting on vendor",
+        colorToken: "orange",
+      }),
+    ]);
+
+    const foreignWord = await searchTicketsForPicker(prisma, y.actor, {
+      q: word,
+      ticketId: yCurrent.id,
+      purpose: "link",
+    });
+    expect(foreignWord).toEqual({ ok: true, results: [] });
+    const foreignNumber = await searchTicketsForPicker(prisma, y.actor, {
+      q: `#${waiting.number}`,
+      ticketId: yCurrent.id,
+      purpose: "link",
+    });
+    expect(
+      foreignNumber.ok &&
+        foreignNumber.results.some(
+          (r) => r.id === waiting.id || r.stateName === "Waiting on vendor",
+        ),
+    ).toBe(false);
   });
 
   it("refuses MEMBERSHIP_ENDED without searching, and TICKET_NOT_FOUND for an unknown or foreign current ticket", async () => {

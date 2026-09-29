@@ -8,7 +8,7 @@
 
 import { Check, Loader2 } from "lucide-react";
 import { type Ref, useEffect, useRef, useState } from "react";
-import { StatusChip } from "@/components/tickets/status-chip";
+import { StateChip } from "@/components/tickets/state-chip";
 import {
   Command,
   CommandEmpty,
@@ -17,7 +17,6 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import type { TicketStatus } from "@/generated/prisma/client";
 import { PICKER_REASON_MERGED } from "@/lib/tickets/lifecycle-copy";
 import type { RelationLabel } from "@/lib/tickets/relation-pairs";
 
@@ -27,7 +26,9 @@ export interface PickerRow {
   id: string;
   number: number;
   subject: string;
-  status: TicketStatus;
+  /** The name and colour key of the ticket's state (Phase 12.1, D-11 chips row). */
+  stateName: string;
+  colorToken: string;
   alreadyLinked: boolean;
   /** The current link from this ticket's side, null when the pair is not linked (UI-WR-06). */
   linkLabel: RelationLabel | null;
@@ -224,7 +225,8 @@ export function TicketPicker({
                     </span>
                     {reason && <span className="text-[12px] text-muted-foreground">{reason}</span>}
                   </span>
-                  <StatusChip status={row.status} />
+                  {/* No tooltip: the chip sits inside an interactive row (UI-SPEC Surface 2). */}
+                  <StateChip name={row.stateName} colorToken={row.colorToken} />
                 </CommandItem>
               );
             })}

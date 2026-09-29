@@ -9,8 +9,9 @@ import { searchTicketsForPicker } from "@/lib/tickets/ticket-picker";
 // Session-protected: src/proxy.ts already answers unauthenticated /api/* requests with 401 (this
 // route is not a public prefix), and this handler checks again from the request headers.
 // Membership is checked by searchTicketsForPicker. The response holds at most 10 of the
-// organization's tickets as { id, number, subject, status, alreadyLinked, linkLabel,
-// sameContact, mergedSource } and nothing else.
+// organization's tickets as { id, number, subject, stateName, colorToken, alreadyLinked,
+// linkLabel, sameContact, mergedSource } and nothing else; stateName and colorToken are the name
+// and colour key of the ticket's state in the actor's organization (Phase 12.1, D-11).
 
 const NO_STORE = { "Cache-Control": "no-store" } as const;
 
