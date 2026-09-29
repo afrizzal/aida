@@ -5,7 +5,7 @@ milestone_name: Helpdesk & Projects
 current_phase: 12
 current_phase_name: ticket-lifecycle
 status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11 and 12 verified human_needed; Phase 12.1 (custom states and SLA pause) next
-stopped_at: Completed 12.1-13-PLAN.md (ticket page on states: grouped top-bar picker via changeState, paused SLA chip, snooze by group, feed state names with the deleted-status marker)
+stopped_at: Completed 12.1-14-PLAN.md (inbox readers on states: list row chip, default emphasis and paused SLA, grouped bulk Status picker, saved views refuse and flag missing states)
 last_updated: "2026-11-08T15:06:29.465Z"
 last_activity: 2026-11-09
 last_activity_desc: Phase 12.1 planned, 17 plans in 7 waves; Codex plan review converged after cycle 2 (K29); execution next
