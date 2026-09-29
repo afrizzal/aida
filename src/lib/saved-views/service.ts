@@ -146,13 +146,24 @@ function validateFilters(raw: unknown): StoredViewFilters {
   return toStoredFilters(parsed.data);
 }
 
-/** Which references of the filters no longer exist in the organization (D-05). */
+/**
+ * Which references of the filters no longer exist in the organization (D-05). A state id is
+ * missing when it is not an active state of the organization: soft-deleted, unknown, another
+ * organization's, or the legacy sentinel (12.1 D-09). One query for all state ids.
+ */
 async function findMissingReferences(
   client: ReadClient,
   orgId: string,
   filters: StoredViewFilters,
-): Promise<{ tag: boolean; customField: boolean }> {
-  const [tag, definition] = await Promise.all([
+): Promise<{ state: boolean; tag: boolean; customField: boolean }> {
+  const stateIds = [...new Set(filters.stateIds)];
+  const [states, tag, definition] = await Promise.all([
+    stateIds.length > 0
+      ? client.ticketState.findMany({
+          where: { id: { in: stateIds }, organizationId: orgId, deletedAt: null },
+          select: { id: true },
+        })
+      : [],
     filters.tagId
       ? client.tag.findFirst({
           where: { id: filters.tagId, organizationId: orgId },
@@ -167,6 +178,7 @@ async function findMissingReferences(
       : null,
   ]);
   return {
+    state: states.length !== stateIds.length,
     tag: filters.tagId !== undefined && tag === null,
     customField: filters.cf !== undefined && definition === null,
   };
@@ -174,7 +186,9 @@ async function findMissingReferences(
 
 async function requireReferences(client: ReadClient, orgId: string, filters: StoredViewFilters) {
   const missing = await findMissingReferences(client, orgId, filters);
-  if (missing.tag || missing.customField) throw new SavedViewError("MISSING_REFERENCE");
+  if (missing.state || missing.tag || missing.customField) {
+    throw new SavedViewError("MISSING_REFERENCE");
+  }
 }
 
 /** The largest position in the target group plus one (D-04); 0 for an empty group. */
@@ -436,7 +450,7 @@ export type SavedViewPanel =
       /** "applied" when the URL filters equal the stored filters, "changed" otherwise. */
       state: "applied" | "changed";
       /** Stored references that no longer exist in the organization; the filter is kept (D-05). */
-      missing: { tag: boolean; customField: boolean };
+      missing: { state: boolean; tag: boolean; customField: boolean };
     };
 
 const NOT_AVAILABLE: SavedViewPanel = { status: "not_available" };

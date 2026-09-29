@@ -3,8 +3,8 @@
 // mocked. Covers two behaviours of the 11-03 service that the UI must respect:
 //   1. listSavedViewsForViewer and getSavedViewForPanel THROW MEMBERSHIP_ENDED; the wrappers the
 //      (app) layout and TicketListPanel use turn that into a defined state.
-//   2. Stored filters keep the caller's status order; applied versus changed compares statuses
-//      as a set, so a different order alone is never "Filters changed".
+//   2. Stored filters hold the state ids sorted (version 2, Phase 12.1 D-09); applied versus
+//      changed compares state ids as a set, so a different order alone is never "Filters changed".
 import { describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import {
@@ -13,16 +13,16 @@ import {
   listSavedViewsForViewer,
 } from "@/lib/saved-views/service";
 import { panelOrMembershipEnded, sidebarViewsOrEmpty } from "@/lib/saved-views/ui-state";
-import { seedOrgWithMembers } from "../support/inbox-fixtures";
+import { seedOrgWithMembers, stateIdFor } from "../support/inbox-fixtures";
 
-async function makeSharedView(orgId: string, userId: string, statuses: string[]) {
+async function makeSharedView(orgId: string, userId: string, stateIds: string[]) {
   const result = await createSavedView(
     prisma,
     { userId, orgId },
     {
       name: `UI state ${Math.random().toString(36).slice(2)}`,
       visibility: "SHARED",
-      filters: { view: "all", statuses: statuses as ("OPEN" | "PENDING")[] },
+      filters: { view: "all", stateIds },
     },
   );
   if (!result.ok) throw new Error(`makeSharedView refused: ${result.error}`);
@@ -33,7 +33,8 @@ describe("saved views in the UI: a removed member gets defined states, never a t
   it("the sidebar gets empty lists and the strip gets membership_ended", async () => {
     const { orgId, users } = await seedOrgWithMembers(prisma, ["member", "member"]);
     const [owner, gone] = users;
-    const viewId = await makeSharedView(orgId, owner.id, ["OPEN"]);
+    const open = await stateIdFor(orgId, "OPEN");
+    const viewId = await makeSharedView(orgId, owner.id, [open]);
     const goneActor = { userId: gone.id, orgId };
 
     // Before removal the same wrappers pass the service result through.
@@ -47,7 +48,7 @@ describe("saved views in the UI: a removed member gets defined states, never a t
       code: "MEMBERSHIP_ENDED",
     });
     await expect(
-      getSavedViewForPanel(prisma, goneActor, viewId, { statuses: ["OPEN"] }),
+      getSavedViewForPanel(prisma, goneActor, viewId, { stateIds: [open] }),
     ).rejects.toMatchObject({ code: "MEMBERSHIP_ENDED" });
 
     // ... and the wrappers the layout and the panel use resolve to a defined state.
@@ -56,7 +57,7 @@ describe("saved views in the UI: a removed member gets defined states, never a t
     ).resolves.toEqual({ private: [], shared: [] });
     await expect(
       panelOrMembershipEnded(() =>
-        getSavedViewForPanel(prisma, goneActor, viewId, { statuses: ["OPEN"] }),
+        getSavedViewForPanel(prisma, goneActor, viewId, { stateIds: [open] }),
       ),
     ).resolves.toEqual({ status: "membership_ended" });
   });
@@ -71,28 +72,30 @@ describe("saved views in the UI: a removed member gets defined states, never a t
   });
 });
 
-describe("saved views in the UI: status order alone never shows Filters changed", () => {
-  it("a view stored as PENDING, OPEN is applied for OPEN, PENDING and changed for OPEN only", async () => {
+describe("saved views in the UI: state id order alone never shows Filters changed", () => {
+  it("a view stored with ids [a, b] is applied for [b, a] and [a, b] and changed for [a] only", async () => {
     const { orgId, users } = await seedOrgWithMembers(prisma, ["member"]);
     const [owner] = users;
     const actor = { userId: owner.id, orgId };
-    const viewId = await makeSharedView(orgId, owner.id, ["PENDING", "OPEN"]);
+    const [a, b] = [await stateIdFor(orgId, "OPEN"), await stateIdFor(orgId, "PENDING")].sort();
+    const viewId = await makeSharedView(orgId, owner.id, [b, a]);
 
+    // Version 2 stores the ids sorted, whatever order the caller gave (12.1-10 frozen contract).
     const row = await prisma.savedView.findUniqueOrThrow({ where: { id: viewId } });
-    expect((row.filters as { statuses: string[] }).statuses).toEqual(["PENDING", "OPEN"]);
+    expect(row.filters).toEqual({ version: 2, view: "all", stateIds: [a, b] });
 
-    const sameSetOtherOrder = await panelOrMembershipEnded(() =>
-      getSavedViewForPanel(prisma, actor, viewId, { view: "all", statuses: ["OPEN", "PENDING"] }),
+    const otherOrder = await panelOrMembershipEnded(() =>
+      getSavedViewForPanel(prisma, actor, viewId, { view: "all", stateIds: [b, a] }),
     );
-    expect(sameSetOtherOrder).toMatchObject({ status: "ok", state: "applied" });
+    expect(otherOrder).toMatchObject({ status: "ok", state: "applied" });
 
     const storedOrder = await panelOrMembershipEnded(() =>
-      getSavedViewForPanel(prisma, actor, viewId, { view: "all", statuses: ["PENDING", "OPEN"] }),
+      getSavedViewForPanel(prisma, actor, viewId, { view: "all", stateIds: [a, b] }),
     );
     expect(storedOrder).toMatchObject({ status: "ok", state: "applied" });
 
     const subset = await panelOrMembershipEnded(() =>
-      getSavedViewForPanel(prisma, actor, viewId, { view: "all", statuses: ["OPEN"] }),
+      getSavedViewForPanel(prisma, actor, viewId, { view: "all", stateIds: [a] }),
     );
     expect(subset).toMatchObject({ status: "ok", state: "changed" });
   });
