@@ -70,6 +70,7 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
     movedFromSources,
     feed,
     feedReferences,
+    stateOptions,
   } = detail;
   const isMergedSource = ticket.mergedIntoTicketId !== null;
 
@@ -109,7 +110,8 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
             id: ticket.id,
             number: ticket.number,
             subject: ticket.subject,
-            status: ticket.status,
+            state: ticket.state,
+            slaPausedAt: ticket.slaPausedAt,
             priority: ticket.priority,
             assigneeId: ticket.assigneeId,
             firstResponseDueAt: ticket.firstResponseDueAt,
@@ -123,6 +125,7 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
             triageLanguage: ticket.triageLanguage,
             triageStatus: ticket.triageStatus,
           }}
+          states={stateOptions}
           assigneeName={ticket.assignee?.name ?? null}
           members={members.map((member) => ({ id: member.user.id, name: member.user.name }))}
           tags={ticket.tags.map((t) => ({ id: t.tag.id, name: t.tag.name }))}

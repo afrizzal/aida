@@ -12,6 +12,7 @@ import { findActiveMembership } from "@/lib/membership";
 import { scopedDb } from "@/lib/scoped-db";
 import { buildActivityFeed, type FeedItem, referencedIds } from "@/lib/tickets/activity-feed";
 import { listRelationsForTicket, type RelationChip } from "@/lib/tickets/relations";
+import { type ActiveStateRow, listActiveStates } from "@/lib/tickets/ticket-states";
 
 export interface TicketDetailActor {
   userId: string;
@@ -24,6 +25,9 @@ function findTicket(db: ReturnType<typeof scopedDb>, ticketId: string) {
     include: {
       contact: true,
       assignee: true,
+      // Phase 12.1 (D-11, UI-SPEC Surface 2): the chip shows the state's name and colour, and the
+      // snooze control decides by its group. slaPausedAt is a scalar and comes with the row.
+      state: { select: { id: true, name: true, colorToken: true, group: true } },
       tags: { include: { tag: true } },
       messages: {
         include: { authorUser: true, authorContact: true, attachments: true },
@@ -101,6 +105,8 @@ export type TicketDetailData =
       /** Messages and TicketAuditEvent rows in one stable order (D-18, AIDA-55). */
       feed: FeedItem<TicketDetail["messages"][number], FeedAuditEvent>[];
       feedReferences: FeedReferences;
+      /** The organization's active states for the top-bar picker, in group then sort order (UI-SPEC 3a). */
+      stateOptions: ActiveStateRow[];
     } & Awaited<ReturnType<typeof findRelated>>);
 
 export async function loadTicketDetailData(
@@ -121,10 +127,13 @@ export async function loadTicketDetailData(
 
   // Relations go through the 12-02 service, which checks membership again and resolves the
   // other tickets through scopedDb; an unreadable other ticket is left out (UI-SPEC 2a).
-  const [related, relationList, receivedMerges] = await Promise.all([
+  // The picker's states are read in the actor's organization after the membership check
+  // (D-01); soft-deleted states are never offered (K42).
+  const [related, relationList, receivedMerges, stateOptions] = await Promise.all([
     findRelated(client, db, orgId, ticketId),
     listRelationsForTicket(client, actor, ticketId),
     db.ticket.count({ where: { mergedIntoTicketId: ticketId } }),
+    listActiveStates(client, orgId),
   ]);
   if (!relationList.ok) return { status: "membership_ended" };
 
@@ -202,6 +211,7 @@ export async function loadTicketDetailData(
     relations: relationList.relations,
     hasReceivedMerges: receivedMerges > 0,
     mergeTarget,
+    stateOptions,
     ...related,
   };
 }

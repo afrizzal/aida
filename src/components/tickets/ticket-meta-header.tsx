@@ -1,7 +1,9 @@
 "use client";
 
 import { ChevronDown, Plus } from "lucide-react";
+import { useRouter } from "next/navigation";
 import {
+  Fragment,
   type ReactNode,
   type RefObject,
   useCallback,
@@ -15,7 +17,7 @@ import {
   addTag,
   assignTicket,
   changePriority,
-  changeStatus,
+  changeState,
   removeTag,
   setCustomFieldValue,
   setTriageCategory,
@@ -32,7 +34,8 @@ import {
 import { type LinkedTicketChip, LinkedTicketsRow } from "@/components/tickets/linked-tickets-row";
 import { PriorityChip } from "@/components/tickets/priority-chip";
 import { SlaDueChip } from "@/components/tickets/sla-due-chip";
-import { StatusChip } from "@/components/tickets/status-chip";
+import { StateChip } from "@/components/tickets/state-chip";
+import { StateDot } from "@/components/tickets/state-dot";
 import { TagChip } from "@/components/tickets/tag-chip";
 import { TicketActionsMenu } from "@/components/tickets/ticket-actions-menu";
 import { TriageCategoryChip } from "@/components/tickets/triage-category-chip";
@@ -51,29 +54,51 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type {
   TicketPriority,
-  TicketStatus,
   TriageCategory,
   TriageSentiment,
   TriageStatus,
 } from "@/generated/prisma/client";
 import type { Command as RegistryCommand } from "@/lib/commands/registry";
-import { MERGED_SOURCE_REASON, STATUS_REFUSED_MERGED_SOURCE } from "@/lib/tickets/lifecycle-copy";
+import type { TicketMutationErrorCode } from "@/lib/tickets/mutations";
+import {
+  GROUP_LABELS,
+  MERGED_SOURCE_REASON,
+  STATE_GROUP_KEYS,
+  STATUS_CHANGE_ERROR_MEMBERSHIP_ENDED,
+  STATUS_CHANGE_ERROR_STATE_DELETED,
+  STATUS_CHANGE_ERROR_TICKET_UNAVAILABLE,
+  STATUS_CHANGE_ERROR_UNKNOWN,
+  STATUS_CHANGE_OUTCOME_UNKNOWN,
+  STATUS_MENU_TRIGGER_LABEL,
+  STATUS_REFUSED_MERGED_SOURCE,
+  type StateGroupKey,
+} from "@/lib/tickets/state-copy";
 
-const STATUSES: { value: TicketStatus; label: string }[] = [
-  { value: "NEW", label: "New" },
-  { value: "OPEN", label: "Open" },
-  { value: "PENDING", label: "Pending" },
-  { value: "RESOLVED", label: "Resolved" },
-  { value: "CLOSED", label: "Closed" },
-];
+/** UI-SPEC 3a: the "Status change error" row for a returned refusal code. */
+function statusChangeErrorText(code: TicketMutationErrorCode | undefined): string {
+  switch (code) {
+    case "MERGED_SOURCE":
+      return STATUS_REFUSED_MERGED_SOURCE;
+    case "STATE_NOT_FOUND":
+      return STATUS_CHANGE_ERROR_STATE_DELETED;
+    case "TICKET_UNAVAILABLE":
+      return STATUS_CHANGE_ERROR_TICKET_UNAVAILABLE;
+    case "MEMBERSHIP_ENDED":
+      return STATUS_CHANGE_ERROR_MEMBERSHIP_ENDED;
+    default:
+      return STATUS_CHANGE_ERROR_UNKNOWN;
+  }
+}
 
 const PRIORITIES: { value: TicketPriority; label: string }[] = [
   { value: "LOW", label: "Low" },
@@ -102,7 +127,10 @@ export interface TicketMetaHeaderTicket {
   id: string;
   number: number;
   subject: string;
-  status: TicketStatus;
+  /** The ticket's state (Phase 12.1, D-11): the chip shows name and colour; rules read the group. */
+  state: { id: string; name: string; colorToken: string; group: StateGroupKey };
+  /** Set while the ticket is in a Pending state (D-16); the SLA chip then reads as paused (D-18). */
+  slaPausedAt: Date | string | null;
   priority: TicketPriority;
   assigneeId: string | null;
   firstResponseDueAt: Date | string;
@@ -122,6 +150,14 @@ export interface TicketMetaHeaderMember {
   name: string;
 }
 
+/** One active state of the organization as the top-bar picker lists it (UI-SPEC 3a). */
+export interface TicketMetaHeaderState {
+  id: string;
+  name: string;
+  colorToken: string;
+  group: StateGroupKey;
+}
+
 export interface TicketMetaHeaderTag {
   id: string;
   name: string;
@@ -134,6 +170,8 @@ export interface TicketMetaHeaderCustomField {
 
 interface TicketMetaHeaderProps {
   ticket: TicketMetaHeaderTicket;
+  /** The organization's active states in group then sort order (UI-SPEC 3a). */
+  states: TicketMetaHeaderState[];
   assigneeName: string | null;
   members: TicketMetaHeaderMember[];
   tags: TicketMetaHeaderTag[];
@@ -171,6 +209,7 @@ function getActiveDue(ticket: TicketMetaHeaderTicket): Date | string | null {
 
 export function TicketMetaHeader({
   ticket,
+  states,
   assigneeName,
   members,
   tags,
@@ -182,6 +221,7 @@ export function TicketMetaHeader({
   snoozeControl,
 }: TicketMetaHeaderProps) {
   const [, startTransition] = useTransition();
+  const router = useRouter();
   const [tagPopoverOpen, setTagPopoverOpen] = useState(false);
   const [languagePopoverOpen, setLanguagePopoverOpen] = useState(false);
   // Controlled so the a and s keys (and the palette's This ticket group) can open them (11-08).
@@ -192,6 +232,7 @@ export function TicketMetaHeader({
   // The "More ticket actions" trigger, shared with the Linked tickets row (review UI-WR-04).
   const actionsTriggerRef = useRef<HTMLButtonElement>(null);
   const statusReasonId = useId();
+  const stateChipId = useId();
   const statusMenuRef = useCallback(
     (node: HTMLDivElement | null) => focusCurrentValue(node, focusStatusValue),
     [],
@@ -245,18 +286,27 @@ export function TicketMetaHeader({
   useRegisterCommands(ticketCommands, [ticket.id]);
 
   const activeDue = getActiveDue(ticket);
+  const stateMenuGroups = STATE_GROUP_KEYS.map((group) => ({
+    group,
+    items: states.filter((state) => state.group === group),
+  })).filter(({ items }) => items.length > 0);
   const untaggedAvailable = availableTags.filter((t) => !tags.some((tg) => tg.id === t.id));
 
-  function handleStatusChange(status: TicketStatus) {
+  // UI-SPEC 3a: success shows nothing (the page refreshes through revalidation); a returned code
+  // shows its "Status change error" row; a rejected call may have changed the state, so its toast
+  // stays until dismissed (P11 D2). Focus stays on the trigger (Radix returns it there).
+  function handleStateChange(stateId: string) {
     startTransition(async () => {
-      const result = await changeStatus(ticket.id, status).catch(() => null);
-      if (result?.ok) return;
+      const result = await changeState(ticket.id, stateId).catch(() => null);
+      if (result === null) {
+        toast.error(STATUS_CHANGE_OUTCOME_UNKNOWN, { duration: Infinity });
+        return;
+      }
+      if (result.ok) return;
       // A merged source keeps its status (Codex diff round 1, D1); this page may predate the merge.
-      toast.error(
-        result?.error === "MERGED_SOURCE"
-          ? STATUS_REFUSED_MERGED_SOURCE
-          : "Couldn't update status. Try again.",
-      );
+      toast.error(statusChangeErrorText(result.error));
+      // The chosen state was deleted meanwhile: refresh so the menu lists current states.
+      if (result.error === "STATE_NOT_FOUND") router.refresh();
     });
   }
 
@@ -332,8 +382,16 @@ export function TicketMetaHeader({
         <div className="ml-auto flex shrink-0 items-center gap-2">
           <DropdownMenu open={statusMenuOpen} onOpenChange={setStatusMenuOpen}>
             <DropdownMenuTrigger asChild>
-              <button type="button" aria-label="Change status">
-                <StatusChip status={ticket.status} />
+              <button
+                type="button"
+                aria-label={STATUS_MENU_TRIGGER_LABEL}
+                aria-describedby={stateChipId}
+              >
+                <StateChip
+                  id={stateChipId}
+                  name={ticket.state.name}
+                  colorToken={ticket.state.colorToken}
+                />
               </button>
             </DropdownMenuTrigger>
             {/* A merged source keeps its status (D-07, D-08; Codex diff round 1, D1): every
@@ -341,6 +399,7 @@ export function TicketMetaHeader({
                 shows its reason in "More ticket actions". The server refuses it anyway. */}
             <DropdownMenuContent
               ref={statusMenuRef}
+              className="w-[240px] max-h-[320px] overflow-y-auto"
               aria-describedby={mergedSource ? statusReasonId : undefined}
             >
               {mergedSource && (
@@ -351,20 +410,33 @@ export function TicketMetaHeader({
                   {MERGED_SOURCE_REASON}
                 </p>
               )}
+              {/* UI-SPEC 3a: one radio group over the active states, a label per non-empty
+                  group (OPEN, PENDING, RESOLVED, CLOSED) and a separator between groups. */}
               <DropdownMenuRadioGroup
-                value={ticket.status}
+                value={ticket.state.id}
                 onValueChange={(value) => {
-                  if (!mergedSource) handleStatusChange(value as TicketStatus);
+                  if (!mergedSource && value !== ticket.state.id) handleStateChange(value);
                 }}
               >
-                {STATUSES.map((status) => (
-                  <DropdownMenuRadioItem
-                    key={status.value}
-                    value={status.value}
-                    disabled={mergedSource}
-                  >
-                    {status.label}
-                  </DropdownMenuRadioItem>
+                {stateMenuGroups.map(({ group, items }, index) => (
+                  <Fragment key={group}>
+                    {index > 0 && <DropdownMenuSeparator />}
+                    <DropdownMenuLabel className="text-[12px] font-semibold text-muted-foreground">
+                      {GROUP_LABELS[group]}
+                    </DropdownMenuLabel>
+                    {items.map((state) => (
+                      <DropdownMenuRadioItem
+                        key={state.id}
+                        value={state.id}
+                        disabled={mergedSource}
+                        title={state.name}
+                        className="text-[13px]"
+                      >
+                        <StateDot colorToken={state.colorToken} />
+                        <span className="min-w-0 truncate">{state.name}</span>
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </Fragment>
                 ))}
               </DropdownMenuRadioGroup>
             </DropdownMenuContent>
