@@ -1,4 +1,3 @@
-import type { TicketStatus } from "@/generated/prisma/client";
 import type { scopedDb } from "@/lib/scoped-db";
 import { DEFAULT_TICKET_LIST_LIMIT, parseUrlFilters } from "@/lib/tickets/list-filters";
 import { searchTickets } from "@/lib/tickets/search";
@@ -7,7 +6,11 @@ export { DEFAULT_TICKET_LIST_LIMIT };
 
 export interface TicketListFilters {
   view?: "unassigned" | "mine" | "all";
-  statuses?: TicketStatus[];
+  /**
+   * State ids of the organization (D-09). Non-empty filters by these ids only, so ids that are
+   * missing (deleted, unknown, another organization's, the sentinel) match no ticket.
+   */
+  stateIds?: string[];
   tagId?: string;
   cf?: { definitionId: string; value: string };
   q?: string;
@@ -37,7 +40,7 @@ export function parseTicketListFilters(
   const { filters, limit } = parseUrlFilters(searchParams);
   return {
     view: filters.view,
-    statuses: filters.statuses.length > 0 ? [...filters.statuses] : undefined,
+    stateIds: filters.stateIds.length > 0 ? [...filters.stateIds] : undefined,
     tagId: filters.tagId,
     cf: filters.cf,
     q: filters.q,
@@ -71,8 +74,10 @@ export async function fetchTicketList(filters: TicketListFilters, ctx: FetchTick
   // rows carry snoozedUntil (every scalar column is returned) for the snoozed chip.
   where.snoozedUntil = filters.snoozed === true ? { not: null } : null;
 
-  if (filters.statuses && filters.statuses.length > 0) {
-    where.status = { in: filters.statuses };
+  // D-09: an all-missing list matches nothing. With the parser's floor an empty list only comes
+  // from an absent state parameter or a stored view without a status filter.
+  if (filters.stateIds && filters.stateIds.length > 0) {
+    where.stateId = { in: filters.stateIds };
   }
 
   if (filters.tagId) {
@@ -109,6 +114,7 @@ export async function fetchTicketList(filters: TicketListFilters, ctx: FetchTick
       contact: true,
       assignee: true,
       tags: { include: { tag: true } },
+      state: { select: { id: true, name: true, colorToken: true, group: true } },
     },
   });
 }

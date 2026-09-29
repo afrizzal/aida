@@ -6,7 +6,8 @@ import { describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { createSavedView } from "@/lib/saved-views/service";
 import { loadTicketListPanelData } from "@/lib/tickets/list-panel-data";
-import { seedOrgWithMembers, seedTicket } from "../support/inbox-fixtures";
+import { readLegacyStateIds } from "@/lib/tickets/ticket-states";
+import { seedOrgWithMembers, seedTicket, stateIdFor } from "../support/inbox-fixtures";
 
 describe("inbox list panel data: the actor's membership is checked first (D-01)", () => {
   it("a member whose row was deleted gets no roster, no tickets, no tags and membership_ended", async () => {
@@ -21,7 +22,7 @@ describe("inbox list panel data: the actor's membership is checked first (D-01)"
     const view = await createSavedView(
       prisma,
       { userId: owner.id, orgId },
-      { name: "Roster view", visibility: "SHARED", filters: { view: "all", statuses: [] } },
+      { name: "Roster view", visibility: "SHARED", filters: { view: "all", stateIds: [] } },
     );
     if (!view.ok) throw new Error(`createSavedView refused: ${view.error}`);
     const ownerRow = await prisma.user.findUniqueOrThrow({ where: { id: owner.id } });
@@ -48,6 +49,9 @@ describe("inbox list panel data: the actor's membership is checked first (D-01)"
       fieldOptions: [],
       memberOptions: [],
       savedView: { status: "membership_ended" },
+      stateOptions: [],
+      defaultStateId: null,
+      legacyStateIds: { NEW: null, OPEN: null, PENDING: null, RESOLVED: null, CLOSED: null },
     });
     // Nothing of the roster reaches what the panel serializes into the response.
     const serialized = JSON.stringify(after);
@@ -66,5 +70,104 @@ describe("inbox list panel data: the actor's membership is checked first (D-01)"
     expect(after.memberOptions).toEqual([]);
     expect(after.tickets).toEqual([]);
     expect(after.savedView).toEqual({ status: "membership_ended" });
+    expect(after.stateOptions).toEqual([]);
+    expect(after.defaultStateId).toBeNull();
+    expect(after.legacyStateIds).toEqual({
+      NEW: null,
+      OPEN: null,
+      PENDING: null,
+      RESOLVED: null,
+      CLOSED: null,
+    });
+  });
+});
+
+// Phase 12.1 (AIDA-56, D-09, review C1): the list filters by state ids from the URL, and a missing
+// id or a present but empty or malformed state parameter narrows the list, never widens it.
+describe("inbox list panel data: the state filter fails closed (D-09, review C1)", () => {
+  async function seedThreeStates() {
+    const { orgId, users } = await seedOrgWithMembers(prisma, ["owner"]);
+    const actor = { userId: users[0].id, orgId };
+    const newTicket = await seedTicket(orgId, { status: "NEW" });
+    const openTicket = await seedTicket(orgId, { status: "OPEN" });
+    const pendingTicket = await seedTicket(orgId, { status: "PENDING" });
+    const openId = await stateIdFor(orgId, "OPEN");
+    const deleted = await prisma.ticketState.create({
+      data: {
+        organizationId: orgId,
+        name: `Gone ${Math.random().toString(36).slice(2)}`,
+        colorToken: "gray",
+        group: "OPEN",
+        sortOrder: 99,
+        deletedAt: new Date(),
+      },
+    });
+    return { orgId, actor, newTicket, openTicket, pendingTicket, openId, deletedId: deleted.id };
+  }
+
+  it("state=<Open id> returns only the Open ticket; a deleted id narrows and never widens", async () => {
+    const { actor, openTicket, openId, deletedId } = await seedThreeStates();
+
+    const only = await loadTicketListPanelData(prisma, actor, { state: openId });
+    expect(only.tickets.map((t) => t.id)).toEqual([openTicket.id]);
+    expect(only.tickets[0].state).toMatchObject({ id: openId, group: "OPEN" });
+
+    const mixed = await loadTicketListPanelData(prisma, actor, { state: `${openId},${deletedId}` });
+    expect(mixed.tickets.map((t) => t.id)).toEqual([openTicket.id]);
+
+    const missingOnly = await loadTicketListPanelData(prisma, actor, { state: deletedId });
+    expect(missingOnly.tickets).toEqual([]);
+  });
+
+  it("a present but empty, comma-only or whitespace state parameter returns zero tickets", async () => {
+    const { actor } = await seedThreeStates();
+
+    const unfiltered = await loadTicketListPanelData(prisma, actor, {});
+    expect(unfiltered.tickets).toHaveLength(3);
+
+    for (const raw of ["", ",,,", "  "]) {
+      const result = await loadTicketListPanelData(prisma, actor, { state: raw });
+      expect(result.tickets, `state=${JSON.stringify(raw)}`).toEqual([]);
+    }
+  });
+
+  it("a valid id mixed with an invalid or empty token returns only the valid id's tickets", async () => {
+    const { actor, openTicket, openId } = await seedThreeStates();
+
+    const invalid = await loadTicketListPanelData(prisma, actor, { state: `${openId},not valid!` });
+    expect(invalid.tickets.map((t) => t.id)).toEqual([openTicket.id]);
+
+    const blanks = await loadTicketListPanelData(prisma, actor, { state: `${openId}, ,` });
+    expect(blanks.tickets.map((t) => t.id)).toEqual([openTicket.id]);
+  });
+
+  it("returns the active states in group order, the default state id and the legacy ids", async () => {
+    const { orgId, actor } = await seedThreeStates();
+    const legacy = await readLegacyStateIds(prisma, orgId);
+    const config = await prisma.ticketStateConfig.findUniqueOrThrow({
+      where: { organizationId: orgId },
+    });
+
+    const result = await loadTicketListPanelData(prisma, actor, {});
+    expect(result.stateOptions.map((s) => s.id)).toEqual([
+      legacy.NEW,
+      legacy.OPEN,
+      legacy.PENDING,
+      legacy.RESOLVED,
+      legacy.CLOSED,
+    ]);
+    expect(result.stateOptions.map((s) => s.group)).toEqual([
+      "OPEN",
+      "OPEN",
+      "PENDING",
+      "RESOLVED",
+      "CLOSED",
+    ]);
+    for (const option of result.stateOptions) {
+      expect(Object.keys(option).sort()).toEqual(["colorToken", "group", "id", "name"]);
+    }
+    expect(result.defaultStateId).toBe(config.newStateId);
+    expect(result.legacyStateIds).toEqual(legacy);
+    expect(Object.values(result.legacyStateIds).every((id) => typeof id === "string")).toBe(true);
   });
 });

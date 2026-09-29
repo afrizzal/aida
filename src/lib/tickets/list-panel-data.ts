@@ -13,6 +13,12 @@ import { panelOrMembershipEnded, type SavedViewPanelState } from "@/lib/saved-vi
 import { scopedDb } from "@/lib/scoped-db";
 import { parseUrlFilters } from "@/lib/tickets/list-filters";
 import { fetchTicketList, parseTicketListFilters } from "@/lib/tickets/list-query";
+import {
+  type LegacyStatusKey,
+  listActiveStates,
+  readLegacyStateIds,
+  type StateGroup,
+} from "@/lib/tickets/ticket-states";
 
 export interface ListPanelActor {
   userId: string;
@@ -30,6 +36,14 @@ export interface ListPanelFieldOption {
   type: CustomFieldType;
 }
 
+/** One active state for the Status filter (D-11 Filters row). */
+export interface ListPanelStateOption {
+  id: string;
+  name: string;
+  colorToken: string;
+  group: StateGroup;
+}
+
 export type ListPanelTicket = Awaited<ReturnType<typeof fetchTicketList>>[number];
 
 export interface TicketListPanelData {
@@ -43,7 +57,21 @@ export interface TicketListPanelData {
   memberOptions: ListPanelOption[];
   /** The saved view named by `sv`, or membership_ended for a removed member. */
   savedView: SavedViewPanelState | null;
+  /** The organization's active states in group, then sort order (Phase 12.1, D-11). */
+  stateOptions: ListPanelStateOption[];
+  /** The configuration's state for new tickets; null for a removed member. */
+  defaultStateId: string | null;
+  /** The active state id per legacy key, for the old status= URL mapper (D-09). */
+  legacyStateIds: Record<LegacyStatusKey, string | null>;
 }
+
+const NO_LEGACY_STATE_IDS: Record<LegacyStatusKey, string | null> = {
+  NEW: null,
+  OPEN: null,
+  PENDING: null,
+  RESOLVED: null,
+  CLOSED: null,
+};
 
 export async function loadTicketListPanelData(
   client: PrismaClient,
@@ -63,6 +91,9 @@ export async function loadTicketListPanelData(
       fieldOptions: [],
       memberOptions: [],
       savedView: { status: "membership_ended" },
+      stateOptions: [],
+      defaultStateId: null,
+      legacyStateIds: { ...NO_LEGACY_STATE_IDS },
     };
   }
 
@@ -71,12 +102,28 @@ export async function loadTicketListPanelData(
 
   // Better Auth's `member` model is excluded from scopedDb's DOMAIN_MODELS allowlist: the global
   // client with an explicit organizationId filter, as on the ticket page.
-  const [tickets, totalTicketCount, tags, customFieldDefinitions, members] = await Promise.all([
+  // The states, the default and the legacy map are read only after the membership check above.
+  const [
+    tickets,
+    totalTicketCount,
+    tags,
+    customFieldDefinitions,
+    members,
+    states,
+    stateConfig,
+    legacyStateIds,
+  ] = await Promise.all([
     fetchTicketList(filters, { db, orgId, userId }),
     db.ticket.count(),
     db.tag.findMany({ orderBy: { name: "asc" } }),
     db.customFieldDefinition.findMany({ orderBy: { position: "asc" } }),
     client.member.findMany({ where: { organizationId: orgId }, include: { user: true } }),
+    listActiveStates(client, orgId),
+    client.ticketStateConfig.findUnique({
+      where: { organizationId: orgId },
+      select: { newStateId: true },
+    }),
+    readLegacyStateIds(client, orgId),
   ]);
 
   // Saved view in the URL (AIDA-47, UI-SPEC Surface 2b): the service decides the strip state and
@@ -102,6 +149,14 @@ export async function loadTicketListPanelData(
       .map((member) => ({ id: member.user.id, name: member.user.name || member.user.email }))
       .sort((a, b) => a.name.localeCompare(b.name)),
     savedView,
+    stateOptions: states.map((s) => ({
+      id: s.id,
+      name: s.name,
+      colorToken: s.colorToken,
+      group: s.group,
+    })),
+    defaultStateId: stateConfig?.newStateId ?? null,
+    legacyStateIds,
   };
 }
 
