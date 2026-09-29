@@ -1,7 +1,7 @@
 import { Merge } from "lucide-react";
 import { Fragment } from "react";
 import { PublicPageShell } from "@/components/public/public-page-shell";
-import { StatusChip } from "@/components/tickets/status-chip";
+import { PublicGroupChip } from "@/components/tickets/public-group-chip";
 import { ThreadMessage } from "@/components/tickets/thread-message";
 import { ThreadSystemEvent } from "@/components/tickets/thread-system-event";
 import { Badge } from "@/components/ui/badge";
@@ -37,7 +37,7 @@ export default async function StatusPage({ params }: StatusPageProps) {
   // Unauthenticated bearer-token flow — the token IS the authorization. Everything the page
   // shows comes from the one loader: messages are filtered server-side by the shared
   // provenance predicate (INTERNAL notes are never fetched, D-21; per-token provenance after a
-  // merge, D-09), and a merged source never exposes its target's number, subject or status.
+  // merge, D-09), and a merged source never exposes its target's number, subject or state.
   const ticket = await loadStatusPageData(token);
 
   if (!ticket) {
@@ -64,13 +64,15 @@ export default async function StatusPage({ params }: StatusPageProps) {
           #{ticket.number} {ticket.subject}
         </h1>
         {/* UI-SPEC Surface 7 (D-09): a merged source shows the neutral "Combined" label and a
-            fixed notice; nothing about the target (number, subject, status, date, count, link). */}
+            fixed notice; nothing about the target (number, subject, group, date, count, link).
+            Otherwise the fixed public label of the ticket's group (Phase 12.1, D-13, UI-SPEC
+            Surface 6): only the group reaches the chip, never an internal state name. */}
         {ticket.merged ? (
           <Badge className="h-5 shrink-0 border border-border bg-muted px-2 py-0 text-[12px] text-muted-foreground">
             Combined
           </Badge>
         ) : (
-          <StatusChip status={ticket.status} />
+          <PublicGroupChip group={ticket.group} />
         )}
       </div>
 
@@ -95,7 +97,7 @@ export default async function StatusPage({ params }: StatusPageProps) {
           // Immediately after any public message with triggeredReopen === true, render
           // the reopen system-event row — this is the customer-facing consumer of the
           // marker the follow-up route (Task 2) sets server-side (never inferred here
-          // from ticket.status/timestamps).
+          // from ticket.group/timestamps).
           <Fragment key={message.id}>
             <ThreadMessage
               message={{
@@ -123,7 +125,8 @@ export default async function StatusPage({ params }: StatusPageProps) {
         <FollowUpForm token={token} />
       </div>
 
-      {(ticket.status === "RESOLVED" || ticket.status === "CLOSED") && (
+      {/* The CSAT section shows for the same two groups the CSAT route accepts (D-11, D-02). */}
+      {(ticket.group === "RESOLVED" || ticket.group === "CLOSED") && (
         <div className="mt-6 border-t border-border pt-4">
           <h2 className="mb-2 text-[14px] font-semibold">How did we do?</h2>
           <CsatForm

@@ -15,13 +15,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
 
   // Unauthenticated bearer-token flow — the token IS the authorization; bare prisma,
   // never scopedDb (no session/org context exists on this route).
-  const ticket = await prisma.ticket.findUnique({ where: { statusToken: token } });
+  const ticket = await prisma.ticket.findUnique({
+    where: { statusToken: token },
+    include: { state: { select: { group: true } } },
+  });
   if (!ticket) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  // CSAT is only accepted once a ticket is RESOLVED/CLOSED (LOCKED).
-  if (ticket.status !== "RESOLVED" && ticket.status !== "CLOSED") {
+  // CSAT is only accepted once the ticket's state is in group RESOLVED or CLOSED, admin-created
+  // states of those groups included (Phase 12.1, D-11 CSAT row, D-02).
+  const group = ticket.state.group;
+  if (group !== "RESOLVED" && group !== "CLOSED") {
     return NextResponse.json({ error: "not_eligible" }, { status: 409 });
   }
 
