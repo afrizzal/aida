@@ -5,7 +5,9 @@
 // fewer than 2 characters returns nothing without querying; cut to 200 characters), then the
 // existing searchTickets with a server limit of 10. searchTickets is raw SQL with an explicit
 // organizationId filter and parameterised text, so another organization's ticket never
-// matches (T-11-15, T-11-16). Only id, number, subject and status leave this function.
+// matches (T-11-15, T-11-16). Only id, number, subject, stateName and colorToken leave this
+// function: the name and colour key of the ticket's state, which searchTickets joins inside the
+// ticket's own organization (Phase 12.1, D-11 palette row).
 //
 // Relative imports only and no Next.js import.
 import { findActiveMembership, type MembershipClient } from "../membership";
@@ -25,7 +27,8 @@ export interface PaletteTicketResult {
   id: string;
   number: number;
   subject: string;
-  status: string;
+  stateName: string;
+  colorToken: string;
 }
 
 export type PaletteSearchResult =
@@ -63,7 +66,8 @@ export async function searchTicketsForPalette(
       id: row.id,
       number: row.number,
       subject: row.subject,
-      status: row.status,
+      stateName: row.stateName,
+      colorToken: row.colorToken,
     })),
   };
 }

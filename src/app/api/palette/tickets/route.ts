@@ -8,7 +8,9 @@ import { searchTicketsForPalette } from "@/lib/tickets/palette-search";
 // Session-protected: src/proxy.ts already answers unauthenticated /api/* requests with 401, and
 // this handler checks again from the request headers. Membership is checked by
 // searchTicketsForPalette (D-01). The response holds at most 10 of the organization's tickets
-// as { id, number, subject, status } and nothing else: no other ticket data, no saved view.
+// as { id, number, subject, stateName, colorToken } and nothing else: no other ticket data, no
+// saved view. stateName and colorToken are the name and colour key of the ticket's state in the
+// actor's organization (Phase 12.1, D-11 palette row).
 
 const NO_STORE = { "Cache-Control": "no-store" } as const;
 

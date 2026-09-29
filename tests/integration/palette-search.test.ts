@@ -37,7 +37,7 @@ function recorder() {
 }
 
 describe("searchTicketsForPalette (D-12)", () => {
-  it("returns the organization's matching ticket with only id, number, subject and status", async () => {
+  it("returns the organization's matching ticket with only id, number, subject, stateName and colorToken", async () => {
     const { orgId, users } = await seedOrgWithMembers(prisma, ["member"]);
     const word = uniqueWord();
     const t = await ticketWithSubject(orgId, `Printer ${word} jammed`);
@@ -45,10 +45,77 @@ describe("searchTicketsForPalette (D-12)", () => {
     const result = await searchTicketsForPalette(prisma, { userId: users[0].id, orgId }, word);
     expect(result).toEqual({
       ok: true,
-      results: [{ id: t.id, number: t.number, subject: `Printer ${word} jammed`, status: "NEW" }],
+      results: [
+        {
+          id: t.id,
+          number: t.number,
+          subject: `Printer ${word} jammed`,
+          stateName: "New",
+          colorToken: "indigo-filled",
+        },
+      ],
     });
     if (result.ok)
-      expect(Object.keys(result.results[0]).sort()).toEqual(["id", "number", "status", "subject"]);
+      expect(Object.keys(result.results[0]).sort()).toEqual([
+        "colorToken",
+        "id",
+        "number",
+        "stateName",
+        "subject",
+      ]);
+  });
+
+  it("returns the state of the ticket's own organization, and another organization never sees the ticket or its state name (Phase 12.1, D-11 palette row)", async () => {
+    const x = await seedOrgWithMembers(prisma, ["member"]);
+    const y = await seedOrgWithMembers(prisma, ["member"]);
+    const word = uniqueWord();
+    const stateName = `Waiting ${word.slice(0, 14)}`;
+    const vendor = await prisma.ticketState.create({
+      data: {
+        organizationId: x.orgId,
+        name: stateName,
+        colorToken: "orange",
+        group: "PENDING",
+        sortOrder: 5,
+      },
+    });
+    const own = await seedTicket(x.orgId, { stateId: vendor.id });
+    await prisma.ticket.update({ where: { id: own.id }, data: { subject: `Courier ${word}` } });
+    const other = await ticketWithSubject(y.orgId, `Courier ${word}`);
+
+    const forX = await searchTicketsForPalette(
+      prisma,
+      { userId: x.users[0].id, orgId: x.orgId },
+      word,
+    );
+    expect(forX).toEqual({
+      ok: true,
+      results: [
+        {
+          id: own.id,
+          number: own.number,
+          subject: `Courier ${word}`,
+          stateName,
+          colorToken: "orange",
+        },
+      ],
+    });
+
+    const forY = await searchTicketsForPalette(
+      prisma,
+      { userId: y.users[0].id, orgId: y.orgId },
+      word,
+    );
+    expect(forY.ok && forY.results.map((r) => [r.id, r.stateName])).toEqual([[other.id, "New"]]);
+
+    const notInY = await searchTicketsForPalette(
+      prisma,
+      { userId: y.users[0].id, orgId: y.orgId },
+      stateName,
+    );
+    expect(
+      notInY.ok && notInY.results.some((r) => r.id === own.id || r.stateName === stateName),
+    ).toBe(false);
   });
 
   it("never returns another organization's ticket with the same word", async () => {

@@ -4,7 +4,7 @@
 //
 // Ticket search: hidden under 2 characters; from 2 characters a 300 ms debounce, then
 // GET /api/palette/tickets?q= (membership-checked, at most 10 server-ranked rows of
-// { id, number, subject, status }). A response whose query is no longer the current one is
+// { id, number, subject, stateName, colorToken }). A response whose query is no longer the current one is
 // discarded. cmdk's own filter is off (shouldFilter false), so the server's ranking is never
 // re-filtered on the client. Ticket text is rendered as React text only (T-11-35).
 //
@@ -43,7 +43,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 import { KeyCap, KeyCaps, useApplePlatform } from "@/components/keyboard/key-caps";
-import { StatusChip } from "@/components/tickets/status-chip";
+import { StateChip } from "@/components/tickets/state-chip";
 import {
   Command,
   CommandEmpty,
@@ -60,7 +60,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { TicketStatus } from "@/generated/prisma/client";
 import {
   COMMAND_GROUP_ORDER,
   type CommandContext,
@@ -70,6 +69,7 @@ import {
   type Command as PaletteCommand,
 } from "@/lib/commands/registry";
 import { keymapEntryForCommand } from "@/lib/keyboard/keymap";
+import { isStateColorKey } from "@/lib/tickets/state-colors";
 
 export const PALETTE_SEARCH_DEBOUNCE_MS = 300;
 export const PALETTE_MIN_QUERY = 2;
@@ -103,26 +103,24 @@ const ICONS: Record<CommandIcon, LucideIcon> = {
 
 const GROUP_CLASS = "**:[[cmdk-group-heading]]:text-[12px]";
 
-const KNOWN_STATUSES: ReadonlySet<string> = new Set<TicketStatus>([
-  "NEW",
-  "OPEN",
-  "PENDING",
-  "RESOLVED",
-  "CLOSED",
-]);
-
 export interface PaletteTicket {
   id: string;
   number: number;
   subject: string;
-  status: TicketStatus;
+  /** The name and colour key of the ticket's state (Phase 12.1, UI-SPEC Surface 2). */
+  stateName: string;
+  colorToken: string;
 }
 
 type TicketSearch =
   | { query: string; status: "ok"; results: PaletteTicket[] }
   | { query: string; status: "error" };
 
-/** Keeps only well-formed rows; anything else in the body counts as a failed search. */
+/**
+ * Keeps only well-formed rows; anything else in the body counts as a failed search. A row is kept
+ * only when stateName is a string and colorToken is one of the palette keys (UI-SPEC Surface 2,
+ * T-12.1-43); StateChip still renders an unknown key gray.
+ */
 function readResults(body: unknown): PaletteTicket[] | null {
   if (typeof body !== "object" || body === null) return null;
   const results = (body as { results?: unknown }).results;
@@ -135,14 +133,15 @@ function readResults(body: unknown): PaletteTicket[] | null {
       typeof row.id === "string" &&
       typeof row.number === "number" &&
       typeof row.subject === "string" &&
-      typeof row.status === "string" &&
-      KNOWN_STATUSES.has(row.status)
+      typeof row.stateName === "string" &&
+      isStateColorKey(row.colorToken)
     ) {
       rows.push({
         id: row.id,
         number: row.number,
         subject: row.subject,
-        status: row.status as TicketStatus,
+        stateName: row.stateName,
+        colorToken: row.colorToken,
       });
     }
   }
@@ -298,7 +297,8 @@ export function CommandPalette({ open, onOpenChange, registry, context }: Comman
         </span>
         <span className="min-w-0 flex-1 truncate">{ticket.subject}</span>
         <CommandShortcut className="shrink-0 tracking-normal">
-          <StatusChip status={ticket.status} />
+          {/* No tooltip: the chip sits inside a command item (UI-SPEC Surface 2). */}
+          <StateChip name={ticket.stateName} colorToken={ticket.colorToken} />
         </CommandShortcut>
       </CommandItem>
     ));
