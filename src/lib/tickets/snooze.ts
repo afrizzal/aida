@@ -10,12 +10,17 @@
 //      deadline as an ISO string or null only (D-21)
 //   5. hooks.beforeCommit (test seam only)
 //
-// Snooze refusals, in this order: MERGED_SOURCE (a merged source is also CLOSED, and it gets
-// MERGED_SOURCE), TICKET_CLOSED, TOO_SOON (earlier than now + 4 minutes; the UI asks for 5, one
-// minute absorbs client clock skew), TOO_FAR (later than now + 366 days; the UI asks for 365).
-// NEW, OPEN, PENDING and RESOLVED tickets can be snoozed (UI-SPEC Assumption 8). A re-snooze
-// while snoozed replaces the deadline. A manual wake is allowed in every status, including a
-// ticket closed after it was snoozed; it refuses NOT_SNOOZED when there is no deadline.
+// Snooze refusals, in this order: MERGED_SOURCE (a merged source is also in a CLOSED-group state,
+// and it gets MERGED_SOURCE), TICKET_CLOSED (the locked ticket's state is in group CLOSED, read
+// with readStateGroups: any admin-created CLOSED-group state too, Phase 12.1 D-11), TOO_SOON
+// (earlier than now + 4 minutes; the UI asks for 5, one minute absorbs client clock skew),
+// TOO_FAR (later than now + 366 days; the UI asks for 365). A ticket in any state of the OPEN,
+// PENDING or RESOLVED group can be snoozed (UI-SPEC Assumption 8). A re-snooze while snoozed
+// replaces the deadline. A manual wake is allowed in every state, including a ticket closed
+// after it was snoozed; it refuses NOT_SNOOZED when there is no deadline.
+//
+// Snooze is not an SLA pause (D-16): it writes only snoozedUntil and never touches slaPausedAt,
+// slaPausedMs or the deadlines; the sla-flag worker keeps flagging a snoozed ticket.
 //
 // Nothing is sent when a ticket is snoozed or woken (notifications are parked Phase 10).
 // Relative imports only and no Next.js import: revalidation belongs to the server action.
@@ -23,6 +28,7 @@ import type { Prisma, PrismaClient } from "../../generated/prisma/client";
 import { findActiveMembership } from "../membership";
 import { type LockedTicketRow, lockTicketsInIdOrder } from "./merge";
 import { recordTicketAudit } from "./ticket-audit";
+import { readStateGroups } from "./ticket-states";
 
 const TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: 30_000 } as const;
 
@@ -113,7 +119,11 @@ export async function snoozeTicket(
 
       const row = await lockTicket(tx, orgId, ticketId);
       if (row.mergedIntoTicketId !== null) throw new SnoozeError("MERGED_SOURCE");
-      if (row.status === "CLOSED") throw new SnoozeError("TICKET_CLOSED");
+      const group = (await readStateGroups(tx, orgId, [row.stateId])).get(row.stateId);
+      // Fail closed: a state the organization does not have (the composite foreign key rules it
+      // out) is treated as unavailable, never as snoozable.
+      if (!group) throw new SnoozeError("TICKET_UNAVAILABLE");
+      if (group === "CLOSED") throw new SnoozeError("TICKET_CLOSED");
 
       // The bounds are measured after the lock, so a wait on the lock never stretches them.
       const at = (now ?? new Date()).getTime();
@@ -143,7 +153,7 @@ export async function snoozeTicket(
   }
 }
 
-/** Wakes a snoozed ticket by hand (D-12), in any status. */
+/** Wakes a snoozed ticket by hand (D-12), in any state. */
 export async function wakeTicket(
   client: PrismaClient,
   actor: SnoozeActor,

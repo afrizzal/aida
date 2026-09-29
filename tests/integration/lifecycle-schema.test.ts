@@ -9,6 +9,7 @@ import {
   seedMessage,
   seedOrgWithMembers,
   seedRelation,
+  stateIdFor,
 } from "../support/lifecycle-fixtures";
 
 /** Draws one value from the Message seq sequence, as the merge does under the row locks. */
@@ -163,7 +164,13 @@ describe("Phase 12 provenance predicate on real rows (D-09 amended, review C1)",
     });
     await prisma.ticket.update({
       where: { id: src.id },
-      data: { mergedIntoTicketId: tgt.id, mergedAt, mergeMessageSeq: marker, status: "CLOSED" },
+      data: {
+        mergedIntoTicketId: tgt.id,
+        mergedAt,
+        mergeMessageSeq: marker,
+        stateId: await stateIdFor(orgId, "CLOSED"),
+        slaPausedAt: null,
+      },
     });
     // A pre-merge T row whose createdAt equals the merge time: still below the marker.
     await prisma.message.update({ where: { id: tPreTie.id }, data: { createdAt: mergedAt } });

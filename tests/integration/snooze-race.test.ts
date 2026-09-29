@@ -13,7 +13,7 @@ import { setReopenObserverForTests } from "@/lib/tickets/reopen-on-reply";
 import { snoozeTicket } from "@/lib/tickets/snooze";
 import { autoCloseHandler } from "@/lib/worker/jobs/auto-close";
 import { snoozeWakeHandler } from "@/lib/worker/jobs/snooze-wake";
-import { seedOrgWithMembers, seedTicket } from "../support/inbox-fixtures";
+import { seedOrgWithMembers, seedTicket, stateIdFor } from "../support/inbox-fixtures";
 import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
 
 const MIN = 60 * 1000;
@@ -274,7 +274,7 @@ describe("snooze races (D-17)", () => {
     expect(await snooze).toMatchObject({ ok: true });
     await close;
     const row = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
-    expect(row.status).toBe("RESOLVED");
+    expect(row.stateId).toBe(await stateIdFor(orgId, "RESOLVED"));
     expect(row.snoozedUntil).not.toBeNull();
     expect(await audits(ticket.id, "AUTO_CLOSED")).toEqual([]);
   });

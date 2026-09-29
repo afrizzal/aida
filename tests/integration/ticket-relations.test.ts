@@ -10,7 +10,12 @@ import {
   type RelationActor,
   removeRelation,
 } from "@/lib/tickets/relations";
-import { seedOrgWithMembers, seedRelation, seedTicket } from "../support/lifecycle-fixtures";
+import {
+  seedOrgWithMembers,
+  seedRelation,
+  seedTicket,
+  stateIdFor,
+} from "../support/lifecycle-fixtures";
 import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
 
 async function seedActor() {
@@ -173,7 +178,8 @@ describe("addRelation: refusals change nothing", () => {
         mergedIntoTicketId: t.id,
         mergedAt: new Date(),
         mergeMessageSeq: 1n,
-        status: "CLOSED",
+        stateId: await stateIdFor(orgId, "CLOSED"),
+        slaPausedAt: null,
       },
     });
     const before = await counts(orgId);
@@ -332,7 +338,8 @@ describe("removeRelation", () => {
         mergedIntoTicketId: t.id,
         mergedAt: new Date(),
         mergeMessageSeq: 1n,
-        status: "CLOSED",
+        stateId: await stateIdFor(orgId, "CLOSED"),
+        slaPausedAt: null,
       },
     });
     const before = await counts(orgId);

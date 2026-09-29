@@ -22,8 +22,9 @@ import {
   wakeTicket,
 } from "@/lib/tickets/snooze";
 import { autoCloseHandler } from "@/lib/worker/jobs/auto-close";
+import { slaFlagHandler } from "@/lib/worker/jobs/sla-flag";
 import { snoozeWakeHandler, wakeDueTicket } from "@/lib/worker/jobs/snooze-wake";
-import { seedOrgWithMembers, seedTicket } from "../support/inbox-fixtures";
+import { seedOrgWithMembers, seedTicket, stateIdFor } from "../support/inbox-fixtures";
 import { seedContactTicket } from "../support/lifecycle-fixtures";
 
 // The agent messages route reads its session through getScopedDb and enqueues through getBoss;
@@ -228,8 +229,11 @@ describe("snooze refusals (D-12)", () => {
         reviewedLinkLabel: null,
       }),
     ).toMatchObject({ ok: true });
-    const source = await prisma.ticket.findUniqueOrThrow({ where: { id: s.id } });
-    expect(source.status).toBe("CLOSED");
+    const source = await prisma.ticket.findUniqueOrThrow({
+      where: { id: s.id },
+      include: { state: { select: { group: true } } },
+    });
+    expect(source.state.group).toBe("CLOSED");
     expect(await snoozeTicket(prisma, owner, { ticketId: s.id, until: inTen }, { now })).toEqual({
       ok: false,
       error: "MERGED_SOURCE",
@@ -337,7 +341,7 @@ describe("snooze edges (AIDA-54)", () => {
     await setDeadline(notYet.id, null);
   });
 
-  it("a re-snooze replaces the deadline; a status change keeps it; a CLOSED ticket can be woken", async () => {
+  it("a re-snooze replaces the deadline; a state change keeps it; a Closed ticket can be woken", async () => {
     const { orgId, owner } = await seedOrg();
     const now = new Date();
     const first = new Date(now.getTime() + 30 * MIN);
@@ -357,13 +361,16 @@ describe("snooze edges (AIDA-54)", () => {
     const status = await runTicketMutation({
       actor: owner,
       ticketIds: [ticket.id],
-      op: { kind: "status", status: "PENDING" },
+      op: { kind: "state", stateId: await stateIdFor(orgId, "PENDING") },
       mode: "single",
     });
     expect(status).toMatchObject({ ok: true });
     expect((await snoozedUntil(ticket.id))?.toISOString()).toBe(second.toISOString());
 
-    await prisma.ticket.update({ where: { id: ticket.id }, data: { status: "CLOSED" } });
+    await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: { stateId: await stateIdFor(orgId, "CLOSED"), slaPausedAt: null },
+    });
     expect(await wakeTicket(prisma, owner, { ticketId: ticket.id })).toEqual({
       ok: true,
       ticketId: ticket.id,
@@ -393,8 +400,8 @@ describe("snooze edges (AIDA-54)", () => {
     });
 
     await autoCloseHandler(undefined, { now, log: () => {} });
-    expect((await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } })).status).toBe(
-      "RESOLVED",
+    expect((await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } })).stateId).toBe(
+      await stateIdFor(orgId, "RESOLVED"),
     );
     expect(
       await prisma.ticketAuditEvent.count({
@@ -404,8 +411,8 @@ describe("snooze edges (AIDA-54)", () => {
 
     expect(await wakeTicket(prisma, owner, { ticketId: ticket.id })).toMatchObject({ ok: true });
     await autoCloseHandler(undefined, { now, log: () => {} });
-    expect((await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } })).status).toBe(
-      "CLOSED",
+    expect((await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } })).stateId).toBe(
+      await stateIdFor(orgId, "CLOSED"),
     );
   });
 });
@@ -488,6 +495,132 @@ describe("customer replies wake a snoozed ticket (D-14)", () => {
   });
 });
 
+// ---------------------------------------------------------------------------------------------
+// Phase 12.1 plan 07 Task 3: snooze by state group (D-11 Snooze and wake row, D-16).
+
+/** An admin-created state written directly (the admin service is plan 12.1-08's). */
+async function addState(
+  orgId: string,
+  name: string,
+  group: "OPEN" | "PENDING" | "RESOLVED" | "CLOSED",
+) {
+  return prisma.ticketState.create({
+    data: { organizationId: orgId, name, colorToken: "gray", group, sortOrder: 9 },
+    select: { id: true },
+  });
+}
+
+describe("snooze by state group (Phase 12.1, D-11, D-16)", () => {
+  it("refuses TICKET_CLOSED for a ticket in an admin-created CLOSED-group state 'Closed - spam' and changes nothing", async () => {
+    const { orgId, owner } = await seedOrg();
+    const now = new Date();
+    const spam = await addState(orgId, "Closed - spam", "CLOSED");
+    const ticket = await seedTicket(orgId);
+    const earlier = new Date(now.getTime() + 20 * MIN);
+    await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: { stateId: spam.id, resolvedAt: now, snoozedUntil: earlier },
+    });
+    const before = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+    const auditsBefore = await prisma.ticketAuditEvent.count({ where: { ticketId: ticket.id } });
+
+    expect(
+      await snoozeTicket(
+        prisma,
+        owner,
+        { ticketId: ticket.id, until: new Date(now.getTime() + 60 * MIN) },
+        { now },
+      ),
+    ).toEqual({ ok: false, error: "TICKET_CLOSED" });
+    expect(await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } })).toEqual(before);
+    expect(await prisma.ticketAuditEvent.count({ where: { ticketId: ticket.id } })).toBe(
+      auditsBefore,
+    );
+  });
+
+  it("accepts New, Open, Pending and Resolved and never touches slaPausedAt or the deadlines", async () => {
+    const { orgId, owner } = await seedOrg();
+    const now = new Date();
+    const until = new Date(now.getTime() + 60 * MIN);
+    for (const key of ["NEW", "OPEN", "PENDING", "RESOLVED"] as const) {
+      const ticket = await seedTicket(orgId, { status: key });
+      const before = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+      expect(
+        await snoozeTicket(prisma, owner, { ticketId: ticket.id, until }, { now }),
+      ).toMatchObject({ ok: true });
+      const after = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+      expect(after.snoozedUntil?.toISOString()).toBe(until.toISOString());
+      expect({
+        stateId: after.stateId,
+        slaPausedAt: after.slaPausedAt,
+        slaPausedMs: after.slaPausedMs,
+        firstResponseDueAt: after.firstResponseDueAt,
+        resolutionDueAt: after.resolutionDueAt,
+      }).toEqual({
+        stateId: before.stateId,
+        slaPausedAt: before.slaPausedAt,
+        slaPausedMs: before.slaPausedMs,
+        firstResponseDueAt: before.firstResponseDueAt,
+        resolutionDueAt: before.resolutionDueAt,
+      });
+      expect(after.slaPausedAt === null).toBe(key !== "PENDING");
+    }
+  });
+
+  it("snooze is not an SLA pause: a snoozed Open ticket keeps slaPausedAt null and is breached by slaFlagHandler (moved from 12.1-06, review C5)", async () => {
+    const { orgId, owner } = await seedOrg();
+    const now = new Date();
+    const ticket = await seedTicket(orgId, { status: "OPEN" });
+    const before = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+    expect(before.isBreached).toBe(false);
+    expect(
+      await snoozeTicket(
+        prisma,
+        owner,
+        { ticketId: ticket.id, until: new Date(now.getTime() + 2 * DAY) },
+        { now },
+      ),
+    ).toMatchObject({ ok: true });
+    const snoozed = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+    expect(snoozed.slaPausedAt).toBeNull();
+    expect(snoozed.firstResponseDueAt).toEqual(before.firstResponseDueAt);
+    expect(snoozed.resolutionDueAt).toEqual(before.resolutionDueAt);
+
+    // The handler is cross-organization: only this ticket's flags are asserted.
+    await slaFlagHandler(undefined, { now: new Date(before.resolutionDueAt.getTime() + 1) });
+    const flagged = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+    expect(flagged.isBreached).toBe(true);
+    expect(flagged.slaPausedAt).toBeNull();
+    expect(flagged.snoozedUntil).not.toBeNull();
+  });
+
+  it("the manual wake works in every state, 'Closed - spam' included", async () => {
+    const { orgId, owner } = await seedOrg();
+    const spam = await addState(orgId, "Closed - spam", "CLOSED");
+    const later = new Date(Date.now() + 2 * 60 * MIN);
+    const stateIds = [
+      ...(await Promise.all(
+        (["NEW", "OPEN", "PENDING", "RESOLVED", "CLOSED"] as const).map((k) =>
+          stateIdFor(orgId, k),
+        ),
+      )),
+      spam.id,
+    ];
+    for (const stateId of stateIds) {
+      const ticket = await seedTicket(orgId);
+      await prisma.ticket.update({
+        where: { id: ticket.id },
+        data: { stateId, snoozedUntil: later },
+      });
+      expect(await wakeTicket(prisma, owner, { ticketId: ticket.id })).toEqual({
+        ok: true,
+        ticketId: ticket.id,
+      });
+      expect(await snoozedUntil(ticket.id)).toBeNull();
+    }
+  });
+});
+
 describe("the snoozed filter in the list query (D-16)", () => {
   it("default views hide snoozed tickets; snoozed true shows only them, combined with other filters", async () => {
     const { orgId, owner } = await seedOrg();
@@ -516,7 +649,8 @@ describe("the snoozed filter in the list query (D-16)", () => {
     );
     expect(await ids({ view: "mine", snoozed: true })).toEqual([mineSnoozed.id]);
     expect(await ids({ view: "unassigned", snoozed: true })).toEqual([freeSnoozed.id]);
-    expect(await ids({ view: "all", snoozed: true, statuses: ["PENDING"] })).toEqual([
+    const pendingId = await stateIdFor(orgId, "PENDING");
+    expect(await ids({ view: "all", snoozed: true, stateIds: [pendingId] })).toEqual([
       mineSnoozed.id,
     ]);
     expect(await ids({ view: "all", snoozed: true, q: word })).toEqual([mineSnoozed.id]);

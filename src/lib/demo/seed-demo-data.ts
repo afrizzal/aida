@@ -53,6 +53,11 @@ import { scopedDb } from "@/lib/scoped-db";
 import { createTicket } from "@/lib/tickets/create-ticket";
 import { lockTicketsInIdOrder } from "@/lib/tickets/merge";
 import { computeDueTimestamps, DEFAULT_SLA_TARGETS } from "@/lib/tickets/sla";
+import {
+  type LegacyStatusKey,
+  readLegacyStateIds,
+  shareLockActiveState,
+} from "@/lib/tickets/ticket-states";
 
 /** All seeded AI artifacts (AuditEvent/InsightRun) use these — never a real vendor/model name.
  * Every artifact below is PRE-COMPUTED DATA, not the output of a live model call — provider/model
@@ -156,12 +161,27 @@ function computeTagVolumeRows(
 // ---------------------------------------------------------------------------
 // Writes on an existing ticket take that ticket's row lock (Phase 12, reviews R2-2 and R3-1).
 // createTicket commits its own transaction, so a merge can land between it and the seed's
-// later writes. Every reply insert and the step-4e status write therefore run in one
+// later writes. Every reply insert and the step-4e state write therefore run in one
 // transaction that first locks the ticket row FOR UPDATE through lockTicketsInIdOrder (the one
 // lock statement of the merge.ts lock-order contract, review WR-05) and refuses a merged or
 // missing ticket (DemoSeedTicketMergedError): the seed refuses, it never skips silently, and it
-// never writes a Message or a status onto a merged source.
+// never writes a Message or a state onto a merged source.
+// Phase 12.1 (D-11 Demo row, D-15 amended): the fixtures keep their five legacy status keys;
+// step 4e maps its key to the organization's migrated state (readLegacyStateIds) and locks that
+// state FOR SHARE before the ticket lock (lock order: state, then ticket), then writes stateId
+// and starts the SLA pause of a PENDING-group ticket at the seed's now (D-16).
 // ---------------------------------------------------------------------------
+
+/** Thrown when the migrated state of a legacy key is missing or soft-deleted in the organization. */
+export class DemoSeedStateUnavailableError extends Error {
+  readonly legacyStatus: LegacyStatusKey;
+
+  constructor(legacyStatus: LegacyStatusKey) {
+    super(`Demo seed refused: no active state for legacy key ${legacyStatus}`);
+    this.name = "DemoSeedStateUnavailableError";
+    this.legacyStatus = legacyStatus;
+  }
+}
 
 /** Thrown when a demo seed write targets a merged ticket or a ticket not in the organization. */
 export class DemoSeedTicketMergedError extends Error {
@@ -238,18 +258,47 @@ export async function insertDemoReplies(
   }, DEMO_LOCK_TX_OPTIONS);
 }
 
+/**
+ * The step-4e fields of one ticket. The state is given as a fixture's legacy key, never as a
+ * state id, and the pause columns follow from it (D-16).
+ */
+export type DemoTicketFinalizeData = Omit<
+  Prisma.TicketUncheckedUpdateInput,
+  "stateId" | "slaPausedAt" | "slaPausedMs"
+> & {
+  /** The fixture's legacy status key, mapped to the organization's migrated state. */
+  legacyStatus?: LegacyStatusKey;
+  /** The seed's now: the pause start of a PENDING-group ticket. Defaults to new Date(). */
+  now?: Date;
+};
+
 /** Applies the seed's step-4e fields to one ticket under its row lock (review R3-1). */
 export async function finalizeDemoTicket(
   orgId: string,
   ticketId: string,
-  data: Prisma.TicketUncheckedUpdateInput,
+  { legacyStatus, now, ...data }: DemoTicketFinalizeData,
   hooks: DemoSeedLockHooks = {},
 ): Promise<void> {
   await prisma.$transaction(async (tx) => {
     if (hooks.onTransactionStart) await hooks.onTransactionStart(tx);
+    // Lock order (D-15 amended): the target state FOR SHARE before the ticket row.
+    let stateData: { stateId: string; slaPausedAt: Date | null } | null = null;
+    if (legacyStatus !== undefined) {
+      const stateId = (await readLegacyStateIds(tx, orgId))[legacyStatus];
+      const state = stateId ? await shareLockActiveState(tx, orgId, stateId) : null;
+      if (!state) throw new DemoSeedStateUnavailableError(legacyStatus);
+      stateData = {
+        stateId: state.id,
+        slaPausedAt: state.group === "PENDING" ? (now ?? new Date()) : null,
+      };
+    }
     await lockDemoTicket(tx, orgId, ticketId);
     if (hooks.afterLock) await hooks.afterLock(tx);
-    await tx.ticket.update({ where: { id: ticketId }, data, select: { id: true } });
+    await tx.ticket.update({
+      where: { id: ticketId },
+      data: { ...data, ...(stateData ?? {}) },
+      select: { id: true },
+    });
   }, DEMO_LOCK_TX_OPTIONS);
 }
 
@@ -417,7 +466,8 @@ export async function seedDemoData(opts: SeedDemoDataOptions): Promise<SeedDemoS
     await finalizeDemoTicket(orgId, created.id, {
       createdAt,
       updatedAt,
-      status: spec.status,
+      legacyStatus: spec.status,
+      now,
       assigneeId,
       firstResponseDueAt,
       resolutionDueAt,

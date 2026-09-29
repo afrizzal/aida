@@ -1097,7 +1097,7 @@ describe("demo seed writes under the ticket row lock (reviews R2-2, R3-1)", () =
     ).toBe(0);
   });
 
-  it("(c) merge holds the row: the seed's status write waits, refuses and the source stays CLOSED", async () => {
+  it("(c) merge holds the row: the seed's state write waits, refuses and the source stays in mergeClose", async () => {
     const { orgId, actor } = await seedActor();
     const contactEmail = email();
     const s = await seedContactTicket(orgId, { contactEmail, status: "OPEN" });
@@ -1108,7 +1108,7 @@ describe("demo seed writes under the ticket row lock (reviews R2-2, R3-1)", () =
     const finalizing = finalizeDemoTicket(
       orgId,
       s.id,
-      { status: "OPEN", updatedAt: new Date() },
+      { legacyStatus: "OPEN", updatedAt: new Date() },
       seed.hooks,
     );
     finalizing.catch(() => {});
@@ -1119,17 +1119,17 @@ describe("demo seed writes under the ticket row lock (reviews R2-2, R3-1)", () =
     await expect(finalizing).rejects.toBeInstanceOf(DemoSeedTicketMergedError);
     const row = await prisma.ticket.findUniqueOrThrow({ where: { id: s.id } });
     expect(row).toEqual(afterMerge);
-    expect(row.status).toBe("CLOSED");
+    expect(row.stateId).toBe(await mergeCloseStateIdOf(orgId));
   });
 
-  it("(d) a merged source refuses the seed's status write and is unchanged", async () => {
+  it("(d) a merged source refuses the seed's state write and is unchanged", async () => {
     const { orgId, actor } = await seedActor();
     const { s, t } = await samePair(orgId);
     expect((await merge(actor, s.id, t.id, null)).ok).toBe(true);
     const before = await snapshot(orgId);
-    await expect(finalizeDemoTicket(orgId, s.id, { status: "RESOLVED" })).rejects.toBeInstanceOf(
-      DemoSeedTicketMergedError,
-    );
+    await expect(
+      finalizeDemoTicket(orgId, s.id, { legacyStatus: "RESOLVED" }),
+    ).rejects.toBeInstanceOf(DemoSeedTicketMergedError);
     expect(await snapshot(orgId)).toEqual(before);
   });
 
@@ -1138,9 +1138,9 @@ describe("demo seed writes under the ticket row lock (reviews R2-2, R3-1)", () =
     const before = await snapshot(orgId);
     const ticketsBefore = await prisma.ticket.count();
     const id = randomUUID();
-    await expect(finalizeDemoTicket(orgId, id, { status: "RESOLVED" })).rejects.toBeInstanceOf(
-      DemoSeedTicketMergedError,
-    );
+    await expect(
+      finalizeDemoTicket(orgId, id, { legacyStatus: "RESOLVED" }),
+    ).rejects.toBeInstanceOf(DemoSeedTicketMergedError);
     expect(await prisma.ticket.count()).toBe(ticketsBefore);
     expect(await prisma.ticket.findUnique({ where: { id } })).toBeNull();
     expect(await snapshot(orgId)).toEqual(before);
@@ -1153,7 +1153,7 @@ describe("demo seed writes under the ticket row lock (reviews R2-2, R3-1)", () =
     const before = await snapshot(orgId);
     const beforeOther = await snapshot(other.orgId);
     await expect(
-      finalizeDemoTicket(orgId, foreign.id, { status: "RESOLVED" }),
+      finalizeDemoTicket(orgId, foreign.id, { legacyStatus: "RESOLVED" }),
     ).rejects.toBeInstanceOf(DemoSeedTicketMergedError);
     expect(await snapshot(orgId)).toEqual(before);
     expect(await snapshot(other.orgId)).toEqual(beforeOther);
@@ -1170,15 +1170,51 @@ describe("demo seed writes under the ticket row lock (reviews R2-2, R3-1)", () =
     expect(
       await prisma.message.count({ where: { organizationId: orgId, visibility: "INTERNAL" } }),
     ).toBe(summary.internalNotes);
-    const statuses = await prisma.ticket.groupBy({
-      by: ["status"],
+    // Tickets per legacyStatus of their state (Phase 12.1): the summary stays keyed by the
+    // fixture keys.
+    const perState = await prisma.ticket.groupBy({
+      by: ["stateId"],
       where: { organizationId: orgId },
       _count: { _all: true },
     });
-    const byStatus = Object.fromEntries(statuses.map((r) => [r.status, r._count._all]));
-    for (const [status, count] of Object.entries(summary.byStatus)) {
-      expect(byStatus[status] ?? 0).toBe(count);
+    const states = await prisma.ticketState.findMany({
+      where: { organizationId: orgId },
+      select: { id: true, legacyStatus: true, group: true },
+    });
+    const legacyOf = new Map(states.map((st) => [st.id, st.legacyStatus]));
+    const byStatus: Record<string, number> = {};
+    for (const r of perState) {
+      const key = legacyOf.get(r.stateId);
+      if (!key) throw new Error(`demo ticket in a state without a legacy key: ${r.stateId}`);
+      byStatus[key] = (byStatus[key] ?? 0) + r._count._all;
     }
+    expect(byStatus).toEqual(summary.byStatus);
+
+    // Every PENDING-group demo ticket has its pause started at seed time; no other is paused.
+    const pendingIds = states.filter((st) => st.group === "PENDING").map((st) => st.id);
+    const tickets = await prisma.ticket.findMany({
+      where: { organizationId: orgId },
+      select: { stateId: true, slaPausedAt: true },
+    });
+    expect(tickets.some((tk) => pendingIds.includes(tk.stateId))).toBe(true);
+    for (const tk of tickets) {
+      expect(tk.slaPausedAt !== null).toBe(pendingIds.includes(tk.stateId));
+    }
+  });
+
+  it("finalizeDemoTicket maps legacyStatus to the migrated state and starts the pause of PENDING", async () => {
+    const { orgId } = await seedActor();
+    const resolved = await seedContactTicket(orgId, { contactEmail: email() });
+    const pending = await seedContactTicket(orgId, { contactEmail: email() });
+    const now = new Date("2026-04-05T06:07:08.009Z");
+    await finalizeDemoTicket(orgId, resolved.id, { legacyStatus: "RESOLVED", now });
+    await finalizeDemoTicket(orgId, pending.id, { legacyStatus: "PENDING", now });
+    const r = await prisma.ticket.findUniqueOrThrow({ where: { id: resolved.id } });
+    const p = await prisma.ticket.findUniqueOrThrow({ where: { id: pending.id } });
+    expect(r.stateId).toBe(await stateIdFor(orgId, "RESOLVED"));
+    expect(r.slaPausedAt).toBeNull();
+    expect(p.stateId).toBe(await stateIdFor(orgId, "PENDING"));
+    expect(p.slaPausedAt).toEqual(now);
   });
 });
 
