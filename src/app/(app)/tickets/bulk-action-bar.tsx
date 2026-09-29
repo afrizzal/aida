@@ -3,6 +3,7 @@
 import { CircleDot, Flag, Loader2, type LucideIcon, Minus, Plus, UserRound, X } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
+import { StateDot } from "@/components/tickets/state-dot";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -13,9 +14,17 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import type { TicketPriority, TicketStatus } from "@/generated/prisma/client";
-import { BULK_STATUS_REFUSED_MERGED_SOURCE } from "@/lib/tickets/lifecycle-copy";
+import type { TicketPriority } from "@/generated/prisma/client";
 import type { TicketMutationErrorCode } from "@/lib/tickets/mutations";
+import {
+  BULK_ERROR_STATE_DELETED,
+  BULK_PICKER_SEARCH_PLACEHOLDER,
+  BULK_STATUS_REFUSED_MERGED_SOURCE,
+  bulkPickerNoMatch,
+  GROUP_LABELS,
+  STATE_GROUP_KEYS,
+  type StateGroupKey,
+} from "@/lib/tickets/state-copy";
 import { type BulkUpdateInput, bulkUpdateTickets } from "./bulk-actions";
 import { MAX_SELECTED_TICKETS, useTicketSelection } from "./ticket-selection";
 
@@ -35,13 +44,16 @@ import { MAX_SELECTED_TICKETS, useTicketSelection } from "./ticket-selection";
 type BulkOp = BulkUpdateInput["op"];
 type Picker = "assign" | "status" | "priority" | "addTag" | "removeTag";
 
-const STATUSES: { value: TicketStatus; label: string }[] = [
-  { value: "NEW", label: "New" },
-  { value: "OPEN", label: "Open" },
-  { value: "PENDING", label: "Pending" },
-  { value: "RESOLVED", label: "Resolved" },
-  { value: "CLOSED", label: "Closed" },
-];
+/** One active state of the organization, in group then sort order (UI-SPEC 3b, D-11). */
+export interface BulkActionBarState {
+  id: string;
+  name: string;
+  colorToken: string;
+  group: StateGroupKey;
+}
+
+/** The 12px group headings of the shipped command palette (command-palette.tsx GROUP_CLASS). */
+const GROUP_CLASS = "**:[[cmdk-group-heading]]:text-[12px]";
 
 const PRIORITIES: { value: TicketPriority; label: string }[] = [
   { value: "LOW", label: "Low" },
@@ -50,8 +62,8 @@ const PRIORITIES: { value: TicketPriority; label: string }[] = [
   { value: "URGENT", label: "Urgent" },
 ];
 
-/** Remove tag gets a search input above this many entries; Assign and Add tag always have one,
- * because their lists have no upper bound (UI-SPEC Surface 3b). */
+/** Remove tag and Status get a search input above this many entries; Assign and Add tag always
+ * have one, because their lists have no upper bound (UI-SPEC Surface 3b). */
 const SEARCH_THRESHOLD = 8;
 
 const UNKNOWN_ERROR = "The change could not be saved. Wait a moment and try again.";
@@ -147,6 +159,8 @@ function failureReason(code: TicketMutationErrorCode | null, memberName?: string
       return "Your access to this workspace has ended. Sign out, then sign in again.";
     case "MERGED_SOURCE":
       return BULK_STATUS_REFUSED_MERGED_SOURCE;
+    case "STATE_NOT_FOUND":
+      return BULK_ERROR_STATE_DELETED;
     default:
       return UNKNOWN_ERROR;
   }
@@ -163,6 +177,7 @@ export function BulkActionBar({
   loaded,
   members,
   tags,
+  states,
 }: {
   /** The tickets the panel rendered, with their tag ids (for Remove tag). */
   loaded: BulkActionBarTicket[];
@@ -170,6 +185,8 @@ export function BulkActionBar({
   members: BulkActionBarOption[];
   /** The organization's tags. */
   tags: BulkActionBarOption[];
+  /** The organization's active states, in group then sort order (D-11). */
+  states: BulkActionBarState[];
 }) {
   const { selectedIds, clear, reportLoaded } = useTicketSelection();
   const pending = useCallPending();
@@ -313,9 +330,9 @@ export function BulkActionBar({
         </PickerButton>
 
         <PickerButton icon={CircleDot} label="Status" {...pickerProps("status")}>
-          <FixedOptions
-            options={STATUSES}
-            onPick={(status) => void run({ kind: "status", status })}
+          <StateOptions
+            states={states}
+            onPick={(state) => void run({ kind: "state", stateId: state.id })}
           />
         </PickerButton>
 
@@ -572,6 +589,59 @@ function TagOptions({
             </CommandItem>
           ))}
         </CommandGroup>
+      </CommandList>
+    </Command>
+  );
+}
+
+/** The grouped Status list (UI-SPEC 3b): one heading per non-empty group, a dot and the name per
+ * state, a name-only search above SEARCH_THRESHOLD states. The list itself is never empty: every
+ * organization keeps at least one Open, Resolved and Closed state (D-12). */
+function StateOptions({
+  states,
+  onPick,
+}: {
+  states: BulkActionBarState[];
+  onPick: (state: BulkActionBarState) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const showSearch = states.length > SEARCH_THRESHOLD;
+  const groups = STATE_GROUP_KEYS.map((group) => ({
+    group,
+    items: states.filter((state) => state.group === group),
+  })).filter(({ items }) => items.length > 0);
+
+  return (
+    <Command filter={matchLabel}>
+      {showSearch && (
+        <CommandInput
+          placeholder={BULK_PICKER_SEARCH_PLACEHOLDER}
+          value={query}
+          onValueChange={setQuery}
+          className="text-[13px]"
+        />
+      )}
+      <CommandList>
+        <CommandEmpty className="px-2 text-[13px] text-muted-foreground">
+          {bulkPickerNoMatch(query.trim())}
+        </CommandEmpty>
+        {groups.map(({ group, items }) => (
+          <CommandGroup key={group} heading={GROUP_LABELS[group]} className={GROUP_CLASS}>
+            {items.map((state) => (
+              <CommandItem
+                key={state.id}
+                value={state.id}
+                keywords={[state.name]}
+                title={state.name}
+                className="text-[13px]"
+                onSelect={() => onPick(state)}
+              >
+                <StateDot colorToken={state.colorToken} />
+                <OptionLabel>{state.name}</OptionLabel>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        ))}
       </CommandList>
     </Command>
   );

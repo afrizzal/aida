@@ -50,6 +50,7 @@ export async function TicketListPanel({
     savedView,
     legacyStateIds,
     stateOptions,
+    defaultStateId,
   } = await loadTicketListPanelData(prisma, { userId: session.user.id, orgId }, searchParams);
 
   // D-09: an old bookmark with status=<ENUM,...> is answered with the canonical state= URL of the
@@ -140,6 +141,7 @@ export async function TicketListPanel({
               ticket={ticket}
               isOpen={ticket.id === selectedId}
               listQuery={listQuery}
+              defaultStateId={defaultStateId}
             />
           ))}
           {canLoadMore && (
@@ -164,6 +166,7 @@ export async function TicketListPanel({
         }))}
         members={memberOptions}
         tags={tagOptions}
+        states={stateOptions}
       />
     </aside>
   );

@@ -3,7 +3,7 @@ import { AssigneeAvatar } from "@/components/tickets/assignee-avatar";
 import { PriorityChip } from "@/components/tickets/priority-chip";
 import { SlaDueChip } from "@/components/tickets/sla-due-chip";
 import { SnoozedChip } from "@/components/tickets/snooze-control";
-import { StatusChip } from "@/components/tickets/status-chip";
+import { StateChip } from "@/components/tickets/state-chip";
 import { TagChip, TagOverflowChip } from "@/components/tickets/tag-chip";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { TicketListItem } from "@/lib/tickets/list-query";
@@ -45,6 +45,7 @@ export function TicketListRow({
   ticket,
   isOpen = false,
   listQuery = "",
+  defaultStateId = null,
 }: {
   ticket: TicketListItem;
   /** The ticket shown in the reading pane (left border and accent background). */
@@ -52,6 +53,9 @@ export function TicketListRow({
   /** The list's query string (no leading "?"), kept on the link so opening a ticket keeps the
    * list, the open saved view and the bulk selection (D-10). */
   listQuery?: string;
+  /** The organization's default state for new tickets (newStateId): its tickets keep the
+   * emphasised subject (UI-SPEC 4e, D-11). */
+  defaultStateId?: string | null;
 }) {
   const activeDue = getActiveDue(ticket);
   const visibleTags = ticket.tags.slice(0, MAX_VISIBLE_TAGS);
@@ -88,14 +92,16 @@ export function TicketListRow({
         <p
           className={cn(
             "mt-0.5 truncate text-[14px]",
-            ticket.status === "NEW" ? "font-medium" : "font-normal",
+            defaultStateId !== null && ticket.stateId === defaultStateId
+              ? "font-medium"
+              : "font-normal",
           )}
         >
           {ticket.subject}
         </p>
 
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-          <StatusChip status={ticket.status} />
+          <StateChip name={ticket.state.name} colorToken={ticket.state.colorToken} />
           {(ticket.priority === "HIGH" || ticket.priority === "URGENT") && (
             <PriorityChip priority={ticket.priority} />
           )}
@@ -105,6 +111,7 @@ export function TicketListRow({
               dueAt={activeDue}
               isAtRisk={ticket.isAtRisk}
               isBreached={ticket.isBreached}
+              pausedAt={ticket.slaPausedAt}
             />
           )}
           {visibleTags.map(({ tag }) => (
