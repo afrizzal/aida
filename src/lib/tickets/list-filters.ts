@@ -207,3 +207,87 @@ export function parseStoredFilters(raw: unknown): StoredViewFilters | null {
   const parsed = storedViewFiltersSchema.safeParse(raw);
   return parsed.success ? parsed.data : null;
 }
+
+/**
+ * Compatibility mapper for old `status=<ENUM,...>` URLs (D-09). `legacy` is the active
+ * organization's map from legacy key to state id, supplied by the server (this module stays
+ * client-safe). Keys are matched case-insensitively. A value that is not one of the five keys, or
+ * whose state is soft-deleted (null in the map), becomes LEGACY_UNMAPPED_STATE_ID: never dropped,
+ * never widened. A present value that names nothing gives [LEGACY_UNMAPPED_STATE_ID], the same
+ * floor as the state parser (review C1).
+ */
+export function mapLegacyStatusParam(
+  raw: string,
+  legacy: Readonly<Record<LegacyStatusParamKey, string | null>>,
+): string[] {
+  const ids = raw
+    .split(",")
+    .map((token) => token.trim())
+    .filter((token) => token !== "")
+    .map((token) => {
+      const key = token.toUpperCase();
+      const id = (LEGACY_STATUS_KEYS as readonly string[]).includes(key)
+        ? legacy[key as LegacyStatusParamKey]
+        : null;
+      return id ?? LEGACY_UNMAPPED_STATE_ID;
+    });
+  return ids.length > 0 ? canonicalIds(ids) : [LEGACY_UNMAPPED_STATE_ID];
+}
+
+/** The entries of a Next.js searchParams record or a URLSearchParams, in order. */
+function searchEntries(
+  source: Record<string, string | string[] | undefined> | URLSearchParams,
+): [string, string][] {
+  if (source instanceof URLSearchParams) return [...source.entries()];
+  const entries: [string, string][] = [];
+  for (const [key, value] of Object.entries(source)) {
+    if (value === undefined) continue;
+    for (const item of Array.isArray(value) ? value : [value]) entries.push([key, item]);
+  }
+  return entries;
+}
+
+/**
+ * The canonical query string for a URL that still carries the old `status` parameter (a present
+ * but empty one counts as present), or null when it carries none. `status` is removed and
+ * `state` holds the sorted union of the URL's own state ids and the mapped ids, in the slot of
+ * whichever of the two came first; every other parameter is kept as it was. The caller redirects
+ * to its own base path plus this string, so no host or path comes from the input (T-12.1-40).
+ */
+export function legacyRedirectSearch(
+  searchParams: Record<string, string | string[] | undefined> | URLSearchParams,
+  legacy: Readonly<Record<LegacyStatusParamKey, string | null>>,
+): string | null {
+  const status = readParam(searchParams, "status");
+  if (status === undefined) return null;
+  const state = readParam(searchParams, "state");
+  const merged = canonicalIds([
+    ...(state === undefined ? [] : parseStateParam(state)),
+    ...mapLegacyStatusParam(status, legacy),
+  ]);
+  const out = new URLSearchParams();
+  let stateWritten = false;
+  for (const [key, value] of searchEntries(searchParams)) {
+    if (key === "status" || key === "state") {
+      if (!stateWritten) out.set("state", merged.join(","));
+      stateWritten = true;
+      continue;
+    }
+    out.append(key, value);
+  }
+  return out.toString();
+}
+
+/**
+ * The filter's state ids that are not among the organization's active state ids, in filter
+ * order. LEGACY_UNMAPPED_STATE_ID is always missing.
+ */
+export function missingStateIds(
+  filters: { stateIds?: readonly string[] },
+  activeIds: readonly string[],
+): string[] {
+  const active = new Set(activeIds);
+  return (filters.stateIds ?? []).filter(
+    (id) => id === LEGACY_UNMAPPED_STATE_ID || !active.has(id),
+  );
+}

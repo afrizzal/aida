@@ -1,10 +1,11 @@
 import { CheckCircle2, Inbox } from "lucide-react";
 import Link from "next/link";
+import { RedirectType, redirect } from "next/navigation";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { prisma } from "@/lib/db";
 import { getScopedDb } from "@/lib/session";
-import { MAX_LIST_LIMIT } from "@/lib/tickets/list-filters";
+import { legacyRedirectSearch, MAX_LIST_LIMIT } from "@/lib/tickets/list-filters";
 import { loadTicketListPanelData } from "@/lib/tickets/list-panel-data";
 import { parseTicketListFilters } from "@/lib/tickets/list-query";
 import { BulkActionBar } from "./bulk-action-bar";
@@ -41,7 +42,16 @@ export async function TicketListPanel({
     fieldOptions,
     memberOptions,
     savedView,
+    legacyStateIds,
   } = await loadTicketListPanelData(prisma, { userId: session.user.id, orgId }, searchParams);
+
+  // D-09: an old bookmark with status=<ENUM,...> is answered with the canonical state= URL of the
+  // active organization (replace, so the old URL leaves no history entry). The target is this
+  // panel's own base path plus a query built by URLSearchParams (T-12.1-40).
+  if (membershipActive) {
+    const legacySearch = legacyRedirectSearch(searchParams, legacyStateIds);
+    if (legacySearch !== null) redirect(`${basePath}?${legacySearch}`, RedirectType.replace);
+  }
   const filters = parseTicketListFilters(searchParams);
 
   const listQuery = buildListQuery(searchParams);
@@ -154,7 +164,7 @@ function toSearchParams(searchParams: Record<string, string | string[] | undefin
 }
 
 /** The list parameters a row link keeps (D-10): the filters, the open view and the page size. */
-const LIST_QUERY_KEYS = ["view", "status", "tag", "cf", "q", "snoozed", "sv", "limit"] as const;
+const LIST_QUERY_KEYS = ["view", "state", "tag", "cf", "q", "snoozed", "sv", "limit"] as const;
 
 function buildListQuery(searchParams: Record<string, string | string[] | undefined>): string {
   const source = toSearchParams(searchParams);
