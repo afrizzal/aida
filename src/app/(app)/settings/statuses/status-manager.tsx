@@ -52,6 +52,7 @@ import {
 import type { SettingsStateRow, StateAdminErrorCode } from "@/lib/tickets/ticket-state-admin";
 import { cn } from "@/lib/utils";
 import { moveStatusAction, setDefaultStatusAction } from "./actions";
+import { DeleteStatusDialog } from "./delete-status-dialog";
 import { StatusFormDialog, type StatusFormTarget } from "./status-form-dialog";
 
 // UI-SPEC Surface 1b, 1c, 1f and 1h: the four group cards, the rows, reorder and set default,
@@ -147,6 +148,8 @@ export function StatusManager({
   const [formTarget, setFormTarget] = useState<StatusFormTarget | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [formKey, setFormKey] = useState(0);
+  const [deleteTarget, setDeleteTarget] = useState<SettingsStateRow | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   /** Focus to apply once the refreshed list arrives (first key found wins). */
   const pendingFocusRef = useRef<{ keys: FocusKey[]; states: SettingsStateRow[] } | null>(null);
@@ -239,6 +242,30 @@ export function StatusManager({
     }
   }
 
+  function openDelete(state: SettingsStateRow) {
+    setGroupCallout(state.group, null);
+    // UI-SPEC 1h: closed without deleting returns to the row's options button.
+    dialogReturnRef.current = [`options-${state.id}`];
+    setDeleteTarget(state);
+    setFormKey((k) => k + 1);
+    setDeleteOpen(true);
+  }
+
+  function handleDeleted(state: SettingsStateRow) {
+    // UI-SPEC 1h: the next row's options button, else the previous row's, else Add status.
+    const groupStates = states.filter((s) => s.group === state.group);
+    const index = groupStates.findIndex((s) => s.id === state.id);
+    const next = groupStates[index + 1];
+    const previous = index > 0 ? groupStates[index - 1] : undefined;
+    const keys: FocusKey[] = [];
+    if (next) keys.push(`options-${next.id}`);
+    if (previous) keys.push(`options-${previous.id}`);
+    keys.push(`add-${state.group}`);
+    dialogReturnRef.current = keys;
+    setDeleteOpen(false);
+    refreshThenFocus(keys);
+  }
+
   const otherNames = (excludeId: string | null) =>
     states.filter((s) => s.id !== excludeId).map((s) => s.name);
 
@@ -318,7 +345,7 @@ export function StatusManager({
                         )
                       }
                       onSetDefault={() => handleSetDefault(state)}
-                      onDelete={() => undefined}
+                      onDelete={() => openDelete(state)}
                     />
                   ))}
                 </ol>
@@ -327,6 +354,23 @@ export function StatusManager({
           </Card>
         );
       })}
+
+      {deleteTarget && (
+        <DeleteStatusDialog
+          key={`delete-${formKey}`}
+          open={deleteOpen}
+          state={deleteTarget}
+          replacements={states.filter(
+            (s) => s.group === deleteTarget.group && s.id !== deleteTarget.id,
+          )}
+          onOpenChange={setDeleteOpen}
+          onDeleted={() => handleDeleted(deleteTarget)}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            focusFirstIn(containerRef.current, dialogReturnRef.current);
+          }}
+        />
+      )}
 
       {formTarget && (
         <StatusFormDialog
@@ -446,7 +490,9 @@ function StatusRow({
                 className="items-start text-[13px]"
                 disabled={deleteReason !== null}
                 aria-describedby={deleteReason ? deleteReasonId : undefined}
-                onSelect={onDelete}
+                onSelect={() => {
+                  if (deleteReason === null) onDelete();
+                }}
               >
                 <Trash2 aria-hidden="true" />
                 <span className="space-y-1">
