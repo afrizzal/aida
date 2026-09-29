@@ -1,7 +1,7 @@
 import { Users } from "lucide-react";
 import Link from "next/link";
 import { EmptyState } from "@/components/empty-state";
-import { StatusChip } from "@/components/tickets/status-chip";
+import { StateChip } from "@/components/tickets/state-chip";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card } from "@/components/ui/card";
 import { formatRelativeTime } from "@/lib/format-relative-time";
@@ -31,7 +31,15 @@ export default async function ContactDetailPage({ params }: ContactDetailPagePro
     include: {
       tickets: {
         orderBy: { createdAt: "desc" },
-        select: { id: true, number: true, subject: true, status: true, createdAt: true },
+        // Phase 12.1 (D-11 chips row): the state through the composite relation, so it is always
+        // a state of the ticket's own organization; only its name and colour key are read.
+        select: {
+          id: true,
+          number: true,
+          subject: true,
+          state: { select: { name: true, colorToken: true } },
+          createdAt: true,
+        },
       },
     },
   });
@@ -100,7 +108,8 @@ export default async function ContactDetailPage({ params }: ContactDetailPagePro
                 <span className="min-w-0 flex-1 truncate text-[14px] text-foreground">
                   {ticket.subject}
                 </span>
-                <StatusChip status={ticket.status} />
+                {/* No tooltip: the chip sits inside the row link (UI-SPEC Surface 2). */}
+                <StateChip name={ticket.state.name} colorToken={ticket.state.colorToken} />
                 <span className="w-20 shrink-0 text-right text-[12px] text-muted-foreground">
                   {formatRelativeTime(ticket.createdAt)}
                 </span>

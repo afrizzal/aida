@@ -9,7 +9,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { mergeTicketAction } from "@/app/(app)/tickets/[id]/merge-actions";
-import { StatusChip } from "@/components/tickets/status-chip";
+import { StateChip } from "@/components/tickets/state-chip";
 import {
   fetchPickerRows,
   type PickerRow,
@@ -25,7 +25,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { TicketStatus } from "@/generated/prisma/client";
 import {
   MERGE_CONFIRM_DESCRIPTION,
   MERGE_ERROR_LINK_CHANGED,
@@ -38,7 +37,9 @@ export interface MergeSourceTicket {
   id: string;
   number: number;
   subject: string;
-  status: TicketStatus;
+  /** The name and colour key of the source's state (Phase 12.1, D-11 chips row). */
+  stateName: string;
+  colorToken: string;
 }
 
 const MERGE_OUTCOME_UNKNOWN =
@@ -356,7 +357,7 @@ function MergeFlow({ source, pending, onPendingChange, onClose }: MergeFlowProps
                 <span className="font-semibold tabular-nums">#{ticket.number}</span>{" "}
                 {ticket.subject}
               </span>
-              <StatusChip status={ticket.status} />
+              <StateChip name={ticket.stateName} colorToken={ticket.colorToken} />
             </div>
           ))}
         </div>

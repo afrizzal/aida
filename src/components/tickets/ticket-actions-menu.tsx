@@ -16,14 +16,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { TicketStatus } from "@/generated/prisma/client";
 import { MERGED_SOURCE_REASON } from "@/lib/tickets/lifecycle-copy";
 
 export interface TicketActionsMenuProps {
   ticketId: string;
   ticketNumber: number;
   ticketSubject: string;
-  ticketStatus: TicketStatus;
+  /** The ticket's state name and colour key, shown on the merge confirmation pair (D-11). */
+  ticketState: { name: string; colorToken: string };
   mergedSource: boolean;
   hasReceivedMerges: boolean;
   /** A ref to the menu trigger, for a parent that also moves focus to it. */
@@ -43,7 +43,7 @@ export function TicketActionsMenu({
   ticketId,
   ticketNumber,
   ticketSubject,
-  ticketStatus,
+  ticketState,
   mergedSource,
   hasReceivedMerges,
   triggerRef: parentTriggerRef,
@@ -121,7 +121,8 @@ export function TicketActionsMenu({
           id: ticketId,
           number: ticketNumber,
           subject: ticketSubject,
-          status: ticketStatus,
+          stateName: ticketState.name,
+          colorToken: ticketState.colorToken,
         }}
         open={mergeOpen}
         onOpenChange={setMergeOpen}
