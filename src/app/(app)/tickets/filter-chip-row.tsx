@@ -11,6 +11,7 @@ import {
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { useRegisterCommands } from "@/components/command-provider";
+import { StateDot } from "@/components/tickets/state-dot";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,14 +29,21 @@ import {
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import type { CustomFieldType, TicketStatus } from "@/generated/prisma/client";
+import type { CustomFieldType } from "@/generated/prisma/client";
 import { parseCfParam, serializeCfParam } from "@/lib/tickets/cf-param";
-import { hasAnyFilter, parseUrlFilters } from "@/lib/tickets/list-filters";
+import { hasAnyFilter, missingStateIds, parseUrlFilters } from "@/lib/tickets/list-filters";
+import {
+  GROUP_LABELS,
+  MISSING_GROUP_LABEL,
+  MISSING_STATUS_ITEM,
+  STATE_GROUP_KEYS,
+} from "@/lib/tickets/state-copy";
 import { cn } from "@/lib/utils";
 import { NewTicketDialog } from "./new-ticket-dialog";
 import { SaveViewDialog } from "./save-view-dialog";
@@ -47,13 +55,16 @@ const VIEWS = [
   { value: "all", label: "All" },
 ] as const;
 
-const STATUSES: { value: TicketStatus; label: string }[] = [
-  { value: "NEW", label: "New" },
-  { value: "OPEN", label: "Open" },
-  { value: "PENDING", label: "Pending" },
-  { value: "RESOLVED", label: "Resolved" },
-  { value: "CLOSED", label: "Closed" },
-];
+/** The Status filter trigger's id: the missing-status notice moves focus here (UI-SPEC 4c). */
+export const STATUS_FILTER_TRIGGER_ID = "inbox-status-filter-trigger";
+
+/** One active state of the organization, as the Status filter lists it (UI-SPEC 4a). */
+export interface FilterChipRowState {
+  id: string;
+  name: string;
+  colorToken: string;
+  group: string;
+}
 
 export interface FilterChipRowTag {
   id: string;
@@ -69,16 +80,16 @@ export interface FilterChipRowCustomField {
 interface FilterChipRowProps {
   tags: FilterChipRowTag[];
   customFieldDefinitions: FilterChipRowCustomField[];
+  /** The organization's active states in group, then sort order. */
+  states: FilterChipRowState[];
 }
 
-export function FilterChipRow({ tags, customFieldDefinitions }: FilterChipRowProps) {
+export function FilterChipRow({ tags, customFieldDefinitions, states }: FilterChipRowProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const view = searchParams.get("view") ?? "all";
-  const activeStatuses = (searchParams.get("status")?.split(",").filter(Boolean) ??
-    []) as TicketStatus[];
   const activeTagId = searchParams.get("tag");
   const cfParam = searchParams.get("cf");
   const activeCf = cfParam ? parseCfParam(cfParam) : null;
@@ -93,6 +104,16 @@ export function FilterChipRow({ tags, customFieldDefinitions }: FilterChipRowPro
   const [saveViewOpen, setSaveViewOpen] = useState(false);
   // Save view (AIDA-47, UI-SPEC Surface 2a): only when at least one filter is on screen.
   const urlFilters = parseUrlFilters(searchParams).filters;
+  // D-09: state ids from the one grammar (a present but malformed state= fails closed there).
+  const activeStateIds = urlFilters.stateIds;
+  const missingIds = missingStateIds(
+    urlFilters,
+    states.map((state) => state.id),
+  );
+  const stateGroups = STATE_GROUP_KEYS.map((group) => ({
+    group,
+    items: states.filter((state) => state.group === group),
+  })).filter((entry) => entry.items.length > 0);
   const canSaveView = hasAnyFilter(urlFilters);
   // UI-SPEC Surface 5 (D-16): on shows only snoozed tickets (snoozed=1); off is the default.
   const snoozedOn = urlFilters.snoozed === true;
@@ -133,9 +154,12 @@ export function FilterChipRow({ tags, customFieldDefinitions }: FilterChipRowPro
     updateParams({ view: next === "all" ? null : next });
   }
 
-  function toggleStatus(status: TicketStatus, checked: boolean) {
-    const next = checked ? [...activeStatuses, status] : activeStatuses.filter((s) => s !== status);
-    updateParams({ status: next.length > 0 ? next.join(",") : null });
+  function toggleState(stateId: string, checked: boolean) {
+    const next = checked
+      ? [...new Set([...activeStateIds, stateId])]
+      : activeStateIds.filter((id) => id !== stateId);
+    // The URL contract (D-09): state=<ids sorted in code-unit order>; no parameter when empty.
+    updateParams({ state: next.length > 0 ? [...next].sort().join(",") : null });
   }
 
   function selectTag(tagId: string) {
@@ -195,30 +219,65 @@ export function FilterChipRow({ tags, customFieldDefinitions }: FilterChipRowPro
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
+              id={STATUS_FILTER_TRIGGER_ID}
               variant="outline"
               size="sm"
-              className={cn(activeStatuses.length > 0 && "border-primary/40 text-primary-emphasis")}
+              className={cn(activeStateIds.length > 0 && "border-primary/40 text-primary-emphasis")}
             >
               <Filter className="size-3.5" />
               Status
-              {activeStatuses.length > 0 && (
+              {/* UI-SPEC 4a: the badge counts every id in the filter, missing ones included. */}
+              {activeStateIds.length > 0 && (
                 <Badge variant="secondary" className="h-4 px-1 text-[12px]">
-                  {activeStatuses.length}
+                  {activeStateIds.length}
                 </Badge>
               )}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent className="w-48">
-            {STATUSES.map((status) => (
-              <DropdownMenuCheckboxItem
-                key={status.value}
-                checked={activeStatuses.includes(status.value)}
-                onSelect={(e) => e.preventDefault()}
-                onCheckedChange={(checked) => toggleStatus(status.value, checked === true)}
-              >
-                {status.label}
-              </DropdownMenuCheckboxItem>
+          <DropdownMenuContent className="w-[240px] max-h-[320px] overflow-y-auto">
+            {stateGroups.map(({ group, items }, index) => (
+              <div key={group}>
+                {index > 0 && <DropdownMenuSeparator />}
+                <DropdownMenuLabel className="text-[12px] font-semibold text-muted-foreground">
+                  {GROUP_LABELS[group]}
+                </DropdownMenuLabel>
+                {items.map((state) => (
+                  <DropdownMenuCheckboxItem
+                    key={state.id}
+                    className="text-[13px]"
+                    title={state.name}
+                    checked={activeStateIds.includes(state.id)}
+                    onSelect={(e) => e.preventDefault()}
+                    onCheckedChange={(checked) => toggleState(state.id, checked === true)}
+                  >
+                    <StateDot colorToken={state.colorToken} />
+                    <span className="min-w-0 truncate">{state.name}</span>
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </div>
             ))}
+            {/* UI-SPEC 4a: a missing id is shown checked and can be removed on its own (D-09). */}
+            {missingIds.length > 0 && (
+              <>
+                {stateGroups.length > 0 && <DropdownMenuSeparator />}
+                <DropdownMenuLabel className="text-[12px] font-semibold text-muted-foreground">
+                  {MISSING_GROUP_LABEL}
+                </DropdownMenuLabel>
+                {missingIds.map((id) => (
+                  <DropdownMenuCheckboxItem
+                    key={id}
+                    className="text-[13px]"
+                    checked
+                    onSelect={(e) => e.preventDefault()}
+                    onCheckedChange={(checked) => {
+                      if (checked !== true) toggleState(id, false);
+                    }}
+                  >
+                    {MISSING_STATUS_ITEM}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
 

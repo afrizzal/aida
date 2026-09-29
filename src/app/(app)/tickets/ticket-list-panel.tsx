@@ -5,12 +5,18 @@ import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { prisma } from "@/lib/db";
 import { getScopedDb } from "@/lib/session";
-import { legacyRedirectSearch, MAX_LIST_LIMIT } from "@/lib/tickets/list-filters";
+import {
+  legacyRedirectSearch,
+  MAX_LIST_LIMIT,
+  missingStateIds,
+  parseUrlFilters,
+} from "@/lib/tickets/list-filters";
 import { loadTicketListPanelData } from "@/lib/tickets/list-panel-data";
 import { parseTicketListFilters } from "@/lib/tickets/list-query";
 import { BulkActionBar } from "./bulk-action-bar";
 import { FilterChipRow } from "./filter-chip-row";
 import { LIST_PANEL_ID, ListPanelFocus } from "./list-panel-focus";
+import { MissingStatusNotice } from "./missing-status-notice";
 import { SavedViewStrip } from "./saved-view-strip";
 import { TicketListRow } from "./ticket-list-row";
 
@@ -43,6 +49,7 @@ export async function TicketListPanel({
     memberOptions,
     savedView,
     legacyStateIds,
+    stateOptions,
   } = await loadTicketListPanelData(prisma, { userId: session.user.id, orgId }, searchParams);
 
   // D-09: an old bookmark with status=<ENUM,...> is answered with the canonical state= URL of the
@@ -53,6 +60,11 @@ export async function TicketListPanel({
     if (legacySearch !== null) redirect(`${basePath}?${legacySearch}`, RedirectType.replace);
   }
   const filters = parseTicketListFilters(searchParams);
+  // UI-SPEC 4c (D-09): state ids in the URL that are not active states of the organization.
+  const urlMissingStateIds = missingStateIds(
+    parseUrlFilters(searchParams).filters,
+    stateOptions.map((state) => state.id),
+  );
 
   const listQuery = buildListQuery(searchParams);
 
@@ -72,7 +84,14 @@ export async function TicketListPanel({
       {/* A removed member gets no filter row: no search, no Save view and no New Ticket
           control (Codex diff critique round 2, E1). Only the membership-ended line shows. */}
       {membershipActive && (
-        <FilterChipRow tags={tagOptions} customFieldDefinitions={fieldOptions} />
+        <FilterChipRow
+          tags={tagOptions}
+          customFieldDefinitions={fieldOptions}
+          states={stateOptions}
+        />
+      )}
+      {membershipActive && savedView?.status !== "ok" && urlMissingStateIds.length > 0 && (
+        <MissingStatusNotice missingIds={urlMissingStateIds} />
       )}
 
       {savedView?.status === "ok" && (
