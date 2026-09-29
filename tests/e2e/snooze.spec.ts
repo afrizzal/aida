@@ -4,7 +4,7 @@ import { expect, type Page, test } from "@playwright/test";
 import { snoozeTicket } from "../../src/lib/tickets/snooze";
 import { snoozeWakeHandler } from "../../src/lib/worker/jobs/snooze-wake";
 import { ADMIN_EMAIL } from "./global-setup";
-import { createTicket, orgId, prisma } from "./support/db";
+import { createTicket, orgId, prisma, stateIdFor } from "./support/db";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 test.use({ storageState: path.resolve(__dirname, ".auth/admin.json") });
@@ -21,7 +21,10 @@ async function seedTicket(label: string) {
     contact: { email: `snooze-${label}-${ts}@example.com` },
     direction: "INBOUND",
   });
-  await prisma.ticket.update({ where: { id: ticket.id }, data: { status: "OPEN" } });
+  await prisma.ticket.update({
+    where: { id: ticket.id },
+    data: { stateId: await stateIdFor("OPEN") },
+  });
   return { id: ticket.id, subject };
 }
 
@@ -105,7 +108,10 @@ test.describe("Snooze", () => {
 
   test("a closed ticket that is not snoozed shows the disabled trigger", async ({ page }) => {
     const ticket = await seedTicket("closed");
-    await prisma.ticket.update({ where: { id: ticket.id }, data: { status: "CLOSED" } });
+    await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: { stateId: await stateIdFor("CLOSED") },
+    });
 
     await open(page, `/tickets/${ticket.id}`);
     const trigger = page.getByRole("button", { name: `Snooze. ${CLOSED_REASON}` });
@@ -149,9 +155,9 @@ test.describe("Snooze", () => {
     await page.keyboard.press("Escape");
     await expect
       .poll(
-        async () => (await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } })).status,
+        async () => (await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } })).stateId,
       )
-      .toBe("CLOSED");
+      .toBe(await stateIdFor("CLOSED"));
 
     await expect(snoozedChipTrigger(page)).toBeEnabled();
     await snoozedChipTrigger(page).click();
@@ -176,7 +182,7 @@ test.describe("Snooze", () => {
     await expect(page.getByRole("button", { name: `Snooze. ${CLOSED_REASON}` })).toBeFocused();
 
     const stored = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
-    expect(stored.status).toBe("CLOSED");
+    expect(stored.stateId).toBe(await stateIdFor("CLOSED"));
     expect(stored.snoozedUntil).toBeNull();
     const woken = await prisma.ticketAuditEvent.findMany({
       where: { ticketId: ticket.id, action: "WOKEN" },
@@ -194,7 +200,10 @@ test.describe("Snooze", () => {
     await expect(preset).toBeFocused();
 
     // Closed behind the agent's back: the server refuses, the page is not revalidated.
-    await prisma.ticket.update({ where: { id: ticket.id }, data: { status: "CLOSED" } });
+    await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: { stateId: await stateIdFor("CLOSED") },
+    });
     await preset.click();
     await expect(dialog.getByRole("alert")).toHaveText(CLOSED_REASON);
     await expect(preset).toBeEnabled();
@@ -424,7 +433,7 @@ test.describe("Snoozed filter", () => {
     await prisma.ticket.update({
       where: { id: ticket.id },
       data: {
-        status: "OPEN",
+        stateId: await stateIdFor("OPEN"),
         snoozedUntil: snoozed ? new Date(Date.now() + 3 * 3600_000) : null,
       },
     });
@@ -476,20 +485,21 @@ test.describe("Snoozed filter", () => {
     const awake = await seedFilterTicket("legacy", false);
     const admin = await prisma.user.findFirstOrThrow({ where: { email: ADMIN_EMAIL } });
     const name = `E2E legacy view ${ts}`;
+    const openId = await stateIdFor("OPEN");
     await prisma.savedView.create({
       data: {
         organizationId: orgId,
         ownerUserId: admin.id,
         name,
         visibility: "PRIVATE",
-        filters: { version: 1, view: "all", statuses: ["OPEN"], q: word },
+        filters: { version: 2, view: "all", stateIds: [openId], q: word },
         position: 0,
       },
     });
 
     await open(page, "/tickets");
     await page.getByRole("list", { name: "Private" }).getByRole("link", { name }).click();
-    await expect(page).toHaveURL(/status=OPEN/);
+    await expect(page).toHaveURL(new RegExp(`state=${openId}`));
     await expect(page).not.toHaveURL(/snoozed=/);
     await expect(toggle(page)).toHaveAttribute("aria-pressed", "false");
     await expect(row(page, awake.id)).toBeVisible();

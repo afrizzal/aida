@@ -2,7 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { ADMIN_EMAIL } from "./global-setup";
-import { createTicket, orgId, prisma } from "./support/db";
+import { createTicket, type LegacyStatusKey, orgId, prisma, stateIdFor } from "./support/db";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 test.use({ storageState: path.resolve(__dirname, ".auth/admin.json") });
@@ -28,7 +28,7 @@ test.describe("Ticket mutations", () => {
     await page.goto(`/tickets/${ticketId}`);
 
     const statusButton = page.getByRole("button", { name: "Change status" });
-    const dbStatus: Record<string, string> = {
+    const dbStatus: Record<string, LegacyStatusKey> = {
       Open: "OPEN",
       Pending: "PENDING",
       Resolved: "RESOLVED",
@@ -44,9 +44,9 @@ test.describe("Ticket mutations", () => {
       await expect
         .poll(async () => {
           const updated = await prisma.ticket.findUniqueOrThrow({ where: { id: ticketId } });
-          return updated.status;
+          return updated.stateId;
         })
-        .toBe(dbStatus[status]);
+        .toBe(await stateIdFor(dbStatus[status]));
 
       await page.reload();
       await expect(statusButton.getByText(status, { exact: true })).toBeVisible();

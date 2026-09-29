@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
 import { mergeTickets } from "../../src/lib/tickets/merge";
 import { ADMIN_EMAIL, MEMBER_EMAIL } from "./global-setup";
-import { createTicket, orgId, prisma } from "./support/db";
+import { createTicket, orgId, prisma, stateIdFor } from "./support/db";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 test.use({ storageState: path.resolve(__dirname, ".auth/admin.json") });
@@ -31,7 +31,10 @@ async function seedTickets(token: string, count: number, status: "NEW" | "OPEN" 
       direction: "INBOUND",
     });
     if (status !== "NEW") {
-      await prisma.ticket.update({ where: { id: ticket.id }, data: { status } });
+      await prisma.ticket.update({
+        where: { id: ticket.id },
+        data: { stateId: await stateIdFor(status) },
+      });
     }
     seeded.push({ id: ticket.id, subject });
   }
@@ -129,11 +132,15 @@ test.describe("Bulk actions", () => {
       .poll(async () => {
         const rows = await prisma.ticket.findMany({
           where: { id: { in: [first.id, second.id, third.id] } },
-          select: { id: true, status: true },
+          select: { id: true, stateId: true },
         });
-        return Object.fromEntries(rows.map((row) => [row.id, row.status]));
+        return Object.fromEntries(rows.map((row) => [row.id, row.stateId]));
       })
-      .toEqual({ [first.id]: "RESOLVED", [second.id]: "RESOLVED", [third.id]: "OPEN" });
+      .toEqual({
+        [first.id]: await stateIdFor("RESOLVED"),
+        [second.id]: await stateIdFor("RESOLVED"),
+        [third.id]: await stateIdFor("OPEN"),
+      });
 
     const audits = await prisma.ticketAuditEvent.findMany({
       where: { ticketId: { in: [first.id, second.id, third.id] }, action: "STATUS_CHANGED" },
@@ -309,11 +316,11 @@ test.describe("Bulk actions", () => {
 
     const rows = await prisma.ticket.findMany({
       where: { id: { in: [kept.id, source.id] } },
-      select: { id: true, status: true },
+      select: { id: true, stateId: true },
     });
-    expect(Object.fromEntries(rows.map((row) => [row.id, row.status]))).toEqual({
-      [kept.id]: "OPEN",
-      [source.id]: "CLOSED",
+    expect(Object.fromEntries(rows.map((row) => [row.id, row.stateId]))).toEqual({
+      [kept.id]: await stateIdFor("OPEN"),
+      [source.id]: await stateIdFor("CLOSED"),
     });
     expect(
       await prisma.ticketAuditEvent.count({ where: { ticketId: { in: [kept.id, source.id] } } }),
@@ -568,7 +575,7 @@ test.describe("Bulk actions", () => {
     // The filter row's Status chip comes before the bar's Status trigger in the panel.
     await page.getByRole("button", { name: "Status", exact: true }).first().click();
     await page.getByRole("menuitemcheckbox", { name: "Open" }).click();
-    await expect(page).toHaveURL(/status=OPEN/);
+    await expect(page).toHaveURL(new RegExp(`state=${await stateIdFor("OPEN")}`));
     // Close the modal status menu: while it is open the rest of the page is hidden from the
     // accessibility tree, which would make the checks below pass or fail for the wrong reason.
     await page.keyboard.press("Escape");

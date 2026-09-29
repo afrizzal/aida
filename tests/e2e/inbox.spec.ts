@@ -2,7 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { ADMIN_EMAIL } from "./global-setup";
-import { createTicket, orgId, prisma } from "./support/db";
+import { createTicket, orgId, prisma, stateIdFor } from "./support/db";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 test.use({ storageState: path.resolve(__dirname, ".auth/admin.json") });
@@ -36,7 +36,7 @@ test.describe("Inbox filters and search", () => {
     const adminUser = await prisma.user.findFirstOrThrow({ where: { email: ADMIN_EMAIL } });
     await prisma.ticket.update({
       where: { id: beta.id },
-      data: { status: "OPEN", assigneeId: adminUser.id },
+      data: { stateId: await stateIdFor("OPEN"), assigneeId: adminUser.id },
     });
 
     const gamma = await createTicket(orgId, {
@@ -46,7 +46,10 @@ test.describe("Inbox filters and search", () => {
       contact: { email: `gamma-${ts}@example.com` },
       direction: "INBOUND",
     });
-    await prisma.ticket.update({ where: { id: gamma.id }, data: { status: "PENDING" } });
+    await prisma.ticket.update({
+      where: { id: gamma.id },
+      data: { stateId: await stateIdFor("PENDING") },
+    });
 
     const tag = await prisma.tag.create({ data: { organizationId: orgId, name: TAG_NAME } });
     await prisma.ticketTag.create({ data: { ticketId: gamma.id, tagId: tag.id } });

@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
 import { ADMIN_EMAIL } from "./global-setup";
-import { createTicket, orgId, prisma } from "./support/db";
+import { createTicket, orgId, prisma, stateIdFor } from "./support/db";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 test.use({ storageState: path.resolve(__dirname, ".auth/admin.json") });
@@ -170,7 +170,7 @@ test.describe("Command palette", () => {
     const name = `E2E palette view ${ts}`;
     seededViewNames.push(name);
     const ownerUserId = await userIdOf(ADMIN_EMAIL);
-    const filters = { version: 1, view: "all", statuses: ["OPEN"] };
+    const filters = { version: 2, view: "all", stateIds: [await stateIdFor("OPEN")] };
     const privateView = await prisma.savedView.create({
       data: {
         organizationId: orgId,
@@ -213,7 +213,7 @@ test.describe("Command palette", () => {
   test("the save command exists only with a filter set and opens the Save view dialog", async ({
     page,
   }) => {
-    await openRoute(page, "/tickets?status=OPEN");
+    await openRoute(page, `/tickets?state=${await stateIdFor("OPEN")}`);
     // The command is registered by the filter row; wait until its Save view button is enabled.
     await expect(page.getByRole("button", { name: "Save these filters as a view" })).toBeEnabled();
     await openPalette(page);
@@ -331,7 +331,15 @@ test.describe("Command palette", () => {
           w.__staleRequested = true;
           await held;
           const body = {
-            results: [{ id: "stale-ticket", number: 99999, subject: `Stale ${q}`, status: "OPEN" }],
+            results: [
+              {
+                id: "stale-ticket",
+                number: 99999,
+                subject: `Stale ${q}`,
+                stateName: "Open",
+                colorToken: "indigo",
+              },
+            ],
           };
           const response = new Response(JSON.stringify(body), {
             headers: { "content-type": "application/json" },
