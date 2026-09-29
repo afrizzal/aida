@@ -26,7 +26,7 @@ import { localFileStorage } from "@/lib/attachments/local-file-storage";
 import { prisma } from "@/lib/db";
 import { type MergeActor, mergeTickets } from "@/lib/tickets/merge";
 import { loadStatusPageData } from "@/lib/tickets/status-page-data";
-import { seedContactTicket, seedOrgWithMembers } from "../support/lifecycle-fixtures";
+import { seedContactTicket, seedOrgWithMembers, stateIdFor } from "../support/lifecycle-fixtures";
 
 afterAll(async () => {
   await rm(uploads.dir, { recursive: true, force: true });
@@ -262,7 +262,7 @@ describe("two status links of one contact (D-09, D-10)", () => {
     // The target is resolved, then its own token writes its own row.
     await prisma.ticket.update({
       where: { id: t.id },
-      data: { status: "RESOLVED", resolvedAt: new Date() },
+      data: { stateId: await stateIdFor(orgId, "RESOLVED"), resolvedAt: new Date() },
     });
     expect(await csat(tToken, 4)).toBe(200);
     expect((await loadStatusPageData(tToken))?.csat).toEqual({ score: 4, comment: null });
@@ -364,8 +364,8 @@ describe("two status links of one contact (D-09, D-10)", () => {
         "merged",
         "mergedAt",
         "messages",
+        "group",
         "number",
-        "status",
         "subject",
         "ticketId",
       ].sort(),
@@ -374,7 +374,7 @@ describe("two status links of one contact (D-09, D-10)", () => {
       ticketId: s.id,
       number: source.number,
       subject: source.subject,
-      status: "CLOSED",
+      group: "CLOSED",
       merged: true,
       mergedAt: source.mergedAt,
     });

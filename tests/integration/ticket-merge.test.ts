@@ -21,6 +21,7 @@ import {
   setAgentMessageObserverForTests,
 } from "@/lib/tickets/merge";
 import type { RelationLabel } from "@/lib/tickets/relation-pairs";
+import { loadStatusPageData } from "@/lib/tickets/status-page-data";
 import {
   seedContactTicket,
   seedMessage,
@@ -131,8 +132,15 @@ describe("mergeTickets (tracer)", () => {
     expect(attachmentRow).toEqual(attachmentBefore);
     expect(message.ticketId).toBe(t.id);
 
-    const source = await prisma.ticket.findUniqueOrThrow({ where: { id: s.id } });
-    expect(source.status).toBe("CLOSED");
+    const source = await prisma.ticket.findUniqueOrThrow({
+      where: { id: s.id },
+      include: { state: { select: { group: true } } },
+    });
+    const config = await prisma.ticketStateConfig.findUniqueOrThrow({
+      where: { organizationId: orgId },
+    });
+    expect(source.stateId).toBe(config.mergeCloseStateId);
+    expect(source.state.group).toBe("CLOSED");
     expect(source.mergedIntoTicketId).toBe(t.id);
     expect(source.mergedAt).toBeInstanceOf(Date);
     expect(typeof source.mergeMessageSeq).toBe("bigint");
@@ -200,6 +208,174 @@ describe("mergeTickets (tracer)", () => {
         { stateId: config.mergeCloseStateId, stateGroup: "CLOSED" },
       ],
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Phase 12.1 plan 07 Task 2: the merge's rules by source group (D-11 Merge row, ResolvedAtPolicy
+// "merge" of state-transition.ts), on any state of the organization.
+
+/** An admin-created state written directly (the admin service is plan 12.1-08's). */
+async function addState(
+  orgId: string,
+  name: string,
+  group: "OPEN" | "PENDING" | "RESOLVED" | "CLOSED",
+) {
+  return prisma.ticketState.create({
+    data: { organizationId: orgId, name, colorToken: "gray", group, sortOrder: 9 },
+    select: { id: true },
+  });
+}
+
+async function mergeCloseStateIdOf(orgId: string): Promise<string> {
+  const config = await prisma.ticketStateConfig.findUniqueOrThrow({
+    where: { organizationId: orgId },
+  });
+  return config.mergeCloseStateId;
+}
+
+async function stateChangedRows(orgId: string, ticketId: string) {
+  const rows = await prisma.ticketAuditEvent.findMany({
+    where: { organizationId: orgId, ticketId, action: "STATUS_CHANGED" },
+  });
+  return rows.map((r) => [r.before, r.after]);
+}
+
+describe("mergeTickets: state rules by source group (Phase 12.1, D-11)", () => {
+  it("an Open source: resolvedAt = mergedAt, flags cleared, mergeClose state, STATUS_CHANGED", async () => {
+    const { orgId, actor } = await seedActor();
+    const contactEmail = email();
+    const s = await seedContactTicket(orgId, { contactEmail, status: "OPEN" });
+    const t = await seedContactTicket(orgId, { contactEmail });
+    await prisma.ticket.update({
+      where: { id: s.id },
+      data: { isAtRisk: true, isBreached: true },
+    });
+    expect((await merge(actor, s.id, t.id, null)).ok).toBe(true);
+
+    const after = await prisma.ticket.findUniqueOrThrow({ where: { id: s.id } });
+    const mergeCloseId = await mergeCloseStateIdOf(orgId);
+    expect(after.stateId).toBe(mergeCloseId);
+    expect(after.mergedAt).toBeInstanceOf(Date);
+    expect(after.resolvedAt).toEqual(after.mergedAt);
+    expect(after.isAtRisk).toBe(false);
+    expect(after.isBreached).toBe(false);
+    expect(after.slaPausedAt).toBeNull();
+    expect(await stateChangedRows(orgId, s.id)).toEqual([
+      [
+        { stateId: await stateIdFor(orgId, "OPEN"), stateGroup: "OPEN" },
+        { stateId: mergeCloseId, stateGroup: "CLOSED" },
+      ],
+    ]);
+  });
+
+  it("a Resolved source keeps resolvedAt and its flags, moves to mergeClose, STATUS_CHANGED", async () => {
+    const { orgId, actor } = await seedActor();
+    const contactEmail = email();
+    const s = await seedContactTicket(orgId, { contactEmail, status: "RESOLVED" });
+    const t = await seedContactTicket(orgId, { contactEmail });
+    const resolvedAt = new Date("2026-02-03T04:05:06.789Z");
+    await prisma.ticket.update({
+      where: { id: s.id },
+      data: { resolvedAt, isAtRisk: true, isBreached: false },
+    });
+    expect((await merge(actor, s.id, t.id, null)).ok).toBe(true);
+
+    const after = await prisma.ticket.findUniqueOrThrow({ where: { id: s.id } });
+    const mergeCloseId = await mergeCloseStateIdOf(orgId);
+    expect(after.stateId).toBe(mergeCloseId);
+    expect(after.resolvedAt).toEqual(resolvedAt);
+    expect(after.isAtRisk).toBe(true);
+    expect(after.isBreached).toBe(false);
+    expect(await stateChangedRows(orgId, s.id)).toEqual([
+      [
+        { stateId: await stateIdFor(orgId, "RESOLVED"), stateGroup: "RESOLVED" },
+        { stateId: mergeCloseId, stateGroup: "CLOSED" },
+      ],
+    ]);
+  });
+
+  it("a source in an admin-created CLOSED-group state 'Closed - spam' changes only stateId", async () => {
+    const { orgId, actor } = await seedActor();
+    const contactEmail = email();
+    const s = await seedContactTicket(orgId, { contactEmail });
+    const t = await seedContactTicket(orgId, { contactEmail });
+    const spam = await addState(orgId, "Closed - spam", "CLOSED");
+    const resolvedAt = new Date("2026-03-04T05:06:07.008Z");
+    await prisma.ticket.update({
+      where: { id: s.id },
+      data: { stateId: spam.id, resolvedAt, isAtRisk: true, isBreached: true },
+    });
+    const before = await prisma.ticket.findUniqueOrThrow({ where: { id: s.id } });
+    expect((await merge(actor, s.id, t.id, null)).ok).toBe(true);
+
+    const after = await prisma.ticket.findUniqueOrThrow({ where: { id: s.id } });
+    const mergeCloseId = await mergeCloseStateIdOf(orgId);
+    // Within-group move: lifecycle columns untouched; only the state and the merge fields change.
+    const keep = (row: typeof before) => ({
+      resolvedAt: row.resolvedAt,
+      isAtRisk: row.isAtRisk,
+      isBreached: row.isBreached,
+      slaPausedAt: row.slaPausedAt,
+      slaPausedMs: row.slaPausedMs,
+      firstResponseDueAt: row.firstResponseDueAt,
+      resolutionDueAt: row.resolutionDueAt,
+    });
+    expect(keep(after)).toEqual(keep(before));
+    expect(after.stateId).toBe(mergeCloseId);
+    expect(after.mergedIntoTicketId).toBe(t.id);
+    expect(await stateChangedRows(orgId, s.id)).toEqual([
+      [
+        { stateId: spam.id, stateGroup: "CLOSED" },
+        { stateId: mergeCloseId, stateGroup: "CLOSED" },
+      ],
+    ]);
+  });
+
+  it("with mergeCloseStateId pointed at a second CLOSED-group state, the merge uses it", async () => {
+    const { orgId, actor } = await seedActor();
+    const contactEmail = email();
+    const s = await seedContactTicket(orgId, { contactEmail, status: "OPEN" });
+    const t = await seedContactTicket(orgId, { contactEmail });
+    const duplicate = await addState(orgId, "Closed - duplicate", "CLOSED");
+    await prisma.ticketStateConfig.update({
+      where: { organizationId: orgId },
+      data: { mergeCloseStateId: duplicate.id },
+    });
+    expect((await merge(actor, s.id, t.id, null)).ok).toBe(true);
+
+    const after = await prisma.ticket.findUniqueOrThrow({ where: { id: s.id } });
+    expect(after.stateId).toBe(duplicate.id);
+    expect(after.resolvedAt).toEqual(after.mergedAt);
+    expect(await stateChangedRows(orgId, s.id)).toEqual([
+      [
+        { stateId: await stateIdFor(orgId, "OPEN"), stateGroup: "OPEN" },
+        { stateId: duplicate.id, stateGroup: "CLOSED" },
+      ],
+    ]);
+  });
+
+  it("the loader of a merged source returns merged true and group CLOSED; the target's returns its own group", async () => {
+    const { orgId, actor } = await seedActor();
+    const contactEmail = email();
+    const s = await seedContactTicket(orgId, { contactEmail, status: "OPEN" });
+    const t = await seedContactTicket(orgId, { contactEmail, status: "PENDING" });
+    expect((await merge(actor, s.id, t.id, null)).ok).toBe(true);
+    const tokens = await prisma.ticket.findMany({
+      where: { id: { in: [s.id, t.id] } },
+      select: { id: true, statusToken: true },
+    });
+    const tokenOf = (id: string) => tokens.find((r) => r.id === id)?.statusToken ?? "";
+    expect(await loadStatusPageData(tokenOf(s.id))).toMatchObject({
+      ticketId: s.id,
+      merged: true,
+      group: "CLOSED",
+    });
+    expect(await loadStatusPageData(tokenOf(t.id))).toMatchObject({
+      ticketId: t.id,
+      merged: false,
+      group: "PENDING",
+    });
   });
 });
 
@@ -468,17 +644,19 @@ describe("mergeTickets: provenance, links, adjacency and rollback", () => {
     });
   }
 
-  it("a CLOSED source merges without STATUS_CHANGED", async () => {
+  it("a source already in the mergeClose state merges without STATUS_CHANGED", async () => {
     const { orgId, actor } = await seedActor();
     const contactEmail = email();
     const s = await seedContactTicket(orgId, { contactEmail, status: "CLOSED" });
     const t = await seedContactTicket(orgId, { contactEmail });
     expect((await merge(actor, s.id, t.id, null)).ok).toBe(true);
     expect(await auditActions(orgId, s.id)).toEqual(["MERGED_INTO"]);
-    expect((await prisma.ticket.findUniqueOrThrow({ where: { id: s.id } })).status).toBe("CLOSED");
+    expect((await prisma.ticket.findUniqueOrThrow({ where: { id: s.id } })).stateId).toBe(
+      await stateIdFor(orgId, "CLOSED"),
+    );
   });
 
-  it("a RESOLVED source becomes CLOSED with one STATUS_CHANGED row", async () => {
+  it("a Resolved source moves to the mergeClose state with one STATUS_CHANGED row", async () => {
     const { orgId, actor } = await seedActor();
     const contactEmail = email();
     const s = await seedContactTicket(orgId, { contactEmail, status: "RESOLVED" });
@@ -488,11 +666,14 @@ describe("mergeTickets: provenance, links, adjacency and rollback", () => {
       where: { organizationId: orgId, ticketId: s.id, action: "STATUS_CHANGED" },
     });
     expect(rows.map((r) => [r.before, r.after])).toEqual([
-      [{ status: "RESOLVED" }, { status: "CLOSED" }],
+      [
+        { stateId: await stateIdFor(orgId, "RESOLVED"), stateGroup: "RESOLVED" },
+        { stateId: await stateIdFor(orgId, "CLOSED"), stateGroup: "CLOSED" },
+      ],
     ]);
   });
 
-  it("a CLOSED target stays CLOSED", async () => {
+  it("a target in the Closed state is unchanged", async () => {
     const { orgId, actor } = await seedActor();
     const contactEmail = email();
     const s = await seedContactTicket(orgId, { contactEmail });

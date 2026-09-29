@@ -315,7 +315,8 @@ async function ticketRow(id: string) {
   return prisma.ticket.findUniqueOrThrow({
     where: { id },
     select: {
-      status: true,
+      stateId: true,
+      state: { select: { group: true } },
       mergedIntoTicketId: true,
       mergedAt: true,
       mergeMessageSeq: true,
@@ -572,8 +573,8 @@ async function expectMovedFrom(ids: readonly string[], s: Side, t: Side) {
 
 async function expectMergedInto(s: Side, t: Side) {
   const row = await ticketRow(s.id);
-  expect({ status: row.status, mergedIntoTicketId: row.mergedIntoTicketId }).toEqual({
-    status: "CLOSED",
+  expect({ group: row.state.group, mergedIntoTicketId: row.mergedIntoTicketId }).toEqual({
+    group: "CLOSED",
     mergedIntoTicketId: t.id,
   });
   expect(await prisma.message.count({ where: { ticketId: s.id } })).toBe(0);
@@ -710,7 +711,7 @@ describe("review C10: two merges into one target racing a reply, and the second 
 
       if (sentinel) {
         expect(rows.map((row) => [row.ticketId, row.mergedFromTicketId])).toEqual([[s1.id, null]]);
-        // S1 is exactly as before the race: its fixture status, unmerged, no marker.
+        // S1 is exactly as before the race: its fixture state, unmerged, no marker.
         expect(await ticketRow(s1.id)).toEqual(s1Before);
         expect(s1Before).toMatchObject({
           mergedIntoTicketId: null,

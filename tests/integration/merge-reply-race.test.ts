@@ -34,7 +34,7 @@ import {
   setReopenObserverForTests,
 } from "@/lib/tickets/reopen-on-reply";
 import { loadStatusPageData } from "@/lib/tickets/status-page-data";
-import { seedContactTicket, seedOrgWithMembers } from "../support/lifecycle-fixtures";
+import { seedContactTicket, seedOrgWithMembers, stateIdFor } from "../support/lifecycle-fixtures";
 import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
 
 const SELF_ADDRESS = "support@aida.test";
@@ -206,9 +206,9 @@ async function messagesWithBody(orgId: string, marker: string) {
 async function expectMergedWhole(s: Side, t: Side) {
   const source = await prisma.ticket.findUniqueOrThrow({
     where: { id: s.id },
-    select: { status: true, mergedIntoTicketId: true },
+    select: { state: { select: { group: true } }, mergedIntoTicketId: true },
   });
-  expect(source).toEqual({ status: "CLOSED", mergedIntoTicketId: t.id });
+  expect(source).toEqual({ state: { group: "CLOSED" }, mergedIntoTicketId: t.id });
   expect(await prisma.message.count({ where: { ticketId: s.id } })).toBe(0);
 }
 
@@ -233,6 +233,22 @@ async function filesUnder(orgId: string): Promise<number> {
   }
 }
 
+/**
+ * Moves a ticket into another organization with one committed statement. The composite foreign
+ * key (organizationId, stateId) of Phase 12.1 requires the state to move with it: the ticket
+ * takes the other organization's state with the same legacy key.
+ */
+async function moveToOrganization(ticketId: string, otherOrgId: string) {
+  await prisma.$executeRaw`
+    UPDATE "Ticket" SET "organizationId" = ${otherOrgId}, "stateId" = (
+      SELECT o.id FROM "TicketState" o
+      JOIN "TicketState" c ON c."legacyStatus" = o."legacyStatus"
+      WHERE o."organizationId" = ${otherOrgId} AND o."deletedAt" IS NULL AND c.id = "Ticket"."stateId"
+    )
+    WHERE id = ${ticketId}
+  `;
+}
+
 async function orgCounts(orgId: string) {
   return {
     messages: await prisma.message.count({ where: { organizationId: orgId } }),
@@ -253,7 +269,7 @@ describe("replies to a merged source land on the target", () => {
     ).toMatchObject({ ok: true });
     await prisma.ticket.update({
       where: { id: t.id },
-      data: { status: "RESOLVED", resolvedAt: new Date() },
+      data: { stateId: await stateIdFor(orgId, "RESOLVED"), resolvedAt: new Date() },
     });
 
     const marker = `after-merge-${randomUUID()}`;
@@ -270,7 +286,7 @@ describe("replies to a merged source land on the target", () => {
     });
     const contact = await prisma.ticket.findUniqueOrThrow({
       where: { id: t.id },
-      select: { contactId: true, status: true },
+      select: { contactId: true, stateId: true },
     });
     expect(rows).toEqual([
       {
@@ -280,7 +296,7 @@ describe("replies to a merged source land on the target", () => {
         authorContactId: contact.contactId,
       },
     ]);
-    expect(contact.status).toBe("OPEN");
+    expect(contact.stateId).toBe(await stateIdFor(orgId, "OPEN"));
     await expectMergedWhole(s, t);
   });
 
@@ -325,7 +341,7 @@ describe("replies to a merged source land on the target", () => {
     const snoozedUntil = new Date(Date.now() + 86_400_000);
     await prisma.ticket.update({
       where: { id: t.id },
-      data: { status: "RESOLVED", resolvedAt: new Date(), snoozedUntil },
+      data: { stateId: await stateIdFor(orgId, "RESOLVED"), resolvedAt: new Date(), snoozedUntil },
     });
     const automatic = await emailReply(orgId, `Re: question [#${s.number}]`, {
       "Auto-Submitted": "auto-replied",
@@ -341,9 +357,9 @@ describe("replies to a merged source land on the target", () => {
     }
     const after = await prisma.ticket.findUniqueOrThrow({
       where: { id: t.id },
-      select: { status: true, snoozedUntil: true },
+      select: { stateId: true, snoozedUntil: true },
     });
-    expect(after).toEqual({ status: "RESOLVED", snoozedUntil });
+    expect(after).toEqual({ stateId: await stateIdFor(orgId, "RESOLVED"), snoozedUntil });
     await expectMergedWhole(s, t);
   });
 });
@@ -490,7 +506,7 @@ describe("review C7: a follow-up that commits no message leaves no stored file",
       onResolveStart: async (_tx, ref) => {
         if (ref.ticketId !== s.id) return;
         // The test's own client, committed before the callback returns.
-        await prisma.$executeRaw`UPDATE "Ticket" SET "organizationId" = ${other.orgId} WHERE id = ${s.id}`;
+        await moveToOrganization(s.id, other.orgId);
       },
     });
     const marker = `unavailable-${randomUUID()}`;
@@ -511,7 +527,7 @@ describe("review IN-04: inbound email on a matched ticket that can no longer tak
       onResolveStart: async (_tx, ref) => {
         if (ref.ticketId !== s.id) return;
         // The test's own client, committed before the callback returns.
-        await prisma.$executeRaw`UPDATE "Ticket" SET "organizationId" = ${other.orgId} WHERE id = ${s.id}`;
+        await moveToOrganization(s.id, other.orgId);
       },
     });
     const mail = await emailReply(orgId, `Re: question [#${s.number}]`);

@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
+import { mergeTickets } from "@/lib/tickets/merge";
 import { runTicketMutation, type TicketMutationActor } from "@/lib/tickets/mutations";
 import { seedOrgWithMembers, seedTicket, stateIdFor } from "../support/inbox-fixtures";
 import { seedContactTicket } from "../support/lifecycle-fixtures";
@@ -1018,10 +1019,10 @@ describe("runTicketMutation: addTagByName same-name race (Codex review R2-2)", (
 // ---------------------------------------------------------------------------------------------
 
 describe("runTicketMutation: a merged source keeps its state (Codex diff round 1, D1)", () => {
-  // Not added to actorOrgIds (kept as before the migration to state ids). The merged source is
-  // seeded by a direct database update, not by mergeTickets: the merge body still writes the
-  // dropped status column until plan 12.1-07 migrates it. The forced-order case (a state change
-  // observed blocked by a held merge) needs a live merge and is restored by plan 12.1-07 Task 2.
+  // Not added to actorOrgIds: the merge writes its own audit rows (MERGED_INTO and others), whose
+  // keys the privacy case below does not list. The first three cases seed the merged source by a
+  // direct database update (12.1-04); the forced-order case at the end runs the real merge
+  // (migrated to states by 12.1-07) and was restored there from 9fe95a4.
   async function seedMergedPair() {
     const { orgId, users } = await seedOrgWithMembers(prisma, ["admin"]);
     const actor: TicketMutationActor = { userId: users[0].id, orgId };
@@ -1113,6 +1114,69 @@ describe("runTicketMutation: a merged source keeps its state (Codex diff round 1
       priority: "HIGH",
     });
     expect((await links(source.id)).map((l) => l.tagId)).toEqual([tag.id]);
+  });
+
+  it("forced order: a state change observed blocked by a held merge is refused after the merge commits", async () => {
+    const { orgId, actor, source, target } = await seedMergedPair();
+    const mergePid = deferred<number>();
+    const mergeHeld = deferred<void>();
+    const releaseMerge = deferred<void>();
+    const mergeRun = mergeTickets(
+      prisma,
+      actor,
+      { sourceTicketId: source.id, targetTicketId: target.id, reviewedLinkLabel: null },
+      {
+        async afterLock(tx) {
+          mergePid.resolve(await backendPid(tx));
+          mergeHeld.resolve();
+          await releaseMerge.promise;
+        },
+      },
+    );
+    mergeRun.catch(() => {});
+    await mergeHeld.promise;
+
+    const statusPid = deferred<number>();
+    const statusRun = runTicketMutation(
+      {
+        actor,
+        ticketIds: [source.id],
+        op: { kind: "state", stateId: await stateIdFor(orgId, "OPEN") },
+        mode: "single",
+      },
+      {
+        async onTransactionStart(tx) {
+          statusPid.resolve(await backendPid(tx));
+        },
+      },
+    );
+    statusRun.catch(() => {});
+    // The state change waits on the source's row lock, which the merge holds.
+    await waitForBlockedBy(prisma, await mergePid.promise, [await statusPid.promise]);
+    const statusBefore = await sourceState(source.id);
+    expect(statusBefore.mergedIntoTicketId).toBeNull();
+
+    releaseMerge.resolve();
+    expect(await mergeRun).toEqual({
+      ok: true,
+      sourceTicketId: source.id,
+      targetTicketId: target.id,
+    });
+    expect(await statusRun).toEqual({ ok: false, error: "MERGED_SOURCE" });
+
+    const config = await prisma.ticketStateConfig.findUniqueOrThrow({
+      where: { organizationId: orgId },
+    });
+    const after = await sourceState(source.id);
+    expect(after.stateId).toBe(config.mergeCloseStateId);
+    expect(after.mergedIntoTicketId).toBe(target.id);
+    const statusRows = await prisma.ticketAuditEvent.findMany({
+      where: { organizationId: orgId, ticketId: source.id, action: "STATUS_CHANGED" },
+    });
+    // Only the merge's own close (D-08), never an Open state written after it.
+    expect(statusRows.map((row) => row.after)).toEqual([
+      { stateId: config.mergeCloseStateId, stateGroup: "CLOSED" },
+    ]);
   });
 });
 
