@@ -1,0 +1,399 @@
+// The admin service behind AIDA-97 (Phase 12.1, D-01, D-03, D-05, D-06, D-12, D-14, D-15
+// amended, K40, K41, K42): create, rename, recolour, reorder, set the default and delete a ticket
+// state, plus the settings list.
+//
+// Admin gate (D-01): every operation runs in one transaction whose first statement (after the
+// onTransactionStart test seam) is findActiveMembership (MEMBERSHIP_ENDED), followed by
+// isAdminRole on the exact role (NOT_ALLOWED). The settings list checks membership only: members
+// read it, only admins change it.
+//
+// Lock protocol (D-15 amended, frozen in ticket-states.ts):
+//   1. the organization's TicketStateConfig row FOR UPDATE (every admin operation, so admin
+//      operations of one organization run one at a time, and a role writer that holds the
+//      config share lock, such as a customer reply, finishes first);
+//   2. the state rows the operation changes FOR UPDATE in ascending id (a state that is only
+//      referenced, such as a replacement or a new default, is locked FOR SHARE through
+//      shareLockActiveState);
+//   3. ticket rows through lockTicketsInIdOrder (ascending id, Ticket table alone).
+//
+// Soft delete (K42): deleting a state moves every ticket of it to a same-group replacement
+// (K41: applyStateTransition with fromGroup equal to toGroup, so only stateId changes), with one
+// STATUS_CHANGED audit row per ticket sharing one batchId, re-points every role column that held
+// it, and then sets deletedAt. The row stays, so foreign keys and history keep resolving. A
+// soft-deleted state, an unknown id and another organization's id are all STATE_NOT_FOUND.
+//
+// Error contract: a refusal is thrown as StateAdminError inside the transaction (rolling it
+// back) and RETURNED as { ok: false, error }. Any other error is rethrown unchanged.
+//
+// Privacy (K42): audit rows carry the flat { stateId, stateGroup } snapshot only, never a name.
+//
+// Relative imports only and no Next.js import: revalidation belongs to the server action.
+import { randomUUID } from "node:crypto";
+import type { Prisma, PrismaClient } from "../../generated/prisma/client";
+import { findActiveMembership, isAdminRole } from "../membership";
+import { lockTicketsInIdOrder } from "./merge";
+import { isStateColorKey } from "./state-colors";
+import { applyStateTransition } from "./state-transition";
+import { recordTicketAudit } from "./ticket-audit";
+import { type StateGroup, shareLockActiveState, stateAuditSnapshot } from "./ticket-states";
+
+const TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: 30_000 } as const;
+
+/** The longest state id accepted (ids are cuid or uuid strings; this only refuses absurd input). */
+const MAX_STATE_ID_LENGTH = 128;
+/** Name length in code points, as the database's char_length counts it (D-03). */
+const MAX_NAME_LENGTH = 40;
+
+const STATE_GROUPS: readonly StateGroup[] = ["OPEN", "PENDING", "RESOLVED", "CLOSED"];
+
+export interface StateAdminActor {
+  userId: string;
+  orgId: string;
+}
+
+/** Frozen for the admin UI (plan 12.1-12) and the UI-SPEC error rows. */
+export type StateAdminErrorCode =
+  | "INVALID"
+  | "INVALID_NAME"
+  | "DUPLICATE_NAME"
+  | "INVALID_COLOR"
+  | "STATE_NOT_FOUND"
+  | "NOT_ALLOWED"
+  | "MEMBERSHIP_ENDED"
+  | "NOT_OPEN_GROUP"
+  | "LAST_IN_GROUP"
+  | "REPLACEMENT_REQUIRED"
+  | "REPLACEMENT_INVALID";
+
+/** The five role keys of TicketStateConfig (D-05), frozen. */
+export type StateRoleKey = "new" | "reopen" | "resolve" | "autoClose" | "mergeClose";
+
+/** A refusal by the service. Rolled back and returned, never rethrown. */
+export class StateAdminError extends Error {
+  readonly code: StateAdminErrorCode;
+
+  constructor(code: StateAdminErrorCode) {
+    super(`Ticket state admin refused: ${code}`);
+    this.name = "StateAdminError";
+    this.code = code;
+  }
+}
+
+export type StateAdminFailure = { ok: false; error: StateAdminErrorCode };
+
+/** Test seams. Production callers never pass them. */
+export interface StateAdminHooks {
+  /** Awaited as the very first step inside the transaction. */
+  onTransactionStart?(tx: Prisma.TransactionClient): Promise<void> | void;
+  /** Awaited right after the configuration row lock. */
+  afterConfigLock?(tx: Prisma.TransactionClient): Promise<void> | void;
+  /** Awaited right after the changed state row(s) are locked. */
+  afterStateLock?(tx: Prisma.TransactionClient): Promise<void> | void;
+  /** Deletion only: awaited right after the deleted state's tickets are locked. */
+  afterTicketsLocked?(tx: Prisma.TransactionClient, ticketIds: readonly string[]): Promise<void> | void;
+  /** Awaited as the last step before the transaction returns (and commits). */
+  beforeCommit?(tx: Prisma.TransactionClient): Promise<void> | void;
+  /** The effective time, read after the locks. Defaults to new Date(). */
+  clock?(): Date;
+}
+
+/** Needs $transaction (and, for the list, member and $queryRaw): the global prisma client. */
+type AdminClient = Pick<PrismaClient, "$transaction">;
+type ListClient = Pick<PrismaClient, "member" | "$queryRaw">;
+
+interface ConfigRow {
+  newStateId: string;
+  reopenStateId: string;
+  resolveStateId: string;
+  autoCloseStateId: string;
+  mergeCloseStateId: string;
+}
+
+const ROLE_COLUMNS: readonly { key: StateRoleKey; column: keyof ConfigRow }[] = [
+  { key: "new", column: "newStateId" },
+  { key: "reopen", column: "reopenStateId" },
+  { key: "resolve", column: "resolveStateId" },
+  { key: "autoClose", column: "autoCloseStateId" },
+  { key: "mergeClose", column: "mergeCloseStateId" },
+];
+
+function rolesOf(config: ConfigRow, stateId: string): StateRoleKey[] {
+  return ROLE_COLUMNS.filter((r) => config[r.column] === stateId).map((r) => r.key);
+}
+
+interface LockedState {
+  id: string;
+  name: string;
+  colorToken: string;
+  group: StateGroup;
+  sortOrder: number;
+}
+
+// --- input parsing -------------------------------------------------------------------------
+
+function isRecord(raw: unknown): raw is Record<string, unknown> {
+  return typeof raw === "object" && raw !== null && !Array.isArray(raw);
+}
+
+function parseStateId(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0 || value.length > MAX_STATE_ID_LENGTH) {
+    throw new StateAdminError("INVALID");
+  }
+  return value;
+}
+
+/** Trims and checks 1 to 40 code points (the database's char_length), else INVALID_NAME. */
+function parseName(value: unknown): string {
+  if (typeof value !== "string") throw new StateAdminError("INVALID_NAME");
+  const name = value.trim();
+  const length = [...name].length;
+  if (length < 1 || length > MAX_NAME_LENGTH) throw new StateAdminError("INVALID_NAME");
+  return name;
+}
+
+function parseColor(value: unknown): string {
+  if (!isStateColorKey(value)) throw new StateAdminError("INVALID_COLOR");
+  return value;
+}
+
+/** Postgres 23505 as surfaced by Prisma (P2002), with or without the pg driver adapter. */
+function isUniqueViolation(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { code?: unknown; meta?: unknown };
+  if (e.code === "P2002") return true;
+  if (e.code === "23505") return true;
+  const meta = JSON.stringify(e.meta ?? {});
+  return /"originalCode":"23505"|UniqueConstraintViolation/.test(meta);
+}
+
+// --- the shared transaction ------------------------------------------------------------------
+
+interface AdminContext {
+  tx: Prisma.TransactionClient;
+  orgId: string;
+  userId: string;
+  config: ConfigRow;
+  hooks: StateAdminHooks;
+}
+
+/**
+ * Opens the transaction, runs the admin gate (membership first, then the exact admin role),
+ * locks the configuration row FOR UPDATE and runs body. Refusals are returned.
+ */
+async function runAdminOperation<T>(
+  client: AdminClient,
+  actor: StateAdminActor,
+  hooks: StateAdminHooks,
+  body: (ctx: AdminContext) => Promise<T>,
+): Promise<T | StateAdminFailure> {
+  try {
+    return await client.$transaction(async (tx) => {
+      if (hooks.onTransactionStart) await hooks.onTransactionStart(tx);
+
+      // D-01: the actor must still be a member, read inside this transaction, and an exact
+      // owner or admin.
+      const membership = await findActiveMembership(tx, actor?.userId, actor?.orgId);
+      if (!membership) throw new StateAdminError("MEMBERSHIP_ENDED");
+      if (!isAdminRole(membership.role)) throw new StateAdminError("NOT_ALLOWED");
+      const orgId = actor.orgId;
+
+      // D-15 step 1: the configuration row FOR UPDATE.
+      const configRows = await tx.$queryRaw<ConfigRow[]>`
+        SELECT "newStateId", "reopenStateId", "resolveStateId", "autoCloseStateId",
+          "mergeCloseStateId"
+        FROM "TicketStateConfig"
+        WHERE "organizationId" = ${orgId}
+        FOR UPDATE
+      `;
+      const config = configRows[0];
+      if (!config) throw new Error(`TicketStateConfig missing for organization ${orgId}`);
+      if (hooks.afterConfigLock) await hooks.afterConfigLock(tx);
+
+      const result = await body({ tx, orgId, userId: actor.userId, config, hooks });
+      if (hooks.beforeCommit) await hooks.beforeCommit(tx);
+      return result;
+    }, TRANSACTION_OPTIONS);
+  } catch (err) {
+    if (err instanceof StateAdminError) return { ok: false, error: err.code };
+    throw err;
+  }
+}
+
+/** Locks one active state of the organization FOR UPDATE, else STATE_NOT_FOUND. */
+async function lockStateForUpdate(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+  stateId: string,
+): Promise<LockedState> {
+  const rows = await tx.$queryRaw<LockedState[]>`
+    SELECT id, name, "colorToken", "group"::text AS "group", "sortOrder"
+    FROM "TicketState"
+    WHERE id = ${stateId} AND "organizationId" = ${orgId} AND "deletedAt" IS NULL
+    FOR UPDATE
+  `;
+  const row = rows[0];
+  if (!row) throw new StateAdminError("STATE_NOT_FOUND");
+  return { ...row, sortOrder: Number(row.sortOrder) };
+}
+
+async function countActiveInGroup(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+  group: StateGroup,
+): Promise<number> {
+  const rows = await tx.$queryRaw<{ n: number }[]>`
+    SELECT count(*)::int AS n FROM "TicketState"
+    WHERE "organizationId" = ${orgId} AND "group" = ${group}::"TicketStateGroup"
+      AND "deletedAt" IS NULL
+  `;
+  return Number(rows[0]?.n ?? 0);
+}
+
+// --- delete ------------------------------------------------------------------------------------
+
+export type DeleteTicketStateResult =
+  | {
+      ok: true;
+      movedCount: number;
+      rolesMoved: boolean;
+      name: string;
+      replacementName: string | null;
+    }
+  | StateAdminFailure;
+
+/**
+ * Soft-deletes a state (K42). Allowed when no ticket and no role uses it, or with a replacement
+ * that is an active state of the same group in the same organization (D-12, K41), which then
+ * receives every ticket and every role of the deleted state.
+ */
+export async function deleteTicketState(
+  client: AdminClient,
+  actor: StateAdminActor,
+  raw: unknown,
+  hooks: StateAdminHooks = {},
+): Promise<DeleteTicketStateResult> {
+  return runAdminOperation(client, actor, hooks, async ({ tx, orgId, userId, config }) => {
+    if (!isRecord(raw)) throw new StateAdminError("INVALID");
+    const stateId = parseStateId(raw.stateId);
+    const replacementStateId =
+      raw.replacementStateId === null || raw.replacementStateId === undefined
+        ? null
+        : parseStateId(raw.replacementStateId);
+
+    // D-15 step 2: the deleted state FOR UPDATE. A writer setting a ticket to it waits on our
+    // lock (its FOR SHARE) and, after our commit, finds it deleted.
+    const state = await lockStateForUpdate(tx, orgId, stateId);
+    if (hooks.afterStateLock) await hooks.afterStateLock(tx);
+
+    // Each of OPEN, RESOLVED and CLOSED keeps at least one state; PENDING may become empty.
+    if (state.group !== "PENDING" && (await countActiveInGroup(tx, orgId, state.group)) <= 1) {
+      throw new StateAdminError("LAST_IN_GROUP");
+    }
+
+    const roles = rolesOf(config, state.id);
+    const countRows = await tx.$queryRaw<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM "Ticket"
+      WHERE "organizationId" = ${orgId} AND "stateId" = ${state.id}
+    `;
+    const ticketCount = Number(countRows[0]?.n ?? 0);
+    if ((ticketCount > 0 || roles.length > 0) && replacementStateId === null) {
+      throw new StateAdminError("REPLACEMENT_REQUIRED");
+    }
+
+    let replacement: { id: string; name: string } | null = null;
+    if (replacementStateId !== null) {
+      if (replacementStateId === state.id) throw new StateAdminError("REPLACEMENT_INVALID");
+      const locked = await shareLockActiveState(tx, orgId, replacementStateId);
+      if (!locked || locked.group !== state.group) {
+        throw new StateAdminError("REPLACEMENT_INVALID");
+      }
+      const named = await tx.$queryRaw<{ name: string }[]>`
+        SELECT name FROM "TicketState"
+        WHERE id = ${locked.id} AND "organizationId" = ${orgId}
+      `;
+      replacement = { id: locked.id, name: named[0]?.name ?? "" };
+    }
+
+    // D-15 step 3: the deleted state's tickets, locked in ascending id. A ticket another writer
+    // held is read here with its committed state: one moved out of the state is skipped.
+    const idRows = await tx.$queryRaw<{ id: string }[]>`
+      SELECT id FROM "Ticket"
+      WHERE "organizationId" = ${orgId} AND "stateId" = ${state.id}
+      ORDER BY id
+    `;
+    const lockedTickets = await lockTicketsInIdOrder(
+      tx,
+      orgId,
+      idRows.map((r) => r.id),
+    );
+    if (hooks.afterTicketsLocked) {
+      await hooks.afterTicketsLocked(
+        tx,
+        lockedTickets.map((t) => t.id),
+      );
+    }
+
+    let movedCount = 0;
+    if (replacement !== null) {
+      const now = hooks.clock ? hooks.clock() : new Date();
+      const batchId = randomUUID();
+      for (const ticket of lockedTickets) {
+        if (ticket.stateId !== state.id) continue;
+        // K41: same group, so only stateId changes (no resolvedAt, flag, deadline or pause
+        // effect).
+        const count = await applyStateTransition(tx, orgId, {
+          row: ticket,
+          fromGroup: state.group,
+          toStateId: replacement.id,
+          toGroup: state.group,
+          now,
+          policy: "by-group",
+        });
+        if (count !== 1) continue;
+        await recordTicketAudit(tx, orgId, {
+          ticketId: ticket.id,
+          action: "STATUS_CHANGED",
+          actorType: "USER",
+          actorUserId: userId,
+          before: stateAuditSnapshot(state.id, state.group),
+          after: stateAuditSnapshot(replacement.id, state.group),
+          batchId,
+        });
+        movedCount += 1;
+      }
+
+      // Every role column that held the deleted state now holds the replacement (D-05 group
+      // invariant: same group).
+      if (roles.length > 0) {
+        await tx.$executeRaw`
+          UPDATE "TicketStateConfig" SET
+            "newStateId" = CASE WHEN "newStateId" = ${state.id} THEN ${replacement.id} ELSE "newStateId" END,
+            "reopenStateId" = CASE WHEN "reopenStateId" = ${state.id} THEN ${replacement.id} ELSE "reopenStateId" END,
+            "resolveStateId" = CASE WHEN "resolveStateId" = ${state.id} THEN ${replacement.id} ELSE "resolveStateId" END,
+            "autoCloseStateId" = CASE WHEN "autoCloseStateId" = ${state.id} THEN ${replacement.id} ELSE "autoCloseStateId" END,
+            "mergeCloseStateId" = CASE WHEN "mergeCloseStateId" = ${state.id} THEN ${replacement.id} ELSE "mergeCloseStateId" END,
+            "updatedAt" = ${now}
+          WHERE "organizationId" = ${orgId}
+        `;
+      }
+    } else if (lockedTickets.some((t) => t.stateId === state.id)) {
+      // Unreachable while the state lock is held (no writer can move a ticket into it), kept as
+      // a guard so a ticket is never left on a deleted state.
+      throw new StateAdminError("REPLACEMENT_REQUIRED");
+    }
+
+    const deletedAt = hooks.clock ? hooks.clock() : new Date();
+    await tx.$executeRaw`
+      UPDATE "TicketState" SET "deletedAt" = ${deletedAt}, "updatedAt" = ${deletedAt}
+      WHERE id = ${state.id} AND "organizationId" = ${orgId}
+    `;
+
+    return {
+      ok: true as const,
+      movedCount,
+      rolesMoved: roles.length > 0,
+      name: state.name,
+      replacementName: replacement?.name ?? null,
+    };
+  });
+}
