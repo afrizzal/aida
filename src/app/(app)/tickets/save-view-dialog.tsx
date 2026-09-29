@@ -2,7 +2,7 @@
 
 import { Loader2, TriangleAlert, X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { type FormEvent, type ReactNode, useId, useState } from "react";
+import { type FormEvent, type ReactNode, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,11 +24,12 @@ import {
 } from "@/components/ui/select";
 import type { SavedViewVisibility } from "@/generated/prisma/client";
 import type { SavedViewErrorCode } from "@/lib/saved-views/service";
+import { type InboxFiltersInput, parseUrlFilters } from "@/lib/tickets/list-filters";
 import {
-  type InboxFiltersInput,
-  parseUrlFilters,
-  TICKET_STATUSES,
-} from "@/lib/tickets/list-filters";
+  REMOVE_DELETED_STATUSES_ARIA_LABEL,
+  SAVED_VIEW_ERROR_MISSING_REFERENCE,
+  SUMMARY_NO_STATUS,
+} from "@/lib/tickets/state-copy";
 import { createSavedViewAction, updateSavedViewAction } from "./saved-view-actions";
 
 // Save view / Edit view dialog (Phase 11, AIDA-47, D-03 to D-05, UI-SPEC Surface 2c). Copy is
@@ -37,14 +38,6 @@ import { createSavedViewAction, updateSavedViewAction } from "./saved-view-actio
 // each refusal to exactly one error row. Values are rendered as React text (escaped).
 
 const MAX_NAME_LENGTH = 80;
-
-const STATUS_LABELS: Record<(typeof TICKET_STATUSES)[number], string> = {
-  NEW: "New",
-  OPEN: "Open",
-  PENDING: "Pending",
-  RESOLVED: "Resolved",
-  CLOSED: "Closed",
-};
 
 const COPY = {
   createTitle: "Save view",
@@ -67,8 +60,7 @@ const ERROR_COPY = {
     `You already have a view named "${name}". Choose another name.`,
   duplicateShared: (name: string) =>
     `A shared view named "${name}" already exists in this workspace. Choose another name.`,
-  missingReference:
-    "A tag or custom field in these filters no longer exists. Remove it from the filters, then save again.",
+  missingReference: SAVED_VIEW_ERROR_MISSING_REFERENCE,
   notAllowed: "You can't change this view. Ask the person who created it, or a workspace admin.",
   membershipEnded: "Your access to this workspace has ended. Sign out, then sign in again.",
   unknown: "The view could not be saved. Wait a moment and try again.",
@@ -100,6 +92,12 @@ export interface SaveViewTag {
   name: string;
 }
 
+/** One active state of the organization; the list arrives in group, then sort order (D-11). */
+export interface SaveViewState {
+  id: string;
+  name: string;
+}
+
 export interface SaveViewCustomField {
   id: string;
   label: string;
@@ -122,7 +120,7 @@ type ModeProps =
       /** True when opened from "Save changes": the on-screen filters replace the stored ones. */
       replacing: boolean;
       /** Stored references that no longer exist (D-05), from the server. */
-      missing?: { tag: boolean; customField: boolean };
+      missing?: { state: boolean; tag: boolean; customField: boolean };
     };
 
 export type SaveViewDialogProps = ModeProps & {
@@ -130,6 +128,8 @@ export type SaveViewDialogProps = ModeProps & {
   onOpenChange: (open: boolean) => void;
   tags: SaveViewTag[];
   customFieldDefinitions: SaveViewCustomField[];
+  /** The organization's active states in group, then sort order (UI-SPEC 4d). */
+  states: SaveViewState[];
 };
 
 export function SaveViewDialog(props: SaveViewDialogProps) {
@@ -148,7 +148,7 @@ export function SaveViewDialog(props: SaveViewDialogProps) {
 function SaveViewForm(
   props: SaveViewDialogProps & { pending: boolean; setPending: (pending: boolean) => void },
 ) {
-  const { onOpenChange, tags, customFieldDefinitions, pending, setPending } = props;
+  const { onOpenChange, tags, customFieldDefinitions, states, pending, setPending } = props;
   const router = useRouter();
   const searchParams = useSearchParams();
   const ids = useId();
@@ -162,6 +162,8 @@ function SaveViewForm(
     isEdit ? props.filters : parseUrlFilters(searchParams).filters,
   );
   const [error, setError] = useState<string | null>(null);
+  // UI-SPEC 4d: a remove button disappears with its value, so focus moves to the primary button.
+  const submitRef = useRef<HTMLButtonElement>(null);
 
   const canChangeVisibility = !isEdit || props.view.isOwner;
   const tag = draft.tagId ? tags.find((t) => t.id === draft.tagId) : undefined;
@@ -173,7 +175,12 @@ function SaveViewForm(
   const fieldMissing =
     draft.cf !== undefined &&
     (field === undefined || (isEdit && props.missing?.customField === true));
-  const statuses = TICKET_STATUSES.filter((s) => draft.statuses?.includes(s));
+  // D-09: names of the filter's existing states in group, then sort order (the order of
+  // `states`); ids that are not an active state stay in the filter as missing ids.
+  const draftStateIds = draft.stateIds ?? [];
+  const stateNames = states.filter((s) => draftStateIds.includes(s.id)).map((s) => s.name);
+  const activeStateIds = new Set(states.map((s) => s.id));
+  const hasMissingStates = draftStateIds.some((id) => !activeStateIds.has(id));
   const view = draft.view ?? "all";
   const showSharedSearchWarning = visibility === "SHARED" && Boolean(draft.q);
   const showMakePrivateNote =
@@ -187,12 +194,27 @@ function SaveViewForm(
     return "All tickets";
   }
 
+  function focusPrimary() {
+    submitRef.current?.focus();
+  }
+
   function removeTag() {
     setDraft(({ tagId: _tagId, ...rest }) => rest);
+    focusPrimary();
   }
 
   function removeCustomField() {
     setDraft(({ cf: _cf, ...rest }) => rest);
+    focusPrimary();
+  }
+
+  /** Removes only the missing state ids; the existing ones stay (UI-SPEC 4d). */
+  function removeMissingStates() {
+    setDraft((current) => ({
+      ...current,
+      stateIds: (current.stateIds ?? []).filter((id) => activeStateIds.has(id)),
+    }));
+    focusPrimary();
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -207,7 +229,9 @@ function SaveViewForm(
     setPending(true);
     const filters: InboxFiltersInput = {
       view,
-      statuses,
+      // Missing ids are sent as they are, so the server refuses them (MISSING_REFERENCE) instead
+      // of the view being widened (D-09).
+      stateIds: draftStateIds,
       ...(draft.tagId ? { tagId: draft.tagId } : {}),
       ...(draft.cf ? { cf: draft.cf } : {}),
       ...(draft.q ? { q: draft.q } : {}),
@@ -313,9 +337,15 @@ function SaveViewForm(
           <dl className="space-y-1 rounded-lg border border-border/70 p-4 text-[13px]">
             <SummaryRow label="Tickets">{ticketsValue()}</SummaryRow>
             <SummaryRow label="Status">
-              {statuses.length > 0
-                ? statuses.map((s) => STATUS_LABELS[s]).join(", ")
-                : "Any status"}
+              {stateNames.length > 0 && <span className="block">{stateNames.join(", ")}</span>}
+              {hasMissingStates && (
+                <BrokenValue
+                  removeLabel={REMOVE_DELETED_STATUSES_ARIA_LABEL}
+                  onRemove={removeMissingStates}
+                  disabled={pending}
+                />
+              )}
+              {stateNames.length === 0 && !hasMissingStates && SUMMARY_NO_STATUS}
             </SummaryRow>
             {draft.tagId !== undefined && (
               <SummaryRow label="Tag">
@@ -384,7 +414,7 @@ function SaveViewForm(
         >
           Close without saving
         </Button>
-        <Button type="submit" disabled={pending}>
+        <Button ref={submitRef} type="submit" disabled={pending}>
           {pending && <Loader2 className="mr-2 size-4 animate-spin" />}
           {pending ? "Saving…" : isEdit ? "Save changes" : "Save view"}
         </Button>

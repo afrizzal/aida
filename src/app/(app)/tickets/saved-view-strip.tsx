@@ -14,8 +14,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { SavedViewVisibility } from "@/generated/prisma/client";
 import { type InboxFiltersInput, parseUrlFilters } from "@/lib/tickets/list-filters";
+import { stripMissingSentence } from "@/lib/tickets/state-copy";
 import { DeleteViewDialog } from "./delete-view-dialog";
-import { type SaveViewCustomField, SaveViewDialog, type SaveViewTag } from "./save-view-dialog";
+import {
+  type SaveViewCustomField,
+  SaveViewDialog,
+  type SaveViewState,
+  type SaveViewTag,
+} from "./save-view-dialog";
 
 // The saved-view strip above the inbox list (Phase 11, AIDA-47, D-04, D-05, UI-SPEC Surface 2b).
 // The server (getSavedViewForPanel) decides the state and whether the viewer may edit; this
@@ -35,17 +41,11 @@ export interface SavedViewStripView {
 interface SavedViewStripProps {
   view: SavedViewStripView;
   state: "applied" | "changed";
-  missing: { tag: boolean; customField: boolean };
+  missing: { state: boolean; tag: boolean; customField: boolean };
   tags: SaveViewTag[];
   customFieldDefinitions: SaveViewCustomField[];
-}
-
-function brokenSentence(missing: { tag: boolean; customField: boolean }): string {
-  if (missing.tag && missing.customField) {
-    return "This view filters on a tag and a custom field that no longer exist.";
-  }
-  if (missing.tag) return "This view filters on a tag that no longer exists.";
-  return "This view filters on a custom field that no longer exists.";
+  /** The organization's active states in group, then sort order (UI-SPEC 4d). */
+  states: SaveViewState[];
 }
 
 type EditSource = "stored" | "screen";
@@ -56,11 +56,12 @@ export function SavedViewStrip({
   missing,
   tags,
   customFieldDefinitions,
+  states,
 }: SavedViewStripProps) {
   const searchParams = useSearchParams();
   const [editSource, setEditSource] = useState<EditSource | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const isBroken = missing.tag || missing.customField;
+  const isBroken = missing.state || missing.tag || missing.customField;
 
   const editFilters =
     editSource === "screen" ? parseUrlFilters(searchParams).filters : view.filters;
@@ -129,7 +130,7 @@ export function SavedViewStrip({
         >
           <TriangleAlert aria-hidden className="size-4 shrink-0" />
           <div className="min-w-0 space-y-2">
-            <p>{`${brokenSentence(missing)} Edit the view to remove it.`}</p>
+            <p>{`${stripMissingSentence(missing)} Edit the view to remove it.`}</p>
             {view.canEdit ? (
               <Button
                 variant="outline"
@@ -165,6 +166,7 @@ export function SavedViewStrip({
             missing={editSource === "stored" ? missing : undefined}
             tags={tags}
             customFieldDefinitions={customFieldDefinitions}
+            states={states}
           />
           <DeleteViewDialog
             open={deleteOpen}

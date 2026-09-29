@@ -422,6 +422,7 @@ export function FilterChipRow({ tags, customFieldDefinitions, states }: FilterCh
         onOpenChange={setSaveViewOpen}
         tags={tags}
         customFieldDefinitions={customFieldDefinitions}
+        states={states}
       />
     </div>
   );

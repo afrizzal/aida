@@ -102,6 +102,7 @@ export async function TicketListPanel({
           missing={savedView.missing}
           tags={tagOptions}
           customFieldDefinitions={fieldOptions}
+          states={stateOptions}
         />
       )}
       {(savedView?.status === "not_available" || savedView?.status === "membership_ended") && (
