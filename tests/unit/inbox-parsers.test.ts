@@ -6,6 +6,7 @@ import {
   filtersToSearchParams,
   hasAnyFilter,
   type InboxFilters,
+  LEGACY_UNMAPPED_STATE_ID,
   MAX_LIST_LIMIT,
   parseStoredFilters,
   parseUrlFilters,
@@ -17,17 +18,18 @@ import { DEFAULT_TICKET_LIST_LIMIT as LIST_QUERY_DEFAULT } from "@/lib/tickets/l
 
 const FULL: InboxFilters = {
   view: "mine",
-  statuses: ["OPEN", "PENDING"],
+  stateIds: ["st_open", "st_pending"],
   tagId: "tag_1",
   cf: { definitionId: "def_1", value: "a:b" },
   q: "printer jam",
 };
 
 describe("parseUrlFilters", () => {
-  it("drops unknown statuses, deduplicates and orders them as the enum", () => {
-    expect(parseUrlFilters({ status: "OPEN,FOO,OPEN,NEW" }).filters.statuses).toEqual([
-      "NEW",
-      "OPEN",
+  it("maps a malformed state token to the sentinel, deduplicates and sorts the ids", () => {
+    expect(parseUrlFilters({ state: "st_open,bad id,st_open,st_new" }).filters.stateIds).toEqual([
+      "st_new",
+      "st_open",
+      LEGACY_UNMAPPED_STATE_ID,
     ]);
   });
 
@@ -40,7 +42,7 @@ describe("parseUrlFilters", () => {
 
   it("omits empty tag, cf and q", () => {
     const { filters } = parseUrlFilters({ tag: "", cf: "", q: "" });
-    expect(filters).toEqual({ view: "all", statuses: [] });
+    expect(filters).toEqual({ view: "all", stateIds: [] });
     expect("tagId" in filters).toBe(false);
     expect("cf" in filters).toBe(false);
     expect("q" in filters).toBe(false);
@@ -55,9 +57,9 @@ describe("parseUrlFilters", () => {
 
   it("reads the first value of a repeated parameter and accepts URLSearchParams", () => {
     expect(parseUrlFilters({ view: ["mine", "all"] }).filters.view).toBe("mine");
-    const sp = new URLSearchParams("view=unassigned&status=CLOSED,NEW&tag=t9&limit=120");
+    const sp = new URLSearchParams("view=unassigned&state=st_new,st_closed&tag=t9&limit=120");
     expect(parseUrlFilters(sp)).toEqual({
-      filters: { view: "unassigned", statuses: ["NEW", "CLOSED"], tagId: "t9" },
+      filters: { view: "unassigned", stateIds: ["st_closed", "st_new"], tagId: "t9" },
       limit: 120,
     });
   });
@@ -65,7 +67,7 @@ describe("parseUrlFilters", () => {
   it("output always satisfies ticketListFiltersSchema", () => {
     const { filters } = parseUrlFilters({
       view: "mine",
-      status: "RESOLVED,OPEN",
+      state: "st_resolved,st_open",
       tag: "t",
       cf: "d:v",
       q: "hi",
@@ -99,16 +101,16 @@ describe("parseUrlFilters limit clamp (D-03, UI-SPEC Assumption 12)", () => {
 });
 
 describe("filtersToSearchParams", () => {
-  it("emits view, status, tag, cf and q in that order, without limit", () => {
-    const sp = filtersToSearchParams({ ...FULL, statuses: ["PENDING", "OPEN"] });
-    expect([...sp.keys()]).toEqual(["view", "status", "tag", "cf", "q"]);
-    expect(sp.get("status")).toBe("OPEN,PENDING");
+  it("emits view, state, tag, cf and q in that order, without limit", () => {
+    const sp = filtersToSearchParams({ ...FULL, stateIds: ["st_pending", "st_open"] });
+    expect([...sp.keys()]).toEqual(["view", "state", "tag", "cf", "q"]);
+    expect(sp.get("state")).toBe("st_open,st_pending");
     expect(sp.get("cf")).toBe("def_1:a:b");
     expect(sp.has("limit")).toBe(false);
   });
 
   it("omits view all and empty parts", () => {
-    expect(filtersToSearchParams({ view: "all", statuses: [] }).toString()).toBe("");
+    expect(filtersToSearchParams({ view: "all", stateIds: [] }).toString()).toBe("");
   });
 
   it("round-trips through parseUrlFilters for a filter set with every field", () => {
@@ -117,18 +119,18 @@ describe("filtersToSearchParams", () => {
 });
 
 describe("filtersEqual and hasAnyFilter", () => {
-  it("ignores status order and limit", () => {
+  it("ignores state id order and limit", () => {
     expect(
       filtersEqual(
-        { ...FULL, statuses: ["PENDING", "OPEN"], limit: 100 },
-        { ...FULL, statuses: ["OPEN", "PENDING"] },
+        { ...FULL, stateIds: ["st_pending", "st_open"], limit: 100 },
+        { ...FULL, stateIds: ["st_open", "st_pending"] },
       ),
     ).toBe(true);
   });
 
-  it("treats missing q and an empty statuses list as equal to absent ones", () => {
-    expect(filtersEqual({ view: "all", statuses: [], q: "" }, { view: "all" })).toBe(true);
-    expect(filtersEqual({ view: "all", statuses: [] }, {})).toBe(true);
+  it("treats missing q and an empty stateIds list as equal to absent ones", () => {
+    expect(filtersEqual({ view: "all", stateIds: [], q: "" }, { view: "all" })).toBe(true);
+    expect(filtersEqual({ view: "all", stateIds: [] }, {})).toBe(true);
   });
 
   it("detects a real difference", () => {
@@ -139,39 +141,40 @@ describe("filtersEqual and hasAnyFilter", () => {
   });
 
   it("hasAnyFilter is false only for view all with nothing else set", () => {
-    expect(hasAnyFilter({ view: "all", statuses: [] })).toBe(false);
-    expect(hasAnyFilter({ view: "mine", statuses: [] })).toBe(true);
-    expect(hasAnyFilter({ view: "all", statuses: ["NEW"] })).toBe(true);
-    expect(hasAnyFilter({ view: "all", statuses: [], tagId: "t" })).toBe(true);
-    expect(hasAnyFilter({ view: "all", statuses: [], cf: { definitionId: "d", value: "" } })).toBe(
+    expect(hasAnyFilter({ view: "all", stateIds: [] })).toBe(false);
+    expect(hasAnyFilter({ view: "mine", stateIds: [] })).toBe(true);
+    expect(hasAnyFilter({ view: "all", stateIds: ["st_new"] })).toBe(true);
+    expect(hasAnyFilter({ view: "all", stateIds: [], tagId: "t" })).toBe(true);
+    expect(hasAnyFilter({ view: "all", stateIds: [], cf: { definitionId: "d", value: "" } })).toBe(
       true,
     );
-    expect(hasAnyFilter({ view: "all", statuses: [], q: "x" })).toBe(true);
+    expect(hasAnyFilter({ view: "all", stateIds: [], q: "x" })).toBe(true);
   });
 });
 
 describe("stored view filters (D-03)", () => {
-  it("toStoredFilters adds version 1 and drops nothing else", () => {
-    expect(toStoredFilters(FULL)).toEqual({ version: 1, ...FULL });
-    expect(toStoredFilters({ view: "all", statuses: [] })).toEqual({
-      version: 1,
+  it("toStoredFilters adds version 2 and drops nothing else", () => {
+    expect(toStoredFilters(FULL)).toEqual({ version: 2, ...FULL });
+    expect(toStoredFilters({ view: "all", stateIds: [] })).toEqual({
+      version: 2,
       view: "all",
-      statuses: [],
+      stateIds: [],
     });
     expect(storedViewFiltersSchema.safeParse(toStoredFilters(FULL)).success).toBe(true);
   });
 
   it("parseStoredFilters accepts what toStoredFilters wrote", () => {
-    expect(parseStoredFilters(toStoredFilters(FULL))).toEqual({ version: 1, ...FULL });
+    expect(parseStoredFilters(toStoredFilters(FULL))).toEqual({ version: 2, ...FULL });
   });
 
   it.each([
-    ["missing version", { view: "all", statuses: [] }],
-    ["version 2", { version: 2, view: "all", statuses: [] }],
-    ["an unknown status", { version: 1, view: "all", statuses: ["SNOOZED"] }],
-    ["a duplicated status", { version: 1, view: "all", statuses: ["NEW", "NEW"] }],
-    ["a 201-character q", { version: 1, view: "all", statuses: [], q: "q".repeat(201) }],
-    ["a stored limit", { version: 1, view: "all", statuses: [], limit: 50 }],
+    ["missing version", { view: "all", stateIds: [] }],
+    ["version 1 with statuses", { version: 1, view: "all", statuses: ["NEW"] }],
+    ["version 1 with stateIds", { version: 1, view: "all", stateIds: [] }],
+    ["an empty state id", { version: 2, view: "all", stateIds: [""] }],
+    ["a duplicated state id", { version: 2, view: "all", stateIds: ["st_new", "st_new"] }],
+    ["a 201-character q", { version: 2, view: "all", stateIds: [], q: "q".repeat(201) }],
+    ["a stored limit", { version: 2, view: "all", stateIds: [], limit: 50 }],
     ["a non-object", "view=all"],
     ["null", null],
     ["an array", []],
