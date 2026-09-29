@@ -4,7 +4,7 @@ import { expect, type Page, test } from "@playwright/test";
 import { addRelation } from "../../src/lib/tickets/relations";
 import { snoozeWakeHandler } from "../../src/lib/worker/jobs/snooze-wake";
 import { ADMIN_EMAIL } from "./global-setup";
-import { createTicket, orgId, prisma } from "./support/db";
+import { createTicket, type LegacyStatusKey, orgId, prisma, stateIdFor } from "./support/db";
 
 // AIDA-55 / D-18 / D-22: the ticket page shows one feed of messages and audit events, oldest
 // first, and the order is observed through the real UI.
@@ -22,7 +22,10 @@ async function seedTicket(label: string) {
     contact: { email: `feed-${label}-${ts}@example.com` },
     direction: "INBOUND",
   });
-  await prisma.ticket.update({ where: { id: ticket.id }, data: { status: "OPEN" } });
+  await prisma.ticket.update({
+    where: { id: ticket.id },
+    data: { stateId: await stateIdFor("OPEN") },
+  });
   return { id: ticket.id, number: ticket.number, body };
 }
 
@@ -41,13 +44,13 @@ async function indexOf(page: Page, text: string): Promise<number> {
   return texts.findIndex((t) => t.includes(text));
 }
 
-async function changeStatus(page: Page, ticketId: string, label: string, value: string) {
+async function changeStatus(page: Page, ticketId: string, label: string, value: LegacyStatusKey) {
   await page.getByRole("button", { name: "Change status" }).click();
   await page.getByRole("menuitemradio", { name: label }).click();
   await page.keyboard.press("Escape");
   await expect
-    .poll(async () => (await prisma.ticket.findUniqueOrThrow({ where: { id: ticketId } })).status)
-    .toBe(value);
+    .poll(async () => (await prisma.ticket.findUniqueOrThrow({ where: { id: ticketId } })).stateId)
+    .toBe(await stateIdFor(value));
 }
 
 async function sendReply(page: Page, ticketId: string, reply: string) {

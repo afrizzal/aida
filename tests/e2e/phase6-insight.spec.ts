@@ -24,7 +24,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
-import { createTicket, orgId, prisma } from "./support/db";
+import { createTicket, orgId, prisma, stateIdFor } from "./support/db";
 import { expect, test } from "./support/fixtures";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -281,7 +281,7 @@ test.describe("Public CSAT capture", () => {
     });
     await prisma.ticket.update({
       where: { id: ticket.id },
-      data: { status: "RESOLVED", resolvedAt: new Date() },
+      data: { stateId: await stateIdFor("RESOLVED"), resolvedAt: new Date() },
     });
 
     await page.goto(`/status/${ticket.statusToken}`);

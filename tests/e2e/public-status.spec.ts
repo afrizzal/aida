@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createTicket, orgId, prisma } from "./support/db";
+import { createTicket, orgId, prisma, stateIdFor } from "./support/db";
 import { expect, requireBrowser, test } from "./support/fixtures";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -47,10 +47,14 @@ test.describe("Public status page", () => {
     });
     await prisma.ticket.update({
       where: { id: ticket.id },
-      data: { status: "RESOLVED", resolvedAt: new Date() },
+      data: { stateId: await stateIdFor("RESOLVED"), resolvedAt: new Date() },
     });
 
     await page.goto(`/status/${ticket.statusToken}`);
+    // The public chip shows the fixed label of the ticket's group, never the state name (D-13).
+    await expect(
+      page.locator('[data-slot="badge"]').filter({ hasText: /^Resolved$/ }),
+    ).toBeVisible();
     await page.getByPlaceholder("Write a follow-up…").fill("Actually, I still need help.");
     await page.getByRole("button", { name: "Send Follow-up" }).click();
 

@@ -4,7 +4,7 @@ import { expect, type Page, test } from "@playwright/test";
 import { mergeTickets } from "../../src/lib/tickets/merge";
 import { addRelation } from "../../src/lib/tickets/relations";
 import { ADMIN_EMAIL } from "./global-setup";
-import { createTicket, orgId, prisma } from "./support/db";
+import { createTicket, orgId, prisma, stateIdFor } from "./support/db";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 test.use({ storageState: path.resolve(__dirname, ".auth/admin.json") });
@@ -78,7 +78,7 @@ async function snapshot(ticketIds: string[]) {
   return {
     tickets: await prisma.ticket.findMany({
       where: { id: { in: ticketIds } },
-      select: { id: true, status: true, mergedIntoTicketId: true },
+      select: { id: true, stateId: true, mergedIntoTicketId: true },
       orderBy: { id: "asc" },
     }),
     messages: await prisma.message.findMany({
@@ -113,7 +113,7 @@ test.describe("Ticket merge", () => {
     await expect(page.getByText(`Merged #${source.number} into #${target.number}.`)).toBeVisible();
 
     const merged = await prisma.ticket.findUniqueOrThrow({ where: { id: source.id } });
-    expect(merged.status).toBe("CLOSED");
+    expect(merged.stateId).toBe(await stateIdFor("CLOSED"));
     expect(merged.mergedIntoTicketId).toBe(target.id);
     expect(await prisma.message.count({ where: { ticketId: source.id } })).toBe(0);
     expect(
@@ -497,7 +497,7 @@ test.describe("Ticket merge", () => {
     await menu.getByRole("menuitemradio", { name: "Open" }).click({ force: true });
     await page.keyboard.press("Escape");
     const after = await prisma.ticket.findUniqueOrThrow({ where: { id: source.id } });
-    expect(after.status).toBe("CLOSED");
+    expect(after.stateId).toBe(await stateIdFor("CLOSED"));
     expect(await prisma.ticketAuditEvent.count({ where: { ticketId: source.id } })).toBe(
       auditsBefore,
     );
@@ -536,7 +536,7 @@ test.describe("Ticket merge", () => {
       ),
     ).toBeVisible();
     const after = await prisma.ticket.findUniqueOrThrow({ where: { id: source.id } });
-    expect(after.status).toBe("CLOSED");
+    expect(after.stateId).toBe(await stateIdFor("CLOSED"));
     expect(after.mergedIntoTicketId).toBe(target.id);
   });
 

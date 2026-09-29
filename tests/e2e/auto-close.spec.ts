@@ -4,7 +4,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
-import { autoCloseHandler, createTicket, orgId, prisma } from "./support/db";
+import { autoCloseHandler, createTicket, orgId, prisma, stateIdFor } from "./support/db";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 test.use({ storageState: path.resolve(__dirname, ".auth/admin.json") });
@@ -30,7 +30,10 @@ async function seedResolved(label: string, resolvedDaysAgo: number) {
   });
   await prisma.ticket.update({
     where: { id: ticket.id },
-    data: { status: "RESOLVED", resolvedAt: new Date(Date.now() - resolvedDaysAgo * DAY) },
+    data: {
+      stateId: await stateIdFor("RESOLVED"),
+      resolvedAt: new Date(Date.now() - resolvedDaysAgo * DAY),
+    },
   });
   return ticket.id;
 }
@@ -116,8 +119,10 @@ test.describe
       expect(rows).toHaveLength(1);
       expect(rows[0].actorType).toBe("SYSTEM");
       expect(rows[0].actorUserId).toBeNull();
+      const a = await prisma.ticket.findUniqueOrThrow({ where: { id: ticketA } });
+      expect(a.stateId).toBe(await stateIdFor("CLOSED"));
       const b = await prisma.ticket.findUniqueOrThrow({ where: { id: ticketB } });
-      expect(b.status).toBe("RESOLVED");
+      expect(b.stateId).toBe(await stateIdFor("RESOLVED"));
 
       await autoCloseHandler(undefined, { log: () => {} });
       expect(await autoClosedRows(ticketA)).toHaveLength(1);
