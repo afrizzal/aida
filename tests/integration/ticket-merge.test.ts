@@ -26,6 +26,7 @@ import {
   seedMessage,
   seedOrgWithMembers,
   seedRelation,
+  stateIdFor,
 } from "../support/lifecycle-fixtures";
 import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
 
@@ -151,6 +152,54 @@ describe("mergeTickets (tracer)", () => {
       ].sort(),
     );
     expect(await orgCounts(orgId)).toEqual(before);
+  });
+
+  it("a pending source closes its pause at mergedAt and lands in the mergeClose state in one write (D-16)", async () => {
+    const { orgId, actor } = await seedActor();
+    const { s, t } = await samePair(orgId);
+    const pendingId = await stateIdFor(orgId, "PENDING");
+    const openId = await stateIdFor(orgId, "OPEN");
+    const pausedAt = new Date("2026-01-02T03:04:05.678Z");
+    await prisma.ticket.update({
+      where: { id: s.id },
+      data: { stateId: pendingId, slaPausedAt: pausedAt, slaPausedMs: 1000n, isAtRisk: true },
+    });
+    await prisma.ticket.update({ where: { id: t.id }, data: { stateId: openId } });
+    const before = await prisma.ticket.findUniqueOrThrow({ where: { id: s.id } });
+    const config = await prisma.ticketStateConfig.findUniqueOrThrow({
+      where: { organizationId: orgId },
+    });
+
+    expect(
+      await mergeTickets(prisma, actor, {
+        sourceTicketId: s.id,
+        targetTicketId: t.id,
+        reviewedLinkLabel: null,
+      }),
+    ).toEqual({ ok: true, sourceTicketId: s.id, targetTicketId: t.id });
+
+    const after = await prisma.ticket.findUniqueOrThrow({ where: { id: s.id } });
+    const mergedAt = after.mergedAt;
+    if (!(mergedAt instanceof Date)) throw new Error("mergedAt missing");
+    const deltaMs = mergedAt.getTime() - pausedAt.getTime();
+    expect(after.stateId).toBe(config.mergeCloseStateId);
+    expect(after.resolvedAt).toEqual(mergedAt);
+    expect(after.isAtRisk).toBe(false);
+    expect(after.isBreached).toBe(false);
+    expect(after.slaPausedAt).toBeNull();
+    expect(after.slaPausedMs).toBe(1000n + BigInt(deltaMs));
+    expect(after.firstResponseDueAt.getTime() - before.firstResponseDueAt.getTime()).toBe(deltaMs);
+    expect(after.resolutionDueAt.getTime() - before.resolutionDueAt.getTime()).toBe(deltaMs);
+
+    const statusRows = await prisma.ticketAuditEvent.findMany({
+      where: { organizationId: orgId, ticketId: s.id, action: "STATUS_CHANGED" },
+    });
+    expect(statusRows.map((r) => [r.before, r.after])).toEqual([
+      [
+        { stateId: pendingId, stateGroup: "PENDING" },
+        { stateId: config.mergeCloseStateId, stateGroup: "CLOSED" },
+      ],
+    ]);
   });
 });
 

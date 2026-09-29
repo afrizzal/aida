@@ -6,6 +6,9 @@
 //      (D-01). No ticket data is read before it and there is no pre-read outside the
 //      transaction (review C3), so a removed member cannot tell a merged source from an
 //      unmerged one.
+//   3b. Phase 12.1 (D-11 Merge row, D-15 amended): the organization's TicketStateConfig row is
+//      read FOR SHARE and its mergeClose role state is locked FOR SHARE, before any ticket lock
+//      (lock order of src/lib/tickets/ticket-states.ts: config, state, tickets)
 //   4. both ticket rows locked through lockTicketsInIdOrder (one statement, ascending id, FOR
 //      UPDATE, organization predicate): TICKET_UNAVAILABLE when either is missing
 //   5. hooks.afterLock (test seam only)
@@ -25,8 +28,14 @@
 //   8. the reviewed link of the pair, if any, is replaced (RELATION_REMOVED on both tickets), the
 //      source's messages move to the target with mergedFromTicketId = source (attachments
 //      follow their message: Attachment belongs to messageId only), hooks.afterMove, the source
-//      is closed with its merge fields, the DUPLICATE_OF link is inserted, and the audit rows
-//      are written (STATUS_CHANGED only on a real change, WOKEN only when it was snoozed,
+//      moves to the mergeClose role state in ONE update with the organization term, together
+//      with its merge fields and the lifecycle effects of planStateTransition (policy merge,
+//      now = mergedAt): an OPEN or PENDING source gets resolvedAt = mergedAt and both flags
+//      cleared, a RESOLVED source keeps them, a source already in another state of the CLOSED
+//      group only changes stateId, and a PENDING source's SLA pause closes at mergedAt in that
+//      same write (D-16). Then the DUPLICATE_OF link is inserted, and the audit rows are written
+//      (STATUS_CHANGED { stateId, stateGroup } only when the state changes, WOKEN only when it
+//      was snoozed,
 //      MERGED_INTO on the source, MERGED_FROM on the target, RELATION_ADDED on both only when a
 //      link was replaced)
 //   9. hooks.beforeCommit (test seam only)
@@ -45,7 +54,7 @@
 // Privacy (D-21): audit before/after carry ids, enum values and the ISO mergedAt only.
 //
 // Relative imports only and no Next.js import: revalidation belongs to the server action.
-import type { Prisma, PrismaClient, TicketStatus } from "../../generated/prisma/client";
+import type { Prisma, PrismaClient } from "../../generated/prisma/client";
 import { findActiveMembership } from "../membership";
 import {
   type RelationLabel,
@@ -53,7 +62,14 @@ import {
   relationLabel,
   relationSideFor,
 } from "./relation-pairs";
+import { planStateTransition } from "./state-transition";
 import { recordTicketAudit } from "./ticket-audit";
+import {
+  readStateConfigForShare,
+  readStateGroups,
+  shareLockActiveState,
+  stateAuditSnapshot,
+} from "./ticket-states";
 
 const TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: 30_000 } as const;
 
@@ -104,6 +120,18 @@ export interface MergeHooks {
   afterMove?(tx: Prisma.TransactionClient): Promise<void> | void;
   /** Awaited after the last write, just before the transaction commits. */
   beforeCommit?(tx: Prisma.TransactionClient): Promise<void> | void;
+}
+
+/**
+ * Thrown when the organization's mergeClose role state is missing, soft-deleted or outside the
+ * CLOSED group. It cannot happen: the role is re-pointed under the config row lock, which the
+ * merge holds FOR SHARE. Not a refusal: it rolls back and is rethrown.
+ */
+export class MergeCloseStateUnavailableError extends Error {
+  constructor(orgId: string) {
+    super(`mergeClose state unavailable for organization ${orgId}`);
+    this.name = "MergeCloseStateUnavailableError";
+  }
 }
 
 export type MergeResult =
@@ -193,6 +221,15 @@ export async function mergeTickets(
       const membership = await findActiveMembership(tx, userId, orgId);
       if (!membership) throw new MergeError("MEMBERSHIP_ENDED");
 
+      // D-15 amended: config FOR SHARE, then the mergeClose role state FOR SHARE, then tickets.
+      const config = await readStateConfigForShare(tx, orgId);
+      const mergeCloseStateId = config.mergeCloseStateId;
+      const toGroup = "CLOSED" as const;
+      const mergeClose = await shareLockActiveState(tx, orgId, mergeCloseStateId);
+      if (!mergeClose || mergeClose.group !== toGroup) {
+        throw new MergeCloseStateUnavailableError(orgId);
+      }
+
       const locked = await lockTicketsInIdOrder(tx, orgId, [sourceTicketId, targetTicketId]);
       if (hooks.afterLock) await hooks.afterLock(tx);
       const source = locked.find((row) => row.id === sourceTicketId);
@@ -268,22 +305,30 @@ export async function mergeTickets(
       });
       if (hooks.afterMove) await hooks.afterMove(tx);
 
-      const statusChanged = source.status !== "CLOSED";
-      const wasTerminal = source.status === "RESOLVED";
-      await tx.ticket.update({
-        where: { id: sourceTicketId },
+      // The source's current group, read under its row lock (the composite foreign key keeps
+      // the state in the organization; a soft-deleted state still has its group).
+      const fromGroup = (await readStateGroups(tx, orgId, [source.stateId])).get(source.stateId);
+      if (!fromGroup) throw new MergeError("TICKET_UNAVAILABLE");
+      const stateChanged = source.stateId !== mergeCloseStateId;
+      const transition = planStateTransition({
+        row: source,
+        fromGroup,
+        toStateId: mergeCloseStateId,
+        toGroup,
+        now: mergedAt,
+        policy: "merge",
+      });
+      const { count } = await tx.ticket.updateMany({
+        where: { id: sourceTicketId, organizationId: orgId },
         data: {
+          ...transition,
           mergedIntoTicketId: targetTicketId,
           mergedAt,
           mergeMessageSeq,
-          status: "CLOSED",
           snoozedUntil: null,
-          ...(statusChanged && !wasTerminal
-            ? { resolvedAt: mergedAt, isAtRisk: false, isBreached: false }
-            : {}),
         },
-        select: { id: true },
       });
+      if (count !== 1) throw new MergeError("TICKET_UNAVAILABLE");
 
       const created = await tx.ticketRelation.create({
         data: {
@@ -296,12 +341,12 @@ export async function mergeTickets(
         select: { id: true },
       });
 
-      if (statusChanged) {
+      if (stateChanged) {
         await recordTicketAudit(tx, orgId, {
           ticketId: sourceTicketId,
           action: "STATUS_CHANGED",
-          before: { status: source.status },
-          after: { status: "CLOSED" },
+          before: stateAuditSnapshot(source.stateId, fromGroup),
+          after: stateAuditSnapshot(mergeCloseStateId, toGroup),
           actorType: "USER",
           actorUserId: userId,
         });
