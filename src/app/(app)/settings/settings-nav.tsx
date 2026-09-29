@@ -8,6 +8,7 @@ const navItems = [
   { href: "/settings", label: "AI Features" },
   { href: "/settings/branding", label: "Branding" },
   { href: "/settings/sla", label: "SLA Policies" },
+  { href: "/settings/statuses", label: "Statuses" },
   { href: "/settings/tags", label: "Tags" },
   { href: "/settings/custom-fields", label: "Custom Fields" },
   { href: "/settings/email", label: "Email" },
@@ -17,7 +18,7 @@ export function SettingsNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="flex items-center gap-1.5">
+    <nav className="flex flex-wrap items-center gap-1.5 gap-y-2">
       {navItems.map(({ href, label }) => {
         // Exact match for /settings (AI Features) so sub-routes like /settings/sla
         // don't also light it up; sub-routes use startsWith.
