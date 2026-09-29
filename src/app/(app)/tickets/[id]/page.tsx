@@ -144,7 +144,7 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
           snoozeControl={
             <SnoozeControl
               ticketId={ticket.id}
-              status={ticket.status}
+              group={ticket.state.group}
               snoozedUntil={ticket.snoozedUntil ? ticket.snoozedUntil.toISOString() : null}
               mergedSource={isMergedSource}
             />

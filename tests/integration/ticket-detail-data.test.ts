@@ -155,4 +155,33 @@ describe("ticket page data: states and the SLA pause (Phase 12.1)", () => {
     expect(serialized).not.toContain(waiting.id);
     expect(serialized).not.toContain(waiting.name);
   });
+
+  it("a ticket paused through runTicketMutation comes back with slaPausedAt set and group PENDING (D-18)", async () => {
+    const { orgId, users } = await seedOrgWithMembers(prisma, ["owner"]);
+    const ticket = await createTicket(orgId, {
+      subject: `Paused ${randomUUID()}`,
+      priority: "NORMAL",
+      body: "Paused body",
+      contact: { email: `paused-${randomUUID()}@example.test` },
+      direction: "INBOUND",
+    });
+    const fresh = await loadTicketDetailData(prisma, { userId: users[0].id, orgId }, ticket.id);
+    if (fresh.status !== "ok") throw new Error(`expected ok, got ${fresh.status}`);
+    expect(fresh.ticket.slaPausedAt).toBeNull();
+    expect(fresh.ticket.state.group).toBe("OPEN");
+
+    const legacy = await readLegacyStateIds(prisma, orgId);
+    const result = await runTicketMutation({
+      actor: { orgId, userId: users[0].id },
+      ticketIds: [ticket.id],
+      op: { kind: "state", stateId: legacy.PENDING as string },
+      mode: "single",
+    });
+    expect(result).toMatchObject({ ok: true, count: 1 });
+
+    const paused = await loadTicketDetailData(prisma, { userId: users[0].id, orgId }, ticket.id);
+    if (paused.status !== "ok") throw new Error(`expected ok, got ${paused.status}`);
+    expect(paused.ticket.slaPausedAt).toBeInstanceOf(Date);
+    expect(paused.ticket.state.group).toBe("PENDING");
+  });
 });

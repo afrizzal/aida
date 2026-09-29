@@ -15,8 +15,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import type { TicketStatus } from "@/generated/prisma/client";
 import type { SnoozeErrorCode } from "@/lib/tickets/snooze";
+import type { StateGroupKey } from "@/lib/tickets/state-copy";
 import { cn } from "@/lib/utils";
 
 // UI-SPEC 4b to 4d (AIDA-54, D-12). Every time is chosen and shown in the browser's zone and
@@ -110,19 +110,16 @@ export function SnoozedChip({ until }: { until: Date | string }) {
 
 export interface SnoozeControlProps {
   ticketId: string;
-  status: TicketStatus;
+  /** The group of the ticket's state (Phase 12.1, D-11): snooze refuses group CLOSED. */
+  group: StateGroupKey;
   snoozedUntil: string | null;
   mergedSource: boolean;
 }
 
-export function SnoozeControl({
-  ticketId,
-  status,
-  snoozedUntil,
-  mergedSource,
-}: SnoozeControlProps) {
+export function SnoozeControl({ ticketId, group, snoozedUntil, mergedSource }: SnoozeControlProps) {
   const isSnoozed = snoozedUntil !== null;
-  const isClosed = status === "CLOSED";
+  // Any state of the CLOSED group counts as closed, whatever its name (D-11 snooze row).
+  const isClosed = group === "CLOSED";
   // The chip's aria-label, from the same hydration-safe text as the chip (review UI-WR-01).
   const snoozedText = useLocalDateTimeText(snoozedUntil);
   const [open, setOpen] = useState(false);
@@ -146,8 +143,9 @@ export function SnoozeControl({
   const dateId = useId();
   const timeId = useId();
 
-  // Disabled trigger only for a merged source, or a CLOSED ticket that is not snoozed (review C9:
-  // a CLOSED ticket that is still snoozed keeps its chip as an enabled trigger so it can be woken).
+  // Disabled trigger only for a merged source, or a ticket in the CLOSED group that is not snoozed
+  // (review C9: a closed ticket that is still snoozed keeps its chip as an enabled trigger so it
+  // can be woken).
   const disabledReason = mergedSource
     ? MERGED_REASON
     : isClosed && !isSnoozed
@@ -270,7 +268,7 @@ export function SnoozeControl({
       : undefined;
 
   // One <button> in every state (Snooze, the snoozed chip, disabled): snoozing, waking or a
-  // status change revalidates the page and only the content changes, so the node keeps focus
+  // state change revalidates the page and only the content changes, so the node keeps focus
   // and Radix returns focus to a trigger that still exists (review UI-WR-04). The tooltip only
   // opens while the trigger is disabled, to give the reason.
   return (

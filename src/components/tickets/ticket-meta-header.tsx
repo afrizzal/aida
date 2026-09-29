@@ -492,6 +492,7 @@ export function TicketMetaHeader({
               dueAt={activeDue}
               isAtRisk={ticket.isAtRisk}
               isBreached={ticket.isBreached}
+              pausedAt={ticket.slaPausedAt}
             />
           )}
 
@@ -501,7 +502,7 @@ export function TicketMetaHeader({
             ticketId={ticket.id}
             ticketNumber={ticket.number}
             ticketSubject={ticket.subject}
-            ticketStatus={ticket.status}
+            ticketState={{ name: ticket.state.name, colorToken: ticket.state.colorToken }}
             mergedSource={mergedSource}
             hasReceivedMerges={hasReceivedMerges}
             triggerRef={actionsTriggerRef}
