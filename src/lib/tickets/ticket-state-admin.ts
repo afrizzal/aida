@@ -397,3 +397,285 @@ export async function deleteTicketState(
     };
   });
 }
+
+// --- create, update ----------------------------------------------------------------------------
+
+/** One state as the admin operations return it. */
+export interface AdminStateRow {
+  id: string;
+  name: string;
+  colorToken: string;
+  group: StateGroup;
+  sortOrder: number;
+}
+
+export type TicketStateWriteResult = { ok: true; state: AdminStateRow } | StateAdminFailure;
+
+/** Runs a write that may hit TicketState_active_name_key; a violation becomes DUPLICATE_NAME. */
+async function withDuplicateName<T>(write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch (err) {
+    if (isUniqueViolation(err)) throw new StateAdminError("DUPLICATE_NAME");
+    throw err;
+  }
+}
+
+/**
+ * Creates a state in one of the four groups with a trimmed, unique name and a palette colour,
+ * one sortOrder above the group's highest active state (D-03, D-14).
+ */
+export async function createTicketState(
+  client: AdminClient,
+  actor: StateAdminActor,
+  raw: unknown,
+  hooks: StateAdminHooks = {},
+): Promise<TicketStateWriteResult> {
+  return runAdminOperation(client, actor, hooks, async ({ tx, orgId }) => {
+    if (!isRecord(raw)) throw new StateAdminError("INVALID");
+    const group = raw.group;
+    if (typeof group !== "string" || !(STATE_GROUPS as readonly string[]).includes(group)) {
+      throw new StateAdminError("INVALID");
+    }
+    const name = parseName(raw.name);
+    const colorToken = parseColor(raw.colorToken);
+
+    const maxRows = await tx.$queryRaw<{ max: number | null }[]>`
+      SELECT max("sortOrder")::int AS max FROM "TicketState"
+      WHERE "organizationId" = ${orgId} AND "group" = ${group}::"TicketStateGroup"
+        AND "deletedAt" IS NULL
+    `;
+    const max = maxRows[0]?.max;
+    const sortOrder = max === null || max === undefined ? 0 : Number(max) + 1;
+
+    // The unique index decides duplicates (never a pre-check alone): a concurrent insert of the
+    // same name in another transaction is refused here too.
+    const state = await withDuplicateName(() =>
+      tx.ticketState.create({
+        data: { organizationId: orgId, name, colorToken, group: group as StateGroup, sortOrder },
+        select: { id: true, name: true, colorToken: true, group: true, sortOrder: true },
+      }),
+    );
+    return { ok: true as const, state };
+  });
+}
+
+/** Renames and/or recolours an active state. The group never changes (D-03). */
+export async function updateTicketState(
+  client: AdminClient,
+  actor: StateAdminActor,
+  raw: unknown,
+  hooks: StateAdminHooks = {},
+): Promise<TicketStateWriteResult> {
+  return runAdminOperation(client, actor, hooks, async ({ tx, orgId }) => {
+    if (!isRecord(raw)) throw new StateAdminError("INVALID");
+    const stateId = parseStateId(raw.stateId);
+    if (raw.name === undefined && raw.colorToken === undefined) {
+      throw new StateAdminError("INVALID");
+    }
+    const name = raw.name === undefined ? undefined : parseName(raw.name);
+    const colorToken = raw.colorToken === undefined ? undefined : parseColor(raw.colorToken);
+
+    const state = await lockStateForUpdate(tx, orgId, stateId);
+    if (hooks.afterStateLock) await hooks.afterStateLock(tx);
+
+    const now = hooks.clock ? hooks.clock() : new Date();
+    await withDuplicateName(() =>
+      tx.ticketState.updateMany({
+        where: { id: state.id, organizationId: orgId, deletedAt: null },
+        data: {
+          ...(name !== undefined ? { name } : {}),
+          ...(colorToken !== undefined ? { colorToken } : {}),
+          updatedAt: now,
+        },
+      }),
+    );
+    return {
+      ok: true as const,
+      state: {
+        id: state.id,
+        name: name ?? state.name,
+        colorToken: colorToken ?? state.colorToken,
+        group: state.group,
+        sortOrder: state.sortOrder,
+      },
+    };
+  });
+}
+
+// --- reorder -------------------------------------------------------------------------------------
+
+export type MoveTicketStateResult =
+  | { ok: true; position: number; total: number; group: StateGroup; name: string }
+  | StateAdminFailure;
+
+/**
+ * Moves a state up or down inside its group: it swaps with its neighbour and the group's active
+ * states are renumbered 0..n-1 by (sortOrder, id in code-unit order), so equal sortOrder values
+ * never make the order ambiguous. The first state up or the last state down is ok and unchanged.
+ * Returns the new 1-based position and the group's count (the live region of UI-SPEC 1f).
+ */
+export async function moveTicketState(
+  client: AdminClient,
+  actor: StateAdminActor,
+  raw: unknown,
+  hooks: StateAdminHooks = {},
+): Promise<MoveTicketStateResult> {
+  return runAdminOperation(client, actor, hooks, async ({ tx, orgId }) => {
+    if (!isRecord(raw)) throw new StateAdminError("INVALID");
+    const stateId = parseStateId(raw.stateId);
+    const direction = raw.direction;
+    if (direction !== "up" && direction !== "down") throw new StateAdminError("INVALID");
+
+    const targetRows = await tx.$queryRaw<{ id: string; group: StateGroup }[]>`
+      SELECT id, "group"::text AS "group" FROM "TicketState"
+      WHERE id = ${stateId} AND "organizationId" = ${orgId} AND "deletedAt" IS NULL
+    `;
+    const target = targetRows[0];
+    if (!target) throw new StateAdminError("STATE_NOT_FOUND");
+
+    // Every active state of the group FOR UPDATE in ascending id (the target and its neighbour
+    // among them, and every row the renumbering may write). Admin operations of the
+    // organization are serialized by the config lock, so this set cannot change meanwhile.
+    await tx.$queryRaw`
+      SELECT id FROM "TicketState"
+      WHERE "organizationId" = ${orgId} AND "group" = ${target.group}::"TicketStateGroup"
+        AND "deletedAt" IS NULL
+      ORDER BY id
+      FOR UPDATE
+    `;
+    if (hooks.afterStateLock) await hooks.afterStateLock(tx);
+
+    const ordered = await tx.$queryRaw<{ id: string; name: string; sortOrder: number }[]>`
+      SELECT id, name, "sortOrder" FROM "TicketState"
+      WHERE "organizationId" = ${orgId} AND "group" = ${target.group}::"TicketStateGroup"
+        AND "deletedAt" IS NULL
+      ORDER BY "sortOrder", id COLLATE "C"
+    `;
+    const index = ordered.findIndex((s) => s.id === target.id);
+    if (index < 0) throw new StateAdminError("STATE_NOT_FOUND");
+    const swapWith = direction === "up" ? index - 1 : index + 1;
+    let position = index;
+    const next = [...ordered];
+    if (swapWith >= 0 && swapWith < ordered.length) {
+      [next[index], next[swapWith]] = [next[swapWith], next[index]];
+      position = swapWith;
+    }
+
+    const now = hooks.clock ? hooks.clock() : new Date();
+    for (let i = 0; i < next.length; i += 1) {
+      if (Number(next[i].sortOrder) === i) continue;
+      await tx.ticketState.updateMany({
+        where: { id: next[i].id, organizationId: orgId },
+        data: { sortOrder: i, updatedAt: now },
+      });
+    }
+
+    return {
+      ok: true as const,
+      position: position + 1,
+      total: next.length,
+      group: target.group,
+      name: ordered[index].name,
+    };
+  });
+}
+
+// --- set default ---------------------------------------------------------------------------------
+
+export type SetDefaultTicketStateResult =
+  | { ok: true; defaultStateId: string; name: string }
+  | StateAdminFailure;
+
+/**
+ * Makes an active OPEN-group state the default for new tickets (newStateId, D-06, K40). The
+ * current default returns ok and changes nothing. No other role changes.
+ */
+export async function setDefaultTicketState(
+  client: AdminClient,
+  actor: StateAdminActor,
+  raw: unknown,
+  hooks: StateAdminHooks = {},
+): Promise<SetDefaultTicketStateResult> {
+  return runAdminOperation(client, actor, hooks, async ({ tx, orgId, config }) => {
+    if (!isRecord(raw)) throw new StateAdminError("INVALID");
+    const stateId = parseStateId(raw.stateId);
+
+    // Referenced, not changed: FOR SHARE (the config row is the row this operation changes).
+    const state = await shareLockActiveState(tx, orgId, stateId);
+    if (!state) throw new StateAdminError("STATE_NOT_FOUND");
+    if (hooks.afterStateLock) await hooks.afterStateLock(tx);
+    if (state.group !== "OPEN") throw new StateAdminError("NOT_OPEN_GROUP");
+
+    const named = await tx.$queryRaw<{ name: string }[]>`
+      SELECT name FROM "TicketState" WHERE id = ${state.id} AND "organizationId" = ${orgId}
+    `;
+    if (config.newStateId !== state.id) {
+      const now = hooks.clock ? hooks.clock() : new Date();
+      await tx.$executeRaw`
+        UPDATE "TicketStateConfig" SET "newStateId" = ${state.id}, "updatedAt" = ${now}
+        WHERE "organizationId" = ${orgId}
+      `;
+    }
+    return { ok: true as const, defaultStateId: state.id, name: named[0]?.name ?? "" };
+  });
+}
+
+// --- the settings list ---------------------------------------------------------------------------
+
+/** One row of the settings page (UI-SPEC Surface 1a). */
+export interface SettingsStateRow extends AdminStateRow {
+  ticketCount: number;
+  roles: StateRoleKey[];
+}
+
+export type ListStatesForSettingsResult =
+  | { ok: true; states: SettingsStateRow[]; defaultStateId: string; isAdmin: boolean }
+  | { ok: false; error: "membership_ended" };
+
+/**
+ * The organization's active states in group and sort order with their ticket counts, the roles
+ * each holds, the default state id and whether the viewer is an admin. Members read the list;
+ * a removed member gets membership_ended. No lock; every read carries the organization term.
+ */
+export async function listStatesForSettings(
+  client: ListClient,
+  actor: StateAdminActor,
+): Promise<ListStatesForSettingsResult> {
+  const membership = await findActiveMembership(client, actor?.userId, actor?.orgId);
+  if (!membership) return { ok: false, error: "membership_ended" };
+  const orgId = actor.orgId;
+
+  const states = await client.$queryRaw<AdminStateRow[]>`
+    SELECT id, name, "colorToken", "group"::text AS "group", "sortOrder"
+    FROM "TicketState"
+    WHERE "organizationId" = ${orgId} AND "deletedAt" IS NULL
+    ORDER BY "TicketState"."group", "TicketState"."sortOrder", "TicketState".id COLLATE "C"
+  `;
+  const counts = await client.$queryRaw<{ stateId: string; n: number }[]>`
+    SELECT "stateId", count(*)::int AS n FROM "Ticket"
+    WHERE "organizationId" = ${orgId}
+    GROUP BY "stateId"
+  `;
+  const configRows = await client.$queryRaw<ConfigRow[]>`
+    SELECT "newStateId", "reopenStateId", "resolveStateId", "autoCloseStateId",
+      "mergeCloseStateId"
+    FROM "TicketStateConfig"
+    WHERE "organizationId" = ${orgId}
+  `;
+  const config = configRows[0];
+  if (!config) throw new Error(`TicketStateConfig missing for organization ${orgId}`);
+  const countOf = new Map(counts.map((c) => [c.stateId, Number(c.n)]));
+
+  return {
+    ok: true,
+    states: states.map((s) => ({
+      ...s,
+      sortOrder: Number(s.sortOrder),
+      ticketCount: countOf.get(s.id) ?? 0,
+      roles: rolesOf(config, s.id),
+    })),
+    defaultStateId: config.newStateId,
+    isAdmin: isAdminRole(membership.role),
+  };
+}
