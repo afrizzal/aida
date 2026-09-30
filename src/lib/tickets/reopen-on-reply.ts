@@ -238,7 +238,8 @@ async function finish(tx: ResolveTx, ticketId: string): Promise<ResolveReplyResu
  * Moves a ticket in group RESOLVED or CLOSED to the organization's reopen state for a customer
  * reply and wakes it when snoozed (D-14). Returns whether it reopened (the wake does not change
  * the result). Callers call resolveReplyTicket first (it takes the config and reopen-state share
- * locks and the ticket row lock).
+ * locks and the ticket row lock); this function takes both share locks again (a no-op then) and
+ * throws ReopenStateUnavailableError for a deleted reopen state (D-15 amended).
  */
 export async function reopenOnCustomerReply(
   tx: ReopenTx & TicketAuditTx,
@@ -249,8 +250,12 @@ export async function reopenOnCustomerReply(
     await observer.beforeLock(tx, { orgId, ticketId });
   }
 
-  // Already share-locked by resolveReplyTicket, so this read does not wait.
+  // D-15 amended: this writer takes the config and the reopen state FOR SHARE itself and refuses a
+  // soft-deleted state, so it is safe without resolveReplyTicket too (review WR-02). After
+  // resolveReplyTicket both locks are already held, so neither read waits.
   const { reopenStateId } = await readStateConfigForShare(tx, orgId);
+  const target = await shareLockActiveState(tx, orgId, reopenStateId);
+  if (!target) throw new ReopenStateUnavailableError(orgId, reopenStateId);
   const locked = await tx.$queryRaw<{ snoozedUntil: Date | null }[]>`
     SELECT "snoozedUntil" FROM "Ticket"
     WHERE "id" = ${ticketId} AND "organizationId" = ${orgId}
