@@ -150,7 +150,11 @@ describe("createTicketState (D-03, D-14)", () => {
       await createTicketState(prisma, admin, { group: "OPEN", name: forty, colorToken: "blue" }),
     ).toMatchObject({ ok: true, state: { name: forty } });
     expect(
-      await createTicketState(prisma, admin, { group: "OPEN", name: `${forty}b`, colorToken: "blue" }),
+      await createTicketState(prisma, admin, {
+        group: "OPEN",
+        name: `${forty}b`,
+        colorToken: "blue",
+      }),
     ).toEqual({ ok: false, error: "INVALID_NAME" });
   });
 
@@ -158,9 +162,9 @@ describe("createTicketState (D-03, D-14)", () => {
     const { orgId, admin } = await seedOrg();
     const before = await snapshot(orgId);
     for (const name of ["", "   "]) {
-      expect(await createTicketState(prisma, admin, { group: "OPEN", name, colorToken: "blue" })).toEqual(
-        { ok: false, error: "INVALID_NAME" },
-      );
+      expect(
+        await createTicketState(prisma, admin, { group: "OPEN", name, colorToken: "blue" }),
+      ).toEqual({ ok: false, error: "INVALID_NAME" });
     }
     expect(await snapshot(orgId)).toEqual(before);
   });
@@ -177,16 +181,36 @@ describe("createTicketState (D-03, D-14)", () => {
 
   it("maps the active-name index to DUPLICATE_NAME after trimming and case folding", async () => {
     const { orgId, admin } = await seedOrg();
-    await createTicketState(prisma, admin, { group: "PENDING", name: "Waiting on vendor", colorToken: "orange" });
+    await createTicketState(prisma, admin, {
+      group: "PENDING",
+      name: "Waiting on vendor",
+      colorToken: "orange",
+    });
     expect(
-      await createTicketState(prisma, admin, { group: "OPEN", name: "waiting on vendor", colorToken: "blue" }),
+      await createTicketState(prisma, admin, {
+        group: "OPEN",
+        name: "waiting on vendor",
+        colorToken: "blue",
+      }),
     ).toEqual({ ok: false, error: "DUPLICATE_NAME" });
-    await createTicketState(prisma, admin, { group: "PENDING", name: "Waiting", colorToken: "amber" });
+    await createTicketState(prisma, admin, {
+      group: "PENDING",
+      name: "Waiting",
+      colorToken: "amber",
+    });
     expect(
-      await createTicketState(prisma, admin, { group: "PENDING", name: " waiting ", colorToken: "amber" }),
+      await createTicketState(prisma, admin, {
+        group: "PENDING",
+        name: " waiting ",
+        colorToken: "amber",
+      }),
     ).toEqual({ ok: false, error: "DUPLICATE_NAME" });
     expect(
-      await createTicketState(prisma, admin, { group: "PENDING", name: "Waitinh", colorToken: "amber" }),
+      await createTicketState(prisma, admin, {
+        group: "PENDING",
+        name: "Waitinh",
+        colorToken: "amber",
+      }),
     ).toMatchObject({ ok: true });
     await expectRolesValid(orgId);
   });
@@ -195,7 +219,11 @@ describe("createTicketState (D-03, D-14)", () => {
     const { admin } = await seedOrg();
     for (const key of STATE_COLOR_KEYS) {
       expect(
-        await createTicketState(prisma, admin, { group: "CLOSED", name: `Colour ${key}`, colorToken: key }),
+        await createTicketState(prisma, admin, {
+          group: "CLOSED",
+          name: `Colour ${key}`,
+          colorToken: key,
+        }),
       ).toMatchObject({ ok: true, state: { colorToken: key } });
     }
   });
@@ -206,8 +234,15 @@ describe("updateTicketState (D-03, D-14)", () => {
     const { orgId, admin } = await seedOrg();
     const pendingId = await stateIdFor(orgId, "PENDING");
     expect(
-      await updateTicketState(prisma, admin, { stateId: pendingId, name: " On hold ", colorToken: "red" }),
-    ).toMatchObject({ ok: true, state: { id: pendingId, name: "On hold", colorToken: "red", group: "PENDING" } });
+      await updateTicketState(prisma, admin, {
+        stateId: pendingId,
+        name: " On hold ",
+        colorToken: "red",
+      }),
+    ).toMatchObject({
+      ok: true,
+      state: { id: pendingId, name: "On hold", colorToken: "red", group: "PENDING" },
+    });
     expect(
       await updateTicketState(prisma, admin, { stateId: pendingId, colorToken: "teal" }),
     ).toMatchObject({ ok: true, state: { name: "On hold", colorToken: "teal" } });
@@ -220,22 +255,30 @@ describe("updateTicketState (D-03, D-14)", () => {
       ok: false,
       error: "DUPLICATE_NAME",
     });
-    expect(await updateTicketState(prisma, admin, { stateId: openId, name: "OPEN" })).toMatchObject({
-      ok: true,
-      state: { name: "OPEN" },
-    });
+    expect(await updateTicketState(prisma, admin, { stateId: openId, name: "OPEN" })).toMatchObject(
+      {
+        ok: true,
+        state: { name: "OPEN" },
+      },
+    );
   });
 
   it("refuses a soft-deleted state as STATE_NOT_FOUND and lets its name be reused", async () => {
     const { orgId, admin } = await seedOrg();
     const pendingId = await stateIdFor(orgId, "PENDING");
-    expect(await deleteTicketState(prisma, admin, { stateId: pendingId, replacementStateId: null })).toMatchObject({ ok: true });
+    expect(
+      await deleteTicketState(prisma, admin, { stateId: pendingId, replacementStateId: null }),
+    ).toMatchObject({ ok: true });
     expect(await updateTicketState(prisma, admin, { stateId: pendingId, name: "Back" })).toEqual({
       ok: false,
       error: "STATE_NOT_FOUND",
     });
     expect(
-      await createTicketState(prisma, admin, { group: "PENDING", name: "Pending", colorToken: "amber" }),
+      await createTicketState(prisma, admin, {
+        group: "PENDING",
+        name: "Pending",
+        colorToken: "amber",
+      }),
     ).toMatchObject({ ok: true, state: { name: "Pending" } });
   });
 });
@@ -270,7 +313,9 @@ describe("moveTicketState (D-14 reorder)", () => {
       group: "OPEN",
       name: "New",
     });
-    expect(await moveTicketState(prisma, admin, { stateId: openId, direction: "down" })).toMatchObject({
+    expect(
+      await moveTicketState(prisma, admin, { stateId: openId, direction: "down" }),
+    ).toMatchObject({
       ok: true,
       position: 2,
       total: 2,
@@ -283,7 +328,9 @@ describe("moveTicketState (D-14 reorder)", () => {
     const a = await addState(orgId, "RESOLVED", "Equal A", 7);
     const b = await addState(orgId, "RESOLVED", "Equal B", 7);
     const [low, high] = [a, b].sort((p, q) => (p.id < q.id ? -1 : 1));
-    expect(await moveTicketState(prisma, admin, { stateId: high.id, direction: "up" })).toMatchObject({
+    expect(
+      await moveTicketState(prisma, admin, { stateId: high.id, direction: "up" }),
+    ).toMatchObject({
       ok: true,
       position: 2,
       total: 3,
@@ -317,7 +364,11 @@ describe("setDefaultTicketState (D-06, K40)", () => {
       name: "Open",
     });
     const after = await config(orgId);
-    expect({ ...after, updatedAt: null }).toEqual({ ...before, newStateId: openId, updatedAt: null });
+    expect({ ...after, updatedAt: null }).toEqual({
+      ...before,
+      newStateId: openId,
+      updatedAt: null,
+    });
     const ticket = await seedTicket(orgId);
     const row = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
     expect(row.stateId).toBe(openId);
@@ -350,14 +401,18 @@ describe("deleteTicketState (D-12, K41, K42)", () => {
   it("case A: soft-deletes a state no ticket and no role uses, without a replacement", async () => {
     const { orgId, admin } = await seedOrg();
     const extra = await addState(orgId, "CLOSED", "Spam");
-    expect(await deleteTicketState(prisma, admin, { stateId: extra.id, replacementStateId: null })).toEqual({
+    expect(
+      await deleteTicketState(prisma, admin, { stateId: extra.id, replacementStateId: null }),
+    ).toEqual({
       ok: true,
       movedCount: 0,
       rolesMoved: false,
       name: "Spam",
       replacementName: null,
     });
-    expect((await prisma.ticketState.findUniqueOrThrow({ where: { id: extra.id } })).deletedAt).toBeInstanceOf(Date);
+    expect(
+      (await prisma.ticketState.findUniqueOrThrow({ where: { id: extra.id } })).deletedAt,
+    ).toBeInstanceOf(Date);
     await expectRolesValid(orgId);
   });
 
@@ -368,21 +423,35 @@ describe("deleteTicketState (D-12, K41, K42)", () => {
     await addState(orgId, "RESOLVED", "Resolved two");
     await seedTicket(orgId, { status: "RESOLVED", resolvedAt: new Date() });
     const before = await snapshot(orgId);
-    expect(await deleteTicketState(prisma, admin, { stateId: resolvedId, replacementStateId: null })).toEqual({
+    expect(
+      await deleteTicketState(prisma, admin, { stateId: resolvedId, replacementStateId: null }),
+    ).toEqual({
       ok: false,
       error: "REPLACEMENT_REQUIRED",
     });
-    expect(await deleteTicketState(prisma, admin, { stateId: resolvedId, replacementStateId: closedId })).toEqual({
+    expect(
+      await deleteTicketState(prisma, admin, { stateId: resolvedId, replacementStateId: closedId }),
+    ).toEqual({
       ok: false,
       error: "REPLACEMENT_INVALID",
     });
-    expect(await deleteTicketState(prisma, admin, { stateId: resolvedId, replacementStateId: resolvedId })).toEqual({
+    expect(
+      await deleteTicketState(prisma, admin, {
+        stateId: resolvedId,
+        replacementStateId: resolvedId,
+      }),
+    ).toEqual({
       ok: false,
       error: "REPLACEMENT_INVALID",
     });
     const other = await seedOrg();
     const foreign = await addState(other.orgId, "RESOLVED", "Foreign resolved");
-    expect(await deleteTicketState(prisma, admin, { stateId: resolvedId, replacementStateId: foreign.id })).toEqual({
+    expect(
+      await deleteTicketState(prisma, admin, {
+        stateId: resolvedId,
+        replacementStateId: foreign.id,
+      }),
+    ).toEqual({
       ok: false,
       error: "REPLACEMENT_INVALID",
     });
@@ -392,7 +461,9 @@ describe("deleteTicketState (D-12, K41, K42)", () => {
   it("refuses deleting the last CLOSED state as LAST_IN_GROUP", async () => {
     const { orgId, admin } = await seedOrg();
     const closedId = await stateIdFor(orgId, "CLOSED");
-    expect(await deleteTicketState(prisma, admin, { stateId: closedId, replacementStateId: null })).toEqual({
+    expect(
+      await deleteTicketState(prisma, admin, { stateId: closedId, replacementStateId: null }),
+    ).toEqual({
       ok: false,
       error: "LAST_IN_GROUP",
     });
@@ -401,13 +472,19 @@ describe("deleteTicketState (D-12, K41, K42)", () => {
   it("lets PENDING become empty, and a second delete is STATE_NOT_FOUND", async () => {
     const { orgId, admin } = await seedOrg();
     const pendingId = await stateIdFor(orgId, "PENDING");
-    expect(await deleteTicketState(prisma, admin, { stateId: pendingId, replacementStateId: null })).toMatchObject({
+    expect(
+      await deleteTicketState(prisma, admin, { stateId: pendingId, replacementStateId: null }),
+    ).toMatchObject({
       ok: true,
       movedCount: 0,
     });
-    expect((await listActiveStates(prisma, orgId)).filter((s) => s.group === "PENDING")).toEqual([]);
+    expect((await listActiveStates(prisma, orgId)).filter((s) => s.group === "PENDING")).toEqual(
+      [],
+    );
     const before = await snapshot(orgId);
-    expect(await deleteTicketState(prisma, admin, { stateId: pendingId, replacementStateId: null })).toEqual({
+    expect(
+      await deleteTicketState(prisma, admin, { stateId: pendingId, replacementStateId: null }),
+    ).toEqual({
       ok: false,
       error: "STATE_NOT_FOUND",
     });
@@ -443,9 +520,15 @@ describe("deleteTicketState (D-12, K41, K42)", () => {
         slaPausedAt: true,
         slaPausedMs: true,
       } as const;
-      const before = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id }, select: cols });
+      const before = await prisma.ticket.findUniqueOrThrow({
+        where: { id: ticket.id },
+        select: cols,
+      });
       expect(
-        await deleteTicketState(prisma, admin, { stateId: fromId, replacementStateId: replacement.id }),
+        await deleteTicketState(prisma, admin, {
+          stateId: fromId,
+          replacementStateId: replacement.id,
+        }),
       ).toMatchObject({ ok: true, movedCount: 1 });
       const after = await prisma.ticket.findUniqueOrThrow({
         where: { id: ticket.id },
@@ -474,7 +557,10 @@ describe("listStatesForSettings (D-01, UI-SPEC 1a)", () => {
       ["Closed", "CLOSED", 0, ["autoClose", "mergeClose"]],
     ]);
     expect(await listStatesForSettings(prisma, member)).toMatchObject({ ok: true, isAdmin: false });
-    expect(await listStatesForSettings(prisma, removed)).toEqual({ ok: false, error: "membership_ended" });
+    expect(await listStatesForSettings(prisma, removed)).toEqual({
+      ok: false,
+      error: "membership_ended",
+    });
   });
 
   it("never returns another organization's states", async () => {
@@ -505,9 +591,17 @@ describe("the admin gate and organization isolation, per operation (D-01, AIDA-9
     const b = await seedOrg();
     const before = await snapshot(a.orgId);
     const raw = { group: "OPEN", name: "Gate", colorToken: "blue" };
-    expect(await createTicketState(prisma, a.removed, raw)).toEqual({ ok: false, error: "MEMBERSHIP_ENDED" });
-    expect(await createTicketState(prisma, a.member, raw)).toEqual({ ok: false, error: "NOT_ALLOWED" });
-    expect(await createTicketState(prisma, { userId: b.admin.userId, orgId: a.orgId }, raw)).toEqual({
+    expect(await createTicketState(prisma, a.removed, raw)).toEqual({
+      ok: false,
+      error: "MEMBERSHIP_ENDED",
+    });
+    expect(await createTicketState(prisma, a.member, raw)).toEqual({
+      ok: false,
+      error: "NOT_ALLOWED",
+    });
+    expect(
+      await createTicketState(prisma, { userId: b.admin.userId, orgId: a.orgId }, raw),
+    ).toEqual({
       ok: false,
       error: "MEMBERSHIP_ENDED",
     });
@@ -516,7 +610,10 @@ describe("the admin gate and organization isolation, per operation (D-01, AIDA-9
 
   it("updateTicketState", async () => {
     await expectGate(async (actor, orgId) =>
-      updateTicketState(prisma, actor, { stateId: await stateIdFor(orgId, "OPEN"), name: "Hacked" }),
+      updateTicketState(prisma, actor, {
+        stateId: await stateIdFor(orgId, "OPEN"),
+        name: "Hacked",
+      }),
     );
   });
 
@@ -534,17 +631,25 @@ describe("the admin gate and organization isolation, per operation (D-01, AIDA-9
 
   it("deleteTicketState", async () => {
     await expectGate(async (actor, orgId) =>
-      deleteTicketState(prisma, actor, { stateId: await stateIdFor(orgId, "PENDING"), replacementStateId: null }),
+      deleteTicketState(prisma, actor, {
+        stateId: await stateIdFor(orgId, "PENDING"),
+        replacementStateId: null,
+      }),
     );
   });
 
   it("listStatesForSettings refuses a removed member and an outsider", async () => {
     const a = await seedOrg();
     const b = await seedOrg();
-    expect(await listStatesForSettings(prisma, a.removed)).toEqual({ ok: false, error: "membership_ended" });
-    expect(await listStatesForSettings(prisma, { userId: b.admin.userId, orgId: a.orgId })).toEqual({
+    expect(await listStatesForSettings(prisma, a.removed)).toEqual({
       ok: false,
       error: "membership_ended",
     });
+    expect(await listStatesForSettings(prisma, { userId: b.admin.userId, orgId: a.orgId })).toEqual(
+      {
+        ok: false,
+        error: "membership_ended",
+      },
+    );
   });
 });

@@ -39,7 +39,13 @@ async function adminClient(): Promise<{ client: pg.Client; pid: number }> {
 async function orgWithTriage(): Promise<{ orgId: string; newId: string; triageId: string }> {
   const { orgId } = await seedOrgWithMembers(prisma, ["owner"]);
   const triage = await prisma.ticketState.create({
-    data: { organizationId: orgId, name: "Triage", colorToken: "teal", group: "OPEN", sortOrder: 5 },
+    data: {
+      organizationId: orgId,
+      name: "Triage",
+      colorToken: "teal",
+      group: "OPEN",
+      sortOrder: 5,
+    },
   });
   return { orgId, newId: await stateIdFor(orgId, "NEW"), triageId: triage.id };
 }
@@ -112,7 +118,10 @@ async function deleteWithReplacement(
 }
 
 async function stateOf(ticketId: string): Promise<string> {
-  const row = await prisma.ticket.findUniqueOrThrow({ where: { id: ticketId }, select: { stateId: true } });
+  const row = await prisma.ticket.findUniqueOrThrow({
+    where: { id: ticketId },
+    select: { stateId: true },
+  });
   return row.stateId;
 }
 

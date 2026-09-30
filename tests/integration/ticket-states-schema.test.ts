@@ -48,7 +48,13 @@ const DEFAULT_STATES = [
   { name: "New", group: "OPEN", colorToken: "indigo-filled", sortOrder: 0, legacyStatus: "NEW" },
   { name: "Open", group: "OPEN", colorToken: "indigo", sortOrder: 1, legacyStatus: "OPEN" },
   { name: "Pending", group: "PENDING", colorToken: "amber", sortOrder: 2, legacyStatus: "PENDING" },
-  { name: "Resolved", group: "RESOLVED", colorToken: "green", sortOrder: 3, legacyStatus: "RESOLVED" },
+  {
+    name: "Resolved",
+    group: "RESOLVED",
+    colorToken: "green",
+    sortOrder: 3,
+    legacyStatus: "RESOLVED",
+  },
   { name: "Closed", group: "CLOSED", colorToken: "gray", sortOrder: 4, legacyStatus: "CLOSED" },
 ] as const;
 
@@ -173,7 +179,13 @@ describe("Phase 12.1 shared state reads (ticket-states.ts)", () => {
     const byName = await statesByName(orgId);
     const openId = byName.get("Open")?.id as string;
     const triage = await prisma.ticketState.create({
-      data: { organizationId: orgId, name: "Triage", colorToken: "teal", group: "OPEN", sortOrder: 1 },
+      data: {
+        organizationId: orgId,
+        name: "Triage",
+        colorToken: "teal",
+        group: "OPEN",
+        sortOrder: 1,
+      },
     });
     const gone = await prisma.ticketState.create({
       data: {
@@ -335,9 +347,13 @@ describe("Phase 12.1 schema: organization ownership (D-04, D-05)", () => {
     const ticket = await seedTicket(orgId, { status: "PENDING" });
     const pending = await stateIdFor(orgId, "PENDING");
     const resolved = await stateIdFor(orgId, "RESOLVED");
-    const byTicket = await rejection(prisma.$executeRaw`DELETE FROM "TicketState" WHERE id = ${pending}`);
+    const byTicket = await rejection(
+      prisma.$executeRaw`DELETE FROM "TicketState" WHERE id = ${pending}`,
+    );
     expect(byTicket).toContain("Ticket_organizationId_stateId_fkey");
-    const byRole = await rejection(prisma.$executeRaw`DELETE FROM "TicketState" WHERE id = ${resolved}`);
+    const byRole = await rejection(
+      prisma.$executeRaw`DELETE FROM "TicketState" WHERE id = ${resolved}`,
+    );
     expect(byRole).toContain("TicketStateConfig_organizationId_resolveStateId_fkey");
     expect(await prisma.ticket.count({ where: { id: ticket.id, stateId: pending } })).toBe(1);
   });
@@ -365,7 +381,9 @@ describe("Phase 12.1 schema: names, checks and the group fence (D-03, K42)", () 
 
   it("refuses a bad name, colour key or legacy key, and a negative pause sum", async () => {
     const orgId = await freshOrg();
-    expect(await rejection(insertState(orgId, { name: "  Waiting" }))).toContain("TicketState_name_check");
+    expect(await rejection(insertState(orgId, { name: "  Waiting" }))).toContain(
+      "TicketState_name_check",
+    );
     expect(await rejection(insertState(orgId, { name: "" }))).toContain("TicketState_name_check");
     expect(await rejection(insertState(orgId, { name: "x".repeat(41) }))).toContain(
       "TicketState_name_check",
@@ -374,12 +392,14 @@ describe("Phase 12.1 schema: names, checks and the group fence (D-03, K42)", () 
     expect(await rejection(insertState(orgId, { name: "Violet", colorToken: "violet" }))).toContain(
       "TicketState_color_token_check",
     );
-    expect(await rejection(insertState(orgId, { name: "Archive", legacyStatus: "ARCHIVED" }))).toContain(
-      "TicketState_legacy_status_check",
-    );
+    expect(
+      await rejection(insertState(orgId, { name: "Archive", legacyStatus: "ARCHIVED" })),
+    ).toContain("TicketState_legacy_status_check");
     const ticket = await seedTicket(orgId);
     expect(
-      await rejection(prisma.$executeRaw`UPDATE "Ticket" SET "slaPausedMs" = -1 WHERE id = ${ticket.id}`),
+      await rejection(
+        prisma.$executeRaw`UPDATE "Ticket" SET "slaPausedMs" = -1 WHERE id = ${ticket.id}`,
+      ),
     ).toContain("Ticket_sla_paused_ms_check");
   });
 
@@ -403,9 +423,16 @@ describe("Phase 12.1 schema: names, checks and the group fence (D-03, K42)", () 
         "group" = 'PENDING'
       WHERE id = ${pending}`;
     const row = await prisma.ticketState.findUniqueOrThrow({ where: { id: pending } });
-    expect(row).toMatchObject({ name: "Waiting", colorToken: "orange", sortOrder: 7, group: "PENDING" });
+    expect(row).toMatchObject({
+      name: "Waiting",
+      colorToken: "orange",
+      sortOrder: 7,
+      group: "PENDING",
+    });
 
-    const triggers = await prisma.$queryRaw<{ relname: string; proname: string; tgenabled: string }[]>`
+    const triggers = await prisma.$queryRaw<
+      { relname: string; proname: string; tgenabled: string }[]
+    >`
       SELECT c.relname, p.proname, t.tgenabled::text AS tgenabled
       FROM pg_trigger t
       JOIN pg_class c ON c.oid = t.tgrelid
@@ -424,7 +451,9 @@ describe("Phase 12.1 schema: the seed function and the trigger (D-07 amended, K4
     expect(await prisma.ticketState.count({ where: { organizationId: orgId } })).toBe(5);
     expect(await prisma.ticketStateConfig.count({ where: { organizationId: orgId } })).toBe(1);
 
-    const triggers = await prisma.$queryRaw<{ relname: string; proname: string; tgenabled: string }[]>`
+    const triggers = await prisma.$queryRaw<
+      { relname: string; proname: string; tgenabled: string }[]
+    >`
       SELECT c.relname, p.proname, t.tgenabled::text AS tgenabled
       FROM pg_trigger t
       JOIN pg_class c ON c.oid = t.tgrelid
@@ -467,7 +496,9 @@ describe("Phase 12.1 schema: scopedDb isolation of the new models (D-01)", () =>
   it("scopedDb(orgB) never reads, counts, updates or deletes organization A's states", async () => {
     const orgA = await freshOrg();
     const orgB = await freshOrg();
-    const aIds = (await prisma.ticketState.findMany({ where: { organizationId: orgA } })).map((s) => s.id);
+    const aIds = (await prisma.ticketState.findMany({ where: { organizationId: orgA } })).map(
+      (s) => s.id,
+    );
     const dbB = scopedDb(orgB);
 
     const seen = await dbB.ticketState.findMany({ where: { id: { in: aIds } } });
@@ -492,11 +523,15 @@ describe("Phase 12.1 schema: scopedDb isolation of the new models (D-01)", () =>
   it("scopedDb(orgB) never reads or updates organization A's configuration row", async () => {
     const orgA = await freshOrg();
     const orgB = await freshOrg();
-    const before = await prisma.ticketStateConfig.findUniqueOrThrow({ where: { organizationId: orgA } });
+    const before = await prisma.ticketStateConfig.findUniqueOrThrow({
+      where: { organizationId: orgA },
+    });
     const dbB = scopedDb(orgB);
 
     // A's row selected by its own role ids is invisible to B.
-    const read = await dbB.ticketStateConfig.findFirst({ where: { newStateId: before.newStateId } });
+    const read = await dbB.ticketStateConfig.findFirst({
+      where: { newStateId: before.newStateId },
+    });
     expect(read).toBeNull();
     // A caller-supplied organizationId is overridden by the scope: B only ever sees its own row.
     const overridden = await dbB.ticketStateConfig.findFirst({ where: { organizationId: orgA } });
@@ -509,7 +544,9 @@ describe("Phase 12.1 schema: scopedDb isolation of the new models (D-01)", () =>
       data: { updatedAt: new Date(0) },
     });
     expect(updated.count).toBe(0);
-    const after = await prisma.ticketStateConfig.findUniqueOrThrow({ where: { organizationId: orgA } });
+    const after = await prisma.ticketStateConfig.findUniqueOrThrow({
+      where: { organizationId: orgA },
+    });
     expect(after).toEqual(before);
   });
 });
@@ -542,7 +579,9 @@ describe("Phase 12.1 keeps earlier hand-written objects (T-12.1-03)", () => {
   });
 
   it("the generated searchVector columns and their GIN indexes are unchanged", async () => {
-    const columns = await prisma.$queryRaw<{ relname: string; attgenerated: string; expr: string }[]>`
+    const columns = await prisma.$queryRaw<
+      { relname: string; attgenerated: string; expr: string }[]
+    >`
       SELECT c.relname, a.attgenerated::text AS attgenerated, pg_get_expr(d.adbin, d.adrelid) AS expr
       FROM pg_attribute a
       JOIN pg_class c ON c.oid = a.attrelid

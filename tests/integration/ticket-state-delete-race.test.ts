@@ -113,7 +113,12 @@ describe("state deletion races (D-15 amended)", () => {
 
     const agentPid = deferred<number>();
     const mutation = runTicketMutation(
-      { actor: agent, ticketIds: [ticket.id], op: { kind: "state", stateId: doomed.id }, mode: "single" },
+      {
+        actor: agent,
+        ticketIds: [ticket.id],
+        op: { kind: "state", stateId: doomed.id },
+        mode: "single",
+      },
       { onTransactionStart: async (tx) => agentPid.resolve(await backendPid(tx)) },
     );
     await waitForBlockedBy(prisma, holder, [await agentPid.promise]);
@@ -136,7 +141,12 @@ describe("state deletion races (D-15 amended)", () => {
     const agentPid = deferred<number>();
     const release = deferred<void>();
     const mutation = runTicketMutation(
-      { actor: agent, ticketIds: [ticket.id], op: { kind: "state", stateId: doomed.id }, mode: "single" },
+      {
+        actor: agent,
+        ticketIds: [ticket.id],
+        op: { kind: "state", stateId: doomed.id },
+        mode: "single",
+      },
       {
         afterItem: async (tx, id) => {
           if (id !== ticket.id) return;
@@ -181,7 +191,12 @@ describe("state deletion races (D-15 amended)", () => {
     const agentPid = deferred<number>();
     const release = deferred<void>();
     const mutation = runTicketMutation(
-      { actor: agent, ticketIds: [ticket.id], op: { kind: "priority", priority: "HIGH" }, mode: "single" },
+      {
+        actor: agent,
+        ticketIds: [ticket.id],
+        op: { kind: "priority", priority: "HIGH" },
+        mode: "single",
+      },
       {
         afterItem: async (tx, id) => {
           if (id !== ticket.id) return;
@@ -218,7 +233,12 @@ describe("state deletion races (D-15 amended)", () => {
     const agentPid = deferred<number>();
     const release = deferred<void>();
     const mutation = runTicketMutation(
-      { actor: agent, ticketIds: [ticket.id], op: { kind: "state", stateId: elsewhere.id }, mode: "single" },
+      {
+        actor: agent,
+        ticketIds: [ticket.id],
+        op: { kind: "state", stateId: elsewhere.id },
+        mode: "single",
+      },
       {
         afterItem: async (tx, id) => {
           if (id !== ticket.id) return;
@@ -245,7 +265,10 @@ describe("state deletion races (D-15 amended)", () => {
     expect((await ticketRow(ticket.id)).stateId).toBe(elsewhere.id);
     const audits = await statusAudits(ticket.id);
     expect(audits).toHaveLength(1);
-    expect(audits[0]).toMatchObject({ actorUserId: agent.userId, after: { stateId: elsewhere.id } });
+    expect(audits[0]).toMatchObject({
+      actorUserId: agent.userId,
+      after: { stateId: elsewhere.id },
+    });
   });
 
   it("Race 4: a customer reply holds the config share lock; deleting the reopen state waits, then moves the reopened ticket", async () => {

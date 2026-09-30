@@ -95,7 +95,7 @@ export async function shareLockActiveState(
   return rows[0] ?? null;
 }
 
-/** The legacy TicketStatus key of the five migrated or default states (old URLs only, D-09). */
+/** The legacy status key of the five migrated or default states (old URLs only, D-09). */
 export type LegacyStatusKey = "NEW" | "OPEN" | "PENDING" | "RESOLVED" | "CLOSED";
 
 export const LEGACY_STATUS_KEYS: readonly LegacyStatusKey[] = [

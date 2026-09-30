@@ -90,7 +90,10 @@ export interface StateAdminHooks {
   /** Awaited right after the changed state row(s) are locked. */
   afterStateLock?(tx: Prisma.TransactionClient): Promise<void> | void;
   /** Deletion only: awaited right after the deleted state's tickets are locked. */
-  afterTicketsLocked?(tx: Prisma.TransactionClient, ticketIds: readonly string[]): Promise<void> | void;
+  afterTicketsLocked?(
+    tx: Prisma.TransactionClient,
+    ticketIds: readonly string[],
+  ): Promise<void> | void;
   /** Awaited as the last step before the transaction returns (and commits). */
   beforeCommit?(tx: Prisma.TransactionClient): Promise<void> | void;
   /** The effective time, read after the locks. Defaults to new Date(). */
