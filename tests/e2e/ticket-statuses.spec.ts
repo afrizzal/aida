@@ -574,4 +574,47 @@ test.describe
       await expect(setDefault).toHaveAccessibleDescription(DEFAULT_UNAVAILABLE_NOT_OPEN);
       await page.keyboard.press("Escape");
     });
+
+    // Review UI-WR-c4: a second "Use for new tickets" while the first is pending is ignored.
+    test("Use for new tickets ignores a second request while the first is pending", async ({
+      page,
+    }) => {
+      const first = await insertState("OPEN", "Default race A");
+      const second = await insertState("OPEN", "Default race B");
+      await gotoReady(page, "/settings/statuses");
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let actionPosts = 0;
+      await page.route(
+        (url) => url.pathname === "/settings/statuses",
+        async (route) => {
+          const request = route.request();
+          if (request.method() !== "POST" || !request.headers()["next-action"]) {
+            return route.fallback();
+          }
+          actionPosts++;
+          await gate;
+          return route.fallback();
+        },
+      );
+
+      await page.getByRole("button", { name: rowOptionsAriaLabel(first.name) }).click();
+      await page.getByRole("menuitem", { name: ROW_MENU_SET_DEFAULT, exact: true }).click();
+      await expect.poll(() => actionPosts).toBe(1);
+      await page.getByRole("button", { name: rowOptionsAriaLabel(second.name) }).click();
+      const item = page.getByRole("menuitem", { name: ROW_MENU_SET_DEFAULT, exact: true });
+      await expect(item).toHaveAttribute("aria-disabled", "true");
+      await item.click({ force: true });
+      release();
+      await expect(page.getByText(defaultToast(first.name))).toBeVisible();
+      await expect(page.getByText(defaultToast(second.name))).toHaveCount(0);
+      expect(actionPosts).toBe(1);
+      const config = await prisma.ticketStateConfig.findUniqueOrThrow({
+        where: { organizationId: orgId },
+      });
+      expect(config.newStateId).toBe(first.id);
+      await page.unrouteAll({ behavior: "wait" });
+    });
   });

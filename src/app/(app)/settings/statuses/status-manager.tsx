@@ -157,6 +157,10 @@ export function StatusManager({
   const dialogReturnRef = useRef<FocusKey[]>([]);
 
   const moveBusy = pendingMove !== null || isRefreshing || movesLocked;
+  // Review UI-WR-c4: one set-default at a time, so toasts and focus cannot finish out of order.
+  // The ref is the guard; the state only renders the items aria-disabled while it is pending.
+  const defaultPendingRef = useRef(false);
+  const [defaultPending, setDefaultPending] = useState(false);
 
   const focusFirst = (keys: readonly FocusKey[]) => focusFirstIn(containerRef.current, keys);
 
@@ -206,8 +210,18 @@ export function StatusManager({
   }
 
   async function handleSetDefault(state: SettingsStateRow) {
+    if (defaultPendingRef.current) return;
+    defaultPendingRef.current = true;
     setGroupCallout(state.group, null);
-    const result = await setDefaultStatusAction({ stateId: state.id }).catch(() => null);
+    // Rendered after the menu's select event, not inside it: Radix flushes that event
+    // synchronously, and re-rendering the closing menu there dropped focus to the body.
+    queueMicrotask(() => setDefaultPending(true));
+    const result = await setDefaultStatusAction({ stateId: state.id })
+      .catch(() => null)
+      .finally(() => {
+        defaultPendingRef.current = false;
+        setDefaultPending(false);
+      });
     if (result === null || !result.ok) {
       setGroupCallout(
         state.group,
@@ -332,6 +346,7 @@ export function StatusManager({
                       moveBusy={moveBusy}
                       pendingDirection={pendingMove?.id === state.id ? pendingMove.direction : null}
                       defaultReason={defaultUnavailableReason(state, defaultStateId)}
+                      defaultBusy={defaultPending}
                       deleteReason={deleteUnavailableReason(state, groupStates)}
                       onMove={(direction) => handleMove(state, direction)}
                       onEdit={() =>
@@ -399,6 +414,7 @@ function StatusRow({
   moveBusy,
   pendingDirection,
   defaultReason,
+  defaultBusy,
   deleteReason,
   onMove,
   onEdit,
@@ -413,6 +429,8 @@ function StatusRow({
   moveBusy: boolean;
   pendingDirection: Direction | null;
   defaultReason: string | null;
+  /** A set-default is pending on some row: the item is aria-disabled until it settles. */
+  defaultBusy: boolean;
   deleteReason: string | null;
   onMove: (direction: Direction) => void;
   onEdit: () => void;
@@ -421,6 +439,8 @@ function StatusRow({
 }) {
   const defaultReasonId = `default-reason-${state.id}`;
   const deleteReasonId = `delete-reason-${state.id}`;
+  const defaultUnavailable = defaultReason !== null || defaultBusy;
+  const optionsRef = useRef<HTMLButtonElement>(null);
 
   return (
     <li className="flex min-h-12 flex-wrap items-center gap-2 px-4 py-2">
@@ -457,13 +477,26 @@ function StatusRow({
                 variant="ghost"
                 size="icon"
                 className="size-8"
+                ref={optionsRef}
                 aria-label={rowOptionsAriaLabel(state.name)}
                 data-focus-key={`options-${state.id}`}
               >
                 <Ellipsis className="size-4" aria-hidden="true" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-[260px]">
+            <DropdownMenuContent
+              align="end"
+              className="w-[260px]"
+              onCloseAutoFocus={(event) => {
+                // A menu still closing can take focus back (Radix focuses the content when the
+                // pointer leaves an item), and its unmount then drops focus to the body. Only in
+                // that case focus returns to this row's Options button; focus anywhere else stays.
+                const active = document.activeElement;
+                if (active && active !== document.body) return;
+                event.preventDefault();
+                optionsRef.current?.focus();
+              }}
+            >
               <DropdownMenuItem className="text-[13px]" onSelect={onEdit}>
                 <Pencil aria-hidden="true" />
                 {ROW_MENU_EDIT}
@@ -472,11 +505,11 @@ function StatusRow({
                   so the reason could never be heard (review UI-WR-c1). The reason line is
                   aria-hidden, so it is read once, as the description, not also in the name. */}
               <DropdownMenuItem
-                className={cn("items-start text-[13px]", defaultReason && "opacity-50")}
-                aria-disabled={defaultReason ? true : undefined}
+                className={cn("items-start text-[13px]", defaultUnavailable && "opacity-50")}
+                aria-disabled={defaultUnavailable ? true : undefined}
                 aria-describedby={defaultReason ? defaultReasonId : undefined}
                 onSelect={(event) => {
-                  if (defaultReason) {
+                  if (defaultUnavailable) {
                     event.preventDefault();
                     return;
                   }
