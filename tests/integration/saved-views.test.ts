@@ -20,9 +20,6 @@ function actorOf(orgId: string, userId: string): SavedViewActor {
   return { userId, orgId };
 }
 
-/** The pre-12.1 filter key, which the version 2 grammar refuses. */
-const LEGACY_FILTER_KEY = "statuses";
-
 /** The ids of the organization's migrated states for the given keys, in the given order. */
 function ids(orgId: string, ...keys: LegacyStatusKey[]): Promise<string[]> {
   return Promise.all(keys.map((key) => stateIdFor(orgId, key)));
@@ -387,8 +384,9 @@ describe("saved views: edit, delete and permissions (D-04)", () => {
       }),
     ).toMatchObject({ ok: true });
     for (const filters of [
-      // The version 1 key is refused, never mapped (12.1 D-09: only version 2 is accepted).
-      { [LEGACY_FILTER_KEY]: ["OPEN"] },
+      // Intended negative case: the pre-12.1 version 1 key, written literally, is refused and
+      // never mapped (12.1 D-09: only version 2 is accepted; review IN-b2).
+      { statuses: ["OPEN"] },
       { stateIds: [open, open] },
       { q: "x".repeat(201) },
       { unknownKey: 1 },
