@@ -112,7 +112,7 @@ export async function closeResolvedTicketIfQuiet(
   const target = await shareLockActiveState(tx, orgId, autoCloseStateId);
   // The service keeps the role inside CLOSED, but no database rule does: a target in another
   // group would skip the effects of planStateTransition, so it is refused (review IN-a2-2).
-  if (!target || target.group !== "CLOSED") {
+  if (target?.group !== "CLOSED") {
     throw new AutoCloseStateUnavailableError(orgId, autoCloseStateId);
   }
 
