@@ -8,7 +8,8 @@ import { recordAuditEvent } from "../audit/record-audit-event";
 import { prisma } from "../db";
 import { complete } from "../llm/complete";
 import { scopedDb } from "../scoped-db";
-import { computeDueTimestamps, getSlaTargets } from "../tickets/sla";
+import { getSlaTargets } from "../tickets/sla";
+import { pausedDueTimestamps } from "../tickets/state-transition";
 import { buildTriageUserPrompt, TRIAGE_SYSTEM_PROMPT } from "./prompt";
 import { TriageResultSchema } from "./schema";
 
@@ -53,11 +54,6 @@ export async function runTriage(ticketId: string): Promise<void> {
     // WRITE with the race guard (Pitfall 5). category/sentiment/language never conflict
     // (nothing else sets them); priority MAY conflict with a fast manual changePriority.
     const targets = await getSlaTargets(db, output.priority);
-    const { firstResponseDueAt, resolutionDueAt } = computeDueTimestamps(
-      loaded.createdAt,
-      targets.firstResponseMinutes,
-      targets.resolutionMinutes,
-    );
 
     const classification = {
       triageCategory: output.category,
@@ -69,13 +65,22 @@ export async function runTriage(ticketId: string): Promise<void> {
     await prisma.$transaction(async (tx) => {
       // The ticket row lock first: the mutation service holds it from its lock until its commit,
       // audit row included, so after this wait the count below sees every committed decision.
-      await tx.$queryRaw`
-        SELECT "id" FROM "Ticket"
+      // The closed pauses are read under that lock too: the deadlines count createdAt plus
+      // slaPausedMs, as a priority change does; an open pause (slaPausedAt) is added by the
+      // transition that closes it (D-16, Codex diff critique D1).
+      const locked = await tx.$queryRaw<{ slaPausedMs: bigint }[]>`
+        SELECT "slaPausedMs" FROM "Ticket"
         WHERE "id" = ${ticketId} AND "organizationId" = ${orgId}
         FOR UPDATE
       `;
       const agentDecided =
         (await countPriorityDecisions(tx, orgId, ticketId)) !== priorityDecisionsBefore;
+      const { firstResponseDueAt, resolutionDueAt } = pausedDueTimestamps(
+        loaded.createdAt,
+        BigInt(locked[0]?.slaPausedMs ?? 0),
+        targets.firstResponseMinutes,
+        targets.resolutionMinutes,
+      );
 
       const guarded = agentDecided
         ? { count: 0 }

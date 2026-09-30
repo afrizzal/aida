@@ -20,8 +20,14 @@ import { prisma } from "@/lib/db";
 import { saveLlmSettings } from "@/lib/llm/settings";
 import { scopedDb } from "@/lib/scoped-db";
 import { runTicketMutation } from "@/lib/tickets/mutations";
+import { getSlaTargets } from "@/lib/tickets/sla";
 import { runTriage } from "@/lib/triage/run-triage";
-import { seedOrgWithMembers, seedTicket } from "../support/inbox-fixtures";
+import {
+  type LegacyStatusKey,
+  seedOrgWithMembers,
+  seedTicket,
+  stateIdFor,
+} from "../support/inbox-fixtures";
 
 async function seedTriageCase() {
   const { orgId, users } = await seedOrgWithMembers(prisma, ["admin"]);
@@ -110,5 +116,97 @@ describe("runTriage respects an agent's priority chosen during the model call", 
       triageStatus: "COMPLETED",
       triageCategory: "BILLING",
     });
+  });
+});
+
+// Codex diff critique D1 (Phase 12.1, D-16): the deadlines triage writes count the closed pauses
+// (slaPausedMs) exactly as a priority change does; an open pause is added when it closes.
+describe("runTriage counts SLA pauses in the deadlines it writes", () => {
+  const MIN = 60_000;
+  const at = (base: Date, ms: number) => new Date(base.getTime() + ms);
+
+  async function moveTo(
+    actor: { userId: string; orgId: string },
+    ticketId: string,
+    key: LegacyStatusKey,
+    when: Date,
+  ): Promise<void> {
+    const stateId = await stateIdFor(actor.orgId, key);
+    const result = await runTicketMutation(
+      { actor, ticketIds: [ticketId], op: { kind: "state", stateId }, mode: "single" },
+      { clock: () => when },
+    );
+    expect(result).toMatchObject({ ok: true, count: 1 });
+  }
+
+  function readSla(id: string) {
+    return prisma.ticket.findUniqueOrThrow({
+      where: { id },
+      select: {
+        createdAt: true,
+        priority: true,
+        slaPausedAt: true,
+        slaPausedMs: true,
+        firstResponseDueAt: true,
+        resolutionDueAt: true,
+      },
+    });
+  }
+
+  it("after a closed pause the deadlines start at createdAt plus slaPausedMs", async () => {
+    const { orgId, actor, ticketId } = await seedTriageCase();
+    const { createdAt } = await readSla(ticketId);
+    await moveTo(actor, ticketId, "PENDING", at(createdAt, 5 * MIN));
+    await moveTo(actor, ticketId, "OPEN", at(createdAt, 65 * MIN));
+    expect((await readSla(ticketId)).slaPausedMs).toBe(BigInt(60 * MIN));
+    duringModelCall = null;
+    modelPriority = "URGENT";
+
+    await runTriage(ticketId);
+
+    const targets = await getSlaTargets(scopedDb(orgId), "URGENT");
+    const after = await readSla(ticketId);
+    expect(after.priority).toBe("URGENT");
+    expect(after.firstResponseDueAt.getTime()).toBe(
+      createdAt.getTime() + 60 * MIN + targets.firstResponseMinutes * MIN,
+    );
+    expect(after.resolutionDueAt.getTime()).toBe(
+      createdAt.getTime() + 60 * MIN + targets.resolutionMinutes * MIN,
+    );
+  });
+
+  it("during an open pause the closed pauses count now and the open one when it closes", async () => {
+    const { orgId, actor, ticketId } = await seedTriageCase();
+    const { createdAt } = await readSla(ticketId);
+    await moveTo(actor, ticketId, "PENDING", at(createdAt, 5 * MIN));
+    await moveTo(actor, ticketId, "OPEN", at(createdAt, 25 * MIN));
+    const pauseAt = at(createdAt, 40 * MIN);
+    await moveTo(actor, ticketId, "PENDING", pauseAt);
+    duringModelCall = null;
+    modelPriority = "URGENT";
+
+    await runTriage(ticketId);
+
+    const targets = await getSlaTargets(scopedDb(orgId), "URGENT");
+    const paused = await readSla(ticketId);
+    expect(paused.priority).toBe("URGENT");
+    expect(paused.slaPausedAt?.getTime()).toBe(pauseAt.getTime());
+    expect(paused.slaPausedMs).toBe(BigInt(20 * MIN));
+    expect(paused.firstResponseDueAt.getTime()).toBe(
+      createdAt.getTime() + 20 * MIN + targets.firstResponseMinutes * MIN,
+    );
+    expect(paused.resolutionDueAt.getTime()).toBe(
+      createdAt.getTime() + 20 * MIN + targets.resolutionMinutes * MIN,
+    );
+
+    await moveTo(actor, ticketId, "OPEN", at(pauseAt, 30 * MIN));
+    const resumed = await readSla(ticketId);
+    expect(resumed.slaPausedAt).toBeNull();
+    expect(resumed.firstResponseDueAt.getTime()).toBe(
+      createdAt.getTime() + 50 * MIN + targets.firstResponseMinutes * MIN,
+    );
+    expect(resumed.resolutionDueAt.getTime()).toBe(
+      createdAt.getTime() + 50 * MIN + targets.resolutionMinutes * MIN,
+    );
   });
 });
