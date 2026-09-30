@@ -14,6 +14,7 @@ import {
   createdToast,
   DEFAULT_BADGE,
   DEFAULT_ERROR_DELETED,
+  DEFAULT_UNAVAILABLE_NOT_OPEN,
   DELETE_STATUS_BUTTON,
   defaultToast,
   deletedAndMovedToast,
@@ -544,5 +545,33 @@ test.describe
         .getByRole("link", { name: viewName })
         .click();
       await expect(page.getByText(stripMissingSentence({ state: true }))).toBeVisible();
+    });
+
+    // Review UI-WR-c1: an unavailable menu item stays focusable (aria-disabled) and reads its
+    // reason once, as its description, not as part of its name.
+    test("unavailable menu items are reachable by keyboard and read their reason once", async ({
+      page,
+    }) => {
+      await gotoReady(page, "/settings/statuses");
+      await page.getByRole("button", { name: rowOptionsAriaLabel(MIGRATED.CLOSED.name) }).focus();
+      await page.keyboard.press("Enter");
+      const remove = page.getByRole("menuitem", { name: ROW_MENU_DELETE, exact: true });
+      await page.keyboard.press("End");
+      await expect(remove).toBeFocused();
+      await expect(remove).toHaveAttribute("aria-disabled", "true");
+      await expect(remove).toHaveAccessibleDescription(
+        deleteUnavailableLastInGroup(GROUP_LABELS.CLOSED),
+      );
+      // Choosing it does nothing: no dialog, and the menu stays open on the item.
+      await page.keyboard.press("Enter");
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(remove).toBeFocused();
+
+      const setDefault = page.getByRole("menuitem", { name: ROW_MENU_SET_DEFAULT, exact: true });
+      await page.keyboard.press("ArrowUp");
+      await expect(setDefault).toBeFocused();
+      await expect(setDefault).toHaveAttribute("aria-disabled", "true");
+      await expect(setDefault).toHaveAccessibleDescription(DEFAULT_UNAVAILABLE_NOT_OPEN);
+      await page.keyboard.press("Escape");
     });
   });

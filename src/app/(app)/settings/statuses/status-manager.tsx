@@ -468,17 +468,30 @@ function StatusRow({
                 <Pencil aria-hidden="true" />
                 {ROW_MENU_EDIT}
               </DropdownMenuItem>
+              {/* aria-disabled, not disabled: Radix drops disabled items from keyboard navigation,
+                  so the reason could never be heard (review UI-WR-c1). The reason line is
+                  aria-hidden, so it is read once, as the description, not also in the name. */}
               <DropdownMenuItem
-                className="items-start text-[13px]"
-                disabled={defaultReason !== null}
+                className={cn("items-start text-[13px]", defaultReason && "opacity-50")}
+                aria-disabled={defaultReason ? true : undefined}
                 aria-describedby={defaultReason ? defaultReasonId : undefined}
-                onSelect={onSetDefault}
+                onSelect={(event) => {
+                  if (defaultReason) {
+                    event.preventDefault();
+                    return;
+                  }
+                  onSetDefault();
+                }}
               >
                 <Star aria-hidden="true" />
                 <span className="space-y-1">
                   <span className="block">{ROW_MENU_SET_DEFAULT}</span>
                   {defaultReason && (
-                    <span id={defaultReasonId} className="block text-[12px] text-muted-foreground">
+                    <span
+                      id={defaultReasonId}
+                      aria-hidden="true"
+                      className="block text-[12px] text-muted-foreground"
+                    >
                       {defaultReason}
                     </span>
                   )}
@@ -487,18 +500,26 @@ function StatusRow({
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 variant="destructive"
-                className="items-start text-[13px]"
-                disabled={deleteReason !== null}
+                className={cn("items-start text-[13px]", deleteReason && "opacity-50")}
+                aria-disabled={deleteReason ? true : undefined}
                 aria-describedby={deleteReason ? deleteReasonId : undefined}
-                onSelect={() => {
-                  if (deleteReason === null) onDelete();
+                onSelect={(event) => {
+                  if (deleteReason) {
+                    event.preventDefault();
+                    return;
+                  }
+                  onDelete();
                 }}
               >
                 <Trash2 aria-hidden="true" />
                 <span className="space-y-1">
                   <span className="block">{ROW_MENU_DELETE}</span>
                   {deleteReason && (
-                    <span id={deleteReasonId} className="block text-[12px] text-muted-foreground">
+                    <span
+                      id={deleteReasonId}
+                      aria-hidden="true"
+                      className="block text-[12px] text-muted-foreground"
+                    >
                       {deleteReason}
                     </span>
                   )}
