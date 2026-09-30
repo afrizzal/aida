@@ -81,7 +81,9 @@ export interface CloseTicketResult {
 export class AutoCloseStateUnavailableError extends Error {
   readonly code = "AUTO_CLOSE_STATE_UNAVAILABLE";
   constructor(orgId: string, stateId: string) {
-    super(`auto-close state ${stateId} of organization ${orgId} is missing or deleted`);
+    super(
+      `auto-close state ${stateId} of organization ${orgId} is missing, deleted or not in CLOSED`,
+    );
     this.name = "AutoCloseStateUnavailableError";
   }
 }
@@ -108,7 +110,11 @@ export async function closeResolvedTicketIfQuiet(
   // Lock order: Setting (above), config, auto-close state, then the ticket row (D-15 amended).
   const { autoCloseStateId } = await readStateConfigForShare(tx, orgId);
   const target = await shareLockActiveState(tx, orgId, autoCloseStateId);
-  if (!target) throw new AutoCloseStateUnavailableError(orgId, autoCloseStateId);
+  // The service keeps the role inside CLOSED, but no database rule does: a target in another
+  // group would skip the effects of planStateTransition, so it is refused (review IN-a2-2).
+  if (!target || target.group !== "CLOSED") {
+    throw new AutoCloseStateUnavailableError(orgId, autoCloseStateId);
+  }
 
   const [locked] = await lockTicketsInIdOrder(tx, orgId, [ticketId]);
   if (!locked) return { closed: false, off: false };

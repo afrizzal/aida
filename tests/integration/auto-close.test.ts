@@ -13,6 +13,7 @@ import { readLegacyStateIds } from "@/lib/tickets/ticket-states";
 import {
   type AutoCloseHandlerOptions,
   AutoCloseRunError,
+  AutoCloseStateUnavailableError,
   autoCloseHandler,
   closeResolvedTicketIfQuiet,
 } from "@/lib/worker/jobs/auto-close";
@@ -753,6 +754,28 @@ describe("auto-close reasons about the RESOLVED group and closes into the auto-c
       expect((await ticketState(ticket.id)).key).toBe(status);
       expect(await autoClosedRows(ticket.id)).toHaveLength(0);
     }
+  });
+
+  it("refuses an auto-close role that points outside the CLOSED group (review IN-a2-2)", async () => {
+    const now = new Date();
+    const { orgId } = await seedAdminOrg();
+    await setAutoClose(orgId, "7", daysAgo(now, 30));
+    const openId = await stateIdFor(orgId, "OPEN");
+    // Only a hand edit or a bug can do this: the service keeps the role inside CLOSED.
+    await prisma.ticketStateConfig.update({
+      where: { organizationId: orgId },
+      data: { autoCloseStateId: openId },
+    });
+    const t = await resolvedTicket(orgId, daysAgo(now, 10));
+
+    await expect(
+      prisma.$transaction(
+        (tx) => closeResolvedTicketIfQuiet(tx, { orgId, ticketId: t.id, now }),
+        TX_OPTS,
+      ),
+    ).rejects.toBeInstanceOf(AutoCloseStateUnavailableError);
+    expect((await ticketState(t.id)).key).toBe("RESOLVED");
+    expect(await autoClosedRows(t.id)).toHaveLength(0);
   });
 
   it("closeResolvedTicketIfQuiet re-checks the group under the ticket lock: an Open ticket is not closed", async () => {
