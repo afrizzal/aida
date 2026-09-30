@@ -15,6 +15,7 @@ import {
   DEFAULT_BADGE,
   DEFAULT_ERROR_DELETED,
   DEFAULT_UNAVAILABLE_NOT_OPEN,
+  DELETE_ERROR_REPLACEMENT_INVALID,
   DELETE_STATUS_BUTTON,
   defaultToast,
   deletedAndMovedToast,
@@ -23,6 +24,7 @@ import {
   EDIT_STATUS_TITLE,
   FORM_CLOSE,
   GROUP_LABELS,
+  KEEP_STATUS,
   MEMBERS_NOTE,
   MOVE_AND_DELETE_BUTTON,
   moveUpAriaLabel,
@@ -616,5 +618,33 @@ test.describe
       });
       expect(config.newStateId).toBe(first.id);
       await page.unrouteAll({ behavior: "wait" });
+    });
+
+    // Review UI-WR-c5: after REPLACEMENT_INVALID the refused replacement is no longer offered.
+    test("a replacement refused as invalid is no longer offered", async ({ page }) => {
+      const target = await insertState("PENDING", "Delete refused");
+      const gone = await insertState("PENDING", "Replacement gone");
+      const ticket = await seedTicket("replacement-gone");
+      await prisma.ticket.update({ where: { id: ticket.id }, data: { stateId: target.id } });
+      await gotoReady(page, "/settings/statuses");
+      await page.getByRole("button", { name: rowOptionsAriaLabel(target.name) }).click();
+      await page.getByRole("menuitem", { name: ROW_MENU_DELETE, exact: true }).click();
+      const dialog = page.getByRole("dialog");
+      // Deleted where only the server sees it.
+      await prisma.ticketState.update({ where: { id: gone.id }, data: { deletedAt: new Date() } });
+      const select = dialog.getByLabel(REPLACEMENT_LABEL);
+      await select.click();
+      await page.getByRole("option", { name: gone.name, exact: true }).click();
+      await dialog.getByRole("button", { name: MOVE_AND_DELETE_BUTTON }).click();
+      await expect(dialog.getByRole("alert")).toContainText(DELETE_ERROR_REPLACEMENT_INVALID);
+      await expect(select).toBeFocused();
+      await select.click();
+      await expect(
+        page.getByRole("option", { name: MIGRATED.PENDING.name, exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole("option", { name: gone.name, exact: true })).toHaveCount(0);
+      await page.keyboard.press("Escape");
+      await dialog.getByRole("button", { name: KEEP_STATUS }).click();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
     });
   });

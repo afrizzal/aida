@@ -104,6 +104,7 @@ export function DeleteStatusDialog({
   replacements,
   onOpenChange,
   onDeleted,
+  onReplacementRejected,
   onCloseAutoFocus,
 }: {
   open: boolean;
@@ -112,6 +113,8 @@ export function DeleteStatusDialog({
   replacements: readonly SettingsStateRow[];
   onOpenChange: (open: boolean) => void;
   onDeleted: () => void;
+  /** The server refused the chosen replacement: the parent refreshes the page's states. */
+  onReplacementRejected: () => void;
   onCloseAutoFocus: (event: Event) => void;
 }) {
   const group = state.group;
@@ -123,6 +126,9 @@ export function DeleteStatusDialog({
   const [locked, setLocked] = useState(false);
   const [callout, setCallout] = useState<string | null>(null);
   const [focusTarget, setFocusTarget] = useState<FocusTarget | null>(null);
+  // Review UI-WR-c5: a replacement the server refused is not offered again, even before the
+  // refreshed list arrives.
+  const [rejectedIds, setRejectedIds] = useState<ReadonlySet<string>>(() => new Set());
 
   const triggerRef = useRef<HTMLButtonElement>(null);
   const keepRef = useRef<HTMLButtonElement>(null);
@@ -134,7 +140,8 @@ export function DeleteStatusDialog({
     setFocusTarget(null);
   }, [focusTarget, pending]);
 
-  const replacement = replacements.find((r) => r.id === replacementId) ?? null;
+  const options = replacements.filter((r) => !rejectedIds.has(r.id));
+  const replacement = options.find((r) => r.id === replacementId) ?? null;
   const replacementName = replacement?.name ?? REPLACEMENT_NOT_CHOSEN;
   const needsReplacement = kind !== "A";
   const destructiveDisabled = pending || locked || (needsReplacement && !replacement);
@@ -175,6 +182,9 @@ export function DeleteStatusDialog({
     }
     setCallout(refusalText(result.error, group));
     if (result.error === "REPLACEMENT_INVALID") {
+      const rejected = replacementId;
+      if (rejected) setRejectedIds((prev) => new Set(prev).add(rejected));
+      onReplacementRejected();
       setReplacementId(null);
       setFocusTarget("replacement");
       return;
@@ -254,7 +264,7 @@ export function DeleteStatusDialog({
                   <SelectValue placeholder={replacementPlaceholder(groupLabel)} />
                 </SelectTrigger>
                 <SelectContent>
-                  {replacements.map((option) => (
+                  {options.map((option) => (
                     <SelectItem key={option.id} value={option.id} className="text-[13px]">
                       <span className="flex min-w-0 items-center gap-2">
                         <StateDot colorToken={option.colorToken} />

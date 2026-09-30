@@ -380,6 +380,7 @@ export function StatusManager({
           )}
           onOpenChange={setDeleteOpen}
           onDeleted={() => handleDeleted(deleteTarget)}
+          onReplacementRejected={() => startTransition(() => router.refresh())}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             focusFirstIn(containerRef.current, dialogReturnRef.current);
