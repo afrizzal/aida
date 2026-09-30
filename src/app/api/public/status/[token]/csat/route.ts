@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod/v4";
 import { prisma } from "@/lib/db";
 import { checkRateLimit } from "@/lib/rate-limit/check-rate-limit";
+import { recordCsat } from "@/lib/tickets/record-csat";
 
 export const runtime = "nodejs";
 
@@ -61,18 +62,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
   }
   const { score, comment } = parsed.data;
 
-  // One CsatResponse per ticket — latest wins (LOCKED upsert semantics). Bare prisma with an
-  // explicit organizationId on create (no scopedDb/session on a public route).
-  await prisma.csatResponse.upsert({
-    where: { ticketId: ticket.id },
-    create: {
-      organizationId: ticket.organizationId,
-      ticketId: ticket.id,
-      score,
-      comment: comment ?? null,
-    },
-    update: { score, comment: comment ?? null },
-  });
+  // One CsatResponse per ticket — latest wins. The write locks the ticket row and checks the
+  // group again in its own transaction, so a reopen that commits after the check above is
+  // still seen (Codex diff critique D3).
+  const result = await recordCsat(ticket.id, { score, comment: comment ?? null });
+  if (result === "not_found") {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+  if (result === "not_eligible") {
+    return NextResponse.json({ error: "not_eligible" }, { status: 409 });
+  }
 
   return NextResponse.json({ ok: true }, { status: 200 });
 }

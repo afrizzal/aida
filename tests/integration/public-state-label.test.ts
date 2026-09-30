@@ -3,7 +3,7 @@
 // extends this file with the page and CSAT cases. Real Postgres through Testcontainers; nothing
 // is mocked.
 import { randomUUID } from "node:crypto";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // A test-only value; the public routes hash rate-limit identifiers with it (set before the route
 // module loads, as merge-provenance.test.ts does).
@@ -13,8 +13,11 @@ vi.hoisted(() => {
 
 import { POST as csatPost } from "@/app/api/public/status/[token]/csat/route";
 import { prisma } from "@/lib/db";
+import { runTicketMutation } from "@/lib/tickets/mutations";
+import { setCsatWriteObserverForTests } from "@/lib/tickets/record-csat";
 import { loadStatusPageData } from "@/lib/tickets/status-page-data";
 import { seedOrgWithMembers, seedTicket, stateIdFor } from "../support/inbox-fixtures";
+import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
 
 async function tokenOf(ticketId: string): Promise<string> {
   const { statusToken } = await prisma.ticket.findUniqueOrThrow({
@@ -271,5 +274,94 @@ describe("CSAT eligibility for every group, merged sources and the data boundary
     expect(json).not.toContain(colour);
     expect(json).not.toContain("colorToken");
     expect(json).not.toContain("stateId");
+  });
+});
+
+// Codex diff critique D3: the CSAT write locks the ticket row and checks the group again in the
+// transaction of the upsert. Both orders against a reopen, every wait bound to recorded backend
+// PIDs (tests/support/lock-wait.ts), never to a timer.
+describe("CSAT against a reopen, in both lock orders (D-11 CSAT row)", () => {
+  afterEach(() => {
+    setCsatWriteObserverForTests(null);
+  });
+
+  async function resolvedTicket() {
+    const { orgId, users } = await seedOrgWithMembers(prisma, ["owner"]);
+    const t = await seedTicket(orgId, { status: "RESOLVED" });
+    return {
+      actor: { orgId, userId: users[0].id },
+      ticketId: t.id,
+      token: await tokenOf(t.id),
+      openId: await stateIdFor(orgId, "OPEN"),
+    };
+  }
+
+  const groupOf = async (id: string) =>
+    (
+      await prisma.ticket.findUniqueOrThrow({
+        where: { id },
+        select: { state: { select: { group: true } } },
+      })
+    ).state.group;
+
+  it("reopen holds the ticket first: the rating waits, sees group OPEN and is refused with 409 and no row", async () => {
+    const { actor, ticketId, token, openId } = await resolvedTicket();
+    const reopenPid = deferred<number>();
+    const reopenChanged = deferred();
+    const releaseReopen = deferred();
+    const csatPid = deferred<number>();
+
+    const reopen = runTicketMutation(
+      { actor, ticketIds: [ticketId], op: { kind: "state", stateId: openId }, mode: "single" },
+      {
+        onTransactionStart: async (tx) => reopenPid.resolve(await backendPid(tx)),
+        afterItem: async () => {
+          reopenChanged.resolve();
+          await releaseReopen.promise;
+        },
+      },
+    );
+    await reopenChanged.promise;
+
+    setCsatWriteObserverForTests({
+      onTransactionStart: async (tx) => csatPid.resolve(await backendPid(tx)),
+    });
+    const rating = postCsat(token, 4);
+    await waitForBlockedBy(prisma, await reopenPid.promise, [await csatPid.promise]);
+    releaseReopen.resolve();
+
+    expect(await reopen).toMatchObject({ ok: true, count: 1 });
+    expect(await rating).toEqual({ status: 409, error: "not_eligible" });
+    expect(await csatRows(ticketId)).toBe(0);
+    expect(await groupOf(ticketId)).toBe("OPEN");
+  });
+
+  it("the rating holds the ticket first: the reopen waits, and the rating is stored with 200", async () => {
+    const { actor, ticketId, token, openId } = await resolvedTicket();
+    const csatPid = deferred<number>();
+    const releaseCsat = deferred();
+    const reopenPid = deferred<number>();
+
+    setCsatWriteObserverForTests({
+      afterTicketLock: async (tx) => {
+        csatPid.resolve(await backendPid(tx));
+        await releaseCsat.promise;
+      },
+    });
+    const rating = postCsat(token, 4);
+    const holder = await csatPid.promise;
+
+    const reopen = runTicketMutation(
+      { actor, ticketIds: [ticketId], op: { kind: "state", stateId: openId }, mode: "single" },
+      { onTransactionStart: async (tx) => reopenPid.resolve(await backendPid(tx)) },
+    );
+    await waitForBlockedBy(prisma, holder, [await reopenPid.promise]);
+    releaseCsat.resolve();
+
+    expect(await rating).toEqual({ status: 200, error: undefined });
+    expect(await reopen).toMatchObject({ ok: true, count: 1 });
+    const row = await prisma.csatResponse.findUniqueOrThrow({ where: { ticketId } });
+    expect(row.score).toBe(4);
+    expect(await groupOf(ticketId)).toBe("OPEN");
   });
 });
