@@ -154,6 +154,19 @@ describe("planStateTransition: merge policy", () => {
     });
   });
 
+  it("entering PENDING keeps an existing pause start instead of overwriting it (review IN-01)", () => {
+    // An inconsistent row (paused outside PENDING) must not lose its earlier pause start.
+    const data = planStateTransition({
+      row: row({ slaPausedAt: PAUSE_START }),
+      fromGroup: "OPEN",
+      toStateId: "pending",
+      toGroup: "PENDING",
+      now: NOW,
+      policy: "by-group",
+    });
+    expect(data.slaPausedAt).toEqual(PAUSE_START);
+  });
+
   it("RESOLVED to CLOSED leaves resolvedAt and the flags out of the data", () => {
     const data = planStateTransition({
       row: row(),

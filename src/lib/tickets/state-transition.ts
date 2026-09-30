@@ -10,7 +10,8 @@
 //   - a move inside one group changes only stateId.
 //
 // D-16, SLA pause:
-//   - entering group PENDING from another group sets slaPausedAt to now;
+//   - entering group PENDING from another group sets slaPausedAt to now, unless the row already
+//     carries a pause start (an inconsistent write): that earlier start is kept (review IN-01);
 //   - a move between two PENDING states changes nothing;
 //   - leaving group PENDING adds delta = now - slaPausedAt (whole milliseconds, never negative)
 //     exactly once to firstResponseDueAt, resolutionDueAt and slaPausedMs and clears slaPausedAt.
@@ -131,7 +132,8 @@ export function planStateTransition({
   }
 
   if (toGroup === "PENDING") {
-    data.slaPausedAt = now;
+    // Never overwrite an open pause: its time would never reach the deadlines (review IN-01).
+    data.slaPausedAt = row.slaPausedAt ?? now;
   } else if (fromGroup === "PENDING") {
     const closed = closePause(row, now);
     if (closed) {
