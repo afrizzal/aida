@@ -250,7 +250,8 @@ function searchEntries(
 /**
  * The canonical query string for a URL that still carries the old `status` parameter (a present
  * but empty one counts as present), or null when it carries none. `status` is removed and
- * `state` holds the sorted union of the URL's own state ids and the mapped ids, in the slot of
+ * `state` holds the mapped ids, intersected with the URL's own state ids when it has a `state`
+ * parameter too (no common id: the unmapped sentinel, never a wider list), in the slot of
  * whichever of the two came first; every other parameter is kept as it was. The caller redirects
  * to its own base path plus this string, so no host or path comes from the input (T-12.1-40).
  */
@@ -261,10 +262,15 @@ export function legacyRedirectSearch(
   const status = readParam(searchParams, "status");
   if (status === undefined) return null;
   const state = readParam(searchParams, "state");
-  const merged = canonicalIds([
-    ...(state === undefined ? [] : parseStateParam(state)),
-    ...mapLegacyStatusParam(status, legacy),
-  ]);
+  const mapped = mapLegacyStatusParam(status, legacy);
+  // Both parameters narrow the list, so the redirect keeps only the ids in both; with none left
+  // it falls to the unmapped sentinel. A union would widen the list (D-09, review WR-b1).
+  let merged = mapped;
+  if (state !== undefined) {
+    const own = new Set(parseStateParam(state));
+    const both = mapped.filter((id) => own.has(id));
+    merged = both.length > 0 ? canonicalIds(both) : [LEGACY_UNMAPPED_STATE_ID];
+  }
   const out = new URLSearchParams();
   let stateWritten = false;
   for (const [key, value] of searchEntries(searchParams)) {

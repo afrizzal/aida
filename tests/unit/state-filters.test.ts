@@ -139,18 +139,29 @@ describe("mapLegacyStatusParam (old status= URLs, D-09)", () => {
 });
 
 describe("legacyRedirectSearch", () => {
-  it("replaces status with the sorted union of state and the mapped ids, keeping other params", () => {
+  it("replaces status and state with their intersection, keeping other params (D-09, review WR-b1)", () => {
     const search = legacyRedirectSearch(
-      new URLSearchParams("view=mine&status=OPEN&sv=x&state=c"),
+      new URLSearchParams("view=mine&status=OPEN,PENDING&sv=x&state=c,id-open"),
       LEGACY,
     );
     expect(search).not.toBeNull();
     const params = new URLSearchParams(search ?? "");
     expect(params.get("view")).toBe("mine");
-    expect(params.get("state")).toBe(["c", "id-open"].sort().join(","));
+    expect(params.get("state")).toBe("id-open");
     expect(params.get("sv")).toBe("x");
     expect(params.has("status")).toBe(false);
     expect(params.getAll("state")).toHaveLength(1);
+  });
+
+  it("never widens a URL with both parameters: no common id yields the sentinel (review WR-b1)", () => {
+    const search = legacyRedirectSearch(
+      new URLSearchParams("view=mine&status=OPEN&sv=x&state=c"),
+      LEGACY,
+    );
+    const params = new URLSearchParams(search ?? "");
+    expect(params.get("state")).toBe(SENTINEL);
+    expect(params.get("view")).toBe("mine");
+    expect(params.has("status")).toBe(false);
   });
 
   it("accepts a Next.js searchParams record", () => {
