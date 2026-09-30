@@ -689,4 +689,33 @@ test.describe
       await expect(page.getByRole("menuitemcheckbox").last()).toBeFocused();
       await page.keyboard.press("Escape");
     });
+
+    // Review UI-WR-c2: the status menu scrolls; opened by s, its current value is scrolled into
+    // view. Runs last: the filler states lengthen every later status list.
+    test("the status menu opened by s shows its focused current value", async ({ page }) => {
+      for (let i = 0; i < 14; i++) await insertState("OPEN", `Scroll filler ${i}`);
+      const ticket = await seedTicket("scroll-current");
+      await prisma.ticket.update({
+        where: { id: ticket.id },
+        data: { stateId: await migratedId("CLOSED") },
+      });
+      await gotoReady(page, `/tickets/${ticket.id}`);
+      const palette = page.getByRole("dialog", { name: "Command palette" });
+      await expect(async () => {
+        if (!(await palette.isVisible())) await page.keyboard.press("Meta+k");
+        await expect(palette).toBeVisible({ timeout: 1_000 });
+      }).toPass({ timeout: 15_000 });
+      await page.keyboard.press("Escape");
+      await expect(palette).toBeHidden();
+      await page.evaluate(() => {
+        const active = document.activeElement;
+        if (active instanceof HTMLElement) active.blur();
+      });
+      await page.keyboard.press("s");
+      const current = page.getByRole("menuitemradio", { name: MIGRATED.CLOSED.name, exact: true });
+      await expect(current).toBeFocused();
+      await expect(current).toHaveAttribute("aria-checked", "true");
+      await expect(current).toBeInViewport();
+      await page.keyboard.press("Escape");
+    });
   });

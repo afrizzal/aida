@@ -195,9 +195,11 @@ interface TicketMetaHeaderProps {
 function focusCurrentValue(content: HTMLElement | null, requested: RefObject<boolean>) {
   if (!content || !requested.current) return;
   requested.current = false;
-  content
-    .querySelector<HTMLElement>('[role="menuitemradio"][aria-checked="true"]')
-    ?.focus({ preventScroll: true });
+  const item = content.querySelector<HTMLElement>('[role="menuitemradio"][aria-checked="true"]');
+  item?.focus({ preventScroll: true });
+  // The status menu scrolls (max-h-[320px]): bring the focused value into view inside it only
+  // (review UI-WR-c2). preventScroll above keeps the page itself from jumping.
+  item?.scrollIntoView({ block: "nearest" });
 }
 
 /** Which SLA timer is still "live" — mirrors ticket-list-row.tsx's identical helper. */
