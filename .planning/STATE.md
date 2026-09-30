@@ -5,16 +5,16 @@ milestone_name: Helpdesk & Projects
 current_phase: 12
 current_phase_name: ticket-lifecycle
 status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11 and 12 verified human_needed; Phase 12.1 (custom states and SLA pause) next
-stopped_at: Completed 12.1-16-PLAN.md; E2E 27 passed 1 fixme (filter-trigger focus defect of 12.1-13); typecheck and lint green; 12.1-17 next
-last_updated: "2026-11-08T23:14:11.644Z"
+stopped_at: Completed 12.1-16-PLAN.md and the focus fix 3dd5a08; 12.1-17 gate next
+last_updated: "2026-11-08T23:33:18.806Z"
 last_activity: 2026-11-09
 last_activity_desc: Phase 12.1 planned, 17 plans in 7 waves; Codex plan review converged after cycle 2 (K29); execution next
-state_head: 032485400e1ad1eb8200685aecf691df2803abb9
+state_head: 75e5a731b94899099a85ae1ff6bdd0f623debc24
 progress:
   total_phases: 12
   completed_phases: 0
   total_plans: 86
-  completed_plans: 33
+  completed_plans: 35
   percent: 0
 ---
 
@@ -107,8 +107,8 @@ Also open (not audit items): `milestones/v1.0.0-phases/07-launch-readiness/defer
 
 ## Session Continuity
 
-**Last session:** 2026-11-08T23:14:11.585Z
-**Stopped at:** Phase 12.1 executing; plans 01 to 15 done, 16 next (2026-11-09)
+**Last session:** 2026-11-08T23:33:18.749Z
+**Stopped at:** Phase 12.1 executing; plans 01 to 16 done, 17 (gate) next (2026-11-09)
 **Resume file:** .planning/run-loop/ANTREAN.md
 
 **Last action (2026-11-08):** Phase 10 parked after the third Codex plan review (2 HIGH findings accepted, not yet incorporated). No tag, nothing pushed.

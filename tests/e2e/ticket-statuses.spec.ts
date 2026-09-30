@@ -498,12 +498,10 @@ test.describe
       await expect(page).not.toHaveURL(new RegExp(`state=${state.id}`));
     });
 
-    // UI-SPEC 4c: focus moves to the Status filter trigger after "Remove deleted status". Run on
-    // 2026-11-09 the trigger was not focused (observed "inactive"): the notice focuses the trigger
-    // before router.replace, and the navigation to new search params renders a new trigger.
-    // Product defect of plan 12.1-13 (missing-status-notice.tsx), reported in 12.1-16-SUMMARY.md;
-    // the fix is outside this plan's files. Remove fixme once the product focuses after the
-    // navigation.
+    // UI-SPEC 4c: focus moves to the Status filter trigger after "Remove deleted status". This case
+    // first failed (trigger "inactive": the notice focused the trigger before router.replace and
+    // the navigation rendered a new trigger; reported in 12.1-16-SUMMARY.md). Fixed in 3dd5a08:
+    // the filter row focuses the trigger once the URL carries the requested state value.
     test("after removing a deleted status the Status filter trigger has focus", async ({
       page,
     }) => {
