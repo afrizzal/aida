@@ -547,6 +547,49 @@ describe("ticket_states migration, harness path: a malformed saved view rolls ev
       filters: JSON.stringify({ version: 1, view: "all", statuses: "OPEN" }),
       expected: "has malformed filters",
     },
+    // Codex diff critique D2 (K45): the whole version 1 grammar (storedViewFiltersSchema before
+    // this phase, a strict object) is checked before any view converts.
+    ...(
+      [
+        ["rollback_version_string", { version: "1", statuses: [] }],
+        ["rollback_view_enum", { version: 1, view: "everyone", statuses: [] }],
+        ["rollback_view_type", { version: 1, view: 1, statuses: [] }],
+        ["rollback_view_null", { version: 1, view: null, statuses: [] }],
+        ["rollback_unknown_key", { version: 1, view: "all", statuses: [], limit: 50 }],
+        ["rollback_statuses_null", { version: 1, statuses: null }],
+        ["rollback_statuses_dup", { version: 1, statuses: ["OPEN", "OPEN"] }],
+        ["rollback_tag_empty", { version: 1, statuses: [], tagId: "" }],
+        ["rollback_tag_type", { version: 1, statuses: [], tagId: 5 }],
+        ["rollback_tag_long", { version: 1, statuses: [], tagId: "t".repeat(65) }],
+        ["rollback_cf_type", { version: 1, statuses: [], cf: "gold" }],
+        ["rollback_cf_missing", { version: 1, statuses: [], cf: { definitionId: "f" } }],
+        [
+          "rollback_cf_extra",
+          { version: 1, statuses: [], cf: { definitionId: "f", value: "v", op: "eq" } },
+        ],
+        [
+          "rollback_cf_id_empty",
+          { version: 1, statuses: [], cf: { definitionId: "", value: "v" } },
+        ],
+        [
+          "rollback_cf_value_long",
+          { version: 1, statuses: [], cf: { definitionId: "f", value: "v".repeat(201) } },
+        ],
+        [
+          "rollback_cf_value_type",
+          { version: 1, statuses: [], cf: { definitionId: "f", value: 7 } },
+        ],
+        ["rollback_q_empty", { version: 1, statuses: [], q: "" }],
+        // 101 code points, 201 UTF-16 code units: zod counts code units.
+        ["rollback_q_long_units", { version: 1, statuses: [], q: `${"\u{1F600}".repeat(100)}a` }],
+        ["rollback_snoozed_false", { version: 1, statuses: [], snoozed: false }],
+        ["rollback_snoozed_string", { version: 1, statuses: [], snoozed: "true" }],
+      ] as const
+    ).map(([name, filters]) => ({
+      name,
+      filters: JSON.stringify(filters),
+      expected: "has malformed filters",
+    })),
   ];
 
   for (const testCase of cases) {
@@ -599,4 +642,60 @@ describe("ticket_states migration, harness path: a malformed saved view rolls ev
       expect(await snapshotTables(db)).toEqual(before);
     });
   }
+});
+
+describe("ticket_states migration, harness path: version 1 views at the grammar boundaries convert (D-09)", () => {
+  it("converts a minimal view and a view with every key at its length limits", async () => {
+    const db = await baselineDatabase("boundary_views");
+    const t = FIXTURE_TIMESTAMP_VALUES;
+    await db.query(
+      `INSERT INTO "organization" ("id", "name", "slug", "createdAt") VALUES ('org-b', 'B', 'b', $1)`,
+      [t[0]],
+    );
+    await db.query(
+      `INSERT INTO "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt")
+       VALUES ('user-b', 'B Agent', 'agent@b.test', true, $1, $2)`,
+      [t[1], t[2]],
+    );
+    const minimal = { version: 1 };
+    const full = {
+      version: 1,
+      view: "mine",
+      statuses: ["CLOSED", "NEW", "OPEN", "PENDING", "RESOLVED"],
+      tagId: "t".repeat(64),
+      cf: { definitionId: "d".repeat(64), value: "" },
+      // 100 code points, 200 UTF-16 code units: exactly the limit.
+      q: "\u{1F600}".repeat(100),
+      snoozed: true,
+    };
+    for (const [id, filters] of [
+      ["view-b-minimal", minimal],
+      ["view-b-full", full],
+    ] as const) {
+      await db.query(
+        `INSERT INTO "SavedView" ("id", "organizationId", "ownerUserId", "name", "visibility", "filters",
+           "position", "createdAt", "updatedAt")
+         VALUES ($1, 'org-b', 'user-b', $1, 'PRIVATE', $2::jsonb, 0, $3, $4)`,
+        [id, JSON.stringify(filters), t[3], t[4]],
+      );
+    }
+
+    await applyMigrations(db, { only: STATES_MIGRATION });
+
+    const states = await db.query<{ id: string }>(
+      `SELECT "id" FROM "TicketState" WHERE "organizationId" = 'org-b' ORDER BY "id" COLLATE "C"`,
+    );
+    expect(states.rowCount).toBe(5);
+    const views = await db.query<{ id: string; filters: unknown }>(
+      `SELECT "id", "filters" FROM "SavedView" WHERE "organizationId" = 'org-b' ORDER BY "id"`,
+    );
+    const { version: _v, statuses: _s, ...fullRest } = full;
+    expect(views.rows).toEqual([
+      {
+        id: "view-b-full",
+        filters: { ...fullRest, version: 2, stateIds: states.rows.map((r) => r.id) },
+      },
+      { id: "view-b-minimal", filters: { version: 2, stateIds: [] } },
+    ]);
+  });
 });

@@ -168,19 +168,63 @@ WHERE "status" = 'PENDING';
 -- 8. Saved views version 1 become version 2 (D-09): statuses become the ids of the view
 -- organization's states with those legacy keys, in code-unit order; every other key is kept.
 -- Malformed filters or an unknown status value fail the migration with the view id.
+-- "Malformed" is anything the version 1 grammar refused (storedViewFiltersSchema before this
+-- migration, a strict object): only the keys version, view, statuses, tagId, cf, q, snoozed;
+-- version 1; view one of all, unassigned, mine; statuses an array of unique status strings;
+-- tagId a string of 1 to 64 UTF-16 code units; cf an object with exactly definitionId (1 to 64)
+-- and value (0 to 200); q a string of 1 to 200; snoozed only true. Every key but version is
+-- optional and JSON null is never valid.
 DO $$
 DECLARE
   v record;
+  f jsonb;
+  cf jsonb;
   statuses jsonb;
   state_ids jsonb;
 BEGIN
   FOR v IN SELECT "id", "organizationId", "filters" FROM "SavedView" ORDER BY "id" LOOP
-    IF jsonb_typeof(v."filters") IS DISTINCT FROM 'object'
-       OR (v."filters" -> 'version') IS DISTINCT FROM '1'::jsonb THEN
+    f := v."filters";
+    IF jsonb_typeof(f) IS DISTINCT FROM 'object' THEN
       RAISE EXCEPTION 'SavedView % has malformed filters', v."id";
     END IF;
 
-    statuses := COALESCE(v."filters" -> 'statuses', '[]'::jsonb);
+    cf := f -> 'cf';
+    IF (f -> 'version') IS DISTINCT FROM '1'::jsonb
+       OR EXISTS (
+         SELECT 1 FROM jsonb_object_keys(f) AS k(key)
+         WHERE k.key NOT IN ('version', 'view', 'statuses', 'tagId', 'cf', 'q', 'snoozed')
+       )
+       OR (f ? 'view' AND (f -> 'view') NOT IN ('"all"'::jsonb, '"unassigned"'::jsonb, '"mine"'::jsonb))
+       OR (f ? 'snoozed' AND (f -> 'snoozed') IS DISTINCT FROM 'true'::jsonb)
+       OR (cf IS NOT NULL AND jsonb_typeof(cf) IS DISTINCT FROM 'object') THEN
+      RAISE EXCEPTION 'SavedView % has malformed filters', v."id";
+    END IF;
+    -- A separate statement: SQL does not promise to short-circuit OR, and jsonb_object_keys
+    -- raises on a non-object.
+    IF cf IS NOT NULL
+       AND (SELECT array_agg(k.key ORDER BY k.key COLLATE "C") FROM jsonb_object_keys(cf) AS k(key))
+           IS DISTINCT FROM ARRAY['definitionId', 'value']::text[] THEN
+      RAISE EXCEPTION 'SavedView % has malformed filters', v."id";
+    END IF;
+
+    -- String lengths in UTF-16 code units, as zod counts them: code points above U+FFFF count 2.
+    IF EXISTS (
+      SELECT 1
+      FROM (VALUES (f -> 'tagId', 1, 64),
+                   (f -> 'cf' -> 'definitionId', 1, 64),
+                   (f -> 'cf' -> 'value', 0, 200),
+                   (f -> 'q', 1, 200)) AS t(value, min_units, max_units)
+      WHERE t.value IS NOT NULL
+        AND (jsonb_typeof(t.value) IS DISTINCT FROM 'string'
+             OR (char_length(t.value #>> '{}')
+                 + (SELECT count(*) FROM regexp_split_to_table(t.value #>> '{}', '') AS c(ch)
+                    WHERE ascii(c.ch) > 65535))
+                NOT BETWEEN t.min_units AND t.max_units)
+    ) THEN
+      RAISE EXCEPTION 'SavedView % has malformed filters', v."id";
+    END IF;
+
+    statuses := COALESCE(f -> 'statuses', '[]'::jsonb);
     IF jsonb_typeof(statuses) IS DISTINCT FROM 'array' THEN
       RAISE EXCEPTION 'SavedView % has malformed filters', v."id";
     END IF;
@@ -191,6 +235,10 @@ BEGIN
          OR (e.value #>> '{}') NOT IN ('NEW', 'OPEN', 'PENDING', 'RESOLVED', 'CLOSED')
     ) THEN
       RAISE EXCEPTION 'SavedView % has an unknown status value', v."id";
+    END IF;
+    IF jsonb_array_length(statuses)
+       <> (SELECT count(DISTINCT e.value) FROM jsonb_array_elements(statuses) AS e(value)) THEN
+      RAISE EXCEPTION 'SavedView % has malformed filters', v."id";
     END IF;
 
     SELECT COALESCE(jsonb_agg(to_jsonb(s."id") ORDER BY s."id" COLLATE "C"), '[]'::jsonb)
