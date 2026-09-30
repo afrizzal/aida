@@ -33,9 +33,10 @@ Most helpdesk software treats AI as a paywalled add-on with per-resolution fees,
 
 | | |
 |---|---|
-| 🎟️ **Modern ticketing** | Shared inbox with views, filters and full-text search. Ticket lifecycle NEW → OPEN → PENDING → RESOLVED → CLOSED. Contacts with full history, tags, custom fields, assignment, internal notes vs public replies, SLA first-response/resolution timers with at-risk/breached states. |
+| 🎟️ **Modern ticketing** | Shared inbox with views, filters and full-text search. Ticket lifecycle with the default statuses New → Open → Pending → Resolved → Closed, which each team can adapt (see custom statuses below). Contacts with full history, tags, custom fields, assignment, internal notes vs public replies, SLA first-response/resolution timers with at-risk/breached states. |
 | ⌨️ **Inbox workflow** | Saved views (private, or shared with the workspace), bulk actions on up to 100 tickets with one audit entry per ticket, a command palette (⌘K / Ctrl+K) and keyboard shortcuts for the list and the ticket page ([`docs/KEYBOARD.md`](docs/KEYBOARD.md)). Optional auto-close of resolved tickets after a quiet period you choose (off by default; customers are not notified). Replies from your team and automatic emails do not restart the count; a customer reply reopens the ticket. |
 | 🔗 **Links, merge and snooze** | Link tickets as *duplicate of*, *related to* or *child of*; each link shows on both tickets (one parent per child, no cycles). Merge a duplicate into another ticket after a confirmation that says it cannot be undone: the duplicate's messages and attachments move, it is closed and linked to the ticket it went into, and its tags, assignee and custom fields stay where they were. Merge is refused for tickets of different customers, and there are no merge chains (a merged ticket, or one that already received a merge, cannot be merged again). Each customer status link keeps showing what it showed before, plus new replies. Snooze a ticket until a date and time you pick (in your local time zone, up to 366 days ahead): it leaves the default inbox views, a Snoozed filter shows it, auto-close skips it, and it comes back at that time or earlier when the customer replies or an agent wakes it. |
+| 🏷️ **Custom statuses and SLA pause** | Each team defines its own ticket statuses inside four fixed groups: Open, Pending, Resolved and Closed. Admins add, rename, recolour (from a fixed palette of ten colours) and reorder statuses, and choose the default status for new tickets, which must be an Open status; other members see the list read-only. A status that tickets still use can be deleted only by moving those tickets to another status of the same group, and the Open, Resolved and Closed groups always keep at least one status. Customers on the status page see only the group, never your status names or colours. SLA first-response and resolution timers pause while a ticket is in a Pending-group status, and their due times move by exactly the paused time when it leaves; snooze does not pause them. |
 | 🌐 **Public portal** | A public web intake form plus a tokenised ticket-status page with follow-up replies and CSAT capture — no login required for your customers. |
 | 📧 **Email channel** | Inbound email threading and outbound SMTP replies, alongside the web form and portal. |
 | 🧠 **AI auto-triage** | Every incoming ticket is classified — category, priority, sentiment, language — with agent override, and every AI action is written to an append-only audit log. |
@@ -137,6 +138,17 @@ easy to run, easy to read.
 - [`docs/SECURITY.md`](docs/SECURITY.md) — privacy and security model
 - [`docs/BRIEF.md`](docs/BRIEF.md) — positioning and product brief
 - [`docs/KEYBOARD.md`](docs/KEYBOARD.md) — keyboard shortcuts and the command palette
+
+### Upgrade note: the custom statuses migration
+
+The migration `20261110100000_ticket_states` moves every ticket to its organization's new statuses and converts saved views. If it finds data it cannot convert (for example a saved view filtering on an unknown status value), it stops with an error that names the row, and the whole migration is rolled back, so no partial change is left. Prisma 7.8.0 still records the attempt as a failed row in `_prisma_migrations`, and a plain `prisma migrate deploy` then refuses to run (error P3009) until that row is resolved. To recover: fix the row the error names, mark the attempt as rolled back, then deploy again:
+
+```bash
+docker compose run --rm migrate pnpm prisma migrate resolve --rolled-back 20261110100000_ticket_states
+docker compose up -d   # the migrate service runs `prisma migrate deploy` again
+```
+
+Take a backup before upgrading, as [`docs/OPERATIONS.md`](docs/OPERATIONS.md) describes.
 
 ## Status
 
