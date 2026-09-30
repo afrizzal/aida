@@ -1,11 +1,13 @@
-import { Users } from "lucide-react";
+import { ShieldOff, Users } from "lucide-react";
 import Link from "next/link";
 import { EmptyState } from "@/components/empty-state";
 import { StateChip } from "@/components/tickets/state-chip";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card } from "@/components/ui/card";
+import { loadContactDetailData } from "@/lib/contacts/contact-detail-data";
+import { prisma } from "@/lib/db";
 import { formatRelativeTime } from "@/lib/format-relative-time";
-import { getScopedDb } from "@/lib/session";
+import { getSessionActor } from "@/lib/session";
 import { NotesForm } from "./notes-form";
 
 interface ContactDetailPageProps {
@@ -23,28 +25,23 @@ function getInitials(name: string): string {
 }
 
 export default async function ContactDetailPage({ params }: ContactDetailPageProps) {
-  const { db } = await getScopedDb();
+  const actor = await getSessionActor();
   const { id } = await params;
 
-  const contact = await db.contact.findFirst({
-    where: { id },
-    include: {
-      tickets: {
-        orderBy: { createdAt: "desc" },
-        // Phase 12.1 (D-11 chips row): the state through the composite relation, so it is always
-        // a state of the ticket's own organization; only its name and colour key are read.
-        select: {
-          id: true,
-          number: true,
-          subject: true,
-          state: { select: { name: true, colorToken: true } },
-          createdAt: true,
-        },
-      },
-    },
-  });
+  // D-01 and K44: the loader checks the member row before it reads the contact or its tickets.
+  const data = await loadContactDetailData(prisma, actor, id);
 
-  if (!contact) {
+  if (data.status === "membership_ended") {
+    return (
+      <EmptyState
+        icon={ShieldOff}
+        heading="Your access to this workspace has ended."
+        body="Sign out, then sign in again."
+      />
+    );
+  }
+
+  if (data.status === "not_found") {
     return (
       <EmptyState
         icon={Users}
@@ -54,6 +51,7 @@ export default async function ContactDetailPage({ params }: ContactDetailPagePro
     );
   }
 
+  const { contact } = data;
   const displayName = contact.name ?? contact.email;
 
   return (
