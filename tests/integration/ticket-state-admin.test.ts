@@ -169,6 +169,31 @@ describe("createTicketState (D-03, D-14)", () => {
     expect(await snapshot(orgId)).toEqual(before);
   });
 
+  it("refuses control, format (zero-width, bidi) and line-separator characters as INVALID_NAME (review IN-a2-3)", async () => {
+    const { orgId, admin } = await seedOrg();
+    const pendingId = await stateIdFor(orgId, "PENDING");
+    const before = await snapshot(orgId);
+    const names = [
+      "Open\u200B", // zero-width space
+      "Op\nen", // inner newline
+      "Op\u0007en", // bell (Cc)
+      "\u202EOpen", // right-to-left override (Cf)
+      "Op\u2028en", // line separator
+      "Op\u2029en", // paragraph separator
+      "Op\uFEFFen", // inner zero-width no-break space (Cf)
+    ];
+    for (const name of names) {
+      expect(
+        await createTicketState(prisma, admin, { group: "OPEN", name, colorToken: "blue" }),
+      ).toEqual({ ok: false, error: "INVALID_NAME" });
+      expect(await updateTicketState(prisma, admin, { stateId: pendingId, name })).toEqual({
+        ok: false,
+        error: "INVALID_NAME",
+      });
+    }
+    expect(await snapshot(orgId)).toEqual(before);
+  });
+
   it("refuses an unknown colour as INVALID_COLOR and an unknown group as INVALID", async () => {
     const { admin } = await seedOrg();
     expect(

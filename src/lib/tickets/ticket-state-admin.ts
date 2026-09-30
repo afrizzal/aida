@@ -145,12 +145,23 @@ function parseStateId(value: unknown): string {
   return value;
 }
 
-/** Trims and checks 1 to 40 code points (the database's char_length), else INVALID_NAME. */
+/**
+ * Control (Cc), format (Cf: zero-width, bidi overrides, soft hyphen, BOM, joiners) and line or
+ * paragraph separators (Zl, Zp). A name with one of them could look identical to another state's
+ * name in chips, filters and the feed without colliding under lower(name) (review IN-a2-3).
+ */
+const INVISIBLE_OR_CONTROL = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+
+/**
+ * Trims and checks 1 to 40 code points (the database's char_length) without control, format or
+ * separator characters, else INVALID_NAME.
+ */
 function parseName(value: unknown): string {
   if (typeof value !== "string") throw new StateAdminError("INVALID_NAME");
   const name = value.trim();
   const length = [...name].length;
   if (length < 1 || length > MAX_NAME_LENGTH) throw new StateAdminError("INVALID_NAME");
+  if (INVISIBLE_OR_CONTROL.test(name)) throw new StateAdminError("INVALID_NAME");
   return name;
 }
 
