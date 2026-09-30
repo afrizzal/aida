@@ -294,11 +294,12 @@ export async function finalizeDemoTicket(
     }
     await lockDemoTicket(tx, orgId, ticketId);
     if (hooks.afterLock) await hooks.afterLock(tx);
-    await tx.ticket.update({
-      where: { id: ticketId },
+    // The organization term on the write itself too, not only on the lock (review IN-a2-5).
+    const { count } = await tx.ticket.updateMany({
+      where: { id: ticketId, organizationId: orgId },
       data: { ...data, ...(stateData ?? {}) },
-      select: { id: true },
     });
+    if (count !== 1) throw new Error(`demo finalize: ticket ${ticketId} not updated`);
   }, DEMO_LOCK_TX_OPTIONS);
 }
 
