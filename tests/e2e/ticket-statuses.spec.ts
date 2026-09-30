@@ -504,7 +504,7 @@ test.describe
     // Product defect of plan 12.1-13 (missing-status-notice.tsx), reported in 12.1-16-SUMMARY.md;
     // the fix is outside this plan's files. Remove fixme once the product focuses after the
     // navigation.
-    test.fixme("after removing a deleted status the Status filter trigger has focus", async ({
+    test("after removing a deleted status the Status filter trigger has focus", async ({
       page,
     }) => {
       const state = await insertState("OPEN", "Focus gone");

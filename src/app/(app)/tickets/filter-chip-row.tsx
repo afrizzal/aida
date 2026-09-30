@@ -9,7 +9,7 @@ import {
   X,
 } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRegisterCommands } from "@/components/command-provider";
 import { StateDot } from "@/components/tickets/state-dot";
 import { Badge } from "@/components/ui/badge";
@@ -58,6 +58,16 @@ const VIEWS = [
 /** The Status filter trigger's id: the missing-status notice moves focus here (UI-SPEC 4c). */
 export const STATUS_FILTER_TRIGGER_ID = "inbox-status-filter-trigger";
 
+// The notice unmounts with the navigation it starts, and the navigation renders the row again,
+// so the notice cannot focus the trigger itself. It records the `state` value it navigates to
+// (null: no parameter); the row focuses the trigger once the URL carries that value.
+let statusFocusTarget: string | null | undefined;
+
+/** Called by the missing-status notice right before it replaces the URL. */
+export function requestStatusFilterFocus(nextStateParam: string | null) {
+  statusFocusTarget = nextStateParam;
+}
+
 /** One active state of the organization, as the Status filter lists it (UI-SPEC 4a). */
 export interface FilterChipRowState {
   id: string;
@@ -88,6 +98,14 @@ export function FilterChipRow({ tags, customFieldDefinitions, states }: FilterCh
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const statusTriggerRef = useRef<HTMLButtonElement>(null);
+  const stateParam = searchParams.get("state");
+
+  useEffect(() => {
+    if (statusFocusTarget === undefined || stateParam !== statusFocusTarget) return;
+    statusFocusTarget = undefined;
+    statusTriggerRef.current?.focus();
+  }, [stateParam]);
 
   const view = searchParams.get("view") ?? "all";
   const activeTagId = searchParams.get("tag");
@@ -219,6 +237,7 @@ export function FilterChipRow({ tags, customFieldDefinitions, states }: FilterCh
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
+              ref={statusTriggerRef}
               id={STATUS_FILTER_TRIGGER_ID}
               variant="outline"
               size="sm"

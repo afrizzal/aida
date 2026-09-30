@@ -8,7 +8,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { parseUrlFilters } from "@/lib/tickets/list-filters";
 import { removeDeletedStatusesLabel, URL_MISSING_STATUS_NOTICE } from "@/lib/tickets/state-copy";
-import { STATUS_FILTER_TRIGGER_ID } from "./filter-chip-row";
+import { requestStatusFilterFocus } from "./filter-chip-row";
 
 interface MissingStatusNoticeProps {
   /** The state ids in the URL filter that are not active states of the organization. */
@@ -29,8 +29,9 @@ export function MissingStatusNotice({ missingIds }: MissingStatusNoticeProps) {
     if (kept.length > 0) params.set("state", kept.join(","));
     else params.delete("state");
     const query = params.toString();
+    // The row focuses the trigger once the new URL is rendered (UI-SPEC 4c).
+    requestStatusFilterFocus(params.get("state"));
     router.replace(query ? `${pathname}?${query}` : pathname);
-    document.getElementById(STATUS_FILTER_TRIGGER_ID)?.focus();
   }
 
   return (
