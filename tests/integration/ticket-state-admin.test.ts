@@ -108,9 +108,9 @@ describe("deleteTicketState tracer (K41, K42, D-15)", () => {
       WHERE t.id = ${first.id} AND t."organizationId" = ${orgId}
     `;
     const total = EXTRA + 1;
-    expect(
-      await prisma.ticket.count({ where: { organizationId: orgId, stateId: openId } }),
-    ).toBe(total);
+    expect(await prisma.ticket.count({ where: { organizationId: orgId, stateId: openId } })).toBe(
+      total,
+    );
 
     // A separate client that counts every statement it sends, so the bound below does not
     // depend on how fast this machine is.
@@ -660,6 +660,53 @@ describe("listStatesForSettings (D-01, UI-SPEC 1a)", () => {
       ok: false,
       error: "membership_ended",
     });
+  });
+
+  it("reads states, counts and roles from one snapshot: a delete committed between the reads is not mixed in (review IN-a2-4)", async () => {
+    const { orgId, admin } = await seedOrg();
+    const newId = await stateIdFor(orgId, "NEW");
+    const openId = await stateIdFor(orgId, "OPEN");
+    await seedTicket(orgId, { status: "NEW" });
+
+    // A client that, right after the states read returns, commits a delete of New (replacement
+    // Open: its ticket and its "new" role move) on another connection, then lets the list go on.
+    let injected = false;
+    const injectAfterStatesRead = async (strings: TemplateStringsArray) => {
+      if (injected || !strings.join("?").includes('FROM "TicketState"')) return;
+      injected = true;
+      expect(
+        await deleteTicketState(prisma, admin, { stateId: newId, replacementStateId: openId }),
+      ).toMatchObject({ ok: true, movedCount: 1, rolesMoved: true });
+    };
+    type RawQuery = (strings: TemplateStringsArray, ...values: unknown[]) => PromiseLike<unknown>;
+    const wrapRaw =
+      (raw: RawQuery) =>
+      async (strings: TemplateStringsArray, ...values: unknown[]) => {
+        const rows = await raw(strings, ...values);
+        await injectAfterStatesRead(strings);
+        return rows;
+      };
+    // biome-ignore lint/suspicious/noExplicitAny: a test proxy over a Prisma client or tx
+    const wrap = (c: any): any => ({
+      member: c.member,
+      $queryRaw: wrapRaw(c.$queryRaw.bind(c)),
+      $executeRaw: c.$executeRaw?.bind(c),
+      $transaction: c.$transaction
+        ? // biome-ignore lint/suspicious/noExplicitAny: forwards Prisma's options unchanged
+          (fn: (tx: any) => Promise<unknown>, opts?: any) =>
+            c.$transaction((tx: unknown) => fn(wrap(tx)), opts)
+        : undefined,
+    });
+
+    const list = await listStatesForSettings(wrap(prisma), admin);
+    expect(injected).toBe(true);
+    if (!list.ok) throw new Error("expected ok");
+    // The list shows New (read before the delete), so it must show New as it was then.
+    const listedNew = list.states.find((s) => s.id === newId);
+    expect(listedNew).toBeDefined();
+    expect(listedNew?.ticketCount).toBe(1);
+    expect(listedNew?.roles).toEqual(["new"]);
+    expect(list.defaultStateId).toBe(newId);
   });
 
   it("never returns another organization's states", async () => {

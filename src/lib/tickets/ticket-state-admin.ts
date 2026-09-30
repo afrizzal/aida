@@ -100,7 +100,7 @@ export interface StateAdminHooks {
 
 /** Needs $transaction (and, for the list, member and $queryRaw): the global prisma client. */
 type AdminClient = Pick<PrismaClient, "$transaction">;
-type ListClient = Pick<PrismaClient, "member" | "$queryRaw">;
+type ListClient = Pick<PrismaClient, "member" | "$transaction">;
 
 interface ConfigRow {
   newStateId: string;
@@ -662,7 +662,8 @@ export type ListStatesForSettingsResult =
 /**
  * The organization's active states in group and sort order with their ticket counts, the roles
  * each holds, the default state id and whether the viewer is an admin. Members read the list;
- * a removed member gets membership_ended. No lock; every read carries the organization term.
+ * a removed member gets membership_ended. No lock; the three reads share one read-only
+ * REPEATABLE READ snapshot, and every read carries the organization term.
  */
 export async function listStatesForSettings(
   client: ListClient,
@@ -672,23 +673,32 @@ export async function listStatesForSettings(
   if (!membership) return { ok: false, error: "membership_ended" };
   const orgId = actor.orgId;
 
-  const states = await client.$queryRaw<AdminStateRow[]>`
-    SELECT id, name, "colorToken", "group"::text AS "group", "sortOrder"
-    FROM "TicketState"
-    WHERE "organizationId" = ${orgId} AND "deletedAt" IS NULL
-    ORDER BY "TicketState"."group", "TicketState"."sortOrder", "TicketState".id COLLATE "C"
-  `;
-  const counts = await client.$queryRaw<{ stateId: string; n: number }[]>`
-    SELECT "stateId", count(*)::int AS n FROM "Ticket"
-    WHERE "organizationId" = ${orgId}
-    GROUP BY "stateId"
-  `;
-  const configRows = await client.$queryRaw<ConfigRow[]>`
-    SELECT "newStateId", "reopenStateId", "resolveStateId", "autoCloseStateId",
-      "mergeCloseStateId"
-    FROM "TicketStateConfig"
-    WHERE "organizationId" = ${orgId}
-  `;
+  // One REPEATABLE READ, read-only snapshot for the three reads, so a delete that commits between
+  // them never yields a role or count that disagrees with the listed states (review IN-a2-4).
+  const { states, counts, configRows } = await client.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SET TRANSACTION READ ONLY`;
+      const states = await tx.$queryRaw<AdminStateRow[]>`
+        SELECT id, name, "colorToken", "group"::text AS "group", "sortOrder"
+        FROM "TicketState"
+        WHERE "organizationId" = ${orgId} AND "deletedAt" IS NULL
+        ORDER BY "TicketState"."group", "TicketState"."sortOrder", "TicketState".id COLLATE "C"
+      `;
+      const counts = await tx.$queryRaw<{ stateId: string; n: number }[]>`
+        SELECT "stateId", count(*)::int AS n FROM "Ticket"
+        WHERE "organizationId" = ${orgId}
+        GROUP BY "stateId"
+      `;
+      const configRows = await tx.$queryRaw<ConfigRow[]>`
+        SELECT "newStateId", "reopenStateId", "resolveStateId", "autoCloseStateId",
+          "mergeCloseStateId"
+        FROM "TicketStateConfig"
+        WHERE "organizationId" = ${orgId}
+      `;
+      return { states, counts, configRows };
+    },
+    { isolationLevel: "RepeatableRead" },
+  );
   const config = configRows[0];
   if (!config) throw new Error(`TicketStateConfig missing for organization ${orgId}`);
   const countOf = new Map(counts.map((c) => [c.stateId, Number(c.n)]));
