@@ -761,6 +761,9 @@ describe("auto-close reasons about the RESOLVED group and closes into the auto-c
     const { orgId } = await seedAdminOrg();
     await setAutoClose(orgId, "7", daysAgo(now, 30));
     const openId = await stateIdFor(orgId, "OPEN");
+    const { autoCloseStateId } = await prisma.ticketStateConfig.findUniqueOrThrow({
+      where: { organizationId: orgId },
+    });
     // Only a hand edit or a bug can do this: the service keeps the role inside CLOSED.
     await prisma.ticketStateConfig.update({
       where: { organizationId: orgId },
@@ -768,14 +771,24 @@ describe("auto-close reasons about the RESOLVED group and closes into the auto-c
     });
     const t = await resolvedTicket(orgId, daysAgo(now, 10));
 
-    await expect(
-      prisma.$transaction(
-        (tx) => closeResolvedTicketIfQuiet(tx, { orgId, ticketId: t.id, now }),
-        TX_OPTS,
-      ),
-    ).rejects.toBeInstanceOf(AutoCloseStateUnavailableError);
-    expect((await ticketState(t.id)).key).toBe("RESOLVED");
-    expect(await autoClosedRows(t.id)).toHaveLength(0);
+    try {
+      await expect(
+        prisma.$transaction(
+          (tx) => closeResolvedTicketIfQuiet(tx, { orgId, ticketId: t.id, now }),
+          TX_OPTS,
+        ),
+      ).rejects.toBeInstanceOf(AutoCloseStateUnavailableError);
+      expect((await ticketState(t.id)).key).toBe("RESOLVED");
+      expect(await autoClosedRows(t.id)).toHaveLength(0);
+    } finally {
+      // The job runs over every organization of the shared database: leave no broken role behind
+      // for the auto-close runs of later test files.
+      await prisma.ticketStateConfig.update({
+        where: { organizationId: orgId },
+        data: { autoCloseStateId },
+      });
+      await setAutoClose(orgId, "0", null);
+    }
   });
 
   it("closeResolvedTicketIfQuiet re-checks the group under the ticket lock: an Open ticket is not closed", async () => {
