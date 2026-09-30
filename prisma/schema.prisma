@@ -281,7 +281,7 @@ model Ticket {
   createdAt                  DateTime       @default(now())
   updatedAt                  DateTime       @updatedAt
   organization      organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  state             TicketState        @relation(fields: [organizationId, stateId], references: [organizationId, id], onDelete: Restrict)
+  state             TicketState        @relation(fields: [organizationId, stateId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
   contact           Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
   assignee          user?              @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   messages          Message[]
@@ -761,9 +761,9 @@ model TicketStateConfig {
   mergeCloseStateId String
   updatedAt         DateTime     @updatedAt
   organization      organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  newState          TicketState  @relation("TicketStateConfigNew", fields: [organizationId, newStateId], references: [organizationId, id], onDelete: Restrict)
-  reopenState       TicketState  @relation("TicketStateConfigReopen", fields: [organizationId, reopenStateId], references: [organizationId, id], onDelete: Restrict)
-  resolveState      TicketState  @relation("TicketStateConfigResolve", fields: [organizationId, resolveStateId], references: [organizationId, id], onDelete: Restrict)
-  autoCloseState    TicketState  @relation("TicketStateConfigAutoClose", fields: [organizationId, autoCloseStateId], references: [organizationId, id], onDelete: Restrict)
-  mergeCloseState   TicketState  @relation("TicketStateConfigMergeClose", fields: [organizationId, mergeCloseStateId], references: [organizationId, id], onDelete: Restrict)
+  newState          TicketState  @relation("TicketStateConfigNew", fields: [organizationId, newStateId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  reopenState       TicketState  @relation("TicketStateConfigReopen", fields: [organizationId, reopenStateId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  resolveState      TicketState  @relation("TicketStateConfigResolve", fields: [organizationId, resolveStateId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  autoCloseState    TicketState  @relation("TicketStateConfigAutoClose", fields: [organizationId, autoCloseStateId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  mergeCloseState   TicketState  @relation("TicketStateConfigMergeClose", fields: [organizationId, mergeCloseStateId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
 }

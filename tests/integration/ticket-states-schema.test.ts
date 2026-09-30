@@ -357,6 +357,49 @@ describe("Phase 12.1 schema: organization ownership (D-04, D-05)", () => {
     expect(byRole).toContain("TicketStateConfig_organizationId_resolveStateId_fkey");
     expect(await prisma.ticket.count({ where: { id: ticket.id, stateId: pending } })).toBe(1);
   });
+
+  it("refuses moving a state into another organization instead of cascading its tickets (review WR-01)", async () => {
+    const orgA = await freshOrg();
+    const orgB = await freshOrg();
+    // A state that holds no role, so only the ticket's composite key references it.
+    const extra = await prisma.ticketState.create({
+      data: {
+        organizationId: orgA,
+        name: "Waiting on vendor",
+        colorToken: "gray",
+        group: "OPEN",
+        sortOrder: 9,
+      },
+      select: { id: true },
+    });
+    const ticket = await seedTicket(orgA, { stateId: extra.id });
+    const moved = await rejection(
+      prisma.$executeRaw`UPDATE "TicketState" SET "organizationId" = ${orgB} WHERE id = ${extra.id}`,
+    );
+    expect(moved).toContain("Ticket_organizationId_stateId_fkey");
+    const after = await prisma.ticket.findUniqueOrThrow({
+      where: { id: ticket.id },
+      select: { organizationId: true, stateId: true },
+    });
+    expect(after).toEqual({ organizationId: orgA, stateId: extra.id });
+  });
+
+  it("declares every composite state foreign key ON UPDATE RESTRICT and ON DELETE RESTRICT (review WR-01)", async () => {
+    const names = [
+      "Ticket_organizationId_stateId_fkey",
+      "TicketStateConfig_organizationId_newStateId_fkey",
+      "TicketStateConfig_organizationId_reopenStateId_fkey",
+      "TicketStateConfig_organizationId_resolveStateId_fkey",
+      "TicketStateConfig_organizationId_autoCloseStateId_fkey",
+      "TicketStateConfig_organizationId_mergeCloseStateId_fkey",
+    ];
+    const rows = await prisma.$queryRaw<{ conname: string; upd: string; del: string }[]>`
+      SELECT conname, confupdtype::text AS upd, confdeltype::text AS del
+      FROM pg_constraint WHERE conname = ANY(${names}::text[])
+    `;
+    rows.sort((x, y) => (x.conname < y.conname ? -1 : 1));
+    expect(rows).toEqual([...names].sort().map((conname) => ({ conname, upd: "r", del: "r" })));
+  });
 });
 
 describe("Phase 12.1 schema: names, checks and the group fence (D-03, K42)", () => {

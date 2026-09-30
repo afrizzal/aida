@@ -13,6 +13,7 @@ import {
   assertFixtureCoverage,
   connect,
   createDatabase,
+  listMigrationFolders,
   snapshotTables,
   startMigrationContainer,
   type TableSnapshot,
@@ -436,7 +437,10 @@ describe("ticket_states migration, harness path: fresh install", () => {
     const db = await connect(container, "fresh");
     clients.push(db);
     const applied = await applyMigrations(db);
-    expect(applied.at(-1)).toBe(STATES_MIGRATION);
+    // The whole chain in folder order; since review WR-01 the phase migration is no longer the
+    // last one (20261110110000_ticket_state_fk_on_update_restrict follows it).
+    expect(applied).toEqual(listMigrationFolders());
+    expect(applied).toContain(STATES_MIGRATION);
     await db.query(
       `INSERT INTO "organization" ("id", "name", "slug", "createdAt") VALUES ('org-fresh', 'Fresh', 'fresh', $1)`,
       [FIXTURE_TIMESTAMP_VALUES[0]],
