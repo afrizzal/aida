@@ -58,7 +58,9 @@ import { fileURLToPath } from "node:url";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
 import { EMBEDDING_DIMENSIONS } from "../../src/lib/rag/types";
-import { createTicket, orgId, prisma } from "./support/db";
+import { STATE_COLOR_KEYS, STATE_COLORS } from "../../src/lib/tickets/state-colors";
+import { addStatusAriaLabel, GROUP_LABELS } from "../../src/lib/tickets/state-copy";
+import { createTicket, type LegacyStatusKey, orgId, prisma, stateIdFor } from "./support/db";
 import { CHAT_MODEL, createLlmStub, EMBED_MODEL } from "./support/llm-stub";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -92,6 +94,20 @@ const SETTING_KEYS_TO_RESET = [
 
 let articleId = "";
 let ticketId = "";
+
+// Phase 12.1 (12.1-16, UI-SPEC Color gate item 1): one OPEN fixture state per colour key the
+// five defaults do not use, so /settings/statuses renders a chip of every key, and one ticket per
+// group for the public status page. All are reverted in the afterAll.
+const EXTRA_COLOR_KEYS = ["blue", "teal", "orange", "red", "pink", "purple"] as const;
+const fixtureStateIds: string[] = [];
+const GROUP_TICKET_KEYS = [
+  "OPEN",
+  "PENDING",
+  "RESOLVED",
+  "CLOSED",
+] as const satisfies readonly LegacyStatusKey[];
+const groupTickets: { key: (typeof GROUP_TICKET_KEYS)[number]; id: string; statusToken: string }[] =
+  [];
 const draftMarkdown =
   "Thanks for reaching out! Here is a grounded, cited answer for the contrast scan [1].";
 
@@ -157,6 +173,39 @@ test.beforeAll(async () => {
   });
   ticketId = ticket.id;
 
+  const lastOpen = await prisma.ticketState.findFirst({
+    where: { organizationId: orgId, group: "OPEN", deletedAt: null },
+    orderBy: { sortOrder: "desc" },
+    select: { sortOrder: true },
+  });
+  for (const [index, colorToken] of EXTRA_COLOR_KEYS.entries()) {
+    const state = await prisma.ticketState.create({
+      data: {
+        organizationId: orgId,
+        name: `A11y ${colorToken} ${ts}`,
+        colorToken,
+        group: "OPEN",
+        sortOrder: (lastOpen?.sortOrder ?? 0) + 1 + index,
+      },
+      select: { id: true },
+    });
+    fixtureStateIds.push(state.id);
+  }
+  for (const key of GROUP_TICKET_KEYS) {
+    const groupTicket = await createTicket(orgId, {
+      subject: `A11y contrast ${key} ticket ${ts}`,
+      priority: "NORMAL",
+      body: `Public status page contrast fixture (${key}).`,
+      contact: { email: `a11y-contrast-${key.toLowerCase()}-${ts}@example.com` },
+      direction: "INBOUND",
+    });
+    await prisma.ticket.update({
+      where: { id: groupTicket.id },
+      data: { stateId: await stateIdFor(key) },
+    });
+    groupTickets.push({ key, id: groupTicket.id, statusToken: groupTicket.statusToken });
+  }
+
   const chunk = await prisma.kbChunk.findFirstOrThrow({ where: { articleId } });
   stub.chatResponse = {
     grounded: true,
@@ -168,6 +217,19 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   stub.stop();
   if (ticketId) await prisma.ticket.delete({ where: { id: ticketId } }).catch(() => {});
+  // The group tickets are removed; one that cannot be deleted goes back to Open.
+  const openId = await stateIdFor("OPEN");
+  for (const { id } of groupTickets) {
+    await prisma.ticket
+      .delete({ where: { id } })
+      .catch(() =>
+        prisma.ticket.update({ where: { id }, data: { stateId: openId, slaPausedAt: null } }),
+      );
+  }
+  // The fixture states hold no ticket, so they are hard-deleted.
+  if (fixtureStateIds.length > 0) {
+    await prisma.ticketState.deleteMany({ where: { id: { in: fixtureStateIds } } });
+  }
   if (articleId) await prisma.kbArticle.delete({ where: { id: articleId } }).catch(() => {});
   await prisma.setting.deleteMany({
     where: { organizationId: orgId, key: { in: SETTING_KEYS_TO_RESET } },
@@ -234,6 +296,46 @@ for (const theme of ["light", "dark"] as const) {
       await expect(page.getByRole("button", { name: "Discard" })).toBeVisible();
 
       await scanForContrastViolations(page);
+    });
+
+    test(`/settings/statuses with every colour key has zero color-contrast violations (${theme})`, async ({
+      page,
+    }) => {
+      await page.addInitScript((t) => window.localStorage.setItem("theme", t), theme);
+      await gotoWarm(page, "/settings/statuses");
+      for (const key of EXTRA_COLOR_KEYS) {
+        await expect(page.getByText(`A11y ${key} ${ts}`, { exact: true })).toBeVisible();
+      }
+      await scanForContrastViolations(page);
+    });
+
+    test(`/settings/statuses with the Add status dialog open has zero color-contrast violations (${theme})`, async ({
+      page,
+    }) => {
+      await page.addInitScript((t) => window.localStorage.setItem("theme", t), theme);
+      await gotoWarm(page, "/settings/statuses");
+      await page.getByRole("button", { name: addStatusAriaLabel(GROUP_LABELS.OPEN) }).click();
+      const dialog = page.getByRole("dialog");
+      for (const key of STATE_COLOR_KEYS) {
+        await expect(
+          dialog.getByRole("radio", { name: STATE_COLORS[key].displayName, exact: true }),
+        ).toHaveCount(1);
+        await expect(
+          dialog.getByText(STATE_COLORS[key].displayName, { exact: true }),
+        ).toBeVisible();
+      }
+      await scanForContrastViolations(page);
+    });
+
+    test(`the public status page of each group has zero color-contrast violations (${theme})`, async ({
+      page,
+    }) => {
+      await page.addInitScript((t) => window.localStorage.setItem("theme", t), theme);
+      for (const { key, statusToken } of groupTickets) {
+        await gotoWarm(page, `/status/${statusToken}`);
+        await expect(page.getByText(GROUP_LABELS[key], { exact: true }).first()).toBeVisible();
+        await scanForContrastViolations(page);
+      }
     });
   });
 }
