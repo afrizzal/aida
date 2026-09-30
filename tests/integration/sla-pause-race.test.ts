@@ -110,7 +110,11 @@ function evidence(entry: Record<string, unknown>): void {
 }
 
 describe("sla-flag worker against a state transition (D-17)", () => {
-  it("order 1: a resume holds the row; the worker settles without waiting; serial resume-then-worker", async () => {
+  // Codex diff critique D4: the paused ticket alone is no candidate (slaPausedAt IS NOT NULL in
+  // the committed snapshot), so the worker would never try to lock it. The same transaction
+  // therefore also holds an OPEN ticket that is overdue at `mid`, an eligible breach candidate:
+  // without SKIP LOCKED the worker waits on it and the test blocks until the vitest timeout.
+  it("order 1: a resume holds the row and an eligible candidate; the worker skips it without waiting; serial resume-then-worker", async () => {
     const actor = await newActor();
     const { id } = await seedTicket(actor.orgId, { status: "OPEN" });
     const original = await row(id);
@@ -124,10 +128,17 @@ describe("sla-flag worker against a state transition (D-17)", () => {
     // window (moved due minus mid = 110 minutes, window 20 percent of 480 = 96 minutes).
     const mid = at(original.firstResponseDueAt, 10 * MIN);
     await drain(mid);
+    // Seeded after the drain: OPEN, no pause, first response overdue at mid.
+    const { id: eligibleId } = await seedTicket(actor.orgId, { status: "OPEN" });
+    const eligible = await row(eligibleId);
+    expect(eligible.slaPausedAt).toBeNull();
+    expect(eligible.firstResponseDueAt.getTime()).toBeLessThan(mid.getTime());
 
     const resumePid = deferred<number>();
     const release = deferred<void>();
-    const resume = mutate(actor, [id], await stateOp(actor, "OPEN"), {
+    // One bulk transaction locks both tickets in one statement before its first item; the
+    // eligible ticket is already OPEN, so its item is a no-op that keeps its lock to the commit.
+    const resume = mutate(actor, [id, eligibleId], await stateOp(actor, "OPEN"), {
       clock: () => resumeAt,
       afterItem: async (tx) => {
         resumePid.resolve(await backendPid(tx));
@@ -156,6 +167,7 @@ describe("sla-flag worker against a state transition (D-17)", () => {
     const whileHeld = await row(id);
     expect(whileHeld.isBreached).toBe(false);
     expect(whileHeld.isAtRisk).toBe(false);
+    expect((await row(eligibleId)).isBreached).toBe(false);
 
     release.resolve();
     const results = await Promise.allSettled([resume]);
@@ -163,6 +175,8 @@ describe("sla-flag worker against a state transition (D-17)", () => {
     expect((results[0] as PromiseFulfilledResult<unknown>).value).toMatchObject({ ok: true });
 
     await slaFlagHandler(undefined, { now: mid });
+    // The held candidate was eligible: once released, the same run time breaches it.
+    expect((await row(eligibleId)).isBreached).toBe(true);
     const resumed = await row(id);
     // Serial resume-then-worker: deadlines moved by the pause, no flag at mid.
     expect(resumed.slaPausedAt).toBeNull();
