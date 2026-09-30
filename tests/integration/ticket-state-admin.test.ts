@@ -2,7 +2,10 @@
 // D-12, D-14, D-15 amended, K40 to K42), on a real Postgres through Testcontainers. Nothing is
 // mocked: real organizations, real members, real tickets.
 import { randomUUID } from "node:crypto";
+import { PrismaPg } from "@prisma/adapter-pg";
+import pg from "pg";
 import { describe, expect, it } from "vitest";
+import { PrismaClient } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { STATE_COLOR_KEYS } from "@/lib/tickets/state-colors";
 import {
@@ -85,6 +88,77 @@ describe("deleteTicketState tracer (K41, K42, D-15)", () => {
     const deleted = await prisma.ticketState.findUniqueOrThrow({ where: { id: openId } });
     expect(deleted.deletedAt).toBeInstanceOf(Date);
   });
+
+  it("moves 5000 tickets with set-based statements well inside the 30 s transaction timeout (review WR-a2-1)", async () => {
+    const { orgId, admin } = await seedOrg();
+    const openId = await stateIdFor(orgId, "OPEN");
+    const second = await addState(orgId, "OPEN", "Second open");
+    const first = await seedTicket(orgId, { status: "OPEN" });
+    const EXTRA = 4999;
+    // Fixture write: clone the seeded ticket into the same state (new id, number and token).
+    await prisma.$executeRaw`
+      INSERT INTO "Ticket" (id, "organizationId", number, "statusToken", subject, "stateId",
+        priority, "contactId", "firstResponseTargetMinutes", "resolutionTargetMinutes",
+        "firstResponseDueAt", "resolutionDueAt", "createdAt", "updatedAt")
+      SELECT gen_random_uuid()::text, t."organizationId", t.number + g, gen_random_uuid()::text,
+        t.subject, t."stateId", t.priority, t."contactId", t."firstResponseTargetMinutes",
+        t."resolutionTargetMinutes", t."firstResponseDueAt", t."resolutionDueAt", t."createdAt",
+        t."updatedAt"
+      FROM "Ticket" t CROSS JOIN generate_series(1, ${EXTRA}::int) g
+      WHERE t.id = ${first.id} AND t."organizationId" = ${orgId}
+    `;
+    const total = EXTRA + 1;
+    expect(
+      await prisma.ticket.count({ where: { organizationId: orgId, stateId: openId } }),
+    ).toBe(total);
+
+    // A separate client that counts every statement it sends, so the bound below does not
+    // depend on how fast this machine is.
+    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
+    const counting = new PrismaClient({
+      adapter: new PrismaPg(pool),
+      log: [{ emit: "event", level: "query" }],
+    });
+    let statements = 0;
+    counting.$on("query", () => {
+      statements += 1;
+    });
+    let result: Awaited<ReturnType<typeof deleteTicketState>>;
+    let elapsed: number;
+    try {
+      const started = Date.now();
+      result = await deleteTicketState(counting, admin, {
+        stateId: openId,
+        replacementStateId: second.id,
+      });
+      elapsed = Date.now() - started;
+    } finally {
+      await counting.$disconnect();
+      await pool.end();
+    }
+
+    expect(result).toMatchObject({ ok: true, movedCount: total, rolesMoved: true });
+    // The statement count does not grow with the number of tickets (the per-ticket loop sent two
+    // per ticket), and the run stays far inside the 30 s transaction timeout.
+    expect(statements).toBeLessThan(50);
+    expect(elapsed).toBeLessThan(5_000);
+    expect(
+      await prisma.ticket.count({ where: { organizationId: orgId, stateId: second.id } }),
+    ).toBe(total);
+    const audits = await prisma.ticketAuditEvent.findMany({
+      where: { organizationId: orgId, action: "STATUS_CHANGED" },
+      select: { ticketId: true, batchId: true, actorUserId: true, before: true, after: true },
+    });
+    expect(audits).toHaveLength(total);
+    expect(new Set(audits.map((a) => a.ticketId)).size).toBe(total);
+    expect(new Set(audits.map((a) => a.batchId)).size).toBe(1);
+    expect(audits[0].batchId).toEqual(expect.any(String));
+    for (const a of audits) {
+      expect(a.actorUserId).toBe(admin.userId);
+      expect(a.before).toEqual({ stateId: openId, stateGroup: "OPEN" });
+      expect(a.after).toEqual({ stateId: second.id, stateGroup: "OPEN" });
+    }
+  }, 120_000);
 });
 
 const ROLE_GROUPS = {

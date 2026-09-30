@@ -17,9 +17,9 @@
 //   3. ticket rows through lockTicketsInIdOrder (ascending id, Ticket table alone).
 //
 // Soft delete (K42): deleting a state moves every ticket of it to a same-group replacement
-// (K41: applyStateTransition with fromGroup equal to toGroup, so only stateId changes), with one
-// STATUS_CHANGED audit row per ticket sharing one batchId, re-points every role column that held
-// it, and then sets deletedAt. The row stays, so foreign keys and history keep resolving. A
+// (K41: fromGroup equals toGroup, so only stateId changes) in one set-based UPDATE, writes one
+// STATUS_CHANGED audit row per ticket sharing one batchId in one INSERT ... SELECT (review
+// WR-a2-1), re-points every role column that held it, and then sets deletedAt. The row stays, so foreign keys and history keep resolving. A
 // soft-deleted state, an unknown id and another organization's id are all STATE_NOT_FOUND.
 //
 // Error contract: a refusal is thrown as StateAdminError inside the transaction (rolling it
@@ -33,8 +33,6 @@ import type { Prisma, PrismaClient } from "../../generated/prisma/client";
 import { findActiveMembership, isAdminRole } from "../membership";
 import { lockTicketsInIdOrder } from "./merge";
 import { isStateColorKey } from "./state-colors";
-import { applyStateTransition } from "./state-transition";
-import { recordTicketAudit } from "./ticket-audit";
 import { type StateGroup, shareLockActiveState, stateAuditSnapshot } from "./ticket-states";
 
 const TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: 30_000 } as const;
@@ -351,29 +349,43 @@ export async function deleteTicketState(
     if (replacement !== null) {
       const now = hooks.clock ? hooks.clock() : new Date();
       const batchId = randomUUID();
-      for (const ticket of lockedTickets) {
-        if (ticket.stateId !== state.id) continue;
-        // K41: same group, so only stateId changes (no resolvedAt, flag, deadline or pause
-        // effect).
-        const count = await applyStateTransition(tx, orgId, {
-          row: ticket,
-          fromGroup: state.group,
-          toStateId: replacement.id,
-          toGroup: state.group,
-          now,
-          policy: "by-group",
-        });
-        if (count !== 1) continue;
-        await recordTicketAudit(tx, orgId, {
-          ticketId: ticket.id,
-          action: "STATUS_CHANGED",
-          actorType: "USER",
-          actorUserId: userId,
-          before: stateAuditSnapshot(state.id, state.group),
-          after: stateAuditSnapshot(replacement.id, state.group),
-          batchId,
-        });
-        movedCount += 1;
+      // A ticket another writer moved out of the state before our lock is skipped.
+      const stillInState = lockedTickets.filter((t) => t.stateId === state.id).map((t) => t.id);
+      if (stillInState.length > 0) {
+        // Set-based (review WR-a2-1): one UPDATE and one INSERT ... SELECT, whatever the number
+        // of tickets, so a large state is moved well inside the transaction timeout while the
+        // config row is held. K41: same group, so only stateId (and updatedAt) changes, exactly
+        // what planStateTransition plans for fromGroup equal to toGroup (no resolvedAt, flag,
+        // deadline or pause effect). updatedAt and the audit time are the wall clock, as the
+        // per-ticket writes had them.
+        const writtenAt = new Date();
+        const moved = await tx.$queryRaw<{ id: string }[]>`
+          UPDATE "Ticket" SET "stateId" = ${replacement.id}, "updatedAt" = ${writtenAt}
+          WHERE "organizationId" = ${orgId} AND "stateId" = ${state.id}
+            AND id = ANY(${stillInState}::text[])
+          RETURNING id
+        `;
+        // Every locked ticket still in the state must move; otherwise the whole delete rolls
+        // back and the state stays active (K42; review IN-a2-1).
+        if (moved.length !== stillInState.length) {
+          throw new Error(
+            `state delete: moved ${moved.length} of ${stillInState.length} locked tickets`,
+          );
+        }
+        // One STATUS_CHANGED row per moved ticket, one batchId, the flat { stateId, stateGroup }
+        // snapshot only (K42), as recordTicketAudit writes it.
+        const before = JSON.stringify(stateAuditSnapshot(state.id, state.group));
+        const after = JSON.stringify(stateAuditSnapshot(replacement.id, state.group));
+        const movedIds = moved.map((m) => m.id);
+        await tx.$executeRaw`
+          INSERT INTO "TicketAuditEvent" (id, "organizationId", "ticketId", "actorType",
+            "actorUserId", action, before, after, "batchId", "createdAt")
+          SELECT gen_random_uuid()::text, ${orgId}, m.id, 'USER'::"TicketAuditActorType",
+            ${userId}, 'STATUS_CHANGED'::"TicketAuditAction", ${before}::jsonb, ${after}::jsonb,
+            ${batchId}, ${writtenAt}
+          FROM unnest(${movedIds}::text[]) AS m(id)
+        `;
+        movedCount = moved.length;
       }
 
       // Every role column that held the deleted state now holds the replacement (D-05 group
