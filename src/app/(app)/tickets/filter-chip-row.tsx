@@ -287,7 +287,23 @@ export function FilterChipRow({ tags, customFieldDefinitions, states }: FilterCh
                     key={id}
                     className="text-[13px]"
                     checked
-                    onSelect={(e) => e.preventDefault()}
+                    onSelect={(e) => {
+                      // Review UI-WR-c3: unchecking removes this item, so focus moves to the item
+                      // before it (else after it) first and does not fall back to the menu itself.
+                      // With no item left the menu closes and Radix focuses the trigger.
+                      const item = e.currentTarget;
+                      if (!(item instanceof HTMLElement)) return;
+                      const items = Array.from(
+                        item
+                          .closest('[role="menu"]')
+                          ?.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]') ?? [],
+                      );
+                      const index = items.indexOf(item);
+                      const survivor = items[index - 1] ?? items[index + 1];
+                      if (!survivor) return;
+                      e.preventDefault();
+                      survivor.focus();
+                    }}
                     onCheckedChange={(checked) => {
                       if (checked !== true) toggleState(id, false);
                     }}

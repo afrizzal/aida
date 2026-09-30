@@ -26,6 +26,7 @@ import {
   GROUP_LABELS,
   KEEP_STATUS,
   MEMBERS_NOTE,
+  MISSING_STATUS_ITEM,
   MOVE_AND_DELETE_BUTTON,
   moveUpAriaLabel,
   NAME_LABEL,
@@ -667,5 +668,25 @@ test.describe
         where: { organizationId: orgId },
         data: { mergeCloseStateId: await migratedId("CLOSED") },
       });
+    });
+
+    // Review UI-WR-c3: unchecking the last deleted status keeps focus on a live item.
+    test("unchecking a deleted status in the Status filter keeps focus on a live item", async ({
+      page,
+    }) => {
+      const live = await migratedId("OPEN");
+      const state = await insertState("OPEN", "Uncheck gone");
+      await prisma.ticketState.update({ where: { id: state.id }, data: { deletedAt: new Date() } });
+      await gotoReady(page, `/tickets?state=${[live, state.id].sort().join(",")}`);
+      await page.locator("#inbox-status-filter-trigger").focus();
+      await page.keyboard.press("Enter");
+      const missing = page.getByRole("menuitemcheckbox", { name: MISSING_STATUS_ITEM });
+      await page.keyboard.press("End");
+      await expect(missing).toBeFocused();
+      await page.keyboard.press("Space");
+      await expect(page).not.toHaveURL(new RegExp(state.id));
+      await expect(missing).toHaveCount(0);
+      await expect(page.getByRole("menuitemcheckbox").last()).toBeFocused();
+      await page.keyboard.press("Escape");
     });
   });
