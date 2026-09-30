@@ -30,6 +30,7 @@ import {
   moveUpAriaLabel,
   NAME_LABEL,
   pausedChipLabel,
+  REPLACE_AND_DELETE_BUTTON,
   REPLACEMENT_LABEL,
   ROW_MENU_DELETE,
   ROW_MENU_EDIT,
@@ -646,5 +647,25 @@ test.describe
       await page.keyboard.press("Escape");
       await dialog.getByRole("button", { name: KEEP_STATUS }).click();
       await expect(page.getByRole("dialog")).toHaveCount(0);
+    });
+
+    // Review UI-IN-c1: case C (roles only) shows its own destructive button.
+    test("a status that only holds a role offers Replace and delete", async ({ page }) => {
+      const state = await insertState("CLOSED", "Role only");
+      await prisma.ticketStateConfig.update({
+        where: { organizationId: orgId },
+        data: { mergeCloseStateId: state.id },
+      });
+      await gotoReady(page, "/settings/statuses");
+      await page.getByRole("button", { name: rowOptionsAriaLabel(state.name) }).click();
+      await page.getByRole("menuitem", { name: ROW_MENU_DELETE, exact: true }).click();
+      const dialog = page.getByRole("dialog");
+      await expect(dialog.getByRole("button", { name: REPLACE_AND_DELETE_BUTTON })).toBeDisabled();
+      await dialog.getByRole("button", { name: KEEP_STATUS }).click();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await prisma.ticketStateConfig.update({
+        where: { organizationId: orgId },
+        data: { mergeCloseStateId: await migratedId("CLOSED") },
+      });
     });
   });

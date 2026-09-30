@@ -145,7 +145,6 @@ export function DeleteStatusDialog({
   const replacementName = replacement?.name ?? REPLACEMENT_NOT_CHOSEN;
   const needsReplacement = kind !== "A";
   const destructiveDisabled = pending || locked || (needsReplacement && !replacement);
-  // Case A "Delete status", case B "Move tickets and delete", case C "Replace and delete".
   const destructiveLabel =
     kind === "A"
       ? DELETE_STATUS_BUTTON
