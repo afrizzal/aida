@@ -16,9 +16,12 @@ export interface RecordAuditEventParams {
     | "DRAFT_GENERATED"
     | "DRAFT_APPROVED"
     | "INSIGHT_CLUSTER_LABELS"
-    | "INSIGHT_SUMMARY";
+    | "INSIGHT_SUMMARY"
+    | "KB_PROPOSAL_GENERATED";
   ticketId?: string | null;
   messageId?: string | null;
+  /** Phase 12.2 (D-12): the KB proposal a KB_PROPOSAL_GENERATED row belongs to; omitted elsewhere. */
+  kbProposalId?: string | null;
   provider: string;
   model: string;
   /** MUST be the already-redacted prompt (never raw ticket text) — D-13. */
@@ -40,6 +43,7 @@ export async function recordAuditEvent(db: AuditDb, params: RecordAuditEventPara
         actionType: params.actionType,
         ticketId: params.ticketId ?? null,
         messageId: params.messageId ?? null,
+        kbProposalId: params.kbProposalId ?? null,
         provider: params.provider,
         model: params.model,
         input: params.input,

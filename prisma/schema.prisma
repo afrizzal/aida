@@ -122,6 +122,8 @@ model organization {
   ticketRelations   TicketRelation[]
   ticketStates      TicketState[]
   ticketStateConfig TicketStateConfig?
+  kbProposals       KbProposal[]
+  kbProposalSources KbProposalSource[]
 }
 
 model member {
@@ -242,6 +244,7 @@ enum AuditActionType {
   DRAFT_APPROVED
   INSIGHT_CLUSTER_LABELS
   INSIGHT_SUMMARY
+  KB_PROPOSAL_GENERATED // Phase 12.2 (D-12): one row per KB proposal generation that returned output
 }
 
 enum KbEmbeddingStatus {
@@ -293,8 +296,10 @@ model Ticket {
   mergedFrom       Ticket[]           @relation("TicketMerge")
   relationsFrom    TicketRelation[]   @relation("RelationFrom")
   relationsTo      TicketRelation[]   @relation("RelationTo")
+  kbProposalSources KbProposalSource[]
 
   @@unique([organizationId, number])
+  @@unique([organizationId, id]) // Phase 12.2 (D-04): target of KbProposalSource (organizationId, ticketId)
   @@index([organizationId])
   @@index([organizationId, stateId])
   @@index([contactId])
@@ -467,11 +472,14 @@ model AuditEvent {
   model          String          // e.g. "gpt-5.4-mini"
   input          String          // full REDACTED prompt — self-contained copy (D-17)
   output         String          // full model output (JSON string)
+  kbProposalId   String?         // Phase 12.2 (D-12): the KB proposal a KB_PROPOSAL_GENERATED row belongs to; composite FK
   createdAt      DateTime        @default(now())
   organization   organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  kbProposal     KbProposal?     @relation(fields: [organizationId, kbProposalId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([organizationId])
   @@index([organizationId, ticketId])
+  @@index([organizationId, kbProposalId])
 }
 
 model RateLimitHit {
@@ -500,8 +508,10 @@ model KbArticle {
   updatedAt        DateTime          @updatedAt
   organization     organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   chunks           KbChunk[]
+  kbProposals      KbProposal[] // Phase 12.2: at most one, enforced by the unique KbProposal.publishedArticleId
 
   @@unique([organizationId, slug])
+  @@unique([organizationId, id]) // Phase 12.2 (D-03): target of KbProposal (organizationId, publishedArticleId)
   @@index([organizationId])
 }
 
@@ -766,4 +776,95 @@ model TicketStateConfig {
   resolveState      TicketState  @relation("TicketStateConfigResolve", fields: [organizationId, resolveStateId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
   autoCloseState    TicketState  @relation("TicketStateConfigAutoClose", fields: [organizationId, autoCloseStateId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
   mergeCloseState   TicketState  @relation("TicketStateConfigMergeClose", fields: [organizationId, mergeCloseStateId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+// ---------------------------------------------------------------------------
+// Domain models (Phase 12.2 — Ticket lifecycle: knowledge from resolved work, KB proposals)
+// ---------------------------------------------------------------------------
+
+enum KbProposalStatus {
+  GENERATING
+  DRAFT
+  REJECTED
+  PUBLISHED
+  FAILED
+}
+
+// REQUESTER_NOT_ALLOWED: the requester lost the owner or admin role before generation (D-01).
+enum KbProposalFailureCode {
+  AI_OFF
+  SOURCE_CHANGED
+  PROVIDER
+  INVALID_OUTPUT
+  CONFIGURATION
+  REQUESTER_NOT_ALLOWED
+  UNKNOWN
+}
+
+// Hand-written objects that live ONLY in migration 20261111100000_kb_proposals, because Prisma
+// cannot express them: the CHECKs KbProposal_version_check (version >= 0),
+// KbProposal_generation_epoch_check ("generationEpoch" >= 1), KbProposal_title_length_check (null
+// or 3 to 120 code points), KbProposal_status_fields_check (the columns each status requires) and
+// KbProposalSource_position_check (1 to 5); the function aida_kb_proposal_status_immutable and the
+// trigger aida_kb_proposal_status_fence (BEFORE UPDATE ON "KbProposal") that refuse every status
+// change except GENERATING to DRAFT or FAILED and DRAFT to PUBLISHED or REJECTED, and any change of
+// title, bodyMarkdown or publishedArticleId on a REJECTED, PUBLISHED or FAILED row (D-16). Any
+// migration Prisma generates after that one must keep them (delete any DROP statement for them by
+// hand).
+// A proposal never gets KbChunk rows, an embedding or a KbArticle row before the explicit publish
+// action (D-05, D-06). Review actions live on these columns, never in AuditEvent (D-02, D-12).
+// Actor columns carry no relation on purpose (the TicketAuditEvent.actorUserId shape).
+model KbProposal {
+  id                 String                 @id @default(cuid())
+  organizationId     String
+  status             KbProposalStatus       @default(GENERATING)
+  version            Int                    @default(0) // D-16: incremented by every write; conditional updates match it
+  // Review R2-3: identifies the current generation. The request leaves it at 1, every restart
+  // increments it in its conditional update; the job payload carries it and every claim, release,
+  // storing and failing update of the job requires it.
+  generationEpoch    Int                    @default(1)
+  title              String?
+  bodyMarkdown       String?
+  inputTruncated     Boolean                @default(false) // D-10: part of a thread was dropped from the input
+  failureCode        KbProposalFailureCode?
+  requestedByUserId  String
+  // Review C5: the request and every restart set it; isStuck counts from it while
+  // generationClaimedAt is null.
+  generationQueuedAt DateTime               @default(now())
+  generationClaimedAt DateTime?
+  generatedAt        DateTime?
+  lastEditedByUserId String?
+  lastEditedAt       DateTime?
+  rejectedByUserId   String?
+  rejectedAt         DateTime?
+  publishedByUserId  String?
+  publishedAt        DateTime?
+  failedAt           DateTime?
+  publishedArticleId String?                @unique
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  organization       organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  publishedArticle   KbArticle?             @relation(fields: [organizationId, publishedArticleId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  sources            KbProposalSource[]
+  auditEvents        AuditEvent[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, status, createdAt])
+}
+
+model KbProposalSource {
+  organizationId String
+  proposalId     String
+  ticketId       String
+  position       Int // 1 to 5 (KbProposalSource_position_check)
+  snapshotSeq    BigInt? // D-08: the ticket's largest PUBLIC message seq at read time (plan 12.2-04), set when the result is stored
+  citedSections  String[] // D-11: the section labels the model cited this source for, shown only to the reviewer
+  createdAt      DateTime     @default(now())
+  organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  proposal       KbProposal   @relation(fields: [organizationId, proposalId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  ticket         Ticket       @relation(fields: [organizationId, ticketId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([proposalId, ticketId])
+  @@unique([proposalId, position])
+  @@index([organizationId, ticketId])
 }

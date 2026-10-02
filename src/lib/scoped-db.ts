@@ -34,6 +34,8 @@ export const DOMAIN_MODELS = [
   "TicketRelation",
   "TicketState",
   "TicketStateConfig",
+  "KbProposal",
+  "KbProposalSource",
 ] as const;
 
 const isDomain = (model?: string): boolean =>
