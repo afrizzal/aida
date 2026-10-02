@@ -210,3 +210,89 @@ describe("runTriage counts SLA pauses in the deadlines it writes", () => {
     );
   });
 });
+
+// Codex diff critique round 2, R2-D1 (run decision K46, D-16 "flags already set when a pause
+// starts stay set"): the sla-flag worker skips paused tickets, so a triage priority write during
+// an open pause recomputes the deadlines but keeps the flags; with no open pause it clears them.
+describe("runTriage and the SLA flags (R2-D1, K46)", () => {
+  const MIN = 60_000;
+
+  function readFlags(id: string) {
+    return prisma.ticket.findUniqueOrThrow({
+      where: { id },
+      select: {
+        createdAt: true,
+        priority: true,
+        triageStatus: true,
+        slaPausedAt: true,
+        slaPausedMs: true,
+        firstResponseDueAt: true,
+        resolutionDueAt: true,
+        isAtRisk: true,
+        isBreached: true,
+      },
+    });
+  }
+
+  async function flag(ticketId: string) {
+    await prisma.ticket.update({
+      where: { id: ticketId },
+      data: { isAtRisk: true, isBreached: true },
+    });
+  }
+
+  it("during an open pause the deadlines are recomputed and both flags stay set", async () => {
+    const { orgId, actor, ticketId } = await seedTriageCase();
+    const { createdAt } = await readFlags(ticketId);
+    const pauseAt = new Date(createdAt.getTime() + 5 * MIN);
+    const stateId = await stateIdFor(orgId, "PENDING");
+    const moved = await runTicketMutation(
+      { actor, ticketIds: [ticketId], op: { kind: "state", stateId }, mode: "single" },
+      { clock: () => pauseAt },
+    );
+    expect(moved).toMatchObject({ ok: true, count: 1 });
+    await flag(ticketId);
+    duringModelCall = null;
+    modelPriority = "URGENT";
+
+    await runTriage(ticketId);
+
+    const targets = await getSlaTargets(scopedDb(orgId), "URGENT");
+    const after = await readFlags(ticketId);
+    expect(after.priority).toBe("URGENT");
+    expect(after.triageStatus).toBe("COMPLETED");
+    expect(after.slaPausedAt?.getTime()).toBe(pauseAt.getTime());
+    expect(after.firstResponseDueAt.getTime()).toBe(
+      createdAt.getTime() + targets.firstResponseMinutes * MIN,
+    );
+    expect(after.resolutionDueAt.getTime()).toBe(
+      createdAt.getTime() + targets.resolutionMinutes * MIN,
+    );
+    expect(after.isBreached).toBe(true);
+    expect(after.isAtRisk).toBe(true);
+  });
+
+  it("with no open pause the deadlines are recomputed and both flags are cleared", async () => {
+    const { orgId, ticketId } = await seedTriageCase();
+    await flag(ticketId);
+    const { createdAt } = await readFlags(ticketId);
+    duringModelCall = null;
+    modelPriority = "URGENT";
+
+    await runTriage(ticketId);
+
+    const targets = await getSlaTargets(scopedDb(orgId), "URGENT");
+    const after = await readFlags(ticketId);
+    expect(after.priority).toBe("URGENT");
+    expect(after.triageStatus).toBe("COMPLETED");
+    expect(after.slaPausedAt).toBeNull();
+    expect(after.firstResponseDueAt.getTime()).toBe(
+      createdAt.getTime() + targets.firstResponseMinutes * MIN,
+    );
+    expect(after.resolutionDueAt.getTime()).toBe(
+      createdAt.getTime() + targets.resolutionMinutes * MIN,
+    );
+    expect(after.isBreached).toBe(false);
+    expect(after.isAtRisk).toBe(false);
+  });
+});

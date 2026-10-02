@@ -68,11 +68,12 @@ export async function runTriage(ticketId: string): Promise<void> {
       // The closed pauses are read under that lock too: the deadlines count createdAt plus
       // slaPausedMs, as a priority change does; an open pause (slaPausedAt) is added by the
       // transition that closes it (D-16, Codex diff critique D1).
-      const locked = await tx.$queryRaw<{ slaPausedMs: bigint }[]>`
-        SELECT "slaPausedMs" FROM "Ticket"
+      const locked = await tx.$queryRaw<{ slaPausedAt: Date | null; slaPausedMs: bigint }[]>`
+        SELECT "slaPausedAt", "slaPausedMs" FROM "Ticket"
         WHERE "id" = ${ticketId} AND "organizationId" = ${orgId}
         FOR UPDATE
       `;
+      const pauseOpen = (locked[0]?.slaPausedAt ?? null) !== null;
       const agentDecided =
         (await countPriorityDecisions(tx, orgId, ticketId)) !== priorityDecisionsBefore;
       const { firstResponseDueAt, resolutionDueAt } = pausedDueTimestamps(
@@ -94,8 +95,10 @@ export async function runTriage(ticketId: string): Promise<void> {
               resolutionTargetMinutes: targets.resolutionMinutes,
               firstResponseDueAt,
               resolutionDueAt,
-              isAtRisk: false,
-              isBreached: false,
+              // Flags set when a pause starts stay set (D-16, K46): the sla-flag worker skips
+              // paused tickets and would not restore them. With no open pause they clear and the
+              // worker re-flags against the new deadlines. slaPausedAt is read under the lock.
+              ...(pauseOpen ? {} : { isAtRisk: false, isBreached: false }),
             },
           });
 

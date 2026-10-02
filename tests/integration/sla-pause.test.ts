@@ -332,3 +332,70 @@ describe("SLA pause with the real sla-flag handler (AIDA-57)", () => {
     expect(after.slaPausedAt).toBeNull();
   });
 });
+
+// Codex diff critique round 2, R2-D1 (run decision K46, D-16 "flags already set when a pause
+// starts stay set"): the worker skips paused tickets, so a priority change during an open pause
+// recomputes the deadlines but keeps the flags; with no open pause it clears them as before.
+describe("a priority change and the SLA flags (R2-D1, K46)", () => {
+  async function breachedTicket(actor: Actor) {
+    const { id } = await seedTicket(actor.orgId, { status: "OPEN" });
+    const original = await read(id);
+    await slaFlagHandler(undefined, { now: at(original.firstResponseDueAt, 1) });
+    const flagged = await read(id);
+    expect(flagged.isBreached).toBe(true);
+    expect(flagged.isAtRisk).toBe(true);
+    return original;
+  }
+
+  async function changePriority(actor: Actor, id: string) {
+    const result = await runTicketMutation({
+      actor,
+      ticketIds: [id],
+      op: { kind: "priority", priority: "HIGH" },
+      mode: "single",
+    });
+    expect(result).toMatchObject({ ok: true, count: 1 });
+  }
+
+  it("during an open pause the deadlines are recomputed and both flags stay set", async () => {
+    const actor = await newActor();
+    const original = await breachedTicket(actor);
+    const pauseAt = at(original.firstResponseDueAt, 2 * MIN);
+    await moveTo(actor, original.id, "PENDING", pauseAt);
+
+    await changePriority(actor, original.id);
+
+    const high = DEFAULT_SLA_TARGETS.HIGH;
+    const changed = await read(original.id);
+    expect(changed.priority).toBe("HIGH");
+    expect(changed.slaPausedAt?.getTime()).toBe(pauseAt.getTime());
+    expect(changed.firstResponseDueAt.getTime()).toBe(
+      at(original.createdAt, high.firstResponseMinutes * MIN).getTime(),
+    );
+    expect(changed.resolutionDueAt.getTime()).toBe(
+      at(original.createdAt, high.resolutionMinutes * MIN).getTime(),
+    );
+    expect(changed.isBreached).toBe(true);
+    expect(changed.isAtRisk).toBe(true);
+  });
+
+  it("with no open pause the deadlines are recomputed and both flags are cleared", async () => {
+    const actor = await newActor();
+    const original = await breachedTicket(actor);
+
+    await changePriority(actor, original.id);
+
+    const high = DEFAULT_SLA_TARGETS.HIGH;
+    const changed = await read(original.id);
+    expect(changed.priority).toBe("HIGH");
+    expect(changed.slaPausedAt).toBeNull();
+    expect(changed.firstResponseDueAt.getTime()).toBe(
+      at(original.createdAt, high.firstResponseMinutes * MIN).getTime(),
+    );
+    expect(changed.resolutionDueAt.getTime()).toBe(
+      at(original.createdAt, high.resolutionMinutes * MIN).getTime(),
+    );
+    expect(changed.isBreached).toBe(false);
+    expect(changed.isAtRisk).toBe(false);
+  });
+});

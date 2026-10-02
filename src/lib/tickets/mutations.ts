@@ -418,8 +418,10 @@ async function applyOp(
           resolutionTargetMinutes: op.targets.resolutionMinutes,
           firstResponseDueAt,
           resolutionDueAt,
-          isAtRisk: false,
-          isBreached: false,
+          // Flags set when a pause starts stay set (D-16, K46): the sla-flag worker skips paused
+          // tickets and would not restore them. With no open pause they clear and the worker
+          // re-flags against the new deadlines. slaPausedAt is read under the row lock above.
+          ...(ticket.slaPausedAt === null ? { isAtRisk: false, isBreached: false } : {}),
         });
       }
       return {
