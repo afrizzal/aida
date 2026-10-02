@@ -678,8 +678,16 @@ test.describe
       const state = await insertState("OPEN", "Uncheck gone");
       await prisma.ticketState.update({ where: { id: state.id }, data: { deletedAt: new Date() } });
       await gotoReady(page, `/tickets?state=${[live, state.id].sort().join(",")}`);
-      await page.locator("#inbox-status-filter-trigger").focus();
+      // The list panel streams in a Suspense boundary: until it is revealed the trigger sits in a
+      // hidden container, where focus() is a silent no-op and the keys reach <body> (E2E failure
+      // on 83fee68). Each key waits for the state it acts on.
+      const trigger = page.locator("#inbox-status-filter-trigger");
+      await expect(trigger).toBeVisible();
+      await trigger.focus();
+      await expect(trigger).toBeFocused();
       await page.keyboard.press("Enter");
+      // Radix focuses the menu or its first item, and End moves to the last item from either.
+      await expect(page.locator('[role="menu"]:focus-within')).toBeVisible();
       const missing = page.getByRole("menuitemcheckbox", { name: MISSING_STATUS_ITEM });
       await page.keyboard.press("End");
       await expect(missing).toBeFocused();
