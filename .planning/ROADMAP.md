@@ -348,7 +348,36 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 1. An admin can review a proposed KB article from resolved tickets, and nothing publishes without that review.
 
-**Plans:** 0 plans
+**Plans:** 12 plans
+**Wave 1**
+
+- [ ] 12.2-01-PLAN.md — One hand-edited migration (KbProposal, KbProposalSource with composite tenancy keys, status fence, audit action and link), frozen contract, fixtures, constraint and D-05 reader-isolation proofs (Wave 1)
+- [ ] 12.2-02-PLAN.md — Fixed system prompt, fenced and bounded ticket input with truncation flag, validated output and the shared field validator, lengths in code points (Wave 1)
+- [ ] 12.2-03-PLAN.md — Typed LLM errors with a classifier and the 30 s Ollama timeout (Wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 12.2-04-PLAN.md — Request path: membership, role, count, AI-off and per-ticket eligibility refusals; post-commit enqueue; PUBLIC-only source input and snapshot markers (Wave 2)
+- [ ] 12.2-05-PLAN.md — Review service: save, reject, transactional publish with slug retry and post-commit embedding, restart, retry indexing; PID-bound races (Wave 2)
+- [ ] 12.2-06-PLAN.md — Copy module with total code mappings and the proposal status chip (Wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 12.2-07-PLAN.md — Generation job: claim lease, D-01/D-08/D-09 rechecks, complete() with one audit row, validated store, typed failures, worker registration, claim races (Wave 3)
+- [ ] 12.2-08-PLAN.md — Server actions and D-01-first loaders, proposal list with polling, admin-only Proposals link, Start dialog (Wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 12.2-09-PLAN.md — Review page: editor, sources card, status views, restart and retry, publish and reject dialogs (Wave 4)
+- [ ] 12.2-10-PLAN.md — Entry points: ticket actions menu item and inbox bulk-bar button, admin-only with reasons (Wave 4)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 12.2-11-PLAN.md — E2E with the LLM stub: generate, review, publish, reject, AI off, provider failure, roles and isolation, absence from RAG and Insight; contrast scan (Wave 5)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 12.2-12-PLAN.md — Phase gate, AIDA-18 and D-01 to D-17 evidence, greps, §9 checklist, README note, open items (Wave 6)
 
 ### Phase 13: Integrations
 
@@ -487,7 +516,7 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 | 11. Inbox | v2.0 | 9/9 | Verified: human_needed (visual, dark mode, 360px and screen-reader checks open) | - |
 | 12. Ticket Lifecycle (relations, merge, snooze, activity) | v2.0 | 10/10 | Verified: human_needed (visual, dark mode, layout widths and screen-reader checks open; AIDA-53 audit wording is owner item 12-o1) | - |
 | 12.1. Ticket Lifecycle (custom states, SLA pause) | v2.0 | 0/17 | Planned | - |
-| 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 0/0 | Not started | - |
+| 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 0/12 | Planned | - |
 | 13. Integrations | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
 | 14. Projects Foundation | v2.0 | 0/0 | Not started | - |
 | 15. Work Views | v2.0 | 0/0 | Not started | - |
