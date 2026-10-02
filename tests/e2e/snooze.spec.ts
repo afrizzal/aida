@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { snoozeTicket } from "../../src/lib/tickets/snooze";
 import { snoozeWakeHandler } from "../../src/lib/worker/jobs/snooze-wake";
 import { ADMIN_EMAIL } from "./global-setup";
@@ -36,6 +36,21 @@ async function open(page: Page, url: string) {
 function listUrl(subject: string, snoozed = false) {
   const q = encodeURIComponent(subject);
   return snoozed ? `/tickets?q=${q}&snoozed=1` : `/tickets?q=${q}`;
+}
+
+/**
+ * Hovers the trigger until its tooltip shows. Radix opens a tooltip only on a pointer move, and a
+ * move that lands before hydration has no handler, so `hover()` right after the page load can be
+ * lost for good (E2E failure on 83fee68). The pointer leaves and comes back until the tooltip is
+ * visible; a hover that opened it ends the loop, the same pattern as `openPalette` in
+ * command-palette.spec.ts. The caller still asserts the tooltip text.
+ */
+async function hoverUntilTooltip(page: Page, trigger: Locator) {
+  await expect(async () => {
+    await page.mouse.move(0, 0);
+    await trigger.hover();
+    await expect(page.getByRole("tooltip")).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
 }
 
 function row(page: Page, ticketId: string) {
@@ -116,7 +131,7 @@ test.describe("Snooze", () => {
     await open(page, `/tickets/${ticket.id}`);
     const trigger = page.getByRole("button", { name: `Snooze. ${CLOSED_REASON}` });
     await expect(trigger).toHaveAttribute("aria-disabled", "true");
-    await trigger.hover();
+    await hoverUntilTooltip(page, trigger);
     await expect(page.getByRole("tooltip")).toContainText(CLOSED_REASON);
     await trigger.click({ force: true });
     await expect(page.getByRole("dialog")).toHaveCount(0);
