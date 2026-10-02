@@ -19,7 +19,7 @@ Milestone v2.0 sudah dibuka (0b) dan daftar fitur Projects sudah dicek ke demo p
 | 10 | Tim (AIDA-42 sampai 46) | diparkir | CONTEXT (D-01 sampai D-29), UI-SPEC disetujui, 16 plan dalam 6 wave, tiga siklus review Codex (12, lalu 6, lalu 4 temuan). Siklus 3 menyisakan 2 HIGH, keduanya kontradiksi skrip E2E di 10-13 (K27). Belum ada kode yang dieksekusi | `fcd034e`, `0706c49`, `f188b06`, `eed405e`, `05570ee`, `1e11185`, `2730d11` |
 | 11 | Inbox (AIDA-47 sampai 51) | selesai, menunggu manusia | 9/9 plan; code review (0 critical) dan tiga putaran kritik Codex atas diff, semua perbaikan masuk; gerbang final di `47fc015`: lint, typecheck, unit (229), integration tanpa egress (142), E2E penuh (121 lolos), dan build exit 0, audit sama dengan baseline, egress blocked (O-1); verifikasi `human_needed` tanpa celah kode. Menunggu manusia: visual, mode gelap, 360px, pembaca layar | `7fb2721`..`866b1ed` |
 | 12 | Siklus tiket: relasi, merge, snooze, feed (AIDA-52 sampai 55) | selesai, menunggu manusia | 10/10 plan; code review tiga bagian (0 critical, 13 warning, 12 info) dan tiga putaran kritik Codex atas diff (HIGH hanya di putaran 1, dua-duanya diperbaiki); perbaikan F1 sampai F8 dengan test yang terlihat gagal lebih dulu; keputusan K34, K37, K38, K39; gerbang final di `db55e8d`: lint, typecheck, unit (276), integration tanpa egress (307), E2E penuh (165 lolos), build exit 0, audit sama dengan baseline, egress blocked (O-1); verifikasi `human_needed` 15/16 tanpa celah kode. AIDA-52, 54, 55 selesai; AIDA-53 menunggu owner (12-o1). Menunggu manusia: visual, mode gelap, lebar tata letak, pembaca layar, zona waktu, dua keputusan copy | `3da126f`..`4f1a777` |
-| 12.1 | Siklus tiket: status kustom, jeda SLA (AIDA-56, 97, 57) | belum disentuh | | |
+| 12.1 | Siklus tiket: status kustom, jeda SLA (AIDA-56, 97, 57) | selesai, menunggu manusia | 17/17 plan; review plan Codex dua siklus, code review empat bagian, tiga putaran Codex atas diff (HIGH di putaran 1 diperbaiki: triage mengabaikan jeda SLA); gerbang final di `f0ccffa`: lint, typecheck, unit 383, integration tanpa egress 519, E2E penuh 192 lolos, build exit 0, audit baseline, egress blocked (O-1); verifikasi `human_needed` 8/8. Catatan operator di README: migrasi `20261110100000_ticket_states` yang gagal butuh `prisma migrate resolve --rolled-back` sebelum deploy ulang (diamati di Prisma 7.8.0; perintah compose-nya tidak dijalankan). K47 ditunda | `25c9214`..`3d26506` |
 | 12.2 | Siklus tiket: usulan KB (AIDA-18) | belum disentuh | | |
 | 13 | Integrasi (AIDA-58 sampai 63) | diparkir (bergantung pada Fase 10) | | |
 | 14 | Fondasi Projects (AIDA-64 sampai 71, 100 sampai 105) | belum disentuh | | |
@@ -104,7 +104,7 @@ Belum ada.
 
 ## 8. Bukti tidak ada push
 
-Dicek 2026-11-09 01.30 WIB:
+Dicek 2026-11-09 08.40 WIB:
 
 - `git ls-remote origin refs/heads/master`: `1ea4281ab7bc72955514847837b5efffa5bc837d`
 - `git remote get-url --push origin`: `no-push-run-loop`

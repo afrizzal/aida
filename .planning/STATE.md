@@ -5,10 +5,10 @@ milestone_name: Helpdesk & Projects
 current_phase: 12
 current_phase_name: ticket-lifecycle
 status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11 and 12 verified human_needed; Phase 12.1 (custom states and SLA pause) next
-stopped_at: Phase 12.1 executed (17/17); code review next
+stopped_at: Phase 12.1 verified human_needed; Phase 12.2 not started
 last_updated: "2026-11-08T23:33:18.806Z"
 last_activity: 2026-11-09
-last_activity_desc: Phase 12.1 executed, 17/17 plans; gate on a8cbcf5 green except audit at baseline (egress blocked, O-1); code review next
+last_activity_desc: Phase 12.1 verified human_needed (8/8); final gate on f0ccffa green except audit at baseline; egress blocked (O-1); K47 deferred
 state_head: 75e5a731b94899099a85ae1ff6bdd0f623debc24
 progress:
   total_phases: 12
@@ -63,6 +63,7 @@ Items deferred during v2.0 (run loop):
 |----------|------|--------|
 | verification_gap | Phase 11 — `11-VERIFICATION.md` (2026-11-08) | `human_needed` — no code gap; AIDA-47 to 51 verified. Open for a human: visual approval and dark mode of the Phase 11 screens, the 360px and long-text backstops (11-04 to 11-08), the 11-06 backstop of a bulk status change moving tickets out of the filter, and the D-14 screen-reader check of single-letter keys. Also open: full `pnpm test:integration` and `pnpm test:egress` (blocked, O-1); owner item O-2 (auto-close customer notice) |
 | verification_gap | Phase 12 — `12-VERIFICATION.md` (2026-11-09) | `human_needed` — no code gap; AIDA-52, 54 and 55 verified; AIDA-53 verified except the "full `AuditEvent`" clause (owner item 12-o1). Open for a human: visual pass and dark mode of the Phase 12 screens (UI-SPEC E1 to E11), layout widths, screen-reader check, the Asia/Jakarta time-zone check, the deferred copy decisions (IN-06, R2-3), and the two judgment-tier privacy rules in plans 12-01 and 12-04. Full integration and `test:egress` blocked (O-1). |
+| verification_gap | Phase 12.1 — `12.1-VERIFICATION.md` (2026-11-09) | `human_needed` — no code gap; AIDA-56, 97, 57 verified (8/8). Open for a human: visual and dark-mode approval, contrast by eye, screen reader, 360px layout checks, UAT. K47 (stale flag after resume when a priority change extended deadlines during a pause) deferred. Full integration and `test:egress` blocked (O-1). |
 
 Items acknowledged and deferred at milestone close on 2026-09-13 (override closeout; 23 items reported by `gsd-tools query audit-open`, plus AIDA-18):
 
@@ -108,7 +109,7 @@ Also open (not audit items): `milestones/v1.0.0-phases/07-launch-readiness/defer
 ## Session Continuity
 
 **Last session:** 2026-11-08T23:33:18.749Z
-**Stopped at:** Phase 12.1 executed (17/17); code review next (2026-11-09)
+**Stopped at:** Phase 12.1 verified human_needed; Phase 12.2 next (2026-11-09)
 **Resume file:** .planning/run-loop/ANTREAN.md
 
 **Last action (2026-11-08):** Phase 10 parked after the third Codex plan review (2 HIGH findings accepted, not yet incorporated). No tag, nothing pushed.
