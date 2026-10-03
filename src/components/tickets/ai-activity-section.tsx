@@ -18,6 +18,8 @@ const ACTION_LABELS: Record<AuditActionType, string> = {
   DRAFT_APPROVED: "Draft approved",
   INSIGHT_CLUSTER_LABELS: "Insight cluster labels",
   INSIGHT_SUMMARY: "Insight summary",
+  // Phase 12.2: written with ticketId null, so it never lists under a ticket; the map is total.
+  KB_PROPOSAL_GENERATED: "KB proposal generated",
 };
 
 /**
