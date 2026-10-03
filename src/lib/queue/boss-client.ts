@@ -8,6 +8,7 @@
 // Mirrors src/lib/db.ts's globalThis-caching singleton pattern, but caches a Promise<PgBoss>
 // since PgBoss.start() is async.
 import { PgBoss } from "pg-boss";
+import { KB_PROPOSAL_GENERATE_QUEUE, KB_PROPOSAL_JOB_RETRY_LIMIT } from "../kb/proposal-contract";
 
 const globalForBoss = globalThis as unknown as { boss?: Promise<PgBoss> };
 
@@ -46,6 +47,15 @@ async function createBoss(): Promise<PgBoss> {
   // Same retry shape as the other on-demand queues — mirrors src/lib/worker/index.ts's insight-run createQueue.
   await boss.createQueue("insight-run", {
     retryLimit: 2,
+    retryBackoff: true,
+    retryDelayMax: 300,
+  });
+
+  // KB proposal generation (Phase 12.2, D-13): on-demand, enqueued by requestProposal after its
+  // transaction commits (and by Restart generation). Same retry shape as the other on-demand
+  // queues; plan 12.2-07 registers the same options in src/lib/worker/index.ts.
+  await boss.createQueue(KB_PROPOSAL_GENERATE_QUEUE, {
+    retryLimit: KB_PROPOSAL_JOB_RETRY_LIMIT,
     retryBackoff: true,
     retryDelayMax: 300,
   });
