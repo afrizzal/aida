@@ -33,6 +33,7 @@ import {
   type EligibleSourceGroup,
   type TicketRefusalReason,
 } from "./proposal-contract";
+import { MAX_MESSAGES_PER_SOURCE, type ProposalSourceInput } from "./proposal-prompt";
 
 /** The client every function here needs: one tagged raw query. */
 export type SourceQueryClient = StateQueryClient;
@@ -55,6 +56,21 @@ export interface EligibleSource {
 export type SourceEligibilityResult =
   | { ok: true; tickets: EligibleSource[] }
   | { ok: false; refusals: SourceRefusal[] };
+
+/** A stored source that no longer passes the request rule (DUPLICATE cannot occur there). */
+export interface ChangedSource {
+  ticketId: string;
+  reason: Exclude<TicketRefusalReason, "DUPLICATE">;
+}
+
+export type SourceRecheckResult = { ok: true } | { ok: false; changed: ChangedSource[] };
+
+export interface LoadedSourceInputs {
+  /** In position order; a ticket the organization cannot read is absent. */
+  inputs: ProposalSourceInput[];
+  /** Per read ticket id: its largest PUBLIC seq at read time, or null without a PUBLIC message. */
+  snapshots: Record<string, bigint | null>;
+}
 
 const ELIGIBLE_GROUPS: ReadonlySet<string> = new Set<EligibleSourceGroup>(ELIGIBLE_SOURCE_GROUPS);
 
@@ -187,4 +203,155 @@ export async function checkSourceEligibility(
 
   if (refusals.length > 0) return { ok: false, refusals };
   return { ok: true, tickets };
+}
+
+interface StoredSourceRow {
+  ticketId: string;
+  position: number;
+  snapshotSeq: bigint | null;
+}
+
+async function readStoredSources(
+  client: SourceQueryClient,
+  orgId: string,
+  proposalId: string,
+): Promise<StoredSourceRow[]> {
+  return client.$queryRaw<StoredSourceRow[]>`
+    SELECT "ticketId", position, "snapshotSeq"
+    FROM "KbProposalSource"
+    WHERE "organizationId" = ${orgId} AND "proposalId" = ${proposalId}
+    ORDER BY position
+  `;
+}
+
+/**
+ * The job's recheck (D-08): the request rule on the proposal's stored sources, without reading
+ * any message text. A proposal with no readable source is refused with an empty list
+ * (fail-closed: no ticket text may be read for it).
+ */
+export async function recheckSourceEligibility(
+  client: SourceQueryClient,
+  orgId: string,
+  proposalId: string,
+): Promise<SourceRecheckResult> {
+  const sources = await readStoredSources(client, orgId, proposalId);
+  if (sources.length === 0) return { ok: false, changed: [] };
+  const verdicts = await evaluateTickets(
+    client,
+    orgId,
+    sources.map((source) => source.ticketId),
+  );
+  const changed: ChangedSource[] = [];
+  for (const source of sources) {
+    const verdict = verdicts.get(source.ticketId);
+    if (!verdict) changed.push({ ticketId: source.ticketId, reason: "NOT_FOUND" });
+    else if (!verdict.eligible) changed.push({ ticketId: source.ticketId, reason: verdict.reason });
+  }
+  return changed.length > 0 ? { ok: false, changed } : { ok: true };
+}
+
+/**
+ * The one snapshot aggregate (D-08): the largest PUBLIC seq per given ticket of the
+ * organization, over all of its PUBLIC messages. A ticket without a PUBLIC message is absent.
+ */
+async function readLargestPublicSeqs(
+  client: SourceQueryClient,
+  orgId: string,
+  ticketIds: readonly string[],
+): Promise<Map<string, bigint>> {
+  if (ticketIds.length === 0) return new Map();
+  const rows = await client.$queryRaw<{ ticketId: string; maxSeq: bigint }[]>`
+    SELECT "ticketId", MAX(seq) AS "maxSeq"
+    FROM "Message"
+    WHERE "organizationId" = ${orgId}
+      AND "ticketId" = ANY(${[...ticketIds]}::text[])
+      AND visibility = 'PUBLIC'
+    GROUP BY "ticketId"
+  `;
+  return new Map(rows.map((row) => [row.ticketId, BigInt(row.maxSeq)]));
+}
+
+/**
+ * The generation input (D-10): subject and PUBLIC messages in seq order, at most
+ * MAX_MESSAGES_PER_SOURCE + 1 per ticket, in position order, plus the snapshot marker per ticket
+ * taken before the bounded read. A ticket the organization cannot read returns nothing.
+ */
+export async function loadSourceInputs(
+  client: SourceQueryClient,
+  orgId: string,
+  sources: readonly { ticketId: string; position: number }[],
+): Promise<LoadedSourceInputs> {
+  const ordered = [...sources].sort((a, b) => a.position - b.position);
+  const ids = [...new Set(ordered.map((source) => source.ticketId))];
+  if (ids.length === 0) return { inputs: [], snapshots: {} };
+
+  const tickets = await client.$queryRaw<{ id: string; subject: string }[]>`
+    SELECT id, subject
+    FROM "Ticket"
+    WHERE "organizationId" = ${orgId} AND id = ANY(${ids}::text[])
+  `;
+  const subjects = new Map(tickets.map((ticket) => [ticket.id, ticket.subject]));
+  const readable = ids.filter((id) => subjects.has(id));
+
+  // The snapshot first: a message committed after this read can only make the source look
+  // changed later, never hide a change.
+  const largest = await readLargestPublicSeqs(client, orgId, readable);
+  const snapshots: Record<string, bigint | null> = {};
+  for (const id of readable) snapshots[id] = largest.get(id) ?? null;
+
+  const limit = MAX_MESSAGES_PER_SOURCE + 1;
+  const inputs: ProposalSourceInput[] = [];
+  for (const source of ordered) {
+    const subject = subjects.get(source.ticketId);
+    if (subject === undefined) continue;
+    const messages = await client.$queryRaw<{ seq: bigint; body: string }[]>`
+      SELECT seq, "bodyMarkdown" AS body
+      FROM "Message"
+      WHERE "organizationId" = ${orgId}
+        AND "ticketId" = ${source.ticketId}
+        AND visibility = 'PUBLIC'
+      ORDER BY seq
+      LIMIT ${limit}
+    `;
+    inputs.push({
+      position: source.position,
+      subject,
+      messages: messages.map((message) => ({ seq: BigInt(message.seq), body: message.body })),
+    });
+  }
+  return { inputs, snapshots };
+}
+
+/**
+ * The ticket numbers, in position order, of the proposal's sources that lost eligibility or whose
+ * largest PUBLIC seq is now greater than the stored snapshotSeq (a null snapshotSeq means no
+ * PUBLIC message at generation, so any PUBLIC message now is a change). An INTERNAL note is never
+ * a change. A source the organization can no longer read has no number and is not listed here
+ * (recheckSourceEligibility reports it as NOT_FOUND).
+ */
+export async function findChangedSources(
+  client: SourceQueryClient,
+  orgId: string,
+  proposalId: string,
+): Promise<number[]> {
+  const sources = await readStoredSources(client, orgId, proposalId);
+  if (sources.length === 0) return [];
+  const ids = sources.map((source) => source.ticketId);
+  const verdicts = await evaluateTickets(client, orgId, ids);
+  const largest = await readLargestPublicSeqs(client, orgId, ids);
+
+  const changed: number[] = [];
+  for (const source of sources) {
+    const verdict = verdicts.get(source.ticketId);
+    if (!verdict) continue;
+    if (!verdict.eligible) {
+      if (verdict.reason !== "NOT_FOUND") changed.push(verdict.number);
+      continue;
+    }
+    const current = largest.get(source.ticketId);
+    if (current === undefined) continue;
+    const snapshot = source.snapshotSeq === null ? null : BigInt(source.snapshotSeq);
+    if (snapshot === null || current > snapshot) changed.push(verdict.number);
+  }
+  return changed;
 }
