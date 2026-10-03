@@ -38,6 +38,43 @@ export async function findActiveMembership(
   return row ? { id: row.id, role: row.role } : null;
 }
 
+/**
+ * The client shareLockActiveMembership needs: any client that runs a tagged raw query (the
+ * StateQueryClient shape of tickets/ticket-states.ts), in practice an interactive transaction.
+ */
+export interface MembershipLockClient {
+  $queryRaw<T = unknown>(query: TemplateStringsArray, ...values: unknown[]): PromiseLike<T>;
+}
+
+/**
+ * Like findActiveMembership (same result: the member row's id and role, or null), but locks the
+ * row FOR SHARE for the rest of the caller's transaction (Phase 12.2, review C1). A role change
+ * (UPDATE member SET role) or a member delete must wait for a publish that already authorized
+ * against the row, and a publish that waited behind a committed demotion or delete sees the new
+ * role or no row (READ COMMITTED re-reads the locked row). Better Auth's table is "member"
+ * (columns id, organizationId, userId, role), outside DOMAIN_MODELS, so both the user and the
+ * organization terms are explicit.
+ *
+ * Only publishProposal (src/lib/kb/proposal-review.ts) uses it, as its transaction's first
+ * statement. findActiveMembership above is unchanged and stays the plain read of every other path.
+ */
+export async function shareLockActiveMembership(
+  client: MembershipLockClient,
+  userId: string,
+  orgId: string,
+): Promise<ActiveMembership | null> {
+  if (!userId || !orgId) return null;
+  const rows = await client.$queryRaw<ActiveMembership[]>`
+    SELECT "id", "role"
+    FROM "member"
+    WHERE "userId" = ${userId} AND "organizationId" = ${orgId}
+    LIMIT 1
+    FOR SHARE
+  `;
+  const row = rows[0];
+  return row ? { id: row.id, role: row.role } : null;
+}
+
 const ADMIN_ROLES = new Set(["owner", "admin"]);
 
 /**

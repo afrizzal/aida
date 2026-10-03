@@ -1,0 +1,284 @@
+// KB proposal review (Phase 12.2, AIDA-18, plan 12.2-05): save (edit), reject, approve and
+// publish, restart of a stuck generation and retry of indexing. The only code path in the phase
+// that creates a KbArticle from a proposal is publishProposal, after an explicit owner or admin
+// action (D-06, D-15); nothing here calls the LLM.
+//
+// Authorization (D-01, review C1): every action checks the active membership and then the exact
+// owner or admin role (isAdminRole) inside its transaction, before any read of the proposal. A
+// deleted member row is MEMBERSHIP_ENDED, a plain member NOT_ALLOWED. Publish takes the member row
+// FOR SHARE as its first statement (shareLockActiveMembership), so a demotion or a member delete
+// cannot commit between publish's role check and its commit. Save, reject, restart and retry keep
+// the plain findActiveMembership read: they publish nothing. The CHECKs and the status trigger of
+// plan 12.2-01 are integrity fences, not authorization; writes by a privileged database user are
+// out of scope.
+//
+// Lock order of publish: the member row (FOR SHARE), the proposal row (the conditional claim
+// update), then the article insert. Every transaction runs at the database default isolation
+// (READ COMMITTED).
+//
+// Version rule (D-16): every write is a conditional update on (id, organizationId, status,
+// version) that increments version. A count of 0 re-reads the row: missing (or another
+// organization's) is NOT_FOUND, still in the expected status is CONFLICT, else NOT_DRAFT (restart:
+// NOT_STUCK). Publish increments the version once, in its claim; its final update to PUBLISHED is
+// conditional on the claimed version.
+//
+// Field rules (run decision K51, reviews C7, R2-2, R3-3, P8): save and publish return the first
+// refusal of validateDraftFields with its field, fail-closed, nothing stripped. Publish validates
+// the STORED title and body after its claim (never client-supplied text) and inserts exactly those
+// through createKbArticleInTx, whose bodyHtml comes from renderMarkdown, the same renderer the
+// validator checks. Citations are never copied into the article.
+//
+// Error contract (merge.ts pattern): a ProposalReviewError thrown inside a transaction rolls it
+// back and is RETURNED as { ok: false, code, field? }; any other error rolls back and is RETHROWN.
+// A slug unique violation from a concurrent publish rolls the whole publish back and it is retried
+// with a fresh slug, at most PUBLISH_MAX_ATTEMPTS attempts (D-06, pattern finding C3).
+//
+// Enqueue (D-06, D-13, run decision K50): only after commit, inside a try. A failing send never
+// undoes the commit: publish returns indexingQueued false (the article's embeddingStatus PENDING
+// is the durable marker), restart and retry return queued false. No transactional outbox.
+//
+// Restart (D-13, reviews C5 and R2-3): only a GENERATING proposal that isStuck at the injected
+// clock; one conditional update clears generationClaimedAt, sets generationQueuedAt to now,
+// increments version and generationEpoch, and the post-commit send carries the new epoch.
+//
+// Retry indexing (reviews C2 and R3-2): the claim is ONE conditional update of the article
+// (embeddingStatus PENDING or FAILED, explicit id and organizationId terms) that sets PENDING; a
+// count of 0 (COMPLETED, also when a job completed it after the proposal was read) is
+// NOT_RETRYABLE and sends nothing. It never reads the status first and never calls the
+// unconditional re-embed helper of create-article.ts, which stays as it is for re-embed-all. A
+// second job for one article is safe through plan 12.2-03's locked swap.
+//
+// Relative imports only and no Next.js import: revalidation belongs to the server action.
+import { isAdminRole, shareLockActiveMembership } from "../membership";
+import { getBoss } from "../queue/boss-client";
+import { scopedDb } from "../scoped-db";
+import { createKbArticleInTx, isSlugUniqueViolation } from "./create-article";
+import type { MaintenanceRefusalCode, ReviewRefusalCode } from "./proposal-contract";
+import { type DraftField, validateDraftFields } from "./proposal-schema";
+
+const TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: 30_000 } as const;
+
+/** The embedding job's queue (src/lib/worker/jobs/kb-embed-article.ts). */
+const KB_EMBED_ARTICLE_QUEUE = "kb-embed-article";
+
+/** Attempts of one publish when a concurrent publish took the same slug (D-06). */
+export const PUBLISH_MAX_ATTEMPTS = 3;
+
+export interface ProposalReviewActor {
+  userId: string;
+  orgId: string;
+}
+
+export interface ProposalReviewOptions {
+  /** The action's clock (tests inject it); defaults to the current time. */
+  now?: Date;
+}
+
+/** Any transaction client that runs tagged raw SQL (the hooks record its backend PID). */
+export interface ProposalReviewTx {
+  $queryRaw<T = unknown>(query: TemplateStringsArray, ...values: unknown[]): PromiseLike<T>;
+}
+
+/** Test seam of the review actions (race proofs). Production code never sets it. */
+export interface ProposalReviewObserver {
+  /** Awaited as the first statement of every action's transaction, before the membership read. */
+  onTransactionStart?(tx: ProposalReviewTx): Promise<void> | void;
+  /** Publish only: awaited right after the member-row share lock. */
+  afterMembershipLock?(tx: ProposalReviewTx): Promise<void> | void;
+  /** Awaited right after the conditional proposal update (save, reject, restart, publish). */
+  afterProposalUpdate?(tx: ProposalReviewTx): Promise<void> | void;
+  /** Publish only: awaited right after the article insert. */
+  afterArticleInsert?(tx: ProposalReviewTx): Promise<void> | void;
+}
+
+let reviewObserver: ProposalReviewObserver | null = null;
+
+/**
+ * Test seam only (shape of setCreateTicketObserverForTests): lets a race test record an action's
+ * backend PID and hold it with its locks taken. null clears it. Production never sets it.
+ */
+export function setProposalReviewObserverForTests(observer: ProposalReviewObserver | null): void {
+  reviewObserver = observer;
+}
+
+type RefusalCode = ReviewRefusalCode | MaintenanceRefusalCode;
+
+/** A refusal of a review action. Rolled back and returned, never rethrown. */
+export class ProposalReviewError extends Error {
+  readonly code: RefusalCode;
+  readonly field?: DraftField;
+
+  constructor(code: RefusalCode, field?: DraftField) {
+    super(`KB proposal review refused: ${code}`);
+    this.name = "ProposalReviewError";
+    this.code = code;
+    if (field) this.field = field;
+  }
+}
+
+export type ReviewRefusal = { ok: false; code: ReviewRefusalCode; field?: DraftField };
+export type MaintenanceRefusal = { ok: false; code: MaintenanceRefusalCode };
+
+export interface ProposalVersionInput {
+  proposalId: string;
+  expectedVersion: number;
+}
+
+export type PublishProposalResult =
+  | { ok: true; articleId: string; indexingQueued: boolean }
+  | ReviewRefusal;
+
+function toReviewRefusal(err: ProposalReviewError): ReviewRefusal {
+  const code = err.code as ReviewRefusalCode;
+  return err.field ? { ok: false, code, field: err.field } : { ok: false, code };
+}
+
+/** An untrusted id: anything but a non-empty string never matches a row. */
+function asId(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+/** An untrusted version: anything but a non-negative safe integer never matches (version >= 0). */
+function asVersion(value: unknown): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : -1;
+}
+
+/** The client the miss re-read needs (any scoped or plain transaction client fits). */
+interface ProposalStatusReader {
+  kbProposal: {
+    findFirst(args: {
+      where: { id: string; organizationId: string };
+      select: { status: true };
+    }): PromiseLike<{ status: string } | null>;
+  };
+}
+
+/**
+ * The refusal for a conditional update that matched no row: NOT_FOUND when the row is missing or
+ * another organization's, CONFLICT when it is still in the expected status (a stale version), else
+ * the action's wrong-status code.
+ */
+async function missRefusal(
+  tx: ProposalStatusReader,
+  orgId: string,
+  proposalId: string,
+  expectedStatus: string,
+  wrongStatusCode: RefusalCode,
+): Promise<ProposalReviewError> {
+  const row = proposalId
+    ? await tx.kbProposal.findFirst({
+        where: { id: proposalId, organizationId: orgId },
+        select: { status: true },
+      })
+    : null;
+  if (!row) return new ProposalReviewError("NOT_FOUND");
+  if (row.status === expectedStatus) return new ProposalReviewError("CONFLICT");
+  return new ProposalReviewError(wrongStatusCode);
+}
+
+/** Sends one job after commit; false when the send throws (logged with a fixed text and the id). */
+async function sendAfterCommit(queue: string, payload: object, id: string): Promise<boolean> {
+  try {
+    const boss = await getBoss();
+    await boss.send(queue, payload);
+    return true;
+  } catch {
+    console.error(`kb-proposal-review: enqueue on ${queue} failed for ${id}`);
+    return false;
+  }
+}
+
+// --- Publish -------------------------------------------------------------------------------------
+
+/** One attempt of the publish transaction; returns the new article's id. */
+async function publishAttempt(
+  actor: ProposalReviewActor,
+  proposalId: string,
+  expectedVersion: number,
+  now: Date,
+): Promise<string> {
+  const { userId, orgId } = actor;
+  return scopedDb(orgId).$transaction(async (tx) => {
+    if (reviewObserver?.onTransactionStart) await reviewObserver.onTransactionStart(tx);
+
+    // Review C1: the first statement. The member row stays share-locked until this commits.
+    const membership = await shareLockActiveMembership(tx, userId, orgId);
+    if (reviewObserver?.afterMembershipLock) await reviewObserver.afterMembershipLock(tx);
+    if (!membership) throw new ProposalReviewError("MEMBERSHIP_ENDED");
+    if (!isAdminRole(membership.role)) throw new ProposalReviewError("NOT_ALLOWED");
+
+    // The claim (D-06, D-16): still DRAFT at the expected version; increments version.
+    const claim = await tx.kbProposal.updateMany({
+      where: { id: proposalId, organizationId: orgId, status: "DRAFT", version: expectedVersion },
+      data: { version: { increment: 1 } },
+    });
+    if (claim.count === 0) {
+      throw await missRefusal(tx, orgId, proposalId, "DRAFT", "NOT_DRAFT");
+    }
+    if (reviewObserver?.afterProposalUpdate) await reviewObserver.afterProposalUpdate(tx);
+
+    // Only the stored, saved version is published (T-12.2-22).
+    const stored = await tx.kbProposal.findFirst({
+      where: { id: proposalId, organizationId: orgId },
+      select: { title: true, bodyMarkdown: true },
+    });
+    if (!stored || stored.title === null || stored.bodyMarkdown === null) {
+      throw new Error("kb-proposal-review: claimed proposal has no stored title or body");
+    }
+    const checked = validateDraftFields({ title: stored.title, bodyMarkdown: stored.bodyMarkdown });
+    if (!checked.ok) throw new ProposalReviewError(checked.code, checked.field);
+
+    const article = await createKbArticleInTx(tx, orgId, {
+      title: stored.title,
+      bodyMarkdown: stored.bodyMarkdown,
+    });
+    if (reviewObserver?.afterArticleInsert) await reviewObserver.afterArticleInsert(tx);
+
+    const done = await tx.kbProposal.updateMany({
+      where: {
+        id: proposalId,
+        organizationId: orgId,
+        status: "DRAFT",
+        version: expectedVersion + 1,
+      },
+      data: {
+        status: "PUBLISHED",
+        publishedArticleId: article.id,
+        publishedAt: now,
+        publishedByUserId: userId,
+      },
+    });
+    if (done.count !== 1) throw new Error("kb-proposal-review: publish lost its claimed row");
+    return article.id;
+  }, TRANSACTION_OPTIONS);
+}
+
+/**
+ * Approve and publish (D-06): creates exactly one KbArticle from the stored draft at the expected
+ * version, links it back and enqueues its embedding after commit. A refusal changes nothing.
+ */
+export async function publishProposal(
+  actor: ProposalReviewActor,
+  input: ProposalVersionInput,
+  opts: ProposalReviewOptions = {},
+): Promise<PublishProposalResult> {
+  if (!actor.userId || !actor.orgId) return { ok: false, code: "MEMBERSHIP_ENDED" };
+  const proposalId = asId(input.proposalId);
+  const expectedVersion = asVersion(input.expectedVersion);
+  const now = opts.now ?? new Date();
+
+  let articleId: string | null = null;
+  for (let attempt = 1; articleId === null; attempt += 1) {
+    try {
+      articleId = await publishAttempt(actor, proposalId, expectedVersion, now);
+    } catch (err) {
+      if (err instanceof ProposalReviewError) return toReviewRefusal(err);
+      // A concurrent publish took the slug: the whole transaction rolled back; try again.
+      if (attempt < PUBLISH_MAX_ATTEMPTS && isSlugUniqueViolation(err)) continue;
+      throw err;
+    }
+  }
+
+  const indexingQueued = await sendAfterCommit(KB_EMBED_ARTICLE_QUEUE, { articleId }, articleId);
+  return { ok: true, articleId, indexingQueued };
+}
