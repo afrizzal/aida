@@ -3,6 +3,7 @@
 //
 // Relative imports only (no `@/`) — worker-bundleable via esbuild, same convention as the rest
 // of src/lib/llm.
+import { LlmConfigurationError } from "./errors";
 import { getLlmSettings, isProviderConfigured, type LlmSettings, type SettingDb } from "./settings";
 import type { LlmProviderName } from "./types";
 
@@ -18,7 +19,7 @@ export type ResolvedProvider = LlmSettings & { provider: LlmProviderName };
 export async function resolveActiveProvider(db: SettingDb): Promise<ResolvedProvider> {
   const settings = await getLlmSettings(db);
   if (!isProviderConfigured(settings)) {
-    throw new Error("No LLM provider configured");
+    throw new LlmConfigurationError("No LLM provider configured");
   }
   return settings as ResolvedProvider;
 }

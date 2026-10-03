@@ -5,6 +5,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { ZodType } from "zod/v4";
+import { LlmOutputError } from "../errors";
 
 export interface CompleteAnthropicParams<T> {
   apiKey: string;
@@ -26,6 +27,6 @@ export async function completeAnthropic<T>(params: CompleteAnthropicParams<T>): 
     messages: [{ role: "user", content: params.prompt }],
     output_config: { format: zodOutputFormat(params.schema) },
   });
-  if (!message.parsed_output) throw new Error("anthropic: structured output parse failed");
+  if (!message.parsed_output) throw new LlmOutputError("anthropic: structured output parse failed");
   return message.parsed_output;
 }

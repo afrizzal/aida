@@ -3,6 +3,7 @@
 import OpenAI from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
 import type { ZodType } from "zod/v4";
+import { LlmOutputError } from "../errors";
 
 export interface CompleteOpenAiParams<T> {
   apiKey: string;
@@ -28,6 +29,6 @@ export async function completeOpenAi<T>(params: CompleteOpenAiParams<T>): Promis
     ...(params.maxOutputTokens ? { max_completion_tokens: params.maxOutputTokens } : {}),
   });
   const parsed = completion.choices[0]?.message.parsed;
-  if (!parsed) throw new Error("openai: structured output parse failed");
+  if (!parsed) throw new LlmOutputError("openai: structured output parse failed");
   return parsed;
 }

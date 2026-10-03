@@ -5,6 +5,7 @@
 //
 // Relative imports only (no `@/`) — worker-bundleable via esbuild.
 import { resolveActiveProvider } from "./active-provider";
+import { LlmConfigurationError } from "./errors";
 import { completeAnthropic } from "./providers/anthropic";
 import { completeOllama } from "./providers/ollama";
 import { completeOpenAi } from "./providers/openai";
@@ -39,7 +40,7 @@ export async function complete<T>(
       output = await completeOllama({ baseUrl: s.ollamaBaseUrl, ...base });
       break;
     default:
-      throw new Error(`Unsupported provider: ${s.provider}`);
+      throw new LlmConfigurationError(`Unsupported provider: ${s.provider}`);
   }
 
   return { output, redactedPrompt, provider: s.provider, model: s.model };
