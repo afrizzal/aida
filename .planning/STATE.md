@@ -5,10 +5,10 @@ milestone_name: Helpdesk & Projects
 current_phase: 12
 current_phase_name: ticket-lifecycle
 status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11 and 12 verified human_needed; Phase 12.1 (custom states and SLA pause) next
-stopped_at: Phase 12.1 verified human_needed; Phase 12.2 not started
-last_updated: "2026-11-08T23:33:18.806Z"
+stopped_at: Completed 12.2-01-PLAN.md (KB proposal schema, contract, isolation proofs); 12.2-02 next
+last_updated: "2026-11-09T04:20:00.000Z"
 last_activity: 2026-11-09
-last_activity_desc: Phase 12.1 verified human_needed (8/8); final gate on f0ccffa green except audit at baseline; egress blocked (O-1); K47 deferred
+last_activity_desc: Plan 12.2-01 complete (4a9c298, 1874722, cad8253); migration 20261111100000_kb_proposals; scratch DB aida_p122_kb dropped
 state_head: 75e5a731b94899099a85ae1ff6bdd0f623debc24
 progress:
   total_phases: 12

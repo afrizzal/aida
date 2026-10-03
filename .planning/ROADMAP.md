@@ -351,7 +351,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 **Plans:** 12 plans
 **Wave 1**
 
-- [ ] 12.2-01-PLAN.md — One hand-edited migration (KbProposal, KbProposalSource with composite tenancy keys, status fence, audit action and link), frozen contract, fixtures, constraint and D-05 reader-isolation proofs (Wave 1)
+- [x] 12.2-01-PLAN.md — One hand-edited migration (KbProposal, KbProposalSource with composite tenancy keys, status fence, audit action and link), frozen contract, fixtures, constraint and D-05 reader-isolation proofs (Wave 1)
 - [ ] 12.2-02-PLAN.md — Fixed system prompt, fenced and bounded ticket input with truncation flag, validated output and the shared field validator, lengths in code points (Wave 1)
 - [ ] 12.2-03-PLAN.md — Typed LLM errors with a classifier and the 30 s Ollama timeout (Wave 1)
 
@@ -516,7 +516,7 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 | 11. Inbox | v2.0 | 9/9 | Verified: human_needed (visual, dark mode, 360px and screen-reader checks open) | - |
 | 12. Ticket Lifecycle (relations, merge, snooze, activity) | v2.0 | 10/10 | Verified: human_needed (visual, dark mode, layout widths and screen-reader checks open; AIDA-53 audit wording is owner item 12-o1) | - |
 | 12.1. Ticket Lifecycle (custom states, SLA pause) | v2.0 | 0/17 | Planned | - |
-| 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 0/12 | Planned | - |
+| 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 1/12 | In progress | - |
 | 13. Integrations | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
 | 14. Projects Foundation | v2.0 | 0/0 | Not started | - |
 | 15. Work Views | v2.0 | 0/0 | Not started | - |
