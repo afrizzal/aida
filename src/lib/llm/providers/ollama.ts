@@ -8,8 +8,63 @@
 // is unverified. The native client's `format` option is Ollama's first-party, fully-supported
 // structured-output mechanism. A future "collapse to one HTTP client" refactor MUST re-verify
 // structured-output compliance against the OpenAI-compat route before relying on it.
+//
+// Relative imports only (no path alias) — worker-bundleable via esbuild.
 import { Ollama } from "ollama";
 import { z } from "zod/v4";
+import { LlmOutputError, LlmTimeoutError } from "../errors";
+
+/** Same call deadline as the OpenAI and Anthropic adapters (Phase 12.2 D-14). */
+export const OLLAMA_TIMEOUT_MS = 30_000;
+
+/**
+ * Runs `run` under one deadline that covers the whole call, from the request to the end of the
+ * response body (Phase 12.2 review C4: the non-streamed Ollama client reads the body with
+ * `response.json()` after `fetch` resolves, so a timer cleared when `fetch` settles would leave a
+ * stalled body unbounded).
+ *
+ * One AbortController and one timer: the fetch given to `run` links the controller's signal (and
+ * any signal the caller passes in the request init) to every request, so an expired deadline
+ * aborts the request and its body. The call is also raced against the deadline, so a fetch
+ * implementation that does not end a stalled body on abort is bounded too. The timer is cleared
+ * in a `finally`; an abort caused by the timer surfaces as `LlmTimeoutError`. `setTimeout` and
+ * `AbortController` (not `AbortSignal.timeout`) so fake timers control the tests.
+ */
+export async function withDeadline<T>(
+  ms: number,
+  run: (fetch: typeof globalThis.fetch) => Promise<T>,
+  baseFetch: typeof globalThis.fetch = globalThis.fetch,
+): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const reason = new LlmTimeoutError();
+      controller.abort(reason);
+      reject(reason);
+    }, ms);
+  });
+  const boundedFetch: typeof globalThis.fetch = (input, init) => {
+    const signal = init?.signal
+      ? AbortSignal.any([controller.signal, init.signal])
+      : controller.signal;
+    return baseFetch(input, { ...init, signal });
+  };
+  const call = (async () => run(boundedFetch))();
+  // The losing promise of the race must never surface as an unhandled rejection.
+  call.catch(() => {});
+  deadline.catch(() => {});
+  try {
+    return await Promise.race([call, deadline]);
+  } catch (err) {
+    if (controller.signal.aborted && controller.signal.reason instanceof LlmTimeoutError) {
+      throw controller.signal.reason;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export interface CompleteOllamaParams<T> {
   baseUrl: string;
@@ -22,20 +77,27 @@ export interface CompleteOllamaParams<T> {
 }
 
 export async function completeOllama<T>(params: CompleteOllamaParams<T>): Promise<T> {
-  const client = new Ollama({ host: params.baseUrl });
-  const response = await client.chat({
-    model: params.model,
-    messages: [
-      { role: "system", content: params.system },
-      { role: "user", content: params.prompt },
-    ],
-    format: z.toJSONSchema(params.schema),
-    options: {
-      temperature: 0, // lower temperature = more reliable schema compliance
-      ...(params.maxOutputTokens ? { num_predict: params.maxOutputTokens } : {}),
-    },
-  });
+  // Deadline over the whole chat call, headers and body; pg-boss owns retry, not the SDK.
+  const response = await withDeadline(OLLAMA_TIMEOUT_MS, (fetch) =>
+    new Ollama({ host: params.baseUrl, fetch }).chat({
+      model: params.model,
+      messages: [
+        { role: "system", content: params.system },
+        { role: "user", content: params.prompt },
+      ],
+      format: z.toJSONSchema(params.schema),
+      options: {
+        temperature: 0, // lower temperature = more reliable schema compliance
+        ...(params.maxOutputTokens ? { num_predict: params.maxOutputTokens } : {}),
+      },
+    }),
+  );
   // Defense-in-depth re-validation — the constrained decoder is vendor-claimed compliant, but we
   // never trust an external process's output without re-validating it against our own schema.
-  return params.schema.parse(JSON.parse(response.message.content));
+  // A failure is reported with a fixed message: the model text never reaches the error.
+  try {
+    return params.schema.parse(JSON.parse(response.message.content));
+  } catch {
+    throw new LlmOutputError("ollama: structured output parse failed");
+  }
 }
