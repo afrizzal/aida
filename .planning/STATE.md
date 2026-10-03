@@ -5,16 +5,16 @@ milestone_name: Helpdesk & Projects
 current_phase: 12
 current_phase_name: ticket-lifecycle
 status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11 and 12 verified human_needed; Phase 12.1 (custom states and SLA pause) next
-stopped_at: Completed 12.2-04-PLAN.md (proposal request with typed refusals and post-commit enqueue, PUBLIC-only source module with bigint snapshots); 12.2-05 next
-last_updated: "2026-11-09T04:52:00.000Z"
+stopped_at: Completed 12.2-05-PLAN.md (review service: save, reject, publish under a member-row share lock with slug retry, restart with a new epoch, retry indexing by one conditional claim; 11 PID-bound races); 12.2-06 next
+last_updated: "2026-11-09T05:05:00.000Z"
 last_activity: 2026-11-09
-last_activity_desc: Plan 12.2-04 complete (5933de0, 3a2cd0b, ef336c6); requestProposal checks membership, role, count, AI and state-group eligibility in one transaction and sends { proposalId, epoch } after commit; loadSourceInputs reads PUBLIC only with the largest PUBLIC seq as bigint snapshot; 29 integration cases
+last_activity_desc: Plan 12.2-05 complete (08fa18b, a95d7a1, 39e1933); publishProposal creates exactly one article under a FOR SHARE member-row lock with slug retry and the embed send after commit; save, reject, stuck-only restart with a new epoch, retry indexing claimed by one conditional article update; 40 review cases and 11 PID-bound races
 state_head: 75e5a731b94899099a85ae1ff6bdd0f623debc24
 progress:
   total_phases: 12
   completed_phases: 0
   total_plans: 86
-  completed_plans: 37
+  completed_plans: 38
   percent: 0
 ---
 
