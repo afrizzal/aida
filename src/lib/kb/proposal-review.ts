@@ -49,11 +49,17 @@
 // second job for one article is safe through plan 12.2-03's locked swap.
 //
 // Relative imports only and no Next.js import: revalidation belongs to the server action.
-import { isAdminRole, shareLockActiveMembership } from "../membership";
+import { findActiveMembership, isAdminRole, shareLockActiveMembership } from "../membership";
 import { getBoss } from "../queue/boss-client";
 import { scopedDb } from "../scoped-db";
 import { createKbArticleInTx, isSlugUniqueViolation } from "./create-article";
-import type { MaintenanceRefusalCode, ReviewRefusalCode } from "./proposal-contract";
+import {
+  isStuck,
+  KB_PROPOSAL_GENERATE_QUEUE,
+  type MaintenanceRefusalCode,
+  type ProposalJobPayload,
+  type ReviewRefusalCode,
+} from "./proposal-contract";
 import { type DraftField, validateDraftFields } from "./proposal-schema";
 
 const TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: 30_000 } as const;
@@ -124,17 +130,35 @@ export interface ProposalVersionInput {
   expectedVersion: number;
 }
 
+export interface SaveProposalInput extends ProposalVersionInput {
+  title: string;
+  bodyMarkdown: string;
+}
+
+export type SaveProposalResult = { ok: true; version: number } | ReviewRefusal;
+export type RejectProposalResult = { ok: true } | ReviewRefusal;
 export type PublishProposalResult =
   | { ok: true; articleId: string; indexingQueued: boolean }
   | ReviewRefusal;
+export type RestartProposalResult = { ok: true; queued: boolean } | MaintenanceRefusal;
+export type RetryIndexingResult = { ok: true; queued: boolean } | MaintenanceRefusal;
 
 function toReviewRefusal(err: ProposalReviewError): ReviewRefusal {
   const code = err.code as ReviewRefusalCode;
   return err.field ? { ok: false, code, field: err.field } : { ok: false, code };
 }
 
+function toMaintenanceRefusal(err: ProposalReviewError): MaintenanceRefusal {
+  return { ok: false, code: err.code as MaintenanceRefusalCode };
+}
+
 /** An untrusted id: anything but a non-empty string never matches a row. */
 function asId(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+/** An untrusted text field: anything but a string is treated as empty (and refused). */
+function asText(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
@@ -185,6 +209,108 @@ async function sendAfterCommit(queue: string, payload: object, id: string): Prom
   } catch {
     console.error(`kb-proposal-review: enqueue on ${queue} failed for ${id}`);
     return false;
+  }
+}
+
+/** The client the plain membership check needs (see findActiveMembership). */
+type MembershipReader = Parameters<typeof findActiveMembership>[0];
+
+/** D-01: active membership, then the exact owner or admin role; before any read of the proposal. */
+async function requireAdmin(tx: MembershipReader, userId: string, orgId: string): Promise<void> {
+  const membership = await findActiveMembership(tx, userId, orgId);
+  if (!membership) throw new ProposalReviewError("MEMBERSHIP_ENDED");
+  if (!isAdminRole(membership.role)) throw new ProposalReviewError("NOT_ALLOWED");
+}
+
+// --- Save -----------------------------------------------------------------------------------------
+
+/**
+ * Saves an edit of a DRAFT (D-11, D-15): validateDraftFields first (its first refusal with the
+ * field, nothing stripped), then title and body by the conditional update, which increments
+ * version and records the editor. Never publishes and never creates a KbArticle.
+ */
+export async function saveProposalDraft(
+  actor: ProposalReviewActor,
+  input: SaveProposalInput,
+  opts: ProposalReviewOptions = {},
+): Promise<SaveProposalResult> {
+  const { userId, orgId } = actor;
+  if (!userId || !orgId) return { ok: false, code: "MEMBERSHIP_ENDED" };
+  const proposalId = asId(input.proposalId);
+  const expectedVersion = asVersion(input.expectedVersion);
+  const now = opts.now ?? new Date();
+
+  try {
+    const version = await scopedDb(orgId).$transaction(async (tx) => {
+      if (reviewObserver?.onTransactionStart) await reviewObserver.onTransactionStart(tx);
+      await requireAdmin(tx, userId, orgId);
+
+      const checked = validateDraftFields({
+        title: asText(input.title),
+        bodyMarkdown: asText(input.bodyMarkdown),
+      });
+      if (!checked.ok) throw new ProposalReviewError(checked.code, checked.field);
+
+      const updated = await tx.kbProposal.updateMany({
+        where: { id: proposalId, organizationId: orgId, status: "DRAFT", version: expectedVersion },
+        data: {
+          title: checked.title,
+          bodyMarkdown: checked.bodyMarkdown,
+          version: { increment: 1 },
+          lastEditedByUserId: userId,
+          lastEditedAt: now,
+        },
+      });
+      if (updated.count === 0) {
+        throw await missRefusal(tx, orgId, proposalId, "DRAFT", "NOT_DRAFT");
+      }
+      if (reviewObserver?.afterProposalUpdate) await reviewObserver.afterProposalUpdate(tx);
+      return expectedVersion + 1;
+    }, TRANSACTION_OPTIONS);
+    return { ok: true, version };
+  } catch (err) {
+    if (err instanceof ProposalReviewError) return toReviewRefusal(err);
+    throw err;
+  }
+}
+
+// --- Reject ---------------------------------------------------------------------------------------
+
+/** Rejects a DRAFT (D-16): terminal, the row is kept, and it can never be published. */
+export async function rejectProposal(
+  actor: ProposalReviewActor,
+  input: ProposalVersionInput,
+  opts: ProposalReviewOptions = {},
+): Promise<RejectProposalResult> {
+  const { userId, orgId } = actor;
+  if (!userId || !orgId) return { ok: false, code: "MEMBERSHIP_ENDED" };
+  const proposalId = asId(input.proposalId);
+  const expectedVersion = asVersion(input.expectedVersion);
+  const now = opts.now ?? new Date();
+
+  try {
+    await scopedDb(orgId).$transaction(async (tx) => {
+      if (reviewObserver?.onTransactionStart) await reviewObserver.onTransactionStart(tx);
+      await requireAdmin(tx, userId, orgId);
+
+      const updated = await tx.kbProposal.updateMany({
+        where: { id: proposalId, organizationId: orgId, status: "DRAFT", version: expectedVersion },
+        data: {
+          status: "REJECTED",
+          rejectedByUserId: userId,
+          rejectedAt: now,
+          version: { increment: 1 },
+        },
+      });
+      if (updated.count === 0) {
+        throw await missRefusal(tx, orgId, proposalId, "DRAFT", "NOT_DRAFT");
+      }
+      if (reviewObserver?.afterProposalUpdate) await reviewObserver.afterProposalUpdate(tx);
+    }, TRANSACTION_OPTIONS);
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof ProposalReviewError) return toReviewRefusal(err);
+    throw err;
   }
 }
 
@@ -281,4 +407,126 @@ export async function publishProposal(
 
   const indexingQueued = await sendAfterCommit(KB_EMBED_ARTICLE_QUEUE, { articleId }, articleId);
   return { ok: true, articleId, indexingQueued };
+}
+
+// --- Restart a stuck generation (D-13, reviews C5 and R2-3) ------------------------------------
+
+/**
+ * Restarts a GENERATING proposal that isStuck at the injected clock: one conditional update clears
+ * the lease, sets generationQueuedAt to now and increments version and generationEpoch; after
+ * commit kb-proposal-generate is sent with { proposalId, epoch } carrying the new epoch, so every
+ * job sent before the restart is stale. The same proposal id is reused.
+ */
+export async function restartProposalGeneration(
+  actor: ProposalReviewActor,
+  input: ProposalVersionInput,
+  opts: ProposalReviewOptions = {},
+): Promise<RestartProposalResult> {
+  const { userId, orgId } = actor;
+  if (!userId || !orgId) return { ok: false, code: "MEMBERSHIP_ENDED" };
+  const proposalId = asId(input.proposalId);
+  const expectedVersion = asVersion(input.expectedVersion);
+  const now = opts.now ?? new Date();
+
+  let epoch: number;
+  try {
+    epoch = await scopedDb(orgId).$transaction(async (tx) => {
+      if (reviewObserver?.onTransactionStart) await reviewObserver.onTransactionStart(tx);
+      await requireAdmin(tx, userId, orgId);
+
+      const row = proposalId
+        ? await tx.kbProposal.findFirst({
+            where: { id: proposalId, organizationId: orgId },
+            select: { status: true, generationClaimedAt: true, generationQueuedAt: true },
+          })
+        : null;
+      if (!row) throw new ProposalReviewError("NOT_FOUND");
+      if (!isStuck(row, now)) throw new ProposalReviewError("NOT_STUCK");
+
+      const updated = await tx.kbProposal.updateManyAndReturn({
+        where: {
+          id: proposalId,
+          organizationId: orgId,
+          status: "GENERATING",
+          version: expectedVersion,
+        },
+        data: {
+          generationClaimedAt: null,
+          generationQueuedAt: now,
+          version: { increment: 1 },
+          generationEpoch: { increment: 1 },
+        },
+        select: { generationEpoch: true },
+      });
+      const claimed = updated[0];
+      if (!claimed) {
+        throw await missRefusal(tx, orgId, proposalId, "GENERATING", "NOT_STUCK");
+      }
+      if (reviewObserver?.afterProposalUpdate) await reviewObserver.afterProposalUpdate(tx);
+      return claimed.generationEpoch;
+    }, TRANSACTION_OPTIONS);
+  } catch (err) {
+    if (err instanceof ProposalReviewError) return toMaintenanceRefusal(err);
+    throw err;
+  }
+
+  const payload: ProposalJobPayload = { proposalId, epoch };
+  const queued = await sendAfterCommit(KB_PROPOSAL_GENERATE_QUEUE, payload, proposalId);
+  return { ok: true, queued };
+}
+
+// --- Retry indexing (reviews C2 and R3-2) -------------------------------------------------------
+
+/**
+ * Re-queues the embedding of a published proposal's article when it is PENDING or FAILED. The
+ * claim is one conditional update of the article (no status read before it), so a job that
+ * completed the article in between is never turned back to PENDING; a count of 0 is
+ * NOT_RETRYABLE and nothing is sent. The send runs after commit; when it throws the claimed
+ * PENDING stays and the result is queued false, so the retry can be repeated.
+ */
+export async function retryProposalIndexing(
+  actor: ProposalReviewActor,
+  input: { proposalId: string },
+): Promise<RetryIndexingResult> {
+  const { userId, orgId } = actor;
+  if (!userId || !orgId) return { ok: false, code: "MEMBERSHIP_ENDED" };
+  const proposalId = asId(input.proposalId);
+
+  let articleId: string;
+  try {
+    articleId = await scopedDb(orgId).$transaction(async (tx) => {
+      if (reviewObserver?.onTransactionStart) await reviewObserver.onTransactionStart(tx);
+      await requireAdmin(tx, userId, orgId);
+
+      const row = proposalId
+        ? await tx.kbProposal.findFirst({
+            where: { id: proposalId, organizationId: orgId },
+            select: { status: true, publishedArticleId: true },
+          })
+        : null;
+      if (!row) throw new ProposalReviewError("NOT_FOUND");
+      if (row.status !== "PUBLISHED" || !row.publishedArticleId) {
+        throw new ProposalReviewError("NOT_RETRYABLE");
+      }
+
+      // Review R3-2: the claim itself is the check. At READ COMMITTED an update that waited behind
+      // the embed job's row lock re-evaluates this where on the committed row.
+      const claim = await tx.kbArticle.updateMany({
+        where: {
+          id: row.publishedArticleId,
+          organizationId: orgId,
+          embeddingStatus: { in: ["PENDING", "FAILED"] },
+        },
+        data: { embeddingStatus: "PENDING" },
+      });
+      if (claim.count === 0) throw new ProposalReviewError("NOT_RETRYABLE");
+      return row.publishedArticleId;
+    }, TRANSACTION_OPTIONS);
+  } catch (err) {
+    if (err instanceof ProposalReviewError) return toMaintenanceRefusal(err);
+    throw err;
+  }
+
+  const queued = await sendAfterCommit(KB_EMBED_ARTICLE_QUEUE, { articleId }, articleId);
+  return { ok: true, queued };
 }
