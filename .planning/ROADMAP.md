@@ -357,7 +357,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 12.2-04-PLAN.md — Request path: membership, role, count, AI-off and per-ticket eligibility refusals; post-commit enqueue; PUBLIC-only source input and snapshot markers (Wave 2)
+- [x] 12.2-04-PLAN.md — Request path: membership, role, count, AI-off and per-ticket eligibility refusals; post-commit enqueue; PUBLIC-only source input and snapshot markers (Wave 2)
 - [ ] 12.2-05-PLAN.md — Review service: save, reject, transactional publish with slug retry and post-commit embedding, restart, retry indexing; PID-bound races (Wave 2)
 - [ ] 12.2-06-PLAN.md — Copy module with total code mappings and the proposal status chip (Wave 2)
 
@@ -516,7 +516,7 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 | 11. Inbox | v2.0 | 9/9 | Verified: human_needed (visual, dark mode, 360px and screen-reader checks open) | - |
 | 12. Ticket Lifecycle (relations, merge, snooze, activity) | v2.0 | 10/10 | Verified: human_needed (visual, dark mode, layout widths and screen-reader checks open; AIDA-53 audit wording is owner item 12-o1) | - |
 | 12.1. Ticket Lifecycle (custom states, SLA pause) | v2.0 | 0/17 | Planned | - |
-| 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 3/12 | In progress | - |
+| 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 4/12 | In progress | - |
 | 13. Integrations | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
 | 14. Projects Foundation | v2.0 | 0/0 | Not started | - |
 | 15. Work Views | v2.0 | 0/0 | Not started | - |
