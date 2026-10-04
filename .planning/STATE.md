@@ -5,16 +5,16 @@ milestone_name: Helpdesk & Projects
 current_phase: 12
 current_phase_name: ticket-lifecycle
 status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11 and 12 verified human_needed; Phase 12.1 (custom states and SLA pause) next
-stopped_at: Completed 12.2-08-PLAN.md (D-01-first proposal loaders with explicit selects and no bigint, seven server actions with getSessionActor and revalidation outside the UNKNOWN try, /kb/proposals list with polling, admin-only Proposals link, StartProposalDialog through resolveActionOutcome; 16 integration cases); 12.2-09 next
-last_updated: "2026-11-09T05:45:00.000Z"
+stopped_at: Completed 12.2-09-PLAN.md (review page with D-01-first loader and refusal EmptyStates, DRAFT editor with client field errors and save outcomes through resolveActionOutcome, Sources card, GENERATING polling with restart, FAILED and REJECTED new-proposal action, PUBLISHED retry indexing with a refresh-surviving focused status line, publish and reject dialogs); 12.2-10 next
+last_updated: "2026-11-09T05:58:00.000Z"
 last_activity: 2026-11-09
-last_activity_desc: Plan 12.2-08 complete (24494d4, 705b1d9, 839703b); loaders check membership and role before any proposal query and return no snapshotSeq or bigint; actions return UNKNOWN only for a thrown session read or service and never let a revalidation error change a committed result; proposal list page, Proposals link on /kb and Start dialog; 16 integration cases
+last_activity_desc: Plan 12.2-09 complete (8d8d5f8, 5f69689, 37fb768); review page /kb/proposals/[id] with editor, Sources card, status views, restart and retry indexing, and the Approve-and-publish and Reject dialogs; every outcome through resolveActionOutcome, publish disabled while dirty; typecheck and biome clean, design-token and copy tests 58 passed; visual, dark-mode and screen-reader checks open for a human
 state_head: 75e5a731b94899099a85ae1ff6bdd0f623debc24
 progress:
   total_phases: 12
   completed_phases: 0
   total_plans: 86
-  completed_plans: 41
+  completed_plans: 42
   percent: 0
 ---
 
