@@ -5,16 +5,16 @@ milestone_name: Helpdesk & Projects
 current_phase: 12
 current_phase_name: ticket-lifecycle
 status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11 and 12 verified human_needed; Phase 12.1 (custom states and SLA pause) next
-stopped_at: Completed 12.2-07-PLAN.md (generation job: epoch-bound claim lease, D-01/D-08/D-09 rechecks before the call, complete() with one audit row, K51-validated conditional store, typed failures with bounded retry, worker registration with includeMetadata; 36 integration cases incl. PID-bound claim race); 12.2-08 next
-last_updated: "2026-11-09T05:30:00.000Z"
+stopped_at: Completed 12.2-08-PLAN.md (D-01-first proposal loaders with explicit selects and no bigint, seven server actions with getSessionActor and revalidation outside the UNKNOWN try, /kb/proposals list with polling, admin-only Proposals link, StartProposalDialog through resolveActionOutcome; 16 integration cases); 12.2-09 next
+last_updated: "2026-11-09T05:45:00.000Z"
 last_activity: 2026-11-09
-last_activity_desc: Plan 12.2-07 complete (49df4cd, 4357643, 0237233); generateProposal claims by epoch and version, rechecks requester, sources, provider and AI before complete(), audits every returned call once, stores DRAFT only on the claimed version and epoch; 28 generation cases and 8 race cases (two-job claim, superseded store and FAILED, both R2-3 arrival orders, lease expiry)
+last_activity_desc: Plan 12.2-08 complete (24494d4, 705b1d9, 839703b); loaders check membership and role before any proposal query and return no snapshotSeq or bigint; actions return UNKNOWN only for a thrown session read or service and never let a revalidation error change a committed result; proposal list page, Proposals link on /kb and Start dialog; 16 integration cases
 state_head: 75e5a731b94899099a85ae1ff6bdd0f623debc24
 progress:
   total_phases: 12
   completed_phases: 0
   total_plans: 86
-  completed_plans: 40
+  completed_plans: 41
   percent: 0
 ---
 
