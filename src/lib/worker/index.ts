@@ -1,5 +1,6 @@
-import type { Job } from "pg-boss";
+import type { Job, JobWithMetadata } from "pg-boss";
 import { PgBoss } from "pg-boss";
+import { KB_PROPOSAL_GENERATE_QUEUE, KB_PROPOSAL_JOB_RETRY_LIMIT } from "../kb/proposal-contract";
 import { aiTriageHandler } from "./jobs/ai-triage";
 import { autoCloseHandler } from "./jobs/auto-close";
 import { emailInboundPollHandler } from "./jobs/email-inbound-poll";
@@ -7,6 +8,7 @@ import { emailOutboundSendHandler } from "./jobs/email-outbound-send";
 import { heartbeatHandler } from "./jobs/heartbeat";
 import { insightRunHandler } from "./jobs/insight-run";
 import { kbEmbedArticleHandler } from "./jobs/kb-embed-article";
+import { kbProposalGenerateHandler } from "./jobs/kb-proposal-generate";
 import { rateLimitCleanupHandler } from "./jobs/rate-limit-cleanup";
 import { slaFlagHandler } from "./jobs/sla-flag";
 import { snoozeWakeHandler } from "./jobs/snooze-wake";
@@ -114,6 +116,24 @@ async function main() {
   await boss.work("insight-run", async ([job]: Job<{ insightRunId: string }>[]) => {
     await insightRunHandler(job.data);
   });
+
+  // KB proposal generation (Phase 12.2, AIDA-18, D-13): on-demand queue enqueued by the app after
+  // requestProposal commits and by Restart generation — no schedule(). Options mirror
+  // boss-client.ts's createQueue exactly so this createQueue is a no-op if the app made it first.
+  // includeMetadata gives the handler retryCount and retryLimit (D-14: a transient failure is
+  // retried while retryCount < retryLimit, and is FAILED PROVIDER on the last attempt).
+  await boss.createQueue(KB_PROPOSAL_GENERATE_QUEUE, {
+    retryLimit: KB_PROPOSAL_JOB_RETRY_LIMIT,
+    retryBackoff: true,
+    retryDelayMax: 300,
+  });
+  await boss.work(
+    KB_PROPOSAL_GENERATE_QUEUE,
+    { includeMetadata: true },
+    async ([job]: JobWithMetadata<unknown>[]) => {
+      await kbProposalGenerateHandler(job);
+    },
+  );
 
   console.log("[worker] started");
 
