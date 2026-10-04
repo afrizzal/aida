@@ -5,10 +5,11 @@
 // notices; this component renders the status-specific content, the Sources card and the action
 // bar.
 //
-// Every action outcome (save, restart, retry indexing) goes through resolveActionOutcome of plan 12.2-06: the
-// component applies the message, the disabled state and the focus target it returns and never
-// compares a result code itself (UI-SPEC amendment A4, review C6). A rejected call is caught as
-// { rejected: true } and resolves to the same view as an unexpected server error.
+// Every action outcome (save, restart, retry indexing here; publish and reject in their dialogs)
+// goes through resolveActionOutcome of plan 12.2-06: the component applies the message, the
+// disabled state and the focus target it returns and never compares a result code itself (UI-SPEC
+// amendment A4, review C6). A rejected call is caught as { rejected: true } and resolves to the
+// same view as an unexpected server error.
 //
 // The preview is the stored body rendered by renderMarkdown on the server (T-12.2-40); the raw
 // body is only ever shown inside the Textarea. The client check validateDraftFields renders the
@@ -81,6 +82,8 @@ import type { ProposalReviewData } from "@/lib/kb/proposal-queries";
 import { type DraftField, validateDraftFields } from "@/lib/kb/proposal-schema";
 import { cn } from "@/lib/utils";
 import { ProposalSourcesCard } from "./proposal-sources-card";
+import { PublishDialog } from "./publish-dialog";
+import { RejectDialog } from "./reject-dialog";
 
 export interface ProposalReviewProps {
   proposal: ProposalReviewData;
@@ -282,6 +285,10 @@ function DraftEditor({ proposal, previewHtml, onFocusHeading, onReload }: DraftE
   const [preview, setPreview] = useState(false);
   const [fieldToFocus, setFieldToFocus] = useState<DraftField | null>(null);
   const calloutRef = useRef<HTMLDivElement>(null);
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const publishTriggerRef = useRef<HTMLButtonElement>(null);
+  const rejectTriggerRef = useRef<HTMLButtonElement>(null);
 
   const formId = useId();
   const titleId = useId();
@@ -481,21 +488,25 @@ function DraftEditor({ proposal, previewHtml, onFocusHeading, onReload }: DraftE
             )}
           </Button>
           <Button
+            ref={rejectTriggerRef}
             type="button"
             variant="outline"
             size="sm"
             className="text-[13px]"
             disabled={saving}
+            onClick={() => setRejectOpen(true)}
           >
             <X className="size-4" aria-hidden="true" />
             {REJECT_TRIGGER}
           </Button>
           <Button
+            ref={publishTriggerRef}
             type="button"
             size="sm"
             className="text-[13px]"
             disabled={publishDisabled}
             aria-describedby={isDirty ? unsavedReasonId : undefined}
+            onClick={() => setPublishOpen(true)}
           >
             {APPROVE_AND_PUBLISH_CTA}
           </Button>
@@ -506,6 +517,27 @@ function DraftEditor({ proposal, previewHtml, onFocusHeading, onReload }: DraftE
           </p>
         )}
       </ActionBar>
+
+      <PublishDialog
+        open={publishOpen}
+        onOpenChange={setPublishOpen}
+        proposalId={proposal.id}
+        expectedVersion={version}
+        // The form is clean whenever the dialog can open, so its title is the saved one.
+        title={form.getValues("title").trim()}
+        returnFocusRef={publishTriggerRef}
+        onFocusHeading={onFocusHeading}
+        onReload={onReload}
+      />
+      <RejectDialog
+        open={rejectOpen}
+        onOpenChange={setRejectOpen}
+        proposalId={proposal.id}
+        expectedVersion={version}
+        returnFocusRef={rejectTriggerRef}
+        onFocusHeading={onFocusHeading}
+        onReload={onReload}
+      />
     </>
   );
 }
