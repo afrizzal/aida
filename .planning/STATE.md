@@ -5,16 +5,16 @@ milestone_name: Helpdesk & Projects
 current_phase: 12
 current_phase_name: ticket-lifecycle
 status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11 and 12 verified human_needed; Phase 12.1 (custom states and SLA pause) next
-stopped_at: Completed 12.2-06-PLAN.md (proposal copy module with total code mappings, KbProposalStatusChip, resolveActionOutcome with UNKNOWN identical to a rejected call); 12.2-07 next
-last_updated: "2026-11-09T05:15:00.000Z"
+stopped_at: Completed 12.2-07-PLAN.md (generation job: epoch-bound claim lease, D-01/D-08/D-09 rechecks before the call, complete() with one audit row, K51-validated conditional store, typed failures with bounded retry, worker registration with includeMetadata; 36 integration cases incl. PID-bound claim race); 12.2-08 next
+last_updated: "2026-11-09T05:30:00.000Z"
 last_activity: 2026-11-09
-last_activity_desc: Plan 12.2-06 complete (6ba9aef, 8ded6fb, b31c629); every Copywriting row and amendment A1 to A5 row verbatim in proposal-copy.ts with mappings total over the contract codes; KbProposalStatusChip; resolveActionOutcome gives UNKNOWN the rejected-call view and the A1, A3 and A5 warnings; 54 unit cases
+last_activity_desc: Plan 12.2-07 complete (49df4cd, 4357643, 0237233); generateProposal claims by epoch and version, rechecks requester, sources, provider and AI before complete(), audits every returned call once, stores DRAFT only on the claimed version and epoch; 28 generation cases and 8 race cases (two-job claim, superseded store and FAILED, both R2-3 arrival orders, lease expiry)
 state_head: 75e5a731b94899099a85ae1ff6bdd0f623debc24
 progress:
   total_phases: 12
   completed_phases: 0
   total_plans: 86
-  completed_plans: 39
+  completed_plans: 40
   percent: 0
 ---
 

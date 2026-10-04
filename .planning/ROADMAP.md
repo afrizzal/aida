@@ -363,7 +363,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 12.2-07-PLAN.md — Generation job: claim lease, D-01/D-08/D-09 rechecks, complete() with one audit row, validated store, typed failures, worker registration, claim races (Wave 3)
+- [x] 12.2-07-PLAN.md — Generation job: claim lease, D-01/D-08/D-09 rechecks, complete() with one audit row, validated store, typed failures, worker registration, claim races (Wave 3)
 - [ ] 12.2-08-PLAN.md — Server actions and D-01-first loaders, proposal list with polling, admin-only Proposals link, Start dialog (Wave 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
@@ -516,7 +516,7 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 | 11. Inbox | v2.0 | 9/9 | Verified: human_needed (visual, dark mode, 360px and screen-reader checks open) | - |
 | 12. Ticket Lifecycle (relations, merge, snooze, activity) | v2.0 | 10/10 | Verified: human_needed (visual, dark mode, layout widths and screen-reader checks open; AIDA-53 audit wording is owner item 12-o1) | - |
 | 12.1. Ticket Lifecycle (custom states, SLA pause) | v2.0 | 0/17 | Planned | - |
-| 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 6/12 | In progress | - |
+| 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 7/12 | In progress | - |
 | 13. Integrations | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
 | 14. Projects Foundation | v2.0 | 0/0 | Not started | - |
 | 15. Work Views | v2.0 | 0/0 | Not started | - |
