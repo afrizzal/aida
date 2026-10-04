@@ -5,16 +5,16 @@ milestone_name: Helpdesk & Projects
 current_phase: 12
 current_phase_name: ticket-lifecycle
 status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11 and 12 verified human_needed; Phase 12.1 (custom states and SLA pause) next
-stopped_at: Completed 12.2-05-PLAN.md (review service: save, reject, publish under a member-row share lock with slug retry, restart with a new epoch, retry indexing by one conditional claim; 11 PID-bound races); 12.2-06 next
-last_updated: "2026-11-09T05:05:00.000Z"
+stopped_at: Completed 12.2-06-PLAN.md (proposal copy module with total code mappings, KbProposalStatusChip, resolveActionOutcome with UNKNOWN identical to a rejected call); 12.2-07 next
+last_updated: "2026-11-09T05:15:00.000Z"
 last_activity: 2026-11-09
-last_activity_desc: Plan 12.2-05 complete (08fa18b, a95d7a1, 39e1933); publishProposal creates exactly one article under a FOR SHARE member-row lock with slug retry and the embed send after commit; save, reject, stuck-only restart with a new epoch, retry indexing claimed by one conditional article update; 40 review cases and 11 PID-bound races
+last_activity_desc: Plan 12.2-06 complete (6ba9aef, 8ded6fb, b31c629); every Copywriting row and amendment A1 to A5 row verbatim in proposal-copy.ts with mappings total over the contract codes; KbProposalStatusChip; resolveActionOutcome gives UNKNOWN the rejected-call view and the A1, A3 and A5 warnings; 54 unit cases
 state_head: 75e5a731b94899099a85ae1ff6bdd0f623debc24
 progress:
   total_phases: 12
   completed_phases: 0
   total_plans: 86
-  completed_plans: 38
+  completed_plans: 39
   percent: 0
 ---
 
