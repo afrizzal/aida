@@ -377,7 +377,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 12.2-12-PLAN.md — Phase gate, AIDA-18 and D-01 to D-17 evidence, greps, §9 checklist, README note, open items (Wave 6)
+- [x] 12.2-12-PLAN.md — Phase gate, AIDA-18 and D-01 to D-17 evidence, greps, §9 checklist, README note, open items (Wave 6)
 
 ### Phase 13: Integrations
 
@@ -516,7 +516,7 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 | 11. Inbox | v2.0 | 9/9 | Verified: human_needed (visual, dark mode, 360px and screen-reader checks open) | - |
 | 12. Ticket Lifecycle (relations, merge, snooze, activity) | v2.0 | 10/10 | Verified: human_needed (visual, dark mode, layout widths and screen-reader checks open; AIDA-53 audit wording is owner item 12-o1) | - |
 | 12.1. Ticket Lifecycle (custom states, SLA pause) | v2.0 | 0/17 | Planned | - |
-| 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 11/12 | In progress | - |
+| 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 12/12 | Executed; gate on 1b73910 recorded in 12.2-GATE.md (audit baseline unchanged, O-1 suites blocked); code review and verification next | - |
 | 13. Integrations | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
 | 14. Projects Foundation | v2.0 | 0/0 | Not started | - |
 | 15. Work Views | v2.0 | 0/0 | Not started | - |

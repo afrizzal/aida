@@ -5,16 +5,16 @@ milestone_name: Helpdesk & Projects
 current_phase: 12
 current_phase_name: ticket-lifecycle
 status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11 and 12 verified human_needed; Phase 12.1 (custom states and SLA pause) next
-stopped_at: Completed 12.2-11-PLAN.md (LLM stub chat mode, request recording and hold; kb-proposals.spec.ts 12 cases for AIDA-18 end to end with the stub and a real worker; contrast scan of /kb/proposals and a Draft review page in both themes; light --destructive darkened to 0.48 after the scan found 3.93:1); 12.2-12 next
-last_updated: "2026-11-09T06:30:00.000Z"
+stopped_at: Completed 12.2-12-PLAN.md (README note on KB article proposals committed first as 1b73910; phase gate on 1b73910 gave lint, typecheck, unit 566, integration without egress 700, E2E full 208 passed 1 skipped, build all exit 0; audit --prod exit 1 baseline unchanged; full integration and test:egress blocked O-1; 12.2-GATE.md maps AIDA-18 and D-01 to D-17 to files and named tests, greps G1 to G9, section 9 checklist, R2-5 and K51 sections, open items); Phase 12.2 code review and verification next
+last_updated: "2026-11-09T06:45:00.000Z"
 last_activity: 2026-11-09
-last_activity_desc: Plan 12.2-11 complete (175050a, f09f2c3, 66867bd, dd6e36d); kb-proposals.spec.ts 12 passed, phase5-rag and honesty-invariants 8 passed, a11y-contrast 18 passed, cross-file run of a11y, honesty, kb-proposals, phase4-ai and phase5-rag 49 passed; earlier red runs were a triage call sharing the stub, a hydration race in an editor fill and a real light-mode destructive contrast failure, each fixed at its cause; afterAll deletes its own proposal audit rows under session_replication_role replica in the test database only; visual, dark-mode and screen-reader checks open for a human
+last_activity_desc: Plan 12.2-12 complete (1b73910, de345d0, 3226bea, 8ab7473); gate on the tested commit 1b73910 green except audit --prod (exit 1, 7 critical and 52 high, Phase 12.1 baseline unchanged, not a pass); O-1 suites blocked, not run; no change outside .planning after the gate; visual, dark-mode, screen-reader, article-quality and UAT items open for a human; AIDA-18 stays Pending until verification
 state_head: 75e5a731b94899099a85ae1ff6bdd0f623debc24
 progress:
   total_phases: 12
   completed_phases: 0
   total_plans: 86
-  completed_plans: 44
+  completed_plans: 45
   percent: 0
 ---
 
