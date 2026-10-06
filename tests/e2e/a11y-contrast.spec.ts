@@ -57,6 +57,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
+import {
+  PROPOSAL_STATUS_LABELS,
+  PROPOSALS_PAGE_TITLE,
+  REVIEW_PAGE_TITLE,
+} from "../../src/lib/kb/proposal-copy";
 import { EMBEDDING_DIMENSIONS } from "../../src/lib/rag/types";
 import { STATE_COLOR_KEYS, STATE_COLORS } from "../../src/lib/tickets/state-colors";
 import { addStatusAriaLabel, GROUP_LABELS } from "../../src/lib/tickets/state-copy";
@@ -110,6 +115,17 @@ const groupTickets: { key: (typeof GROUP_TICKET_KEYS)[number]; id: string; statu
   [];
 const draftMarkdown =
   "Thanks for reaching out! Here is a grounded, cited answer for the contrast scan [1].";
+
+// Phase 12.2 (12.2-11 Task 3, UI-SPEC E3, E4, E7 contrast backstop): one KB proposal per status,
+// seeded directly (no LLM call, no job queued), each from its own RESOLVED ticket, so
+// /kb/proposals shows every status chip and a Draft review page can be scanned. All are removed
+// in the afterAll, with the article the PUBLISHED fixture creates.
+const PROPOSAL_STATUSES = ["GENERATING", "DRAFT", "REJECTED", "PUBLISHED", "FAILED"] as const;
+const proposalIds: string[] = [];
+const proposalArticleIds: string[] = [];
+const proposalTicketIds: string[] = [];
+let draftProposalId = "";
+let draftProposalTitle = "";
 
 // First-hit compile-race guard (project pitfall: next dev can transiently 404 a route before its
 // first compile finishes) — this file runs before any other spec has warmed these routes.
@@ -206,6 +222,38 @@ test.beforeAll(async () => {
     groupTickets.push({ key, id: groupTicket.id, statusToken: groupTicket.statusToken });
   }
 
+  // The proposal fixtures import src/lib/db, so they are loaded here, after ./support/db has set
+  // DATABASE_URL (a static import could be ordered before it).
+  const { seedProposal } = await import("../support/kb-proposal-fixtures");
+  const resolvedId = await stateIdFor("RESOLVED");
+  for (const status of PROPOSAL_STATUSES) {
+    const source = await createTicket(orgId, {
+      subject: `A11y contrast proposal source ${status} ${ts}`,
+      priority: "NORMAL",
+      body: `Proposal contrast fixture (${status}).`,
+      contact: { email: `a11y-contrast-proposal-${status.toLowerCase()}-${ts}@example.com` },
+      direction: "INBOUND",
+    });
+    await prisma.ticket.update({ where: { id: source.id }, data: { stateId: resolvedId } });
+    proposalTicketIds.push(source.id);
+    const hasText = status === "DRAFT" || status === "REJECTED" || status === "PUBLISHED";
+    const title = `A11y contrast proposal ${status} ${ts}`;
+    const seeded = await seedProposal(orgId, {
+      status,
+      ticketIds: [source.id],
+      ...(hasText
+        ? { title, bodyMarkdown: `## Steps\n\nContrast fixture body for ${status}.` }
+        : {}),
+      ...(status === "FAILED" ? { failureCode: "PROVIDER" as const } : {}),
+    });
+    proposalIds.push(seeded.id);
+    if (seeded.publishedArticleId) proposalArticleIds.push(seeded.publishedArticleId);
+    if (status === "DRAFT") {
+      draftProposalId = seeded.id;
+      draftProposalTitle = title;
+    }
+  }
+
   const chunk = await prisma.kbChunk.findFirstOrThrow({ where: { articleId } });
   stub.chatResponse = {
     grounded: true,
@@ -229,6 +277,22 @@ test.afterAll(async () => {
   // The fixture states hold no ticket, so they are hard-deleted.
   if (fixtureStateIds.length > 0) {
     await prisma.ticketState.deleteMany({ where: { id: { in: fixtureStateIds } } });
+  }
+  // The proposals first (their sources restrict the tickets and the PUBLISHED one restricts its
+  // article), then that article and the source tickets.
+  if (proposalIds.length > 0) {
+    await prisma.kbProposalSource.deleteMany({ where: { proposalId: { in: proposalIds } } });
+    await prisma.kbProposal.deleteMany({ where: { id: { in: proposalIds } } });
+  }
+  if (proposalArticleIds.length > 0) {
+    await prisma.kbArticle.deleteMany({ where: { id: { in: proposalArticleIds } } });
+  }
+  for (const id of proposalTicketIds) {
+    await prisma.ticket
+      .delete({ where: { id } })
+      .catch(() =>
+        prisma.ticket.update({ where: { id }, data: { stateId: openId, slaPausedAt: null } }),
+      );
   }
   if (articleId) await prisma.kbArticle.delete({ where: { id: articleId } }).catch(() => {});
   await prisma.setting.deleteMany({
@@ -324,6 +388,31 @@ for (const theme of ["light", "dark"] as const) {
           dialog.getByText(STATE_COLORS[key].displayName, { exact: true }),
         ).toBeVisible();
       }
+      await scanForContrastViolations(page);
+    });
+
+    test(`/kb/proposals with one proposal per status has zero color-contrast violations (${theme})`, async ({
+      page,
+    }) => {
+      await page.addInitScript((t) => window.localStorage.setItem("theme", t), theme);
+      await gotoWarm(page, "/kb/proposals");
+      const main = page.getByRole("main");
+      await expect(main.getByRole("heading", { name: PROPOSALS_PAGE_TITLE })).toBeVisible();
+      for (const status of PROPOSAL_STATUSES) {
+        await expect(main.getByText(PROPOSAL_STATUS_LABELS[status], { exact: true })).toBeVisible();
+      }
+      await scanForContrastViolations(page);
+    });
+
+    test(`a Draft proposal review page has zero color-contrast violations (${theme})`, async ({
+      page,
+    }) => {
+      await page.addInitScript((t) => window.localStorage.setItem("theme", t), theme);
+      await gotoWarm(page, `/kb/proposals/${draftProposalId}`);
+      const main = page.getByRole("main");
+      await expect(main.getByRole("heading", { name: REVIEW_PAGE_TITLE })).toBeVisible();
+      await expect(main.getByText(PROPOSAL_STATUS_LABELS.DRAFT, { exact: true })).toBeVisible();
+      await expect(main.getByRole("textbox", { name: "Title" })).toHaveValue(draftProposalTitle);
       await scanForContrastViolations(page);
     });
 
