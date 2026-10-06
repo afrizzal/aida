@@ -5,16 +5,16 @@ milestone_name: Helpdesk & Projects
 current_phase: 12
 current_phase_name: ticket-lifecycle
 status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11 and 12 verified human_needed; Phase 12.1 (custom states and SLA pause) next
-stopped_at: Completed 12.2-10-PLAN.md (admin-only Propose KB article entry in the ticket actions menu and the inbox bulk bar, disabled with Entry unavailable reasons as aria-describedby, opening StartProposalDialog with one ticket or the selected ids; reason helpers in proposal-entry.ts with 16 unit cases); 12.2-11 next
-last_updated: "2026-11-09T06:05:00.000Z"
+stopped_at: Completed 12.2-11-PLAN.md (LLM stub chat mode, request recording and hold; kb-proposals.spec.ts 12 cases for AIDA-18 end to end with the stub and a real worker; contrast scan of /kb/proposals and a Draft review page in both themes; light --destructive darkened to 0.48 after the scan found 3.93:1); 12.2-12 next
+last_updated: "2026-11-09T06:30:00.000Z"
 last_activity: 2026-11-09
-last_activity_desc: Plan 12.2-10 complete (6fdefc2, 0b29342, 29e7832); Propose KB article menu item after Merge and bulk-bar button after the pickers, owners and admins only, isAdmin and aiEnabled computed on the server; menu reasons AI off, merged, not resolved; bar reasons AI off, more than 5, the bar lock; the disabled menu item uses aria-disabled so its reason is reachable; typecheck and biome clean, proposal-entry and design-token tests 45 passed; visual, dark-mode and screen-reader checks open for a human
+last_activity_desc: Plan 12.2-11 complete (175050a, f09f2c3, 66867bd, dd6e36d); kb-proposals.spec.ts 12 passed, phase5-rag and honesty-invariants 8 passed, a11y-contrast 18 passed, cross-file run of a11y, honesty, kb-proposals, phase4-ai and phase5-rag 49 passed; earlier red runs were a triage call sharing the stub, a hydration race in an editor fill and a real light-mode destructive contrast failure, each fixed at its cause; afterAll deletes its own proposal audit rows under session_replication_role replica in the test database only; visual, dark-mode and screen-reader checks open for a human
 state_head: 75e5a731b94899099a85ae1ff6bdd0f623debc24
 progress:
   total_phases: 12
   completed_phases: 0
   total_plans: 86
-  completed_plans: 43
+  completed_plans: 44
   percent: 0
 ---
 
