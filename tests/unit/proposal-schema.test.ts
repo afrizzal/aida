@@ -8,6 +8,8 @@ import {
   RENDERED_URL_PROPERTIES,
   renderedBodyLinksToTicket,
   renderedMarkdownHasImage,
+  TOKEN_WRAP_LEADING,
+  TOKEN_WRAP_TRAILING,
   validateDraftFields,
   validateProposalOutput,
 } from "@/lib/kb/proposal-schema";
@@ -533,5 +535,74 @@ describe("run decision K54: images are refused in title and body (review a2-CR-0
     expect(renderedMarkdownHasImage(REMOTE)).toBe(true);
     expect(renderedMarkdownHasImage("[link](https://example.com)")).toBe(false);
     expect(renderedMarkdownHasImage("Plain text.")).toBe(false);
+  });
+});
+
+describe("run decision K53 and review a2-IN-05: emphasis, typographic and table wrappers", () => {
+  const WRAPPED = [
+    "**/tickets/abc**",
+    "_/tickets/abc_",
+    "~~/tickets/abc~~",
+    "*/tickets/abc*",
+    "__/tickets/abc__",
+    "**(/tickets/abc)**.",
+    "_[/tickets/abc]_,",
+    "“/tickets/abc”",
+    "‘/tickets/abc’",
+    "«/tickets/abc»",
+    "|/tickets/abc|",
+  ];
+
+  it("refuses every wrapped ticket path in the title (TICKET_LINK)", () => {
+    for (const token of WRAPPED) {
+      expect(titleRefusal(`Reset guide ${token}`)).toEqual({
+        ok: false,
+        field: "title",
+        code: "TICKET_LINK",
+      });
+      expect(reason({ title: `Reset guide ${token}` })).toBe("TICKET_LINK");
+    }
+  });
+
+  it("refuses every wrapped ticket path in the body (TICKET_LINK)", () => {
+    for (const token of WRAPPED) {
+      expect(bodyRefusal(`See ${token} first.`)).toEqual({
+        ok: false,
+        field: "bodyMarkdown",
+        code: "TICKET_LINK",
+      });
+      expect(reason({ bodyMarkdown: `## Steps\n\nSee ${token} first.` })).toBe("TICKET_LINK");
+    }
+  });
+
+  it("refuses a ticket path in an unpadded table cell", () => {
+    expect(bodyRefusal("| Link |\n| --- |\n|/tickets/abc|")).toEqual({
+      ok: false,
+      field: "bodyMarkdown",
+      code: "TICKET_LINK",
+    });
+  });
+
+  it("allows the wrapped neighbours /ticketsfoo and docs/tickets-guide", () => {
+    for (const text of [
+      "**/ticketsfoo**",
+      "_docs/tickets-guide_",
+      "~~/ticketsfoo~~",
+      "“/ticketsfoo”",
+      "|docs/tickets-guide|",
+    ]) {
+      expect(titleRefusal(`About ${text}`).ok).toBe(true);
+      expect(bodyRefusal(`Read ${text} first.`).ok).toBe(true);
+      expect(containsTicketLink(text)).toBe(false);
+    }
+  });
+
+  it("exports the extended wrap sets", () => {
+    for (const ch of ["*", "_", "~", "“", "‘", "«", "|"]) {
+      expect(TOKEN_WRAP_LEADING).toContain(ch);
+    }
+    for (const ch of ["*", "_", "~", "”", "’", "»", "|"]) {
+      expect(TOKEN_WRAP_TRAILING).toContain(ch);
+    }
   });
 });

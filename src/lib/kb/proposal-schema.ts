@@ -137,10 +137,17 @@ export function isTicketPageUrl(candidate: string): boolean {
   return path.toLowerCase().startsWith(TICKET_PATH_PREFIX);
 }
 
-/** Characters stripped, as a run, from the start of a whitespace-delimited token (review R3-3). */
-export const TOKEN_WRAP_LEADING = "([{<\"'`";
-/** Characters stripped, as a run, from the end of a whitespace-delimited token (review R3-3). */
-export const TOKEN_WRAP_TRAILING = ")]}>.,;:!?\"'`";
+/**
+ * Characters stripped, as a run, from the start of a whitespace-delimited token (review R3-3),
+ * plus the Markdown emphasis characters * _ ~ (run decision K53), the opening typographic quotes
+ * and guillemet “ ‘ « and the table pipe | (review a2-IN-05).
+ */
+export const TOKEN_WRAP_LEADING = "([{<\"'`*_~\u201C\u2018\u00AB|";
+/**
+ * Characters stripped, as a run, from the end of a whitespace-delimited token (review R3-3), plus
+ * * _ ~ (run decision K53), the closing typographic quotes and guillemet ” ’ » and | (a2-IN-05).
+ */
+export const TOKEN_WRAP_TRAILING = ")]}>.,;:!?\"'`*_~\u201D\u2019\u00BB|";
 
 function charClass(chars: string): string {
   return `[${chars.replace(/[\\\]^-]/g, "\\$&")}]`;
