@@ -56,6 +56,19 @@ class InputBudget {
   }
 }
 
+/**
+ * Review a2-IN-01: any ticket_content tag lookalike in ticket text, opening or closing, in any
+ * case, with spaces, attributes or a self-closing slash, and even without its closing `>`, loses
+ * its `<…ticket_content` prefix before fencing. Ticket text can then neither end its own block
+ * nor forge a block that looks like another source. Proposal-local: the RAG fenceContent stays
+ * as it is.
+ */
+const TAG_LOOKALIKE = /<\s*\/?\s*ticket_content\b/gi;
+
+function escapeTagLookalikes(text: string): string {
+  return text.replace(TAG_LOOKALIKE, "[escaped-tag]");
+}
+
 function sourceText(subject: string, bodies: string[]): string {
   const parts = [`Subject: ${subject}`];
   bodies.forEach((body, i) => {
@@ -93,7 +106,7 @@ export function buildProposalPrompt(sources: readonly ProposalSourceInput[]): Pr
       bodies.push(body);
     }
 
-    return fenceContent("ticket_content", sourceText(subject, bodies)).replace(
+    return fenceContent("ticket_content", escapeTagLookalikes(sourceText(subject, bodies))).replace(
       "<ticket_content>",
       `<ticket_content id="T${source.position}">`,
     );

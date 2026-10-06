@@ -300,6 +300,8 @@ export function validateProposalOutput(
   if (titleLength < TITLE_MIN || titleLength > TITLE_MAX)
     return { ok: false, reason: "TITLE_LENGTH" };
   if (containsSourceMarker(title)) return { ok: false, reason: "MARKER_IN_TITLE" };
+  // Review a2-IN-01: the fence-echo check covers the title too.
+  if (FENCE_TAG_PATTERN.test(title)) return { ok: false, reason: "FENCE_ECHO" };
   if (containsTicketLink(title)) return { ok: false, reason: "TICKET_LINK" };
   if (renderedMarkdownHasImage(title)) return { ok: false, reason: "IMAGE_IN_TITLE" };
 

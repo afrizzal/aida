@@ -657,3 +657,11 @@ describe("run decision K57: public status bearer links are ticket links (review 
     }
   });
 });
+
+describe("review a2-IN-01: a fence tag echoed in the title is refused", () => {
+  it("refuses a title that echoes a ticket_content tag (FENCE_ECHO)", () => {
+    expect(reason({ title: 'Reset <ticket_content id="T1"> guide' })).toBe("FENCE_ECHO");
+    expect(reason({ title: "Reset </ticket_content> guide" })).toBe("FENCE_ECHO");
+    expect(reason({ title: "Reset ticket content guide" })).toBe("OK");
+  });
+});
