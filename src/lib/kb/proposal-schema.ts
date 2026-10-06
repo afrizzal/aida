@@ -7,6 +7,12 @@
 // nothing stripped. Generation (validateProposalOutput), save, publish and the editor
 // (validateDraftFields) all use the checks of this module.
 //
+// Run decision K54 (review a2-CR-01): an image anywhere in the rendered title or body is refused,
+// fail-closed, whatever its URL. A model-chosen image URL would be fetched by the reviewer's
+// browser as soon as the draft is previewed, which can carry ticket text to another host.
+// Generation refuses it as INVALID_OUTPUT; save, publish and the editor refuse it in the body as
+// IMAGE_NOT_ALLOWED. The title is shown as plain text everywhere, so only generation checks it.
+//
 // Relative imports only (no path alias): bundled into the worker by esbuild and used by the
 // client editor, which reads only the rendered URL attribute values and never inserts the HTML.
 import type { Element, Root } from "hast";
@@ -58,11 +64,13 @@ export type ProposalOutput = z.infer<typeof proposalOutputSchema>;
 export type ProposalOutputRefusal =
   | "TITLE_LENGTH"
   | "MARKER_IN_TITLE"
+  | "IMAGE_IN_TITLE"
   | "BODY_EMPTY"
   | "BODY_TOO_LONG"
   | "MARKER_IN_BODY"
   | "FENCE_ECHO"
   | "TICKET_LINK"
+  | "IMAGE_IN_BODY"
   | "TOO_MANY_CITATIONS"
   | "SECTION_LENGTH"
   | "CITATION_UNKNOWN_SOURCE";
@@ -243,6 +251,25 @@ function bodyLinksToTicket(bodyMarkdown: string): boolean {
 }
 
 /**
+ * The elements that make a browser fetch an image. Markdown produces only img (renderMarkdown
+ * drops raw HTML); picture and source are listed because the sanitizer would keep them.
+ */
+const IMAGE_TAG_NAMES: ReadonlySet<string> = new Set(["img", "picture", "source"]);
+
+/**
+ * Run decision K54: true when the Markdown, rendered with renderMarkdown (the renderer of the
+ * preview and of a published article's bodyHtml), contains any image element, whatever its URL.
+ */
+export function renderedMarkdownHasImage(markdown: string): boolean {
+  const tree = renderedHtmlParser.parse(renderMarkdown(markdown)) as Root;
+  let found = false;
+  visit(tree, "element", (node: Element) => {
+    if (IMAGE_TAG_NAMES.has(node.tagName)) found = true;
+  });
+  return found;
+}
+
+/**
  * Validates one model answer for a proposal built from `sourceCount` selected tickets.
  * Fail-closed: the first broken rule is returned as a typed reason and nothing is stripped.
  * Title and body are trimmed before checking and returned trimmed.
@@ -260,12 +287,14 @@ export function validateProposalOutput(
     return { ok: false, reason: "TITLE_LENGTH" };
   if (containsSourceMarker(title)) return { ok: false, reason: "MARKER_IN_TITLE" };
   if (containsTicketLink(title)) return { ok: false, reason: "TICKET_LINK" };
+  if (renderedMarkdownHasImage(title)) return { ok: false, reason: "IMAGE_IN_TITLE" };
 
   if (bodyMarkdown === "") return { ok: false, reason: "BODY_EMPTY" };
   if (codePointLength(bodyMarkdown) > BODY_MAX) return { ok: false, reason: "BODY_TOO_LONG" };
   if (containsSourceMarker(bodyMarkdown)) return { ok: false, reason: "MARKER_IN_BODY" };
   if (FENCE_TAG_PATTERN.test(bodyMarkdown)) return { ok: false, reason: "FENCE_ECHO" };
   if (bodyLinksToTicket(bodyMarkdown)) return { ok: false, reason: "TICKET_LINK" };
+  if (renderedMarkdownHasImage(bodyMarkdown)) return { ok: false, reason: "IMAGE_IN_BODY" };
 
   if (rawCitations.length > CITATIONS_MAX) return { ok: false, reason: "TOO_MANY_CITATIONS" };
   const citations: { position: number; section: string }[] = [];
@@ -294,7 +323,8 @@ export type DraftFieldCode =
   | "TITLE_TOO_LONG"
   | "CITATION_MARKER"
   | "TICKET_LINK"
-  | "BODY_REQUIRED";
+  | "BODY_REQUIRED"
+  | "IMAGE_NOT_ALLOWED";
 
 export type DraftField = "title" | "bodyMarkdown";
 
@@ -305,8 +335,9 @@ export type DraftFieldsResult =
 /**
  * Checks a title and body in this order and returns the first failure with its field: title
  * under 3 code points, over 120, with a source marker, with a ticket link; body empty or
- * whitespace-only, with a source marker, with a ticket link (raw text or rendered URL attribute).
- * Fail-closed, nothing stripped; on success the trimmed values are returned.
+ * whitespace-only, with a source marker, with a ticket link (raw text or rendered URL attribute),
+ * with an image (run decision K54). Fail-closed, nothing stripped; on success the trimmed values
+ * are returned.
  */
 export function validateDraftFields(input: {
   title: string;
@@ -327,6 +358,9 @@ export function validateDraftFields(input: {
   }
   if (bodyLinksToTicket(bodyMarkdown)) {
     return { ok: false, field: "bodyMarkdown", code: "TICKET_LINK" };
+  }
+  if (renderedMarkdownHasImage(bodyMarkdown)) {
+    return { ok: false, field: "bodyMarkdown", code: "IMAGE_NOT_ALLOWED" };
   }
 
   return { ok: true, title, bodyMarkdown };

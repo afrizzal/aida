@@ -1,4 +1,4 @@
-// Phase 12.2 post-action rule (UI-SPEC 1b, 3e to 3i, amendments A1 to A5): the one function every
+// Phase 12.2 post-action rule (UI-SPEC 1b, 3e to 3i, amendments A1 to A6): the one function every
 // proposal UI applies to an action's result, so the message, its tone, whether the submit stays
 // disabled, the reload offer and the focus target are decided once and tested once. Pure and
 // client-safe: client components import it. Relative imports only.
@@ -112,7 +112,11 @@ function isOneOf<T extends string>(list: readonly T[], code: string): code is T 
   return (list as readonly string[]).includes(code);
 }
 
-/** The field a field code belongs to when the refusal names none. */
+/**
+ * The field a field code belongs to when the refusal names none. CITATION_MARKER, TICKET_LINK,
+ * BODY_REQUIRED and IMAGE_NOT_ALLOWED (amendment A6, run decision K54: the "Image error" row,
+ * focus on Body) belong to the body.
+ */
 function fieldFor(code: ProposalFieldCode, field: string | undefined): ProposalField {
   if (isProposalField(field)) return field;
   return code === "TITLE_TOO_SHORT" || code === "TITLE_TOO_LONG" ? "title" : "bodyMarkdown";

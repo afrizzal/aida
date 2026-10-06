@@ -216,11 +216,13 @@ describe("proposal-copy: Review (Surface 3)", () => {
     expect(copy.TITLE_LABEL).toBe("Title");
     expect(copy.TITLE_HELP).toBe("3 to 120 characters.");
     expect(copy.BODY_LABEL).toBe("Body (Markdown)");
-    // Amendment A2: the Body help ends with "Links to tickets are not allowed."
+    // Amendment A2 adds "Links to tickets are not allowed."; amendment A6 (run decision K54)
+    // adds "Images are not allowed." after it.
     expect(copy.BODY_HELP).toBe(
-      "Source references such as [T1] are not allowed in the body; AIDA refuses to save or publish a body that contains them. Remove customer names, emails and other personal details. Links to tickets are not allowed.",
+      "Source references such as [T1] are not allowed in the body; AIDA refuses to save or publish a body that contains them. Remove customer names, emails and other personal details. Links to tickets are not allowed. Images are not allowed.",
     );
-    expect(copy.BODY_HELP.endsWith("Links to tickets are not allowed.")).toBe(true);
+    expect(copy.BODY_HELP).toContain("Links to tickets are not allowed.");
+    expect(copy.BODY_HELP.endsWith("Images are not allowed.")).toBe(true);
     expect(copy.PREVIEW_TOGGLE).toBe("Preview");
     expect(copy.REJECT_TRIGGER).toBe("Reject…");
     expect(copy.SOURCES_HEADING).toBe("Sources");
@@ -243,6 +245,10 @@ describe("proposal-copy: Review (Surface 3)", () => {
     expect(copy.TICKET_LINK_ERROR).toBe(
       "Nothing was changed. The body links to a ticket. Remove ticket links, then save again.",
     );
+    // Amendment A6 (run decision K54) "Image error" (Body field).
+    expect(copy.IMAGE_ERROR).toBe(
+      "Nothing was changed. The body contains an image. Remove images, then save again.",
+    );
     // UI-SPEC "Field errors": "Title must be at least 3 characters. / Title must be at most 120
     // characters. / Body is required."
     expect(copy.TITLE_TOO_SHORT_ERROR).toBe("Title must be at least 3 characters.");
@@ -259,6 +265,8 @@ describe("proposal-copy: Review (Surface 3)", () => {
     expect(fieldRefusalCopy("title", "TITLE_TOO_SHORT")).toBe(copy.TITLE_TOO_SHORT_ERROR);
     expect(fieldRefusalCopy("title", "TITLE_TOO_LONG")).toBe(copy.TITLE_TOO_LONG_ERROR);
     expect(fieldRefusalCopy("bodyMarkdown", "BODY_REQUIRED")).toBe(copy.BODY_REQUIRED_ERROR);
+    // Amendment A6: only the body produces IMAGE_NOT_ALLOWED; the title entry exists for totality.
+    expect(fieldRefusalCopy("bodyMarkdown", "IMAGE_NOT_ALLOWED")).toBe(copy.IMAGE_ERROR);
     for (const field of PROPOSAL_FIELDS) {
       for (const code of PROPOSAL_FIELD_CODES) {
         expect(fieldRefusalCopy(field, code).length).toBeGreaterThan(0);
@@ -277,6 +285,7 @@ describe("proposal-copy: Review (Surface 3)", () => {
       { title: "Reset guide", bodyMarkdown: "   " },
       { title: "Reset guide", bodyMarkdown: "See [T2] for details." },
       { title: "Reset guide", bodyMarkdown: "[g](/tickets/abc)" },
+      { title: "Reset guide", bodyMarkdown: "![x](https://attacker.example/p.png)" },
     ];
     const seen = new Set<string>();
     for (const input of cases) {
@@ -297,6 +306,7 @@ describe("proposal-copy: Review (Surface 3)", () => {
         "bodyMarkdown:BODY_REQUIRED",
         "bodyMarkdown:CITATION_MARKER",
         "bodyMarkdown:TICKET_LINK",
+        "bodyMarkdown:IMAGE_NOT_ALLOWED",
       ].sort(),
     );
   });
@@ -622,6 +632,7 @@ describe("proposal-copy: the 'Nothing was changed.' rule", () => {
       copy.CITATION_MARKER_ERROR,
       copy.TITLE_CITATION_MARKER_ERROR,
       copy.TICKET_LINK_ERROR,
+      copy.IMAGE_ERROR,
       copy.SAVE_ERROR_NOT_DRAFT,
       copy.SAVE_ERROR_NOT_ALLOWED,
       copy.SAVE_ERROR_UNKNOWN,

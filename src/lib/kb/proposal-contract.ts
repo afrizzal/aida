@@ -48,6 +48,9 @@
 // A ticket number in free prose such as "#123" stays allowed and is the reviewer's responsibility
 // under the publish checklist. Fail-closed: nothing is stripped. Generation, save and publish all
 // apply these rules (validators in plan 12.2-02).
+// Run decision K54 (review a2-CR-01) adds (c): any image in the rendered body is refused as
+// IMAGE_NOT_ALLOWED at save and publish, and any image in the title or body at generation
+// (INVALID_OUTPUT).
 //
 // Publish lock (review C1, plan 12.2-05): the publish transaction's first statement share-locks
 // the actor's member row, so a concurrent demotion or member removal waits for the publish to
@@ -202,7 +205,10 @@ export const TICKET_REFUSAL_REASONS = ["NOT_RESOLVED", "MERGED", "NOT_FOUND", "D
 
 export type TicketRefusalReason = (typeof TICKET_REFUSAL_REASONS)[number];
 
-/** Refusals of list, read, save, reject and publish (TICKET_LINK: review C7, K51). */
+/**
+ * Refusals of list, read, save, reject and publish (TICKET_LINK: review C7, K51;
+ * IMAGE_NOT_ALLOWED: run decision K54).
+ */
 export const REVIEW_REFUSAL_CODES = [
   "NOT_ALLOWED",
   "MEMBERSHIP_ENDED",
@@ -214,6 +220,7 @@ export const REVIEW_REFUSAL_CODES = [
   "TITLE_TOO_SHORT",
   "TITLE_TOO_LONG",
   "BODY_REQUIRED",
+  "IMAGE_NOT_ALLOWED",
 ] as const;
 
 export type ReviewRefusalCode = (typeof REVIEW_REFUSAL_CODES)[number];

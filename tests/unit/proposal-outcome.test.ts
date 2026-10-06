@@ -160,6 +160,33 @@ describe("resolveActionOutcome: save (UI-SPEC 3c, 3e, 3h, 3i)", () => {
     });
   });
 
+  it("IMAGE_NOT_ALLOWED gives the A6 Image error row on the Body field (run decision K54)", () => {
+    const expected = {
+      kind: "field",
+      tone: "error",
+      message: copy.IMAGE_ERROR,
+      disableSubmit: false,
+      offerReload: false,
+      focus: "field",
+      field: "bodyMarkdown",
+    };
+    expect(
+      resolveActionOutcome("save", { ok: false, code: "IMAGE_NOT_ALLOWED", field: "bodyMarkdown" }),
+    ).toStrictEqual(expected);
+    // Without a field, the code belongs to the body.
+    expect(resolveActionOutcome("save", { ok: false, code: "IMAGE_NOT_ALLOWED" })).toStrictEqual(
+      expected,
+    );
+    // Publish validates the stored body: the dialog shows the same row.
+    expect(
+      resolveActionOutcome("publish", {
+        ok: false,
+        code: "IMAGE_NOT_ALLOWED",
+        field: "bodyMarkdown",
+      }).message,
+    ).toBe(copy.IMAGE_ERROR);
+  });
+
   it("CONFLICT offers reload, disables save until reload and focuses the callout", () => {
     expect(resolveActionOutcome("save", { ok: false, code: "CONFLICT" })).toStrictEqual({
       kind: "refusal",

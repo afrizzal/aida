@@ -1,4 +1,4 @@
-// Phase 12.2 copy rows (UI-SPEC Copywriting Contract and amendments A1 to A5). Each string is one
+// Phase 12.2 copy rows (UI-SPEC Copywriting Contract and amendments A1 to A6). Each string is one
 // exported constant, or a function of escaped runtime values, used verbatim; the copy-table unit
 // test checks each against its row. Pure and client-safe: server and client components import it.
 // Relative imports only.
@@ -235,9 +235,12 @@ export const TITLE_HELP = "3 to 120 characters.";
 /** Copywriting "Body label / help", first half. */
 export const BODY_LABEL = "Body (Markdown)";
 
-/** Copywriting "Body label / help", second half, with the sentence of amendment A2 last. */
+/**
+ * Copywriting "Body label / help", second half, with the sentence of amendment A2 and then the
+ * sentence of amendment A6 (run decision K54) last.
+ */
 export const BODY_HELP =
-  "Source references such as [T1] are not allowed in the body; AIDA refuses to save or publish a body that contains them. Remove customer names, emails and other personal details. Links to tickets are not allowed.";
+  "Source references such as [T1] are not allowed in the body; AIDA refuses to save or publish a body that contains them. Remove customer names, emails and other personal details. Links to tickets are not allowed. Images are not allowed.";
 
 /** Copywriting "Preview toggle". */
 export const PREVIEW_TOGGLE = "Preview";
@@ -256,6 +259,10 @@ export const TITLE_CITATION_MARKER_ERROR =
 /** Amendment A2 "Ticket link error" (Body field). */
 export const TICKET_LINK_ERROR =
   "Nothing was changed. The body links to a ticket. Remove ticket links, then save again.";
+
+/** Amendment A6 (run decision K54) "Image error" (Body field). */
+export const IMAGE_ERROR =
+  "Nothing was changed. The body contains an image. Remove images, then save again.";
 
 /** Copywriting "Field errors", first part. */
 export const TITLE_TOO_SHORT_ERROR = "Title must be at least 3 characters.";
@@ -524,6 +531,7 @@ export const PROPOSAL_FIELD_CODES = [
   "TITLE_TOO_SHORT",
   "TITLE_TOO_LONG",
   "BODY_REQUIRED",
+  "IMAGE_NOT_ALLOWED",
 ] as const satisfies readonly ReviewRefusalCode[];
 
 export type ProposalFieldCode = (typeof PROPOSAL_FIELD_CODES)[number];
@@ -545,6 +553,7 @@ const DEFAULT_FIELD: Record<ProposalFieldCode, ProposalField> = {
   TITLE_TOO_SHORT: "title",
   TITLE_TOO_LONG: "title",
   BODY_REQUIRED: "bodyMarkdown",
+  IMAGE_NOT_ALLOWED: "bodyMarkdown",
 };
 
 /** The actions whose outcome a proposal UI shows (amendment A4). */
@@ -600,6 +609,9 @@ const FIELD_REFUSAL_ROWS: Record<ProposalField, Record<ProposalFieldCode, string
     TITLE_TOO_SHORT: TITLE_TOO_SHORT_ERROR,
     TITLE_TOO_LONG: TITLE_TOO_LONG_ERROR,
     BODY_REQUIRED: BODY_REQUIRED_ERROR,
+    // Run decision K54: validateDraftFields never refuses an image on the title (the title is
+    // plain text everywhere); the entry exists for totality and names the body row.
+    IMAGE_NOT_ALLOWED: IMAGE_ERROR,
   },
   bodyMarkdown: {
     CITATION_MARKER: CITATION_MARKER_ERROR,
@@ -607,6 +619,7 @@ const FIELD_REFUSAL_ROWS: Record<ProposalField, Record<ProposalFieldCode, string
     TITLE_TOO_SHORT: TITLE_TOO_SHORT_ERROR,
     TITLE_TOO_LONG: TITLE_TOO_LONG_ERROR,
     BODY_REQUIRED: BODY_REQUIRED_ERROR,
+    IMAGE_NOT_ALLOWED: IMAGE_ERROR,
   },
 };
 
