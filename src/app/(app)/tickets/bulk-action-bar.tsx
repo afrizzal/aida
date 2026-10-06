@@ -1,8 +1,19 @@
 "use client";
 
-import { CircleDot, Flag, Loader2, type LucideIcon, Minus, Plus, UserRound, X } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  CircleDot,
+  Flag,
+  Loader2,
+  type LucideIcon,
+  Minus,
+  Plus,
+  Sparkles,
+  UserRound,
+  X,
+} from "lucide-react";
+import { type ReactNode, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
+import { StartProposalDialog } from "@/components/kb/start-proposal-dialog";
 import { StateDot } from "@/components/tickets/state-dot";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +26,8 @@ import {
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { TicketPriority } from "@/generated/prisma/client";
+import { PROPOSE_KB_ARTICLE_ENTRY } from "@/lib/kb/proposal-copy";
+import { proposalBulkUnavailableReason } from "@/lib/kb/proposal-entry";
 import type { TicketMutationErrorCode } from "@/lib/tickets/mutations";
 import {
   BULK_ERROR_STATE_DELETED,
@@ -40,6 +53,13 @@ import { MAX_SELECTED_TICKETS, useTicketSelection } from "./ticket-selection";
 // /tickets and /tickets/[id] all keep it, and bulk actions stay off while it shows, so the agent
 // cannot retry without seeing it. It lives in this module rather than in component state, so a
 // remount of the list panel keeps it and only a full page load (a refresh) starts without it.
+//
+// Phase 12.2 (UI-SPEC 1a, AIDA-18): owners and admins also get "Propose KB article…" after the
+// pickers. It opens the Start dialog with the selected ids and stays focusable but
+// aria-disabled, with a 12px reason under the bar, when AI is off, more than five tickets are
+// selected, or the bar's call lock or unknown-outcome lock is on (the bar's own text is the
+// reason). Each ticket's eligibility is judged by the dialog and the server, not here. A start
+// keeps the selection. Members never see the button; requestProposalAction refuses them anyway.
 
 type BulkOp = BulkUpdateInput["op"];
 type Picker = "assign" | "status" | "priority" | "addTag" | "removeTag";
@@ -178,6 +198,8 @@ export function BulkActionBar({
   members,
   tags,
   states,
+  isAdmin = false,
+  aiEnabled = false,
 }: {
   /** The tickets the panel rendered, with their tag ids (for Remove tag). */
   loaded: BulkActionBarTicket[];
@@ -187,6 +209,10 @@ export function BulkActionBar({
   tags: BulkActionBarOption[];
   /** The organization's active states, in group then sort order (D-11). */
   states: BulkActionBarState[];
+  /** The actor is an owner or admin, computed on the server (12.2 UI-SPEC 1a, D-01). */
+  isAdmin?: boolean;
+  /** The organization's aiEnabled setting, read on the server (12.2 UI-SPEC 1a, D-09). */
+  aiEnabled?: boolean;
 }) {
   const { selectedIds, clear, reportLoaded } = useTicketSelection();
   const pending = useCallPending();
@@ -198,6 +224,12 @@ export function BulkActionBar({
   const unknown = useOutcomeUnknown();
   // A rejected call ends with the triggers disabled, so focus goes to Dismiss instead (IN-04).
   const [focusDismiss, setFocusDismiss] = useState(false);
+  // The Start dialog (12.2 UI-SPEC 1b) and the ids it was last opened with; the ids stay while it
+  // closes, so its close animation and focus return run on the same tickets.
+  const [proposeOpen, setProposeOpen] = useState(false);
+  const [proposeIds, setProposeIds] = useState<string[]>([]);
+  const proposeRef = useRef<HTMLButtonElement>(null);
+  const proposeReasonId = useId();
 
   // Report the rendered list so the selection is pruned to tickets on screen (Surface 3a).
   const loadedKey = loaded.map((ticket) => ticket.id).join(",");
@@ -263,6 +295,26 @@ export function BulkActionBar({
     } finally {
       setCallPending(false);
     }
+  }
+
+  // 12.2 UI-SPEC 1a: the proposal entry respects the bar's call lock and unknown-outcome lock
+  // (no start while a bulk call runs or its outcome is unknown); the lock's reason is the bar's
+  // own text for that lock.
+  const lockReason =
+    pending || unknown
+      ? unknown
+        ? OUTCOME_UNKNOWN_CONTINUE
+        : `Updating ${tickets(selectedIds.length)}…`
+      : null;
+  const proposeReason = isAdmin
+    ? proposalBulkUnavailableReason({ aiEnabled, count: selectedIds.length, locked: lockReason })
+    : null;
+
+  function openProposal() {
+    // aria-disabled keeps the button focusable, so an activation is ignored here.
+    if (proposeReason !== null || selectedIds.length === 0) return;
+    setProposeIds([...selectedIds]);
+    setProposeOpen(true);
   }
 
   const pickerProps = (picker: Picker) => ({
@@ -359,7 +411,44 @@ export function BulkActionBar({
             onPick={(tag) => void run({ kind: "removeTag", tagId: tag.id })}
           />
         </PickerButton>
+
+        {isAdmin && (
+          <Button
+            ref={proposeRef}
+            variant="outline"
+            size="sm"
+            className="text-[13px] aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+            aria-disabled={proposeReason !== null ? "true" : undefined}
+            aria-describedby={proposeReason !== null ? proposeReasonId : undefined}
+            onClick={openProposal}
+          >
+            <Sparkles className="size-4" />
+            {PROPOSE_KB_ARTICLE_ENTRY}
+          </Button>
+        )}
       </div>
+
+      {isAdmin && proposeReason !== null && (
+        <p id={proposeReasonId} className="text-[12px] text-muted-foreground">
+          {proposeReason}
+        </p>
+      )}
+
+      {isAdmin && (
+        <StartProposalDialog
+          open={proposeOpen}
+          // The selection is kept after a start or a close (12.2 UI-SPEC 1b): only the dialog
+          // closes, clear() is never called here.
+          onOpenChange={setProposeOpen}
+          ticketIds={proposeIds}
+          onCloseAutoFocus={(event) => {
+            // UI-SPEC 3i: focus returns to the bulk button when it is still on screen.
+            if (!proposeRef.current) return;
+            event.preventDefault();
+            proposeRef.current.focus();
+          }}
+        />
+      )}
     </section>
   );
 }

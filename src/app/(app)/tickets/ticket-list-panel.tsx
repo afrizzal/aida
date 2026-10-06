@@ -4,6 +4,7 @@ import { RedirectType, redirect } from "next/navigation";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { prisma } from "@/lib/db";
+import { findActiveMembership, isAdminRole } from "@/lib/membership";
 import { getScopedDb } from "@/lib/session";
 import {
   legacyRedirectSearch,
@@ -36,7 +37,7 @@ export async function TicketListPanel({
   selectedId,
   basePath = "/tickets",
 }: TicketListPanelProps) {
-  const { orgId, session } = await getScopedDb();
+  const { db, orgId, session } = await getScopedDb();
   // The actor's membership is checked before any panel data is read (D-01, Codex diff critique
   // D1): a removed member with a still-valid session gets no roster, no tickets and no tags,
   // only the "membership ended" line below.
@@ -61,6 +62,23 @@ export async function TicketListPanel({
     if (legacySearch !== null) redirect(`${basePath}?${legacySearch}`, RedirectType.replace);
   }
   const filters = parseTicketListFilters(searchParams);
+
+  // 12.2 UI-SPEC 1a (D-01, D-09): the bulk bar's "Propose KB article…" is for owners and admins
+  // only, and is disabled while AI is off. The actor comes from this panel's own session (it has
+  // no actor prop) and its role from findActiveMembership, read only for an active member. The
+  // bar only hides or explains the entry; requestProposalAction decides again on the server.
+  const membership = membershipActive
+    ? await findActiveMembership(prisma, session.user.id, orgId)
+    : null;
+  const isAdmin = isAdminRole(membership?.role);
+  const aiSetting = isAdmin
+    ? await db.setting.findFirst({
+        where: { organizationId: orgId, key: "aiEnabled" },
+        select: { value: true },
+      })
+    : null;
+  // On only when the setting is exactly 'true', the request's own rule (D-09).
+  const aiEnabled = aiSetting?.value === "true";
   // UI-SPEC 4c (D-09): state ids in the URL that are not active states of the organization.
   const urlMissingStateIds = missingStateIds(
     parseUrlFilters(searchParams).filters,
@@ -168,6 +186,8 @@ export async function TicketListPanel({
         members={memberOptions}
         tags={tagOptions}
         states={stateOptions}
+        isAdmin={isAdmin}
+        aiEnabled={aiEnabled}
       />
     </aside>
   );
