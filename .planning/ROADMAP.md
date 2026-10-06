@@ -369,7 +369,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 **Wave 4** *(blocked on Wave 3 completion)*
 
 - [x] 12.2-09-PLAN.md — Review page: editor, sources card, status views, restart and retry, publish and reject dialogs (Wave 4)
-- [ ] 12.2-10-PLAN.md — Entry points: ticket actions menu item and inbox bulk-bar button, admin-only with reasons (Wave 4)
+- [x] 12.2-10-PLAN.md — Entry points: ticket actions menu item and inbox bulk-bar button, admin-only with reasons (Wave 4)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
@@ -516,7 +516,7 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 | 11. Inbox | v2.0 | 9/9 | Verified: human_needed (visual, dark mode, 360px and screen-reader checks open) | - |
 | 12. Ticket Lifecycle (relations, merge, snooze, activity) | v2.0 | 10/10 | Verified: human_needed (visual, dark mode, layout widths and screen-reader checks open; AIDA-53 audit wording is owner item 12-o1) | - |
 | 12.1. Ticket Lifecycle (custom states, SLA pause) | v2.0 | 0/17 | Planned | - |
-| 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 9/12 | In progress | - |
+| 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 10/12 | In progress | - |
 | 13. Integrations | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
 | 14. Projects Foundation | v2.0 | 0/0 | Not started | - |
 | 15. Work Views | v2.0 | 0/0 | Not started | - |

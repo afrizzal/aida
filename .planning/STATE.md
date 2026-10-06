@@ -5,16 +5,16 @@ milestone_name: Helpdesk & Projects
 current_phase: 12
 current_phase_name: ticket-lifecycle
 status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11 and 12 verified human_needed; Phase 12.1 (custom states and SLA pause) next
-stopped_at: Completed 12.2-09-PLAN.md (review page with D-01-first loader and refusal EmptyStates, DRAFT editor with client field errors and save outcomes through resolveActionOutcome, Sources card, GENERATING polling with restart, FAILED and REJECTED new-proposal action, PUBLISHED retry indexing with a refresh-surviving focused status line, publish and reject dialogs); 12.2-10 next
-last_updated: "2026-11-09T05:58:00.000Z"
+stopped_at: Completed 12.2-10-PLAN.md (admin-only Propose KB article entry in the ticket actions menu and the inbox bulk bar, disabled with Entry unavailable reasons as aria-describedby, opening StartProposalDialog with one ticket or the selected ids; reason helpers in proposal-entry.ts with 16 unit cases); 12.2-11 next
+last_updated: "2026-11-09T06:05:00.000Z"
 last_activity: 2026-11-09
-last_activity_desc: Plan 12.2-09 complete (8d8d5f8, 5f69689, 37fb768); review page /kb/proposals/[id] with editor, Sources card, status views, restart and retry indexing, and the Approve-and-publish and Reject dialogs; every outcome through resolveActionOutcome, publish disabled while dirty; typecheck and biome clean, design-token and copy tests 58 passed; visual, dark-mode and screen-reader checks open for a human
+last_activity_desc: Plan 12.2-10 complete (6fdefc2, 0b29342, 29e7832); Propose KB article menu item after Merge and bulk-bar button after the pickers, owners and admins only, isAdmin and aiEnabled computed on the server; menu reasons AI off, merged, not resolved; bar reasons AI off, more than 5, the bar lock; the disabled menu item uses aria-disabled so its reason is reachable; typecheck and biome clean, proposal-entry and design-token tests 45 passed; visual, dark-mode and screen-reader checks open for a human
 state_head: 75e5a731b94899099a85ae1ff6bdd0f623debc24
 progress:
   total_phases: 12
   completed_phases: 0
   total_plans: 86
-  completed_plans: 42
+  completed_plans: 43
   percent: 0
 ---
 
