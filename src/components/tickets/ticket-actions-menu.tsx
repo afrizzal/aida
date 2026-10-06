@@ -26,6 +26,7 @@ import { PROPOSE_KB_ARTICLE_ENTRY } from "@/lib/kb/proposal-copy";
 import { proposalMenuUnavailableReason } from "@/lib/kb/proposal-entry";
 import { MERGED_SOURCE_REASON } from "@/lib/tickets/lifecycle-copy";
 import type { StateGroupKey } from "@/lib/tickets/state-copy";
+import { cn } from "@/lib/utils";
 
 export interface TicketActionsMenuProps {
   ticketId: string;
@@ -131,19 +132,32 @@ export function TicketActionsMenu({
             </span>
           </DropdownMenuItem>
           {/* "Propose KB article…" (UI-SPEC 1a): admins only, after Merge, no pending state. A
-              disabled item keeps its reason as a second 12px line and as its description. */}
+              disabled item keeps its reason as a second 12px line and as its description. It is
+              aria-disabled, not disabled: Radix drops disabled items from keyboard navigation,
+              so the reason could never be heard (status-manager.tsx, review UI-WR-c1). The
+              reason line is aria-hidden, so it is read once, as the description. */}
           {isAdmin && (
             <DropdownMenuItem
-              disabled={proposeReason !== null}
+              aria-disabled={proposeReason !== null ? true : undefined}
               aria-describedby={proposeReason ? proposeReasonId : undefined}
-              onSelect={() => setProposeOpen(true)}
-              className="items-start gap-2 text-[13px]"
+              onSelect={(event) => {
+                if (proposeReason !== null) {
+                  event.preventDefault();
+                  return;
+                }
+                setProposeOpen(true);
+              }}
+              className={cn("items-start gap-2 text-[13px]", proposeReason && "opacity-50")}
             >
               <Sparkles className="size-4" />
               <span className="flex flex-col">
                 <span>{PROPOSE_KB_ARTICLE_ENTRY}</span>
                 {proposeReason && (
-                  <span id={proposeReasonId} className="text-[12px] text-muted-foreground">
+                  <span
+                    id={proposeReasonId}
+                    aria-hidden="true"
+                    className="text-[12px] text-muted-foreground"
+                  >
                     {proposeReason}
                   </span>
                 )}
