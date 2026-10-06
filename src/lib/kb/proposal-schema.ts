@@ -4,7 +4,7 @@
 //
 // Run decision K51 (reviews C7, R2-2, R3-3 and P8) is the one reference rule of the phase: a source
 // marker [T<n>] and a link to a ticket page are refused in the title and the body, fail-closed,
-// nothing stripped. Generation (validateProposalOutput), save, publish and the editor
+// nothing stripped. Run decision K57 widens "ticket page" to the public status bearer links. Generation (validateProposalOutput), save, publish and the editor
 // (validateDraftFields) all use the checks of this module.
 //
 // Run decision K54 (review a2-CR-01): an image anywhere in the rendered title or body is refused,
@@ -108,15 +108,21 @@ function citationPosition(source: string, sourceCount: number): number | null {
 
 /** Fixed base a candidate is resolved against: an article page, as a browser would see it. */
 const TICKET_LINK_BASE = "https://aida.invalid/kb/article";
-const TICKET_PATH_PREFIX = "/tickets/";
+/**
+ * The paths that expose a ticket: the auth-gated ticket page (K51) and the public status bearer
+ * links, which give anyone holding them read and follow-up access to a customer's ticket (run
+ * decision K57: the status page and its public API).
+ */
+const TICKET_PATH_PREFIXES = ["/tickets/", "/status/", "/api/public/status/"] as const;
 
 /**
  * True when the candidate, resolved with the WHATWG URL parser against TICKET_LINK_BASE (dot
  * segments, protocol-relative URLs and backslashes normalised as a browser does; a leading `www.`
- * gets an https:// prefix), has a pathname that, percent-decoded once, starts with /tickets/ in
- * any case. A malformed percent escape counts as a ticket link (fail-closed). A candidate the
- * parser rejects is not a URL and is ignored. The host is not checked: a link to another site
- * whose path starts with /tickets/ is refused too (documented false positive).
+ * gets an https:// prefix), has a pathname that, percent-decoded once, starts with /tickets/,
+ * /status/ or /api/public/status/ (run decision K57) in any case. A malformed percent escape
+ * counts as a ticket link (fail-closed). A candidate the parser rejects is not a URL and is
+ * ignored. The host is not checked: a link to another site whose path starts with one of these
+ * prefixes is refused too (documented false positive).
  */
 export function isTicketPageUrl(candidate: string): boolean {
   let raw = candidate.trim();
@@ -134,7 +140,8 @@ export function isTicketPageUrl(candidate: string): boolean {
   } catch {
     return true;
   }
-  return path.toLowerCase().startsWith(TICKET_PATH_PREFIX);
+  const lower = path.toLowerCase();
+  return TICKET_PATH_PREFIXES.some((prefix) => lower.startsWith(prefix));
 }
 
 /**

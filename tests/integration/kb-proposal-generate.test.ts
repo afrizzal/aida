@@ -548,6 +548,14 @@ See the [guide](\/tickets\/abc) first.`,
     });
   });
 
+  it("a public status bearer link in the body gives FAILED INVALID_OUTPUT (K57)", async () => {
+    await expectInvalidOutput({
+      ...validOutput(),
+      bodyMarkdown:
+        "## Steps\n\nTrack it on [your status page](https://help.example.com/status/tok_abc).",
+    });
+  });
+
   it("a citation of T3 for two sources gives FAILED INVALID_OUTPUT with one audit row", async () => {
     await expectInvalidOutput(
       { ...validOutput(), citations: [{ source: "T3", section: "Steps" }] },

@@ -39,12 +39,14 @@
 // forms are exactly
 //   (a) a source marker [T<n>] in the title or the body, refused as CITATION_MARKER, and
 //   (b) a link to a ticket page in the title or the body, refused as TICKET_LINK. A ticket page is
-//       a relative or absolute URL whose path, after percent-decoding, starts with /tickets/.
+//       a relative or absolute URL whose path, after percent-decoding, starts with /tickets/, or
+//       (run decision K57, review a2-WR-06) with /status/ or /api/public/status/: the public
+//       status bearer links, which give anyone holding them access to the customer's ticket.
 //       It is checked on the raw text, where a bare path counts wherever it stands as a
 //       whitespace-delimited token after stripping wrapping punctuation, and on every URL
 //       attribute of the body's rendered HTML that renderMarkdown's sanitizer keeps, at least
-//       a href and img src. A link to another site whose path starts with /tickets/ is refused
-//       too (fail-closed, a documented false positive).
+//       a href and img src. A link to another site whose path starts with one of these prefixes
+//       is refused too (fail-closed, a documented false positive).
 // A ticket number in free prose such as "#123" stays allowed and is the reviewer's responsibility
 // under the publish checklist. Fail-closed: nothing is stripped. Generation, save and publish all
 // apply these rules (validators in plan 12.2-02).

@@ -606,3 +606,54 @@ describe("run decision K53 and review a2-IN-05: emphasis, typographic and table 
     }
   });
 });
+
+describe("run decision K57: public status bearer links are ticket links (review a2-WR-06)", () => {
+  const LINKS = [
+    "/status/tok_abc123",
+    "https://help.example.com/status/tok_abc123",
+    "/api/public/status/tok_abc123/attachments",
+    "https://help.example.com/api/public/status/tok_abc123/follow-up",
+    "/%73tatus/tok_abc123",
+    "/STATUS/tok_abc123",
+    "../status/tok_abc123",
+  ];
+
+  it("isTicketPageUrl is true for every status path form", () => {
+    for (const link of LINKS) expect(isTicketPageUrl(link)).toBe(true);
+  });
+
+  it("refuses a status link in the title (raw text)", () => {
+    for (const link of LINKS) {
+      expect(titleRefusal(`Track it at ${link}`)).toEqual({
+        ok: false,
+        field: "title",
+        code: "TICKET_LINK",
+      });
+      expect(reason({ title: `Track it at ${link}` })).toBe("TICKET_LINK");
+    }
+  });
+
+  it("refuses a status link in the body, raw and through the rendered href", () => {
+    for (const link of LINKS) {
+      expect(bodyRefusal(`Open [your status page](${link}).`)).toEqual({
+        ok: false,
+        field: "bodyMarkdown",
+        code: "TICKET_LINK",
+      });
+    }
+    const escaped = String.raw`Open [status](\/status\/tok_abc123).`;
+    expect(renderedBodyLinksToTicket(escaped)).toBe(true);
+    expect(reason({ bodyMarkdown: `## Steps\n\n${escaped}` })).toBe("TICKET_LINK");
+  });
+
+  it("allows neighbours that are not status paths", () => {
+    for (const text of [
+      "See https://status.example.com for outages.",
+      "Read /statuspage first.",
+      "The status of your order is shown in Settings.",
+      "Open /api/public/intake to submit.",
+    ]) {
+      expect(bodyRefusal(text).ok).toBe(true);
+    }
+  });
+});
