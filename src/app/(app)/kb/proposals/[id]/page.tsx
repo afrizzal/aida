@@ -16,7 +16,7 @@ import {
   TRUNCATION_NOTICE,
 } from "@/lib/kb/proposal-copy";
 import { loadProposalReview } from "@/lib/kb/proposal-queries";
-import { renderMarkdown } from "@/lib/markdown/render";
+import { renderMarkdownPreview } from "@/lib/markdown/render";
 import { getSessionActor } from "@/lib/session";
 import { ProposalReview } from "./proposal-review";
 
@@ -58,7 +58,9 @@ interface ProposalReviewPageProps {
  * The review page (UI-SPEC Surface 3, AIDA-18). loadProposalReview checks the member row and the
  * owner or admin role before it reads the proposal (D-01): a plain member, an ended membership,
  * a missing id and another organization's id each get their EmptyState and no proposal data.
- * The preview HTML comes only from renderMarkdown here on the server (T-12.2-40); the loader's
+ * The preview HTML comes only from renderMarkdownPreview here on the server (T-12.2-40): the
+ * renderMarkdown pipeline that also strips every image source that is not same-origin relative
+ * (run decision K54), so a stored body can never make the browser fetch another host; the loader's
  * sources are passed to the client component as returned (review P3), and this page never
  * queries sources or tickets itself.
  */
@@ -79,7 +81,7 @@ export default async function ProposalReviewPage({ params }: ProposalReviewPageP
 
   const { proposal } = result;
   const isDraft = proposal.status === "DRAFT";
-  const previewHtml = proposal.bodyMarkdown ? renderMarkdown(proposal.bodyMarkdown) : "";
+  const previewHtml = proposal.bodyMarkdown ? renderMarkdownPreview(proposal.bodyMarkdown) : "";
   const requested = requestedByParts(proposal.requestedByName);
   const changedList = proposal.changedSourceNumbers.map((number) => `#${number}`).join(", ");
 

@@ -54,6 +54,72 @@ export function renderMarkdown(markdown: string): string {
   return String(processor.processSync(markdown));
 }
 
+// Phase 12.2, run decision K54 (review a2-CR-01): the KB proposal review page previews a body the
+// model wrote from untrusted ticket text. A remote image in it would be fetched by the reviewer's
+// browser on page load, before any approval, and could carry ticket text to another host. The
+// validators refuse every image in a proposal; this preview renderer is the second layer for a
+// stored body that still holds one: an img or source whose URL is not same-origin relative
+// (http(s), protocol-relative `//host`, backslash forms such as `/\host`, any scheme) loses its
+// src and srcSet before the sanitize pass, exactly like rehypeStripRemoteImages does for email.
+
+/** A fixed app page that a relative image URL is resolved against, as a browser would. */
+const PREVIEW_BASE = new URL("https://aida.invalid/kb/proposals/preview");
+
+/** True only for a URL that stays on the page's own origin when the browser resolves it. */
+function isSameOriginImageUrl(candidate: string): boolean {
+  try {
+    return new URL(candidate.trim(), PREVIEW_BASE).origin === PREVIEW_BASE.origin;
+  } catch {
+    return false; // fail-closed: an unparsable URL is stripped
+  }
+}
+
+function srcSetUrls(value: unknown): string[] {
+  const entries = Array.isArray(value)
+    ? value.map(String)
+    : typeof value === "string"
+      ? value.split(",")
+      : [];
+  return entries.map((entry) => entry.trim().split(/\s+/)[0] ?? "").filter((url) => url !== "");
+}
+
+function rehypeStripCrossOriginImageSources() {
+  return (tree: Root) => {
+    visit(tree, "element", (node: Element) => {
+      if (node.tagName !== "img" && node.tagName !== "source") return;
+      const properties = node.properties ?? {};
+      if (properties.src !== undefined && properties.src !== null) {
+        if (typeof properties.src !== "string" || !isSameOriginImageUrl(properties.src)) {
+          properties.src = undefined;
+        }
+      }
+      if (properties.srcSet !== undefined && properties.srcSet !== null) {
+        if (!srcSetUrls(properties.srcSet).every(isSameOriginImageUrl)) {
+          properties.srcSet = undefined;
+        }
+      }
+      node.properties = properties;
+    });
+  };
+}
+
+const previewProcessor = unified()
+  .use(remarkParse)
+  .use(remarkGfm)
+  .use(remarkRehype)
+  .use(rehypeSafeLinks)
+  .use(rehypeStripCrossOriginImageSources)
+  .use(rehypeSanitize, schema)
+  .use(rehypeStringify);
+
+/**
+ * renderMarkdown with every image source that is not same-origin relative removed (run decision
+ * K54). For the KB proposal review preview only; published articles keep renderMarkdown.
+ */
+export function renderMarkdownPreview(markdown: string): string {
+  return String(previewProcessor.processSync(markdown));
+}
+
 // Privacy-first (D-18): inbound email HTML must never be trusted to not
 // contain remote tracking pixels. Strip the src of any http(s) <img> BEFORE
 // the sanitize pass so the src-less node gets dropped entirely. Relative /
