@@ -56,7 +56,9 @@ export const proposalOutputSchema = z.object({
           .describe("The heading of the article section this source supports, up to 80 characters"),
       }),
     )
-    .describe("The supporting sources, at most 20; never put them in the title or the body"),
+    .describe(
+      "The supporting sources, at least 1 and at most 20; never put them in the title or the body",
+    ),
 });
 
 export type ProposalOutput = z.infer<typeof proposalOutputSchema>;
@@ -71,6 +73,7 @@ export type ProposalOutputRefusal =
   | "FENCE_ECHO"
   | "TICKET_LINK"
   | "IMAGE_IN_BODY"
+  | "NO_CITATIONS"
   | "TOO_MANY_CITATIONS"
   | "SECTION_LENGTH"
   | "CITATION_UNKNOWN_SOURCE";
@@ -312,6 +315,9 @@ export function validateProposalOutput(
   if (bodyLinksToTicket(bodyMarkdown)) return { ok: false, reason: "TICKET_LINK" };
   if (renderedMarkdownHasImage(bodyMarkdown)) return { ok: false, reason: "IMAGE_IN_BODY" };
 
+  // Review a2-IN-04: a draft must name at least one supporting source (provenance); headings stay
+  // free-form.
+  if (rawCitations.length === 0) return { ok: false, reason: "NO_CITATIONS" };
   if (rawCitations.length > CITATIONS_MAX) return { ok: false, reason: "TOO_MANY_CITATIONS" };
   const citations: { position: number; section: string }[] = [];
   for (const citation of rawCitations) {

@@ -139,22 +139,39 @@ describe("validateProposalOutput lengths and structure", () => {
     );
   });
 
-  it("accepts zero citations", () => {
-    const result = validateProposalOutput(output({ citations: [] }), 2);
+  it("refuses zero citations: a draft needs at least one supporting source (review a2-IN-04)", () => {
+    expect(validateProposalOutput(output({ citations: [] }), 2)).toEqual({
+      ok: false,
+      reason: "NO_CITATIONS",
+    });
+    expect(reason({ citations: undefined as unknown as ProposalOutput["citations"] })).toBe(
+      "NO_CITATIONS",
+    );
+  });
+
+  it("accepts exactly one valid citation", () => {
+    const result = validateProposalOutput(
+      output({ citations: [{ source: "T2", section: "Steps" }] }),
+      2,
+    );
     expect(result).toEqual({
       ok: true,
-      value: { title: "Resetting a password", bodyMarkdown: BODY, citations: [] },
+      value: {
+        title: "Resetting a password",
+        bodyMarkdown: BODY,
+        citations: [{ position: 2, section: "Steps" }],
+      },
     });
   });
 
   it("trims title and body before checking and returns the trimmed values", () => {
     const result = validateProposalOutput(
-      output({ title: "  Reset  ", bodyMarkdown: `\n${BODY}\n  `, citations: [] }),
+      output({ title: "  Reset  ", bodyMarkdown: `\n${BODY}\n  ` }),
       1,
     );
     expect(result).toEqual({
       ok: true,
-      value: { title: "Reset", bodyMarkdown: BODY, citations: [] },
+      value: { title: "Reset", bodyMarkdown: BODY, citations: [{ position: 1, section: "Steps" }] },
     });
   });
 });

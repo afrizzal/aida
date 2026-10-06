@@ -556,6 +556,10 @@ See the [guide](\/tickets\/abc) first.`,
     });
   });
 
+  it("an answer with no citation gives FAILED INVALID_OUTPUT with one audit row (a2-IN-04)", async () => {
+    await expectInvalidOutput({ ...validOutput(), citations: [] });
+  });
+
   it("a citation of T3 for two sources gives FAILED INVALID_OUTPUT with one audit row", async () => {
     await expectInvalidOutput(
       { ...validOutput(), citations: [{ source: "T3", section: "Steps" }] },
