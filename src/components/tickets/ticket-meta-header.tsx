@@ -183,6 +183,10 @@ interface TicketMetaHeaderProps {
   mergedSource?: boolean;
   /** Other tickets were merged into this one (D-07). */
   hasReceivedMerges?: boolean;
+  /** The actor is an owner or admin, computed on the server (12.2 UI-SPEC 1a, D-01). */
+  isAdmin?: boolean;
+  /** The organization's aiEnabled setting, read on the server (12.2 UI-SPEC 1a, D-09). */
+  aiEnabled?: boolean;
   /** Slot for the snooze control (12-07), rendered before the actions menu (UI-SPEC Surface 1). */
   snoozeControl?: ReactNode;
 }
@@ -220,6 +224,8 @@ export function TicketMetaHeader({
   relations = [],
   mergedSource = false,
   hasReceivedMerges = false,
+  isAdmin = false,
+  aiEnabled = false,
   snoozeControl,
 }: TicketMetaHeaderProps) {
   const [, startTransition] = useTransition();
@@ -507,6 +513,9 @@ export function TicketMetaHeader({
             ticketState={{ name: ticket.state.name, colorToken: ticket.state.colorToken }}
             mergedSource={mergedSource}
             hasReceivedMerges={hasReceivedMerges}
+            stateGroup={ticket.state.group}
+            isAdmin={isAdmin}
+            aiEnabled={aiEnabled}
             triggerRef={actionsTriggerRef}
           />
         </div>

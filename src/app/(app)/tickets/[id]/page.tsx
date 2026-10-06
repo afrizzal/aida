@@ -8,6 +8,8 @@ import { SnoozeControl } from "@/components/tickets/snooze-control";
 import { TicketMetaHeader } from "@/components/tickets/ticket-meta-header";
 import { TicketReplyArea } from "@/components/tickets/ticket-reply-area";
 import { prisma } from "@/lib/db";
+import { findActiveMembership, isAdminRole } from "@/lib/membership";
+import { scopedDb } from "@/lib/scoped-db";
 import { getSessionActor } from "@/lib/session";
 import { loadTicketDetailData } from "@/lib/tickets/ticket-detail-data";
 import { TicketListPanel } from "../ticket-list-panel";
@@ -73,6 +75,20 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
     stateOptions,
   } = detail;
   const isMergedSource = ticket.mergedIntoTicketId !== null;
+
+  // 12.2 UI-SPEC 1a (D-01, D-09): the "Propose KB article…" menu item is for owners and admins
+  // only, and is disabled while AI is off. Both flags are read here, after the membership check
+  // above; the menu only hides or explains the entry, and requestProposalAction decides again.
+  const membership = await findActiveMembership(prisma, actor.userId, actor.orgId);
+  const isAdmin = isAdminRole(membership?.role);
+  const aiSetting = isAdmin
+    ? await scopedDb(actor.orgId).setting.findFirst({
+        where: { organizationId: actor.orgId, key: "aiEnabled" },
+        select: { value: true },
+      })
+    : null;
+  // On only when the setting is exactly 'true', the request's own rule (D-09).
+  const aiEnabled = aiSetting?.value === "true";
 
   const customFields = definitions.map((definition) => {
     const inputDefinition: CustomFieldInputDefinition = {
@@ -141,6 +157,8 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
           }))}
           mergedSource={isMergedSource}
           hasReceivedMerges={hasReceivedMerges}
+          isAdmin={isAdmin}
+          aiEnabled={aiEnabled}
           snoozeControl={
             <SnoozeControl
               ticketId={ticket.id}
