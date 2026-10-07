@@ -74,7 +74,7 @@ import {
   PROPOSAL_CONTEXT_TOKENS,
   type ProposalJobPayload,
 } from "@/lib/kb/proposal-contract";
-import { PROPOSAL_SYSTEM_PROMPT } from "@/lib/kb/proposal-prompt";
+import { MESSAGES_LEFT_OUT, PROPOSAL_SYSTEM_PROMPT } from "@/lib/kb/proposal-prompt";
 import { requestProposal } from "@/lib/kb/proposal-request";
 import { findChangedSources } from "@/lib/kb/proposal-sources";
 import { LlmOutputError } from "@/lib/llm/errors";
@@ -867,6 +867,16 @@ describe("generateProposal: input rules (D-10, review P1, T-12.2-28, T-12.2-29)"
     expect(source.snapshotSeq).toBe(seqs[24]);
     expect(source.snapshotSeq).not.toBe(seqs[20]);
     expect(await findChangedSources(prisma, orgId, proposalId)).toEqual([]);
+
+    // Run decision K56 end to end (review a-WR-04, loader and prompt halves): the model sees the
+    // first message and the last 19, with the gap line between them; messages 2 to 6 are left out.
+    const prompt = fake.calls[0].prompt;
+    const kept = [1, ...Array.from({ length: 19 }, (_m, i) => i + 7)];
+    for (const step of kept) expect(prompt).toContain(`Step ${step} of the spooler fix.`);
+    for (const step of [2, 3, 4, 5, 6]) {
+      expect(prompt).not.toContain(`Step ${step} of the spooler fix.`);
+    }
+    expect(prompt).toContain(`${MESSAGES_LEFT_OUT}\n\nMessage 2 (customer):\nStep 7 of`);
   });
 
   it("explicit seqs 2147483653n and 9007199254740993n store snapshotSeq exactly as a bigint (review P1)", async () => {

@@ -133,7 +133,7 @@ describe("loadSourceInputs: PUBLIC only, bounded, snapshot marker (D-08, D-10, T
     ]);
   });
 
-  it("returns MAX_MESSAGES_PER_SOURCE + 1 of 25 PUBLIC messages and the 25th seq as snapshot", async () => {
+  it("returns the first and the last 20 of 25 PUBLIC messages (K56) and the 25th seq as snapshot", async () => {
     const orgId = await freshOrg();
     const ticket = await seedBareTicket(orgId);
     const seeded = [];
@@ -143,14 +143,39 @@ describe("loadSourceInputs: PUBLIC only, bounded, snapshot marker (D-08, D-10, T
 
     const loaded = await loadSourceInputs(prisma, orgId, [{ ticketId: ticket.id, position: 1 }]);
 
+    // Run decision K56 (review a-WR-04, loader half): the problem (message 1) and the resolution
+    // (the tail). One row more than MAX_MESSAGES_PER_SOURCE tells the prompt the thread is longer.
     expect(MAX_MESSAGES_PER_SOURCE + 1).toBe(21);
     expect(loaded.inputs[0].messages).toHaveLength(21);
-    expect(loaded.inputs[0].messages.map((m) => m.body)).toEqual(
-      seeded.slice(0, 21).map((_m, i) => `Message ${i + 1}`),
-    );
-    // The ticket's largest PUBLIC seq, not the largest seq among the messages read.
+    expect(loaded.inputs[0].messages.map((m) => m.body)).toEqual([
+      "Message 1",
+      ...Array.from({ length: 20 }, (_m, i) => `Message ${i + 6}`),
+    ]);
+    expect(loaded.inputs[0].messages.map((m) => m.seq)).toEqual([
+      seeded[0].seq,
+      ...seeded.slice(5).map((m) => m.seq),
+    ]);
+    // The ticket's largest PUBLIC seq, from the aggregate, not from the bounded read.
     expect(loaded.snapshots[ticket.id]).toBe(seeded[24].seq);
     expect(loaded.snapshots[ticket.id]).not.toBe(seeded[20].seq);
+  });
+
+  it("returns every message of a 21-message and of a 20-message thread, in seq order (K56)", async () => {
+    const orgId = await freshOrg();
+    for (const count of [21, 20]) {
+      const ticket = await seedBareTicket(orgId);
+      for (let i = 1; i <= count; i += 1) {
+        await seedPublicMessage(orgId, ticket.id, `Message ${i}`);
+      }
+      // An INTERNAL note in the tail never takes a PUBLIC message's place.
+      await seedInternalNote(orgId, ticket.id, "internal tail note");
+
+      const loaded = await loadSourceInputs(prisma, orgId, [{ ticketId: ticket.id, position: 1 }]);
+
+      expect(loaded.inputs[0].messages.map((m) => m.body)).toEqual(
+        Array.from({ length: count }, (_m, i) => `Message ${i + 1}`),
+      );
+    }
   });
 
   it("returns no messages and snapshot null for a ticket with only a subject", async () => {

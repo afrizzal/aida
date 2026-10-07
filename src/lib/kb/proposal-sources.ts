@@ -9,8 +9,9 @@
 //   * recheckSourceEligibility: the same rule on a stored proposal's sources, run by the job
 //     before any ticket text is read (D-08). It reads no Message row.
 //   * loadSourceInputs: the generation input (D-10). Only the subject and PUBLIC messages, in seq
-//     order, at most MAX_MESSAGES_PER_SOURCE + 1 per ticket (the prompt builder cuts and flags the
-//     truncation), each with its fixed role from the direction (customer or agent, review
+//     order, at most MAX_MESSAGES_PER_SOURCE + 1 per ticket: the first one and the last
+//     MAX_MESSAGES_PER_SOURCE (run decision K56; the prompt builder keeps the first and the last
+//     MAX_MESSAGES_PER_SOURCE - 1 and flags the truncation), each with its fixed role from the direction (customer or agent, review
 //     a2-IN-06). Never INTERNAL notes, attachments, author names or contact fields. Per ticket it also returns
 //     the snapshot marker: the ticket's actual largest PUBLIC seq, from an aggregate over all of
 //     its PUBLIC messages that runs BEFORE the bounded read, or the largest mergeMessageSeq of a
@@ -297,8 +298,9 @@ async function readLargestPublicSeqs(
 
 /**
  * The generation input (D-10): subject and PUBLIC messages in seq order, at most
- * MAX_MESSAGES_PER_SOURCE + 1 per ticket, in position order, plus the snapshot marker per ticket
- * taken before the bounded read. A ticket the organization cannot read returns nothing.
+ * MAX_MESSAGES_PER_SOURCE + 1 per ticket (the first and the last MAX_MESSAGES_PER_SOURCE, run
+ * decision K56), in position order, plus the snapshot marker per ticket taken before the bounded
+ * read. A ticket the organization cannot read returns nothing.
  */
 export async function loadSourceInputs(
   client: SourceQueryClient,
@@ -323,19 +325,35 @@ export async function loadSourceInputs(
   const snapshots: Record<string, bigint | null> = {};
   for (const id of readable) snapshots[id] = largest.get(id) ?? null;
 
-  const limit = MAX_MESSAGES_PER_SOURCE + 1;
+  // Run decision K56 (review a-WR-04, loader half): the first PUBLIC message (the problem) and
+  // the last MAX_MESSAGES_PER_SOURCE PUBLIC messages (the resolution), at most
+  // MAX_MESSAGES_PER_SOURCE + 1 rows in seq order. The tail holds one row more than the prompt
+  // keeps, so a thread longer than the bound reaches buildProposalPrompt with more than
+  // MAX_MESSAGES_PER_SOURCE messages; the prompt then keeps the first and the last
+  // MAX_MESSAGES_PER_SOURCE - 1, writes the gap line and flags the input truncated. UNION drops
+  // the overlap of a short thread, so up to MAX_MESSAGES_PER_SOURCE + 1 messages come back whole.
+  const tail = MAX_MESSAGES_PER_SOURCE;
   const inputs: ProposalSourceInput[] = [];
   for (const source of ordered) {
     const subject = subjects.get(source.ticketId);
     if (subject === undefined) continue;
     const messages = await client.$queryRaw<{ seq: bigint; body: string; direction: string }[]>`
-      SELECT seq, "bodyMarkdown" AS body, direction::text AS direction
-      FROM "Message"
-      WHERE "organizationId" = ${orgId}
-        AND "ticketId" = ${source.ticketId}
-        AND visibility = 'PUBLIC'
-      ORDER BY seq
-      LIMIT ${limit}
+      (SELECT seq, "bodyMarkdown" AS body, direction::text AS direction
+        FROM "Message"
+        WHERE "organizationId" = ${orgId}
+          AND "ticketId" = ${source.ticketId}
+          AND visibility = 'PUBLIC'
+        ORDER BY seq ASC
+        LIMIT 1)
+      UNION
+      (SELECT seq, "bodyMarkdown" AS body, direction::text AS direction
+        FROM "Message"
+        WHERE "organizationId" = ${orgId}
+          AND "ticketId" = ${source.ticketId}
+          AND visibility = 'PUBLIC'
+        ORDER BY seq DESC
+        LIMIT ${tail})
+      ORDER BY seq ASC
     `;
     inputs.push({
       position: source.position,
