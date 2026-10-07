@@ -444,6 +444,19 @@ describe("resolveActionOutcome: restart and retry indexing (UI-SPEC 3i, amendmen
     });
   });
 
+  it("NOT_ALLOWED and NOT_FOUND keep the button disabled; the other refusals invite another try (review b-IN-02)", () => {
+    for (const action of ["restart", "retryIndexing"] as const) {
+      for (const code of MAINTENANCE_REFUSAL_CODES) {
+        const view = resolveActionOutcome(action, { ok: false, code });
+        expect(view.disableSubmit).toBe(code === "NOT_ALLOWED" || code === "NOT_FOUND");
+        expect(view.focus).toBe("pressedButton");
+      }
+      expect(resolveActionOutcome(action, { ok: false, code: "NOT_ALLOWED" }).message).toBe(
+        copy.maintenanceRefusalCopy("NOT_ALLOWED"),
+      );
+    }
+  });
+
   it("every maintenance refusal code resolves for both actions with focus on the pressed button", () => {
     for (const action of ["restart", "retryIndexing"] as const) {
       for (const code of MAINTENANCE_REFUSAL_CODES) {

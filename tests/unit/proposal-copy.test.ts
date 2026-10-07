@@ -559,12 +559,19 @@ describe("proposal-copy: Maintenance (restart and retry indexing)", () => {
   });
 
   it("maintenanceRefusalCopy maps every restart and retry code", () => {
+    // Review b-IN-02: NOT_ALLOWED and NOT_FOUND use the existing "Not allowed" and "Not found"
+    // bodies with the callout prefix (as save, publish and reject map NOT_FOUND), never "Wait a
+    // moment and try again", which invites a retry that cannot succeed.
+    const expected: Record<string, string> = {
+      NOT_ALLOWED: `${PREFIX} Only workspace owners and admins can review article proposals.`,
+      NOT_FOUND: `${PREFIX} It may have been removed. Go back to Proposals to see the current list.`,
+      MEMBERSHIP_ENDED: MEMBERSHIP_ENDED_ROW,
+    };
     for (const code of MAINTENANCE_REFUSAL_CODES) {
-      const row = copy.maintenanceRefusalCopy(code);
-      expect(row).toBe(
-        code === "MEMBERSHIP_ENDED" ? MEMBERSHIP_ENDED_ROW : copy.RESTART_RETRY_ERROR,
-      );
+      expect(copy.maintenanceRefusalCopy(code)).toBe(expected[code] ?? copy.RESTART_RETRY_ERROR);
     }
+    expect(copy.maintenanceRefusalCopy("NOT_ALLOWED")).toBe(`${PREFIX} ${copy.NOT_ALLOWED_BODY}`);
+    expect(copy.maintenanceRefusalCopy("NOT_FOUND")).toBe(`${PREFIX} ${copy.NOT_FOUND_BODY}`);
   });
 });
 

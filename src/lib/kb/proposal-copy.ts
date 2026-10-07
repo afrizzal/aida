@@ -696,10 +696,13 @@ export function rejectRefusalCopy(code: ReviewRefusalCode, field?: ProposalField
   return reviewRefusalCopy(REJECT_REFUSAL_ROWS, code, field);
 }
 
+// Review b-IN-02: a refusal that cannot succeed on another try uses the existing "Not allowed"
+// and "Not found" bodies with the callout prefix (as save, publish and reject map NOT_FOUND);
+// "Restart / Retry error" ("… Wait a moment and try again.") stays for the passing states.
 const MAINTENANCE_REFUSAL_ROWS: Record<MaintenanceRefusalCode, string> = {
-  NOT_ALLOWED: RESTART_RETRY_ERROR,
+  NOT_ALLOWED: withPrefix(NOT_ALLOWED_BODY),
   MEMBERSHIP_ENDED,
-  NOT_FOUND: RESTART_RETRY_ERROR,
+  NOT_FOUND: withPrefix(NOT_FOUND_BODY),
   NOT_STUCK: RESTART_RETRY_ERROR,
   NOT_RETRYABLE: RESTART_RETRY_ERROR,
   CONFLICT: RESTART_RETRY_ERROR,

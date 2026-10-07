@@ -205,8 +205,10 @@ function rejectRefusalView(code: ReviewRefusalCode, field: string | undefined): 
 }
 
 function maintenanceRefusalView(code: MaintenanceRefusalCode): OutcomeView {
-  // "Restart / Retry error" invites another try, so the button stays enabled.
-  return view("refusal", "error", maintenanceRefusalCopy(code), "pressedButton");
+  // "Restart / Retry error" invites another try, so the button stays enabled. NOT_ALLOWED and
+  // NOT_FOUND cannot succeed on another try: their rows and a disabled button (review b-IN-02).
+  const final = code === "NOT_ALLOWED" || code === "NOT_FOUND";
+  return view("refusal", "error", maintenanceRefusalCopy(code), "pressedButton", final);
 }
 
 /** The view after an action (UI-SPEC 3i); UNKNOWN and a rejected call give the identical view. */
