@@ -13,6 +13,8 @@
 import {
   MAINTENANCE_REFUSAL_CODES,
   type MaintenanceRefusalCode,
+  PUBLISH_REFUSAL_CODES,
+  type PublishRefusalCode,
   REQUEST_REFUSAL_CODES,
   REVIEW_REFUSAL_CODES,
   type RequestRefusalCode,
@@ -167,15 +169,23 @@ function saveRefusalView(code: ReviewRefusalCode, field: string | undefined): Ou
   return view("refusal", "error", saveRefusalCopy(code), "callout", true, code === "CONFLICT");
 }
 
-function dialogRefusalView(
-  action: "publish" | "reject",
-  code: ReviewRefusalCode,
-  field: string | undefined,
-): OutcomeView {
-  const target = isProposalField(field) ? field : undefined;
-  const message =
-    action === "publish" ? publishRefusalCopy(code, target) : rejectRefusalCopy(code, target);
+function dialogRefusalView(message: string, code: PublishRefusalCode): OutcomeView {
   return view("refusal", "error", message, "dismiss", true, code === "CONFLICT");
+}
+
+function publishRefusalView(code: PublishRefusalCode, field: string | undefined): OutcomeView {
+  // SLUG_UNAVAILABLE (review a-IN-03) is a known outcome: "Publish error: unknown" with the prefix.
+  return dialogRefusalView(
+    publishRefusalCopy(code, isProposalField(field) ? field : undefined),
+    code,
+  );
+}
+
+function rejectRefusalView(code: ReviewRefusalCode, field: string | undefined): OutcomeView {
+  return dialogRefusalView(
+    rejectRefusalCopy(code, isProposalField(field) ? field : undefined),
+    code,
+  );
 }
 
 function maintenanceRefusalView(code: MaintenanceRefusalCode): OutcomeView {
@@ -199,9 +209,12 @@ export function resolveActionOutcome(action: ProposalAction, outcome: ActionOutc
         ? saveRefusalView(code, field)
         : unknownView(action);
     case "publish":
+      return isOneOf(PUBLISH_REFUSAL_CODES, code)
+        ? publishRefusalView(code, field)
+        : unknownView(action);
     case "reject":
       return isOneOf(REVIEW_REFUSAL_CODES, code)
-        ? dialogRefusalView(action, code, field)
+        ? rejectRefusalView(code, field)
         : unknownView(action);
     case "restart":
     case "retryIndexing":

@@ -246,6 +246,16 @@ export const REVIEW_REFUSAL_CODES = [
 
 export type ReviewRefusalCode = (typeof REVIEW_REFUSAL_CODES)[number];
 
+/**
+ * Refusals of publish: the review codes plus SLUG_UNAVAILABLE (review a-IN-03), returned when
+ * every one of the publish attempts met a slug unique violation from concurrent publishes. The
+ * transaction rolled back each time, so nothing changed; the UI shows the "Publish error:
+ * unknown" row with the callout prefix, never "outcome unknown".
+ */
+export const PUBLISH_REFUSAL_CODES = [...REVIEW_REFUSAL_CODES, "SLUG_UNAVAILABLE"] as const;
+
+export type PublishRefusalCode = (typeof PUBLISH_REFUSAL_CODES)[number];
+
 /** Refusals of restart and retry indexing. */
 export const MAINTENANCE_REFUSAL_CODES = [
   "NOT_ALLOWED",

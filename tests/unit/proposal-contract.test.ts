@@ -25,6 +25,7 @@ import {
   PROPOSAL_POLL_INTERVAL_MS,
   PROPOSAL_STATUSES,
   type ProposalStatus,
+  PUBLISH_REFUSAL_CODES,
   REQUEST_REFUSAL_CODES,
   REVIEW_REFUSAL_CODES,
   STUCK_AFTER_MS,
@@ -134,6 +135,8 @@ describe("proposal contract: constants and codes", () => {
       "IMAGE_NOT_ALLOWED",
       "BODY_TOO_LONG",
     ]);
+    // Review a-IN-03: publish alone adds SLUG_UNAVAILABLE to the review codes.
+    expect([...PUBLISH_REFUSAL_CODES]).toEqual([...REVIEW_REFUSAL_CODES, "SLUG_UNAVAILABLE"]);
     expect([...MAINTENANCE_REFUSAL_CODES]).toEqual([
       "NOT_ALLOWED",
       "MEMBERSHIP_ENDED",

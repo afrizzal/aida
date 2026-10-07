@@ -30,7 +30,8 @@ const CHIP_SOURCE = fs.readFileSync(
 
 const PREFIX = "Nothing was changed.";
 
-// The four "… error: unknown" rows (UI-SPEC amendment A4): kept verbatim, mapped from no code.
+// The four "… error: unknown" rows (UI-SPEC amendment A4): kept verbatim. Only publish's
+// SLUG_UNAVAILABLE (review a-IN-03) maps to one of them, the publish row, with the prefix.
 const ERROR_UNKNOWN_ROWS = [
   "Nothing was changed. The proposal could not be started. Wait a moment and try again.",
   "Nothing was changed. The draft could not be saved. Wait a moment and try again.",
@@ -60,6 +61,7 @@ function everyMappedRow(): string[] {
   for (const field of PROPOSAL_FIELDS) {
     for (const code of PROPOSAL_FIELD_CODES) rows.push(fieldRefusalCopy(field, code));
   }
+  rows.push(copy.publishRefusalCopy("SLUG_UNAVAILABLE"));
   for (const code of MAINTENANCE_REFUSAL_CODES) rows.push(copy.maintenanceRefusalCopy(code));
   for (const code of PROPOSAL_FAILURE_CODES) {
     rows.push(copy.failureFullCopy(code), copy.failureShortCopy(code));
@@ -415,6 +417,10 @@ describe("proposal-copy: Publish (3f)", () => {
     expect(copy.publishRefusalCopy("CONFLICT")).toBe(copy.CONFLICT);
     expect(copy.publishRefusalCopy("MEMBERSHIP_ENDED")).toBe(MEMBERSHIP_ENDED_ROW);
     expect(copy.publishRefusalCopy("TICKET_LINK", "bodyMarkdown")).toBe(copy.TICKET_LINK_ERROR);
+    // Review a-IN-03: the exhausted slug retry.
+    expect(copy.publishRefusalCopy("SLUG_UNAVAILABLE")).toBe(
+      `${PREFIX} ${copy.PUBLISH_ERROR_UNKNOWN}`,
+    );
   });
 });
 
@@ -580,7 +586,7 @@ describe("proposal-copy: outcome unknown and the four '… error: unknown' rows 
     expect(outcomeUnknownCopy("retryIndexing")).toBe(copy.RETRY_INDEXING_OUTCOME_UNKNOWN);
   });
 
-  it("no mapping function returns a '… error: unknown' row, yet the rows exist verbatim", () => {
+  it("only SLUG_UNAVAILABLE maps to a '… error: unknown' row (the publish row, prefixed); the rows exist verbatim", () => {
     expect([
       copy.START_ERROR_UNKNOWN,
       copy.SAVE_ERROR_UNKNOWN,
@@ -588,8 +594,17 @@ describe("proposal-copy: outcome unknown and the four '… error: unknown' rows 
       copy.REJECT_ERROR_UNKNOWN,
     ]).toEqual(ERROR_UNKNOWN_ROWS);
     const mapped = everyMappedRow();
-    for (const row of ERROR_UNKNOWN_ROWS) {
-      expect(mapped).not.toContain(row);
+    for (const row of ERROR_UNKNOWN_ROWS) expect(mapped).not.toContain(row);
+    // Review a-IN-03 changed this expectation for the publish row only: the exhausted slug retry
+    // is a known outcome (nothing was published), so it shows "Publish error: unknown".
+    const slug = copy.publishRefusalCopy("SLUG_UNAVAILABLE");
+    expect(slug).toBe(`${PREFIX} ${copy.PUBLISH_ERROR_UNKNOWN}`);
+    expect(mapped.filter((m) => m.includes(copy.PUBLISH_ERROR_UNKNOWN))).toEqual([slug]);
+    for (const row of [
+      copy.START_ERROR_UNKNOWN,
+      copy.SAVE_ERROR_UNKNOWN,
+      copy.REJECT_ERROR_UNKNOWN,
+    ]) {
       expect(mapped.some((m) => m.includes(row))).toBe(false);
     }
   });

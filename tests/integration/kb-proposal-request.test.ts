@@ -340,6 +340,22 @@ describe("requestProposal: eligibility by group, whole refusal (D-07, owner item
     await expectNothingLeft(orgId);
   });
 
+  it("an id holding a NUL character is NOT_FOUND, never a raw database error (review a-IN-03)", async () => {
+    const { orgId, admin } = await seedOrg();
+    const resolved = await seedResolvedTicket(orgId);
+    const withNul = `${resolved.id}\u0000`;
+    bossEnv.sends = [];
+
+    const result = await requestProposal(admin, [resolved.id, withNul]);
+
+    expect(result).toEqual({
+      ok: false,
+      code: "SELECTION",
+      refusals: [{ ticketId: withNul, reason: "NOT_FOUND" }],
+    });
+    await expectNothingLeft(orgId);
+  });
+
   it("a RESOLVED ticket and a CLOSED ticket together are accepted", async () => {
     const { orgId, owner } = await seedOrg();
     const resolved = await seedResolvedTicket(orgId);

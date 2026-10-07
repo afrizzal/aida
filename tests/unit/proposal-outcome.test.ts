@@ -209,6 +209,23 @@ describe("resolveActionOutcome: save (UI-SPEC 3c, 3e, 3h, 3i)", () => {
     ).toBe(copy.BODY_TOO_LONG_ERROR);
   });
 
+  it("publish SLUG_UNAVAILABLE is a refusal with the prefixed 'Publish error: unknown' row, never outcome unknown (review a-IN-03)", () => {
+    expect(resolveActionOutcome("publish", { ok: false, code: "SLUG_UNAVAILABLE" })).toStrictEqual({
+      kind: "refusal",
+      tone: "error",
+      message: `Nothing was changed. ${copy.PUBLISH_ERROR_UNKNOWN}`,
+      disableSubmit: true,
+      offerReload: false,
+      focus: "dismiss",
+    });
+    // Only publish knows the code: any other action treats it as outside its contract.
+    for (const action of ["save", "reject"] as const) {
+      expect(resolveActionOutcome(action, { ok: false, code: "SLUG_UNAVAILABLE" }).kind).toBe(
+        "unknown",
+      );
+    }
+  });
+
   it("CONFLICT offers reload, disables save until reload and focuses the callout", () => {
     expect(resolveActionOutcome("save", { ok: false, code: "CONFLICT" })).toStrictEqual({
       kind: "refusal",

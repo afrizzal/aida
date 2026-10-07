@@ -14,12 +14,15 @@
 //
 // Amendment A4 (review C6): an UNKNOWN action result is shown with the action's "… outcome
 // unknown" row (outcomeUnknownCopy, applied by proposal-outcome.ts); the four "… error: unknown"
-// rows stay here verbatim but no code maps to them.
+// rows stay here verbatim. Only one code maps to one of them: publish's SLUG_UNAVAILABLE (review
+// a-IN-03, a known outcome where nothing changed) gives "Publish error: unknown" with the callout
+// prefix. No code maps to the other three.
 
 import type {
   MaintenanceRefusalCode,
   ProposalFailureCode,
   ProposalStatus,
+  PublishRefusalCode,
   RequestRefusalCode,
   ReviewRefusalCode,
   TicketRefusalReason,
@@ -374,7 +377,10 @@ export const PUBLISH_ERROR_NOT_DRAFT =
 /** Copywriting "Publish error: not allowed" (shown after the callout prefix). */
 export const PUBLISH_ERROR_NOT_ALLOWED = "Only workspace owners and admins can publish.";
 
-/** Copywriting "Publish error: unknown". Mapped from no code (amendment A4). */
+/**
+ * Copywriting "Publish error: unknown". Mapped only from SLUG_UNAVAILABLE, with the callout prefix
+ * (review a-IN-03); an UNKNOWN result uses "Publish outcome unknown" (amendment A4).
+ */
 export const PUBLISH_ERROR_UNKNOWN =
   "The article could not be published. Wait a moment and try again.";
 
@@ -668,8 +674,12 @@ const PUBLISH_REFUSAL_ROWS: Record<NonFieldReviewCode, string> = {
   CONFLICT,
 };
 
-/** The Publish dialog callout for a refused publish, prefix included (UI-SPEC 3f). */
-export function publishRefusalCopy(code: ReviewRefusalCode, field?: ProposalField): string {
+/**
+ * The Publish dialog callout for a refused publish, prefix included (UI-SPEC 3f). SLUG_UNAVAILABLE
+ * (review a-IN-03) gives "Publish error: unknown" with the prefix: nothing was published.
+ */
+export function publishRefusalCopy(code: PublishRefusalCode, field?: ProposalField): string {
+  if (code === "SLUG_UNAVAILABLE") return withPrefix(PUBLISH_ERROR_UNKNOWN);
   return reviewRefusalCopy(PUBLISH_REFUSAL_ROWS, code, field);
 }
 

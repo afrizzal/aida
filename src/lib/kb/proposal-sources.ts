@@ -163,14 +163,18 @@ async function evaluateTickets(
   return verdicts;
 }
 
+/**
+ * A non-empty string without a NUL character (review a-IN-03: Postgres refuses NUL in text, so
+ * such an id is NOT_FOUND instead of a raw database error).
+ */
 function isTicketId(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0;
+  return typeof value === "string" && value.length > 0 && !value.includes("\u0000");
 }
 
 /**
  * The request-time rule (D-07): ok with the tickets in selection order (positions 1 to n), or
  * every failing ticket with one typed reason, never a silent drop. The count (1 to 5) is the
- * caller's check. A value that is not a non-empty string is NOT_FOUND.
+ * caller's check. A value that is not a non-empty string without NUL is NOT_FOUND.
  */
 export async function checkSourceEligibility(
   client: SourceQueryClient,

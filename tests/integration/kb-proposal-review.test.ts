@@ -38,6 +38,7 @@ vi.mock("@/lib/queue/boss-client", () => ({
 import { PrismaClient } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import {
+  PUBLISH_MAX_ATTEMPTS,
   publishProposal,
   rejectProposal,
   restartProposalGeneration,
@@ -230,6 +231,121 @@ describe("saveProposalDraft and publishProposal: body length (review a-IN-02)", 
     expect(row).toMatchObject({ status: "DRAFT", version: 1, publishedArticleId: null });
     expect(await prisma.kbArticle.count({ where: { organizationId: orgId } })).toBe(0);
     expect(sendsOn("kb-embed-article")).toHaveLength(0);
+  });
+});
+
+describe("known outcomes are typed refusals, never raw errors (review a-IN-03)", () => {
+  const TITLE = "Reset a forgotten password";
+  const BODY = "## Steps\n\nOpen Settings.";
+
+  async function seedDraft(version = 1) {
+    const org = await seedOrg();
+    const ticket = await seedResolvedTicket(org.orgId);
+    const proposal = await seedProposal(org.orgId, {
+      status: "DRAFT",
+      ticketIds: [ticket.id],
+      title: TITLE,
+      bodyMarkdown: BODY,
+      version,
+    });
+    bossEnv.sends = [];
+    return { ...org, proposal };
+  }
+
+  it("publish returns SLUG_UNAVAILABLE when every attempt meets a slug unique violation; nothing changed", async () => {
+    const { orgId, owner, proposal } = await seedDraft(1);
+    // A test-only trigger, scoped to this organization (dropped below): right before the publish's
+    // own insert, it inserts another article with the same slug, in the same transaction, so the
+    // publish's insert meets the real KbArticle_organizationId_slug_key unique violation, exactly
+    // as when a concurrent publish takes the slug. The blocker row rolls back with the attempt.
+    const fn = `test_slug_taken_${orgId.replaceAll("-", "_")}`;
+    await prisma.$executeRawUnsafe(`
+      CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW."organizationId" = '${orgId}' AND pg_trigger_depth() = 1 THEN
+          INSERT INTO "KbArticle" (id, "organizationId", title, slug, "bodyMarkdown", "bodyHtml", "updatedAt")
+          VALUES (NEW.id || '-blocker', NEW."organizationId", 'Blocker', NEW.slug, 'b', '<p>b</p>', now());
+        END IF;
+        RETURN NEW;
+      END $$`);
+    await prisma.$executeRawUnsafe(
+      `CREATE TRIGGER ${fn} BEFORE INSERT ON "KbArticle" FOR EACH ROW EXECUTE FUNCTION ${fn}()`,
+    );
+    let starts = 0;
+    setProposalReviewObserverForTests({
+      onTransactionStart: () => {
+        starts += 1;
+      },
+    });
+    try {
+      const result = await publishProposal(owner, { proposalId: proposal.id, expectedVersion: 1 });
+
+      expect(result).toEqual({ ok: false, code: "SLUG_UNAVAILABLE" });
+      expect(starts).toBe(PUBLISH_MAX_ATTEMPTS);
+      const row = await prisma.kbProposal.findUniqueOrThrow({ where: { id: proposal.id } });
+      expect(row).toMatchObject({ status: "DRAFT", version: 1, publishedArticleId: null });
+      expect(await prisma.kbArticle.count({ where: { organizationId: orgId } })).toBe(0);
+      expect(sendsOn("kb-embed-article")).toHaveLength(0);
+    } finally {
+      await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS ${fn} ON "KbArticle"`);
+      await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS ${fn}()`);
+    }
+  });
+
+  it("a NUL character in the title or the body is a field refusal; nothing stored", async () => {
+    const { owner, proposal } = await seedDraft(2);
+
+    expect(
+      await saveProposalDraft(owner, {
+        proposalId: proposal.id,
+        expectedVersion: 2,
+        title: "Reset a\u0000 password",
+        bodyMarkdown: BODY,
+      }),
+    ).toEqual({ ok: false, code: "TITLE_TOO_SHORT", field: "title" });
+    expect(
+      await saveProposalDraft(owner, {
+        proposalId: proposal.id,
+        expectedVersion: 2,
+        title: TITLE,
+        bodyMarkdown: `${BODY}\u0000`,
+      }),
+    ).toEqual({ ok: false, code: "BODY_REQUIRED", field: "bodyMarkdown" });
+    const row = await prisma.kbProposal.findUniqueOrThrow({ where: { id: proposal.id } });
+    expect(row).toMatchObject({ title: TITLE, bodyMarkdown: BODY, version: 2 });
+  });
+
+  it("a proposal id holding a NUL character is NOT_FOUND for every action", async () => {
+    const { owner, proposal } = await seedDraft(1);
+    const id = `${proposal.id}\u0000`;
+
+    expect(
+      await saveProposalDraft(owner, {
+        proposalId: id,
+        expectedVersion: 1,
+        title: TITLE,
+        bodyMarkdown: BODY,
+      }),
+    ).toEqual({ ok: false, code: "NOT_FOUND" });
+    expect(await rejectProposal(owner, { proposalId: id, expectedVersion: 1 })).toEqual({
+      ok: false,
+      code: "NOT_FOUND",
+    });
+    expect(await publishProposal(owner, { proposalId: id, expectedVersion: 1 })).toEqual({
+      ok: false,
+      code: "NOT_FOUND",
+    });
+    expect(await restartProposalGeneration(owner, { proposalId: id, expectedVersion: 1 })).toEqual({
+      ok: false,
+      code: "NOT_FOUND",
+    });
+    expect(await retryProposalIndexing(owner, { proposalId: id })).toEqual({
+      ok: false,
+      code: "NOT_FOUND",
+    });
+    const row = await prisma.kbProposal.findUniqueOrThrow({ where: { id: proposal.id } });
+    expect(row).toMatchObject({ status: "DRAFT", version: 1 });
+    expect(bossEnv.sends).toEqual([]);
   });
 });
 

@@ -32,7 +32,10 @@
 // Error contract (merge.ts pattern): a ProposalReviewError thrown inside a transaction rolls it
 // back and is RETURNED as { ok: false, code, field? }; any other error rolls back and is RETHROWN.
 // A slug unique violation from a concurrent publish rolls the whole publish back and it is retried
-// with a fresh slug, at most PUBLISH_MAX_ATTEMPTS attempts (D-06, pattern finding C3).
+// with a fresh slug, at most PUBLISH_MAX_ATTEMPTS attempts (D-06, pattern finding C3); when they
+// run out, publish returns SLUG_UNAVAILABLE (review a-IN-03), since nothing changed. An untrusted
+// id or text holding a NUL character, which Postgres refuses, is treated as absent: NOT_FOUND, or
+// the field's empty-value refusal (review a-IN-03).
 //
 // Enqueue (D-06, D-13, run decision K50): only after commit, inside a try. A failing send never
 // undoes the commit: publish returns indexingQueued false (the article's embeddingStatus PENDING
@@ -138,9 +141,12 @@ export interface SaveProposalInput extends ProposalVersionInput {
 
 export type SaveProposalResult = { ok: true; version: number } | ReviewRefusal;
 export type RejectProposalResult = { ok: true } | ReviewRefusal;
+/** Review a-IN-03: every publish attempt met a slug unique violation; nothing changed. */
+export type SlugUnavailableRefusal = { ok: false; code: "SLUG_UNAVAILABLE" };
 export type PublishProposalResult =
   | { ok: true; articleId: string; indexingQueued: boolean }
-  | ReviewRefusal;
+  | ReviewRefusal
+  | SlugUnavailableRefusal;
 export type RestartProposalResult = { ok: true; queued: boolean } | MaintenanceRefusal;
 export type RetryIndexingResult = { ok: true; queued: boolean } | MaintenanceRefusal;
 
@@ -153,14 +159,25 @@ function toMaintenanceRefusal(err: ProposalReviewError): MaintenanceRefusal {
   return { ok: false, code: err.code as MaintenanceRefusalCode };
 }
 
-/** An untrusted id: anything but a non-empty string never matches a row. */
-function asId(value: unknown): string {
-  return typeof value === "string" ? value : "";
+/**
+ * Review a-IN-03: Postgres refuses a NUL character in text (22021). An untrusted string holding
+ * one is treated as absent, so it ends in a typed refusal instead of a raw database error.
+ */
+function hasNul(value: string): boolean {
+  return value.includes("\u0000");
 }
 
-/** An untrusted text field: anything but a string is treated as empty (and refused). */
+/** An untrusted id: anything but a string without NUL never matches a row (NOT_FOUND). */
+function asId(value: unknown): string {
+  return typeof value === "string" && !hasNul(value) ? value : "";
+}
+
+/**
+ * An untrusted text field: anything but a string without NUL is treated as empty and refused by
+ * validateDraftFields as a field error (TITLE_TOO_SHORT or BODY_REQUIRED on that field).
+ */
 function asText(value: unknown): string {
-  return typeof value === "string" ? value : "";
+  return typeof value === "string" && !hasNul(value) ? value : "";
 }
 
 /** An untrusted version: anything but a non-negative safe integer never matches (version >= 0). */
@@ -400,9 +417,11 @@ export async function publishProposal(
       articleId = await publishAttempt(actor, proposalId, expectedVersion, now);
     } catch (err) {
       if (err instanceof ProposalReviewError) return toReviewRefusal(err);
-      // A concurrent publish took the slug: the whole transaction rolled back; try again.
-      if (attempt < PUBLISH_MAX_ATTEMPTS && isSlugUniqueViolation(err)) continue;
-      throw err;
+      if (!isSlugUniqueViolation(err)) throw err;
+      // A concurrent publish took the slug: the whole transaction rolled back; try again. Once
+      // the attempts run out the outcome is still known (review a-IN-03): nothing changed.
+      if (attempt < PUBLISH_MAX_ATTEMPTS) continue;
+      return { ok: false, code: "SLUG_UNAVAILABLE" };
     }
   }
 
