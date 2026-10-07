@@ -857,7 +857,7 @@ model KbProposalSource {
   proposalId     String
   ticketId       String
   position       Int // 1 to 5 (KbProposalSource_position_check)
-  snapshotSeq    BigInt? // D-08: the ticket's largest PUBLIC message seq at read time (plan 12.2-04), set when the result is stored
+  snapshotSeq    BigInt? // D-08: the ticket's largest PUBLIC message seq at read time, or a greater mergeMessageSeq of a ticket merged into it (review a-WR-01) (plan 12.2-04), set when the result is stored
   citedSections  String[] // D-11: the section labels the model cited this source for, shown only to the reviewer
   createdAt      DateTime     @default(now())
   organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)

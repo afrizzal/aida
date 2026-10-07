@@ -13,11 +13,13 @@
 //     truncation), each with its fixed role from the direction (customer or agent, review
 //     a2-IN-06). Never INTERNAL notes, attachments, author names or contact fields. Per ticket it also returns
 //     the snapshot marker: the ticket's actual largest PUBLIC seq, from an aggregate over all of
-//     its PUBLIC messages that runs BEFORE the bounded read (null without a PUBLIC message). A
+//     its PUBLIC messages that runs BEFORE the bounded read, or the largest mergeMessageSeq of a
+//     ticket merged into it when that is greater (review a-WR-01); null with neither. A
 //     truncated source is therefore not reported as changed right after generation, and a message
 //     added between the two reads can only cause a warning, never hide a change.
-//   * findChangedSources: the ticket numbers of sources that lost eligibility or whose largest
-//     PUBLIC seq, read by the same aggregate, is now greater than the stored snapshotSeq (D-08).
+//   * findChangedSources: the ticket numbers of sources that lost eligibility or whose marker,
+//     read by the same aggregate, is now greater than the stored snapshotSeq (D-08), which also
+//     catches messages merged in after generation (review a-WR-01).
 //
 // Message.seq is a database-wide BigInt (review P1): every seq on this path stays a bigint and is
 // compared with bigint operators; none is ever converted to a JavaScript number.
@@ -69,7 +71,10 @@ export type SourceRecheckResult = { ok: true } | { ok: false; changed: ChangedSo
 export interface LoadedSourceInputs {
   /** In position order; a ticket the organization cannot read is absent. */
   inputs: ProposalSourceInput[];
-  /** Per read ticket id: its largest PUBLIC seq at read time, or null without a PUBLIC message. */
+  /**
+   * Per read ticket id: its snapshot marker at read time (the largest PUBLIC seq, or a greater
+   * mergeMessageSeq of a ticket merged into it, review a-WR-01), or null with neither.
+   */
   snapshots: Record<string, bigint | null>;
 }
 
@@ -252,8 +257,15 @@ export async function recheckSourceEligibility(
 }
 
 /**
- * The one snapshot aggregate (D-08): the largest PUBLIC seq per given ticket of the
- * organization, over all of its PUBLIC messages. A ticket without a PUBLIC message is absent.
+ * The one snapshot aggregate (D-08): per given ticket of the organization, the larger of its
+ * largest PUBLIC seq (over all of its PUBLIC messages, never only the ones a bounded read
+ * returned) and the largest mergeMessageSeq of the tickets merged into it. A ticket with neither
+ * is absent.
+ *
+ * Review a-WR-01: a merge moves the source ticket's messages into the target with their old,
+ * lower seqs (merge.ts), so the target's largest PUBLIC seq does not see them. merge.ts draws
+ * mergeMessageSeq from the same Message seq sequence after both ticket row locks, so a merge
+ * after the snapshot always has a greater marker; a merge before it is already inside it.
  */
 async function readLargestPublicSeqs(
   client: SourceQueryClient,
@@ -261,15 +273,26 @@ async function readLargestPublicSeqs(
   ticketIds: readonly string[],
 ): Promise<Map<string, bigint>> {
   if (ticketIds.length === 0) return new Map();
-  const rows = await client.$queryRaw<{ ticketId: string; maxSeq: bigint }[]>`
-    SELECT "ticketId", MAX(seq) AS "maxSeq"
-    FROM "Message"
-    WHERE "organizationId" = ${orgId}
-      AND "ticketId" = ANY(${[...ticketIds]}::text[])
-      AND visibility = 'PUBLIC'
-    GROUP BY "ticketId"
+  const rows = await client.$queryRaw<{ ticketId: string; maxSeq: bigint | null }[]>`
+    SELECT t.id AS "ticketId",
+           GREATEST(
+             (SELECT MAX(m.seq) FROM "Message" m
+               WHERE m."organizationId" = ${orgId}
+                 AND m."ticketId" = t.id
+                 AND m.visibility = 'PUBLIC'),
+             (SELECT MAX(s."mergeMessageSeq") FROM "Ticket" s
+               WHERE s."organizationId" = ${orgId}
+                 AND s."mergedIntoTicketId" = t.id)
+           ) AS "maxSeq"
+    FROM "Ticket" t
+    WHERE t."organizationId" = ${orgId}
+      AND t.id = ANY(${[...ticketIds]}::text[])
   `;
-  return new Map(rows.map((row) => [row.ticketId, BigInt(row.maxSeq)]));
+  const largest = new Map<string, bigint>();
+  for (const row of rows) {
+    if (row.maxSeq !== null) largest.set(row.ticketId, BigInt(row.maxSeq));
+  }
+  return largest;
 }
 
 /**
@@ -330,9 +353,10 @@ export async function loadSourceInputs(
 
 /**
  * The ticket numbers, in position order, of the proposal's sources that lost eligibility or whose
- * largest PUBLIC seq is now greater than the stored snapshotSeq (a null snapshotSeq means no
- * PUBLIC message at generation, so any PUBLIC message now is a change). An INTERNAL note is never
- * a change. A source the organization can no longer read has no number and is not listed here
+ * marker (readLargestPublicSeqs: the largest PUBLIC seq, or a greater mergeMessageSeq of a ticket
+ * merged into it) is now greater than the stored snapshotSeq (a null snapshotSeq means no PUBLIC
+ * message and no merge at generation, so any PUBLIC message or merge now is a change). An
+ * INTERNAL note is never a change. A source the organization can no longer read has no number and is not listed here
  * (recheckSourceEligibility reports it as NOT_FOUND).
  */
 export async function findChangedSources(

@@ -12,6 +12,7 @@ import {
   loadSourceInputs,
   recheckSourceEligibility,
 } from "@/lib/kb/proposal-sources";
+import { mergeTickets } from "@/lib/tickets/merge";
 import {
   seedInternalNote,
   seedOrgWithMembers,
@@ -366,6 +367,71 @@ describe("findChangedSources: eligibility and new PUBLIC messages after the snap
     // Number(9007199254740993n) === Number(9007199254740992n): only a bigint comparison sees it.
     await seedPublicMessage(orgId, ticket.id, "at 2^53 + 1", { seq: 9007199254740993n });
     expect(await findChangedSources(prisma, orgId, proposal.id)).toEqual([ticket.number]);
+  });
+
+  /**
+   * Review a-WR-01: a ticket `from` (with its own PUBLIC message, written BEFORE the stored
+   * source's last PUBLIC message, so every moved seq is lower) and a stored RESOLVED source `into`
+   * of the same contact. The real merge service moves the thread; `into` stays RESOLVED and is not
+   * merged itself.
+   */
+  async function mergeablePair() {
+    const { orgId, users } = await seedOrgWithMembers(prisma, ["owner"]);
+    const from = await seedBareTicket(orgId, "OPEN");
+    const into = await seedBareTicket(orgId, "RESOLVED");
+    const moved = await seedPublicMessage(orgId, from.id, "Merged thread: the printer jams");
+    const own = await seedPublicMessage(orgId, into.id, "Agent: replace the roller");
+    expect(moved.seq < own.seq).toBe(true);
+    const { contactId } = await prisma.ticket.findUniqueOrThrow({
+      where: { id: into.id },
+      select: { contactId: true },
+    });
+    await prisma.ticket.update({ where: { id: from.id }, data: { contactId } });
+    const merge = () =>
+      mergeTickets(
+        prisma,
+        { userId: users[0].id, orgId },
+        { sourceTicketId: from.id, targetTicketId: into.id, reviewedLinkLabel: null },
+      );
+    return { orgId, from, into, own, merge };
+  }
+
+  it("reports a source whose PUBLIC thread grew by a merge after the snapshot, although its largest PUBLIC seq did not change (review a-WR-01)", async () => {
+    const { orgId, into, own, merge } = await mergeablePair();
+    const loaded = await loadSourceInputs(prisma, orgId, [{ ticketId: into.id, position: 1 }]);
+    const proposal = await seedProposal(orgId, {
+      status: "DRAFT",
+      ticketIds: [into.id],
+      snapshotSeqs: [loaded.snapshots[into.id] ?? null],
+    });
+    expect(await findChangedSources(prisma, orgId, proposal.id)).toEqual([]);
+
+    expect(await merge()).toMatchObject({ ok: true });
+
+    // The moved messages keep their lower seqs: the PUBLIC maximum alone sees nothing.
+    const publicMax = await prisma.message.aggregate({
+      where: { organizationId: orgId, ticketId: into.id, visibility: "PUBLIC" },
+      _max: { seq: true },
+    });
+    expect(publicMax._max.seq).toBe(own.seq);
+    expect(await recheckSourceEligibility(prisma, orgId, proposal.id)).toEqual({ ok: true });
+    expect(await findChangedSources(prisma, orgId, proposal.id)).toEqual([into.number]);
+  });
+
+  it("does not report a merge into the source that happened before the snapshot (review a-WR-01)", async () => {
+    const { orgId, into, merge } = await mergeablePair();
+    expect(await merge()).toMatchObject({ ok: true });
+
+    const loaded = await loadSourceInputs(prisma, orgId, [{ ticketId: into.id, position: 1 }]);
+    const proposal = await seedProposal(orgId, {
+      status: "DRAFT",
+      ticketIds: [into.id],
+      snapshotSeqs: [loaded.snapshots[into.id] ?? null],
+    });
+
+    expect(await findChangedSources(prisma, orgId, proposal.id)).toEqual([]);
+    await seedPublicMessage(orgId, into.id, "a later public reply");
+    expect(await findChangedSources(prisma, orgId, proposal.id)).toEqual([into.number]);
   });
 
   it("finds nothing for a proposal of another organization", async () => {
