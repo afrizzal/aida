@@ -5,6 +5,7 @@ import {
   MAX_MESSAGE_CODE_POINTS,
   MAX_MESSAGES_PER_SOURCE,
   MAX_SUBJECT_CODE_POINTS,
+  MESSAGES_LEFT_OUT,
   PROPOSAL_SYSTEM_PROMPT,
   type ProposalSourceInput,
 } from "@/lib/kb/proposal-prompt";
@@ -62,16 +63,43 @@ describe("buildProposalPrompt bounds", () => {
     expect(MAX_INPUT_CODE_POINTS).toBe(24000);
   });
 
-  it("keeps the first 20 of 25 messages by seq and sets truncated", () => {
+  it("keeps the first message and the last 19 of 25 by seq and sets truncated (run decision K56)", () => {
     const shuffled = messages(25, (i) => `body-${i}-end`).reverse();
     const { prompt, truncated } = buildProposalPrompt([
       { position: 1, subject: "Many", messages: shuffled },
     ]);
     expect(truncated).toBe(true);
     const text = block(prompt, 1);
-    for (let i = 1; i <= 20; i++) expect(text).toContain(`body-${i}-end`);
-    for (let i = 21; i <= 25; i++) expect(text).not.toContain(`body-${i}-end`);
-    expect(text.indexOf("body-1-end")).toBeLessThan(text.indexOf("body-20-end"));
+    // The problem (message 1) and the resolution (messages 7 to 25) are kept: 20 in all.
+    expect(text).toContain("body-1-end");
+    for (let i = 7; i <= 25; i++) expect(text).toContain(`body-${i}-end`);
+    for (let i = 2; i <= 6; i++) expect(text).not.toContain(`body-${i}-end`);
+    expect(text.match(/^Message \d+ \(/gm)).toHaveLength(MAX_MESSAGES_PER_SOURCE);
+    // In seq order, with the fixed gap line after the first message.
+    expect(text.indexOf("body-1-end")).toBeLessThan(text.indexOf(MESSAGES_LEFT_OUT));
+    expect(text.indexOf(MESSAGES_LEFT_OUT)).toBeLessThan(text.indexOf("body-7-end"));
+    expect(text.indexOf("body-7-end")).toBeLessThan(text.indexOf("body-25-end"));
+  });
+
+  it("with 21 messages drops only the second one (run decision K56)", () => {
+    const { prompt, truncated } = buildProposalPrompt([
+      { position: 1, subject: "Twenty-one", messages: messages(21, (i) => `b${i}e`) },
+    ]);
+    expect(truncated).toBe(true);
+    const text = block(prompt, 1);
+    expect(text).toContain("b1e");
+    expect(text).not.toContain("b2e");
+    for (let i = 3; i <= 21; i++) expect(text).toContain(`b${i}e`);
+    expect(text).toContain(MESSAGES_LEFT_OUT);
+  });
+
+  it("with at most 20 messages keeps all of them and writes no gap line", () => {
+    const text = block(
+      buildProposalPrompt([{ position: 1, subject: "Twenty", messages: messages(20) }]).prompt,
+      1,
+    );
+    expect(text).not.toContain(MESSAGES_LEFT_OUT);
+    expect(text.match(/^Message \d+ \(/gm)).toHaveLength(20);
   });
 
   it("cuts a 5,000-code-point message to 4,000 and sets truncated", () => {
