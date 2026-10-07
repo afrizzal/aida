@@ -100,6 +100,28 @@ describe("isEmbeddingConfigured / resolveEmbeddingProvider", () => {
       "No embedding provider configured",
     );
   });
+
+  it("not configured is the typed EmbeddingNotConfiguredError; a read error is not (a2-WR-07)", async () => {
+    const { resolveEmbeddingProvider, EmbeddingNotConfiguredError } = await import(
+      "../../src/lib/rag/settings"
+    );
+    // biome-ignore lint/suspicious/noExplicitAny: fake db satisfies the structural SettingDb shape
+    const missing = await resolveEmbeddingProvider(makeFakeSettingDb({}) as any).catch(
+      (err: unknown) => err,
+    );
+    expect(missing).toBeInstanceOf(EmbeddingNotConfiguredError);
+
+    const unreadable = await resolveEmbeddingProvider(
+      makeFakeSettingDb({
+        "llm:embeddingProvider": "openai",
+        "llm:embeddingModel": "text-embedding-3-small",
+        "llm:embeddingApiKeyEnc": "not-a-ciphertext",
+        // biome-ignore lint/suspicious/noExplicitAny: fake db satisfies the structural SettingDb shape
+      }) as any,
+    ).catch((err: unknown) => err);
+    expect(unreadable).toBeInstanceOf(Error);
+    expect(unreadable).not.toBeInstanceOf(EmbeddingNotConfiguredError);
+  });
 });
 
 // --- Task 2: embed() dispatch + dimension guard, SDK boundary mocked -------------------------

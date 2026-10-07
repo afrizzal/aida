@@ -29,6 +29,8 @@
 //     they are not used, and the job that re-embed-all sends after the change replaces them.
 //   - A model change without re-embed-all leaves an article whose job skipped at its status
 //     (normally PENDING) until re-embed-all or Retry indexing sends a job under the new model.
+//   - A settings read error (review a2-WR-07) is never taken for "not configured" or a model
+//     change: the job rejects, pg-boss retries it, and the article stays PENDING.
 //
 // Lock order: the article row, then its chunks (the same order as every other writer of KbChunk).
 // No unique index on KbChunk (articleId, position) is added: the row lock serializes the swap,
@@ -41,7 +43,12 @@ import { randomBytes } from "node:crypto";
 import { prisma } from "../../db";
 import { chunkMarkdown, type MarkdownChunk } from "../../rag/chunk-markdown";
 import { embed } from "../../rag/embed";
-import { embeddingModelId, resolveEmbeddingProvider, type SettingDb } from "../../rag/settings";
+import {
+  EmbeddingNotConfiguredError,
+  embeddingModelId,
+  resolveEmbeddingProvider,
+  type SettingDb,
+} from "../../rag/settings";
 import { toVectorLiteral } from "../../rag/vector-literal";
 import { scopedDb } from "../../scoped-db";
 
@@ -105,15 +112,19 @@ async function lockArticleForJob(
 }
 
 /**
- * The embedding model id configured now (`provider:model`), or null when nothing is configured.
- * The provider's error text is never logged. On a scoped transaction client it reads only this
- * organization's settings (the scopedDb query extension applies inside its $transaction).
+ * The embedding model id configured now (`provider:model`), or null when nothing is configured
+ * (EmbeddingNotConfiguredError). Review a2-WR-07: any other error (a failed query, an aborted
+ * transaction, a key that cannot be decrypted) is rethrown, never read as "not configured" or as a
+ * model change, so the job fails and pg-boss retries it instead of reporting success. The error
+ * text is never logged. On a scoped transaction client it reads only this organization's settings
+ * (the scopedDb query extension applies inside its $transaction).
  */
 async function configuredModelId(client: SettingDb): Promise<string | null> {
   try {
     return embeddingModelId(await resolveEmbeddingProvider(client));
-  } catch {
-    return null;
+  } catch (err) {
+    if (err instanceof EmbeddingNotConfiguredError) return null;
+    throw err;
   }
 }
 
@@ -203,13 +214,16 @@ export async function kbEmbedArticleHandler(data: { articleId: string }): Promis
   // provider config is an operator problem, not a retryable transient error, so this marks
   // FAILED (when still current) and returns (no throw -> no pg-boss retry).
   // The job's model (review P6): the configured model id now, then the model embed() reports.
-  let jobModel: string | null = await configuredModelId(db);
-  if (jobModel === null) {
-    await markFailedIfCurrent(db, job, readText, null);
-    return;
-  }
+  // A settings read error (not "not configured") takes the catch path below (review a2-WR-07).
+  let jobModel: string | null = null;
 
   try {
+    jobModel = await configuredModelId(db);
+    if (jobModel === null) {
+      await markFailedIfCurrent(db, job, readText, null);
+      return;
+    }
+
     const chunks = chunkMarkdown(readText);
 
     if (chunks.length === 0) {
@@ -229,6 +243,8 @@ export async function kbEmbedArticleHandler(data: { articleId: string }): Promis
     await swapChunks(db, job, readText, jobModel, chunks, embeddings);
   } catch (err) {
     try {
+      // FAILED only when still current (review R3-1). When the settings cannot be read, nothing
+      // proves the article is current, so this write throws and the article stays PENDING.
       await markFailedIfCurrent(db, job, readText, jobModel);
     } catch {
       // The original error is the one pg-boss must see; a failed status write never replaces it.

@@ -50,6 +50,19 @@ export interface ResolvedEmbedding {
   ollamaBaseUrl: string;
 }
 
+/**
+ * Thrown by resolveEmbeddingProvider when no complete embedding configuration exists (provider,
+ * model and credential). Phase 12.2 review a2-WR-07: callers tell "not configured" (an operator
+ * problem) apart from a failed read (a database or decryption error, worth a retry) by this class,
+ * never by the message.
+ */
+export class EmbeddingNotConfiguredError extends Error {
+  constructor() {
+    super("No embedding provider configured");
+    this.name = "EmbeddingNotConfiguredError";
+  }
+}
+
 function isEmbeddingProviderName(value: string): value is EmbeddingProviderName {
   return value === "openai" || value === "ollama";
 }
@@ -130,13 +143,14 @@ export async function saveEmbeddingSettings(
  * Resolves the fully configured active embedding provider, applying the chat-credential fallback
  * (Decision 5): when the embedding provider equals the chat provider AND the embedding-specific
  * credential is blank, borrow the chat credential (apiKey for openai, ollamaBaseUrl for ollama).
- * Throws when provider+model+resolved-credential are not all present — never a silent fallback.
+ * Throws EmbeddingNotConfiguredError when provider+model+resolved-credential are not all present
+ * — never a silent fallback. A failed settings read or decryption propagates as it is.
  */
 export async function resolveEmbeddingProvider(db: SettingDb): Promise<ResolvedEmbedding> {
   const s = await getEmbeddingSettings(db);
 
   if (!s.provider || !s.model) {
-    throw new Error("No embedding provider configured");
+    throw new EmbeddingNotConfiguredError();
   }
 
   let apiKey = s.apiKey;
@@ -156,7 +170,7 @@ export async function resolveEmbeddingProvider(db: SettingDb): Promise<ResolvedE
 
   const stillMissing = s.provider === "ollama" ? !ollamaBaseUrl : !apiKey;
   if (stillMissing) {
-    throw new Error("No embedding provider configured");
+    throw new EmbeddingNotConfiguredError();
   }
 
   return { provider: s.provider, model: s.model, apiKey, ollamaBaseUrl };

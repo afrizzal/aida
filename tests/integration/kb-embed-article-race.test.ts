@@ -518,3 +518,47 @@ describe("kb-embed-article: model freshness (review P6)", () => {
     expect(embedMock).not.toHaveBeenCalled();
   });
 });
+
+describe("kb-embed-article: a settings read error is never a silent skip (review a2-WR-07)", () => {
+  /** Makes the stored embedding key undecryptable: the next settings read throws. */
+  async function breakEmbeddingKey(orgId: string): Promise<void> {
+    const updated = await prisma.setting.updateMany({
+      where: { organizationId: orgId, key: "llm:embeddingApiKeyEnc" },
+      data: { value: "not-a-ciphertext" },
+    });
+    expect(updated.count).toBe(1);
+  }
+
+  it("a read error inside the swap transaction: the job rejects for a retry, PENDING, no chunks", async () => {
+    const { orgId } = await seedOrg();
+    const articleId = await seedArticle(orgId, BODY);
+    await prisma.kbChunk.deleteMany({ where: { articleId } });
+    await prisma.kbArticle.update({
+      where: { id: articleId },
+      data: { embeddingStatus: "PENDING" },
+    });
+    setKbEmbedArticleObserverForTests({
+      // Committed on its own connection while the job holds the article row lock.
+      afterArticleLock: async () => breakEmbeddingKey(orgId),
+    });
+
+    await expect(kbEmbedArticleHandler({ articleId })).rejects.toThrow();
+    expect(embedMock).toHaveBeenCalledTimes(1);
+    expect((await articleRow(articleId))?.embeddingStatus).toBe("PENDING");
+    expect(await chunkRows(articleId)).toEqual([]);
+  });
+
+  it("a read error at the configuration gate: the job rejects for a retry, never FAILED as unconfigured", async () => {
+    const { orgId } = await seedOrg();
+    const articleId = await seedArticle(orgId, BODY);
+    await prisma.kbArticle.update({
+      where: { id: articleId },
+      data: { embeddingStatus: "PENDING" },
+    });
+    await breakEmbeddingKey(orgId);
+
+    await expect(kbEmbedArticleHandler({ articleId })).rejects.toThrow();
+    expect(embedMock).not.toHaveBeenCalled();
+    expect((await articleRow(articleId))?.embeddingStatus).toBe("PENDING");
+  });
+});
