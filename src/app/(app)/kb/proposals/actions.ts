@@ -118,7 +118,7 @@ export async function saveProposalAction(
   return result;
 }
 
-/** Rejects a DRAFT (D-16). */
+/** Rejects a DRAFT (D-16). Also revalidates /kb, whose Proposals link counts drafts (b-IN-06). */
 export async function rejectProposalAction(
   input: ProposalVersionInput,
 ): Promise<RejectProposalResult | ActionUnknown> {
@@ -130,7 +130,7 @@ export async function rejectProposalAction(
     return unknownResult("reject");
   }
   if (result.ok) {
-    revalidateAfterCommit([PROPOSALS_PATH, proposalPath(idOf(input?.proposalId))]);
+    revalidateAfterCommit([PROPOSALS_PATH, proposalPath(idOf(input?.proposalId)), "/kb"]);
   }
   return result;
 }

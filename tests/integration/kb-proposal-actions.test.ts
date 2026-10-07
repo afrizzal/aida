@@ -502,6 +502,19 @@ describe("review C6: revalidation never changes a committed result; a thrown ser
     await expect(requestProposalAction([ticket.id])).rejects.toBe(wrapped.cause);
   });
 
+  it("a reject revalidates /kb, whose Proposals link counts drafts, as publish does (review b-IN-06)", async () => {
+    const { orgId, owner } = await seedOrg();
+    const ticket = await seedResolvedTicket(orgId);
+    const draft = await seedProposal(orgId, { status: "DRAFT", ticketIds: [ticket.id] });
+    env.actor = owner;
+
+    expect(await rejectProposalAction({ proposalId: draft.id, expectedVersion: 0 })).toEqual({
+      ok: true,
+    });
+    const paths = revalidatePath.mock.calls.map((call) => call[0]);
+    expect(paths).toEqual(["/kb/proposals", `/kb/proposals/${draft.id}`, "/kb"]);
+  });
+
   it("restart and retry pass queued through, save passes the new version and a field refusal its field", async () => {
     const { orgId, owner } = await seedOrg();
     const ticket = await seedResolvedTicket(orgId);
