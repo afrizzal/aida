@@ -1,6 +1,7 @@
 import type { Job, JobWithMetadata } from "pg-boss";
 import { PgBoss } from "pg-boss";
-import { KB_PROPOSAL_GENERATE_QUEUE, KB_PROPOSAL_JOB_RETRY_LIMIT } from "../kb/proposal-contract";
+import { KB_PROPOSAL_GENERATE_QUEUE } from "../kb/proposal-contract";
+import { ensureKbProposalQueue } from "../kb/proposal-queue";
 import { aiTriageHandler } from "./jobs/ai-triage";
 import { autoCloseHandler } from "./jobs/auto-close";
 import { emailInboundPollHandler } from "./jobs/email-inbound-poll";
@@ -118,15 +119,12 @@ async function main() {
   });
 
   // KB proposal generation (Phase 12.2, AIDA-18, D-13): on-demand queue enqueued by the app after
-  // requestProposal commits and by Restart generation — no schedule(). Options mirror
-  // boss-client.ts's createQueue exactly so this createQueue is a no-op if the app made it first.
+  // requestProposal commits and by Restart generation — no schedule(). Run decision K55: the
+  // same helper as boss-client.ts creates the queue and updates it to an explicit 30 s retryDelay
+  // with backoff (pg-boss defaults retryDelay to 0, which made every retry immediate).
   // includeMetadata gives the handler retryCount and retryLimit (D-14: a transient failure is
   // retried while retryCount < retryLimit, and is FAILED PROVIDER on the last attempt).
-  await boss.createQueue(KB_PROPOSAL_GENERATE_QUEUE, {
-    retryLimit: KB_PROPOSAL_JOB_RETRY_LIMIT,
-    retryBackoff: true,
-    retryDelayMax: 300,
-  });
+  await ensureKbProposalQueue(boss);
   await boss.work(
     KB_PROPOSAL_GENERATE_QUEUE,
     { includeMetadata: true },
