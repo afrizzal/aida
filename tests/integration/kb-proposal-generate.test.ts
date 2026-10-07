@@ -360,6 +360,29 @@ describe("generateProposal: tracer (D-10 to D-13)", () => {
   });
 });
 
+describe("generateProposal: role labels in the prompt (review a2-IN-06)", () => {
+  it("labels the customer's and the agent's PUBLIC messages, with no author name", async () => {
+    const { orgId, owner } = await seedOrg();
+    const ticket = await seedResolvedTicket(orgId);
+    await prisma.message.deleteMany({ where: { organizationId: orgId, ticketId: ticket.id } });
+    await seedPublicMessage(orgId, ticket.id, "The queue stopped after the update.", {
+      direction: "INBOUND",
+    });
+    await seedPublicMessage(orgId, ticket.id, "Restart the spooler service.", {
+      direction: "OUTBOUND",
+    });
+    const { payload } = await request(owner, [ticket.id]);
+    respondWith(validOutput());
+    await runJob(payload);
+
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0].prompt).toContain(
+      "Message 1 (customer):\nThe queue stopped after the update.",
+    );
+    expect(fake.calls[0].prompt).toContain("Message 2 (agent):\nRestart the spooler service.");
+  });
+});
+
 describe("generateProposal: call deadline and context size (run decision K55)", () => {
   it("passes the 180 s deadline to OpenAI, and no context size", async () => {
     const { proposalId, payload } = await setupProposal();

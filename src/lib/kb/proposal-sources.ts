@@ -10,7 +10,8 @@
 //     before any ticket text is read (D-08). It reads no Message row.
 //   * loadSourceInputs: the generation input (D-10). Only the subject and PUBLIC messages, in seq
 //     order, at most MAX_MESSAGES_PER_SOURCE + 1 per ticket (the prompt builder cuts and flags the
-//     truncation). Never INTERNAL notes, attachments or contact fields. Per ticket it also returns
+//     truncation), each with its fixed role from the direction (customer or agent, review
+//     a2-IN-06). Never INTERNAL notes, attachments, author names or contact fields. Per ticket it also returns
 //     the snapshot marker: the ticket's actual largest PUBLIC seq, from an aggregate over all of
 //     its PUBLIC messages that runs BEFORE the bounded read (null without a PUBLIC message). A
 //     truncated source is therefore not reported as changed right after generation, and a message
@@ -304,8 +305,8 @@ export async function loadSourceInputs(
   for (const source of ordered) {
     const subject = subjects.get(source.ticketId);
     if (subject === undefined) continue;
-    const messages = await client.$queryRaw<{ seq: bigint; body: string }[]>`
-      SELECT seq, "bodyMarkdown" AS body
+    const messages = await client.$queryRaw<{ seq: bigint; body: string; direction: string }[]>`
+      SELECT seq, "bodyMarkdown" AS body, direction::text AS direction
       FROM "Message"
       WHERE "organizationId" = ${orgId}
         AND "ticketId" = ${source.ticketId}
@@ -316,7 +317,12 @@ export async function loadSourceInputs(
     inputs.push({
       position: source.position,
       subject,
-      messages: messages.map((message) => ({ seq: BigInt(message.seq), body: message.body })),
+      messages: messages.map((message) => ({
+        seq: BigInt(message.seq),
+        body: message.body,
+        // Review a2-IN-06: the role comes from the direction only, never from an author field.
+        role: message.direction === "OUTBOUND" ? ("agent" as const) : ("customer" as const),
+      })),
     });
   }
   return { inputs, snapshots };

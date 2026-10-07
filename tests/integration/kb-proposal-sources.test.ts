@@ -104,14 +104,32 @@ describe("loadSourceInputs: PUBLIC only, bounded, snapshot marker (D-08, D-10, T
         position: 1,
         subject: ticket.subject,
         messages: [
-          { seq: first.seq, body: "Customer: the export button fails" },
-          { seq: third.seq, body: "Agent: clear the cache, then retry" },
+          { seq: first.seq, body: "Customer: the export button fails", role: "customer" },
+          { seq: third.seq, body: "Agent: clear the cache, then retry", role: "customer" },
         ],
       },
     ]);
     expect(loaded.snapshots).toEqual({ [ticket.id]: third.seq });
     expect(typeof loaded.snapshots[ticket.id]).toBe("bigint");
     expect(serialize(loaded)).not.toContain("INTERNAL-ONLY-7f3a");
+  });
+
+  it("labels INBOUND messages customer and OUTBOUND messages agent, from the direction only (a2-IN-06)", async () => {
+    const orgId = await freshOrg();
+    const ticket = await seedBareTicket(orgId);
+    const asked = await seedPublicMessage(orgId, ticket.id, "The export fails", {
+      direction: "INBOUND",
+    });
+    const answered = await seedPublicMessage(orgId, ticket.id, "Clear the cache", {
+      direction: "OUTBOUND",
+    });
+
+    const loaded = await loadSourceInputs(prisma, orgId, [{ ticketId: ticket.id, position: 1 }]);
+
+    expect(loaded.inputs[0].messages).toEqual([
+      { seq: asked.seq, body: "The export fails", role: "customer" },
+      { seq: answered.seq, body: "Clear the cache", role: "agent" },
+    ]);
   });
 
   it("returns MAX_MESSAGES_PER_SOURCE + 1 of 25 PUBLIC messages and the 25th seq as snapshot", async () => {
@@ -197,8 +215,8 @@ describe("loadSourceInputs: PUBLIC only, bounded, snapshot marker (D-08, D-10, T
     expect(typeof snapshot).toBe("bigint");
     expect(snapshot).toBe(9007199254740993n);
     expect(loaded.inputs[0].messages).toEqual([
-      { seq: 2147483653n, body: "earlier body" },
-      { seq: 9007199254740993n, body: "later body" },
+      { seq: 2147483653n, body: "earlier body", role: "customer" },
+      { seq: 9007199254740993n, body: "later body", role: "customer" },
     ]);
     expect(loaded.inputs[0].messages.map((m) => typeof m.seq)).toEqual(["bigint", "bigint"]);
   });
