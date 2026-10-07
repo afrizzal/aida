@@ -213,6 +213,66 @@ describe("Phase 12.2 schema: the status fence (D-16, aida_kb_proposal_status_fen
     ).toContain("KbProposal is final");
   });
 
+  // Review a-IN-01 (migration 20261112100000_kb_proposal_final_fence): a final row keeps its
+  // actor, time, failure and version columns, the only record of who did what (D-12).
+  const FROZEN_ON_EVERY_FINAL_ROW: Record<string, string> = {
+    version: `"version" = "version" + 1`,
+    generationEpoch: `"generationEpoch" = "generationEpoch" + 1`,
+    inputTruncated: `"inputTruncated" = NOT "inputTruncated"`,
+    requestedByUserId: `"requestedByUserId" = 'someone-else'`,
+    generationQueuedAt: `"generationQueuedAt" = "generationQueuedAt" - interval '1 hour'`,
+    generationClaimedAt: `"generationClaimedAt" = now() - interval '2 hours'`,
+    generatedAt: `"generatedAt" = now() - interval '1 day'`,
+    lastEditedByUserId: `"lastEditedByUserId" = 'someone-else'`,
+    lastEditedAt: `"lastEditedAt" = now() - interval '1 day'`,
+    createdAt: `"createdAt" = "createdAt" - interval '1 day'`,
+  };
+  const FROZEN_BY_STATUS: Record<"REJECTED" | "PUBLISHED" | "FAILED", Record<string, string>> = {
+    REJECTED: {
+      rejectedByUserId: `"rejectedByUserId" = 'someone-else'`,
+      rejectedAt: `"rejectedAt" = "rejectedAt" - interval '1 day'`,
+    },
+    PUBLISHED: {
+      publishedByUserId: `"publishedByUserId" = 'someone-else'`,
+      publishedAt: `"publishedAt" = "publishedAt" - interval '1 day'`,
+    },
+    FAILED: {
+      failureCode: `"failureCode" = CASE WHEN "failureCode" = 'PROVIDER' THEN 'UNKNOWN'::"KbProposalFailureCode" ELSE 'PROVIDER'::"KbProposalFailureCode" END`,
+      failedAt: `"failedAt" = "failedAt" - interval '1 day'`,
+    },
+  };
+
+  for (const status of ["REJECTED", "PUBLISHED", "FAILED"] as const) {
+    it(`refuses a change of every actor, time, failure and version column on a ${status} row (review a-IN-01)`, async () => {
+      const orgId = await freshOrg();
+      const { id } = await seedProposal(orgId, { status, ticketIds: [] });
+      const before = await prisma.kbProposal.findUniqueOrThrow({ where: { id } });
+      const sets = { ...FROZEN_ON_EVERY_FINAL_ROW, ...FROZEN_BY_STATUS[status] };
+      for (const [column, set] of Object.entries(sets)) {
+        const text = await rejection(
+          prisma.$executeRawUnsafe(`UPDATE "KbProposal" SET ${set} WHERE id = $1`, id),
+        );
+        expect(text, column).toContain("KbProposal is final");
+      }
+      const after = await prisma.kbProposal.findUniqueOrThrow({ where: { id } });
+      expect(after).toEqual(before);
+      // updatedAt alone is not frozen (it records the last write attempt Prisma makes).
+      expect(
+        await prisma.$executeRaw`UPDATE "KbProposal" SET "updatedAt" = now() WHERE id = ${id}`,
+      ).toBe(1);
+    });
+  }
+
+  it("still lets a DRAFT row change those columns (review a-IN-01: only final rows are frozen)", async () => {
+    const orgId = await freshOrg();
+    const { id } = await seedProposal(orgId, { status: "DRAFT", ticketIds: [] });
+    for (const set of Object.values(FROZEN_ON_EVERY_FINAL_ROW)) {
+      expect(
+        await prisma.$executeRawUnsafe(`UPDATE "KbProposal" SET ${set} WHERE id = $1`, id),
+      ).toBe(1);
+    }
+  });
+
   it("allows GENERATING to DRAFT with title and body, then DRAFT to REJECTED with the reviewer columns", async () => {
     const orgId = await freshOrg();
     const { id } = await seedProposal(orgId, { status: "GENERATING", ticketIds: [] });
@@ -570,6 +630,34 @@ describe("Phase 12.2 schema: catalog (D-16, D-12; earlier hand-written objects s
     expect(triggers).toEqual([
       { relname: "KbProposal", proname: "aida_kb_proposal_status_immutable", tgenabled: "O" },
     ]);
+    // Review a-IN-01: the fence function names every frozen column of a final row, besides the
+    // original title, body and article.
+    const [definition] = await prisma.$queryRaw<{ def: string }[]>`
+      SELECT pg_get_functiondef('aida_kb_proposal_status_immutable()'::regprocedure) AS def`;
+    for (const column of [
+      "title",
+      "bodyMarkdown",
+      "publishedArticleId",
+      "version",
+      "generationEpoch",
+      "inputTruncated",
+      "requestedByUserId",
+      "generationQueuedAt",
+      "generationClaimedAt",
+      "generatedAt",
+      "lastEditedByUserId",
+      "lastEditedAt",
+      "rejectedByUserId",
+      "rejectedAt",
+      "publishedByUserId",
+      "publishedAt",
+      "failureCode",
+      "failedAt",
+      "createdAt",
+    ]) {
+      expect(definition.def, column).toContain(`OLD."${column}" IS DISTINCT FROM NEW."${column}"`);
+    }
+    expect(definition.def).not.toContain(`OLD."updatedAt"`);
     const labels = await prisma.$queryRaw<{ enumlabel: string }[]>`
       SELECT e.enumlabel FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
       WHERE t.typname = 'AuditActionType' ORDER BY e.enumsortorder`;

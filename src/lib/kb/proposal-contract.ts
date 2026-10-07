@@ -11,7 +11,9 @@
 //     proposal; a rejected proposal can never be published.
 //   * The database trigger aida_kb_proposal_status_fence (migration 20261111100000_kb_proposals)
 //     enforces the same pairs and refuses any change of title, body or published article on a
-//     final row; the CHECK KbProposal_status_fields_check holds the columns each status needs.
+//     final row; since 20261112100000_kb_proposal_final_fence (review a-IN-01) also of the actor,
+//     time, failure and version columns (every column but updatedAt). The CHECK
+//     KbProposal_status_fields_check holds the columns each status needs.
 //
 // Version rule (D-16): every write is a conditional update on id, organizationId, status and
 // version, and increments version. A count of 0 is CONFLICT when the re-read row is still in the
