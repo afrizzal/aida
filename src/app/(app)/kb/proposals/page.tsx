@@ -2,8 +2,9 @@ import { BookOpen, Sparkles, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { EmptyState } from "@/components/empty-state";
 import { KbProposalStatusChip } from "@/components/kb/kb-proposal-status-chip";
-import { LocalDateTime } from "@/components/tickets/local-date-time";
+import { TimeWithLocalTitle } from "@/components/tickets/local-date-time";
 import { Button } from "@/components/ui/button";
+import { formatRelativeTime } from "@/lib/format-relative-time";
 import {
   BACK_TO_ARTICLES,
   LIST_AI_OFF_NOTICE,
@@ -108,10 +109,14 @@ export default async function KbProposalsPage() {
                 <span className="text-[12px] text-muted-foreground tabular-nums">
                   {sourceCount(row.sourceCount)}
                 </span>
-                <LocalDateTime
-                  value={row.createdAt}
+                {/* UI-SPEC Surface 2 "relative time (LocalDateTime title)" (review b-IN-08): the
+                    relative text /kb rows use, the full local time in the title. */}
+                <TimeWithLocalTitle
+                  value={row.createdAt.toISOString()}
                   className="shrink-0 text-[12px] text-muted-foreground"
-                />
+                >
+                  {formatRelativeTime(row.createdAt)}
+                </TimeWithLocalTitle>
               </Link>
             );
           })}

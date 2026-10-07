@@ -79,11 +79,23 @@ export function LocalDateTime({ value, className }: { value: Date | string; clas
  * holds the full time: UTC before mount, the viewer's zone after (UI-SPEC Surface 6 and 4a,
  * review UI-WR-02).
  */
-export function TimeWithLocalTitle({ value, children }: { value: string; children: ReactNode }) {
+export function TimeWithLocalTitle({
+  value,
+  children,
+  className,
+}: {
+  value: string;
+  children: ReactNode;
+  className?: string;
+}) {
   const hydrated = useHydrated();
   const date = new Date(value);
   return (
-    <time dateTime={value} title={hydrated ? formatFull(date) : formatFull(date, "UTC")}>
+    <time
+      dateTime={value}
+      title={hydrated ? formatFull(date) : formatFull(date, "UTC")}
+      className={className}
+    >
       {children}
     </time>
   );
