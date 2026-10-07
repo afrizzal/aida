@@ -151,6 +151,11 @@ docker compose up -d   # the migrate service runs `prisma migrate deploy` again
 
 Take a backup before upgrading, as [`docs/OPERATIONS.md`](docs/OPERATIONS.md) describes.
 
+### Upgrade notes: KB article proposals
+
+- **Writes wait while two indexes are built.** The migration `20261111100000_kb_proposals` builds two unique indexes, on `"Ticket"` and on `"KbArticle"` (`organizationId`, `id`). Prisma runs each migration in one transaction, where `CREATE INDEX CONCURRENTLY` is not allowed, so new tickets, ticket changes and KB article writes wait until each index is built. On a small install this takes moments; on a large ticket table, upgrade in a quiet period.
+- **A local Ollama model needs a 32k context window.** When AIDA drafts a KB article proposal through Ollama, it asks for a context window of 32,768 tokens (`num_ctx`), enough for the bounded ticket input and the answer. Use a model that supports at least that; with a smaller model, the ticket input can be cut off or drafting can fail. OpenAI and Anthropic models are not affected.
+
 ## Status
 
 **v1 — Minimum Lovable Helpdesk.** Core ticketing, email/web intake, AI triage, RAG drafted replies,
