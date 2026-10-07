@@ -920,6 +920,27 @@ describe("restartProposalGeneration (D-13, reviews C5 and R2-3)", () => {
     expect(sends[0].seen).toBe(2); // the separate client saw the new epoch: sent after commit
   });
 
+  it("review a-IN-04: a restart records the restarting admin as the requester", async () => {
+    const { orgId, admin, member } = await seedOrg();
+    const p = await seedOne(orgId, {
+      status: "GENERATING",
+      version: 1,
+      generationEpoch: 1,
+      generationClaimedAt: null,
+      generationQueuedAt: new Date(T0.getTime() - 10 * MINUTE),
+      requestedByUserId: member.userId,
+    });
+
+    expect(
+      await restartProposalGeneration(admin, { proposalId: p.id, expectedVersion: 1 }, { now: T0 }),
+    ).toEqual({ ok: true, queued: true });
+    const row = await prisma.kbProposal.findUniqueOrThrow({
+      where: { id: p.id },
+      select: { requestedByUserId: true, version: true, generationEpoch: true },
+    });
+    expect(row).toEqual({ requestedByUserId: admin.userId, version: 2, generationEpoch: 2 });
+  });
+
   it("a restart right after a restart is NOT_STUCK; 10 minutes after the first it is allowed again", async () => {
     const { orgId, admin } = await seedOrg();
     const p = await seedGenerating(orgId, 20 * MINUTE);

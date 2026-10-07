@@ -23,8 +23,8 @@
 // by setting generationClaimedAt and incrementing version; another job may claim only when
 // generationClaimedAt is null or older than STUCK_AFTER_MS. A transient failure releases the
 // lease, before it rethrows, with a conditional update that also sets generationQueuedAt (pg-boss
-// queues the retry). A restart clears generationClaimedAt and sets generationQueuedAt in one
-// conditional update. isStuck counts from generationClaimedAt, else generationQueuedAt, never
+// queues the retry). A restart clears generationClaimedAt, sets generationQueuedAt and records the
+// restarting admin as requestedByUserId (review a-IN-04) in one conditional update. isStuck counts from generationClaimedAt, else generationQueuedAt, never
 // from the row's creation timestamp, so a proposal is not stuck again right after a restart. Only
 // a conditional update on the claimed version stores a result.
 //

@@ -43,7 +43,9 @@
 //
 // Restart (D-13, reviews C5 and R2-3): only a GENERATING proposal that isStuck at the injected
 // clock; one conditional update clears generationClaimedAt, sets generationQueuedAt to now,
-// increments version and generationEpoch, and the post-commit send carries the new epoch.
+// increments version and generationEpoch, records the restarting admin as requestedByUserId
+// (review a-IN-04: the job checks the requester's role), and the post-commit send carries the new
+// epoch.
 //
 // Retry indexing (reviews C2 and R3-2): the claim is ONE conditional update of the article
 // (embeddingStatus PENDING or FAILED, explicit id and organizationId terms) that sets PENDING; a
@@ -433,7 +435,8 @@ export async function publishProposal(
 
 /**
  * Restarts a GENERATING proposal that isStuck at the injected clock: one conditional update clears
- * the lease, sets generationQueuedAt to now and increments version and generationEpoch; after
+ * the lease, sets generationQueuedAt to now, increments version and generationEpoch and makes the
+ * restarting admin the requester (review a-IN-04); after
  * commit kb-proposal-generate is sent with { proposalId, epoch } carrying the new epoch, so every
  * job sent before the restart is stale. The same proposal id is reused.
  */
@@ -475,6 +478,9 @@ export async function restartProposalGeneration(
           generationQueuedAt: now,
           version: { increment: 1 },
           generationEpoch: { increment: 1 },
+          // Review a-IN-04: the job checks the requester's role, so the admin who restarts
+          // becomes the requester; a proposal whose first requester lost the role can recover.
+          requestedByUserId: userId,
         },
         select: { generationEpoch: true },
       });

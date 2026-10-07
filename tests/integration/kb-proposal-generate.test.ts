@@ -73,9 +73,11 @@ import {
   PROPOSAL_CALL_TIMEOUT_MS,
   PROPOSAL_CONTEXT_TOKENS,
   type ProposalJobPayload,
+  STUCK_AFTER_MS,
 } from "@/lib/kb/proposal-contract";
 import { MESSAGES_LEFT_OUT, PROPOSAL_SYSTEM_PROMPT } from "@/lib/kb/proposal-prompt";
 import { requestProposal } from "@/lib/kb/proposal-request";
+import { restartProposalGeneration } from "@/lib/kb/proposal-review";
 import { findChangedSources } from "@/lib/kb/proposal-sources";
 import { LlmOutputError } from "@/lib/llm/errors";
 import { saveLlmSettings } from "@/lib/llm/settings";
@@ -487,6 +489,37 @@ describe("generateProposal: rechecks before any provider call (D-01, D-08, D-09)
 
     await expectFailed(proposalId, "REQUESTER_NOT_ALLOWED");
     expect(fake.calls).toHaveLength(0);
+  });
+
+  it("review a-IN-04: after the requester was demoted, another admin's restart makes that admin the requester and the job drafts", async () => {
+    const { owner, admin, proposalId } = await setupProposal();
+    await prisma.member.update({ where: { id: owner.memberId }, data: { role: "member" } });
+    const before = await prisma.kbProposal.findUniqueOrThrow({
+      where: { id: proposalId },
+      select: { version: true, generationQueuedAt: true },
+    });
+    const restartAt = new Date(before.generationQueuedAt.getTime() + STUCK_AFTER_MS);
+    bossEnv.sends = [];
+
+    const restarted = await restartProposalGeneration(
+      admin,
+      { proposalId, expectedVersion: before.version },
+      { now: restartAt },
+    );
+    expect(restarted).toEqual({ ok: true, queued: true });
+    const row = await prisma.kbProposal.findUniqueOrThrow({
+      where: { id: proposalId },
+      select: { requestedByUserId: true, generationEpoch: true },
+    });
+    expect(row).toEqual({ requestedByUserId: admin.userId, generationEpoch: 2 });
+    const sends = bossEnv.sends.filter((send) => send.queue === KB_PROPOSAL_GENERATE_QUEUE);
+    expect(sends.map((send) => send.payload)).toEqual([{ proposalId, epoch: 2 }]);
+
+    respondWith(validOutput());
+    await runJob(sends[0].payload, 0, new Date(restartAt.getTime() + 1000));
+
+    expect((await readProposal(proposalId)).status).toBe("DRAFT");
+    expect(fake.calls).toHaveLength(1);
   });
 
   it("no provider configured gives FAILED CONFIGURATION without a call", async () => {
