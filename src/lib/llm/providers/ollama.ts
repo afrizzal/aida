@@ -14,8 +14,12 @@ import { Ollama } from "ollama";
 import { z } from "zod/v4";
 import { LlmOutputError, LlmTimeoutError } from "../errors";
 
-/** Same call deadline as the OpenAI and Anthropic adapters (Phase 12.2 D-14). */
-export const OLLAMA_TIMEOUT_MS = 30_000;
+/**
+ * The default call deadline (Phase 12.2 D-14). Run decision K55: 120 s, because a local model on
+ * a CPU can need more than the hosted adapters' 30 s for triage and drafts (unbounded before this
+ * phase). A caller may pass its own deadline (KB proposal generation passes 180 s).
+ */
+export const OLLAMA_TIMEOUT_MS = 120_000;
 
 /**
  * Runs `run` under one deadline that covers the whole call, from the request to the end of the
@@ -74,11 +78,18 @@ export interface CompleteOllamaParams<T> {
   schema: z.ZodType<T>;
   /** Optional output-token cap; applied only when provided (no default cap for Ollama). */
   maxOutputTokens?: number;
+  /** Optional call deadline in ms; OLLAMA_TIMEOUT_MS when absent (run decision K55). */
+  timeoutMs?: number;
+  /**
+   * Optional context window (`num_ctx`), sent only when provided (review a2-WR-05). Without it the
+   * server's default window applies, and Ollama drops input that does not fit without an error.
+   */
+  contextTokens?: number;
 }
 
 export async function completeOllama<T>(params: CompleteOllamaParams<T>): Promise<T> {
   // Deadline over the whole chat call, headers and body; pg-boss owns retry, not the SDK.
-  const response = await withDeadline(OLLAMA_TIMEOUT_MS, (fetch) =>
+  const response = await withDeadline(params.timeoutMs ?? OLLAMA_TIMEOUT_MS, (fetch) =>
     new Ollama({ host: params.baseUrl, fetch }).chat({
       model: params.model,
       messages: [
@@ -89,6 +100,7 @@ export async function completeOllama<T>(params: CompleteOllamaParams<T>): Promis
       options: {
         temperature: 0, // lower temperature = more reliable schema compliance
         ...(params.maxOutputTokens ? { num_predict: params.maxOutputTokens } : {}),
+        ...(params.contextTokens ? { num_ctx: params.contextTokens } : {}),
       },
     }),
   );

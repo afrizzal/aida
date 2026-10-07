@@ -19,6 +19,8 @@ import {
   MAINTENANCE_REFUSAL_CODES,
   MAX_PROPOSAL_SOURCES,
   MIN_PROPOSAL_SOURCES,
+  PROPOSAL_CALL_TIMEOUT_MS,
+  PROPOSAL_CONTEXT_TOKENS,
   PROPOSAL_FAILURE_CODES,
   PROPOSAL_POLL_INTERVAL_MS,
   PROPOSAL_STATUSES,
@@ -94,6 +96,14 @@ describe("proposal contract: constants and codes", () => {
     expect(PROPOSAL_POLL_INTERVAL_MS).toBe(5_000);
     expect(KB_PROPOSAL_GENERATE_QUEUE).toBe("kb-proposal-generate");
     expect(KB_PROPOSAL_JOB_RETRY_LIMIT).toBe(2);
+  });
+
+  it("run decision K55: a 180 s call deadline well under STUCK_AFTER_MS, and a 32k context", () => {
+    expect(PROPOSAL_CALL_TIMEOUT_MS).toBe(180_000);
+    // A running call is never seen as stuck: the deadline ends it long before a restart is offered.
+    expect(PROPOSAL_CALL_TIMEOUT_MS * 3).toBeLessThan(STUCK_AFTER_MS);
+    expect(PROPOSAL_CONTEXT_TOKENS).toBe(32_768);
+    expect(PROPOSAL_CONTEXT_TOKENS).toBeGreaterThanOrEqual(16_384);
   });
 
   it("freezes the refusal code lists", () => {

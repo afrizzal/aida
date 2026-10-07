@@ -1,5 +1,6 @@
-// Phase 12.2 D-14 and review C4: the Ollama call is bounded at 30 s from the request to the end of
-// the response body. Fake timers (setTimeout and clearTimeout only; streams and microtasks stay
+// Phase 12.2 D-14 and review C4: the Ollama call is bounded from the request to the end of the
+// response body; run decision K55 (review a2-WR-02) sets the default to 120 s and lets a caller
+// pass its own deadline (180 s for proposal generation) and context size (num_ctx, a2-WR-05). Fake timers (setTimeout and clearTimeout only; streams and microtasks stay
 // real), a stubbed global fetch, the real ollama client; never a network call, never a real wait.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod/v4";
@@ -116,11 +117,11 @@ describe("withDeadline and completeOllama (D-14, review C4)", () => {
     vi.useRealTimers();
   });
 
-  it("uses a 30 s deadline", () => {
-    expect(OLLAMA_TIMEOUT_MS).toBe(30_000);
+  it("uses a 120 s default deadline (run decision K55; it was 30 s)", () => {
+    expect(OLLAMA_TIMEOUT_MS).toBe(120_000);
   });
 
-  it("rejects a request without an answer at 30 s with LlmTimeoutError, classified TRANSIENT", async () => {
+  it("rejects a request without an answer at the deadline with LlmTimeoutError, classified TRANSIENT", async () => {
     const { fetchStub, calls } = hangingFetch();
     const promise = withDeadline(
       OLLAMA_TIMEOUT_MS,
@@ -129,7 +130,7 @@ describe("withDeadline and completeOllama (D-14, review C4)", () => {
     );
     const settled = track(promise);
 
-    await vi.advanceTimersByTimeAsync(29_999);
+    await vi.advanceTimersByTimeAsync(OLLAMA_TIMEOUT_MS - 1);
     expect(settled.state).toBe("pending");
     expect(calls).toHaveLength(1);
     expect(calls[0]?.aborted).toBe(false);
@@ -142,13 +143,13 @@ describe("withDeadline and completeOllama (D-14, review C4)", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("aborts a call whose headers arrived and whose body stalls, at 30 s (review C4)", async () => {
+  it("aborts a call whose headers arrived and whose body stalls, at the default deadline (review C4)", async () => {
     const { fetchStub, record } = stalledBodyFetch();
     vi.stubGlobal("fetch", fetchStub);
     const promise = callOllama();
     const settled = track(promise);
 
-    await vi.advanceTimersByTimeAsync(29_999);
+    await vi.advanceTimersByTimeAsync(OLLAMA_TIMEOUT_MS - 1);
     // The real ollama client reached the stubbed fetch and received the headers.
     expect(record.calls).toBe(1);
     expect(record.url).toContain("/api/chat");
@@ -221,5 +222,70 @@ describe("withDeadline and completeOllama (D-14, review C4)", () => {
     expect((error as Error).message).toBe("ollama: structured output parse failed");
     expect((error as Error).message).not.toContain("SECRET-SCHEMA-MISS");
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("completeOllama: caller deadline and context size (run decision K55, a2-WR-02, a2-WR-05)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("a caller deadline of 180 s replaces the default: still pending at 179.999 s, aborted at 180 s", async () => {
+    const { fetchStub, record } = stalledBodyFetch();
+    vi.stubGlobal("fetch", fetchStub);
+    const promise = completeOllama({
+      baseUrl: "http://127.0.0.1:11434",
+      model: "llama3.1",
+      system: "system text",
+      prompt: "prompt text",
+      schema,
+      timeoutMs: 180_000,
+    });
+    const settled = track(promise);
+
+    await vi.advanceTimersByTimeAsync(179_999);
+    expect(settled.state).toBe("pending");
+    expect(record.bodyAborted).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(promise).rejects.toBeInstanceOf(LlmTimeoutError);
+    expect(record.bodyAborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("sends num_ctx only when the caller passes a context size", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({
+            model: "llama3.1",
+            created_at: "2026-11-09T00:00:00Z",
+            message: { role: "assistant", content: JSON.stringify({ answer: "ok" }) },
+            done: true,
+            done_reason: "stop",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }),
+    );
+    const base = {
+      baseUrl: "http://127.0.0.1:11434",
+      model: "llama3.1",
+      system: "system text",
+      prompt: "prompt text",
+      schema,
+    };
+    await completeOllama({ ...base, maxOutputTokens: 8192, contextTokens: 32768 });
+    await completeOllama(base);
+    expect(bodies[0]?.options).toEqual({ temperature: 0, num_predict: 8192, num_ctx: 32768 });
+    expect(bodies[1]?.options).toEqual({ temperature: 0 });
   });
 });

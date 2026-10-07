@@ -21,6 +21,17 @@ export interface CompleteParams<T> {
    * (Phase 5) pass a higher value to avoid truncating multi-paragraph replies (Pitfall 3).
    */
   maxOutputTokens?: number;
+  /**
+   * Optional deadline of the whole provider call in milliseconds (Phase 12.2, run decision K55).
+   * Defaults: OpenAI and Anthropic 30 s, Ollama 120 s (OLLAMA_TIMEOUT_MS). KB proposal generation
+   * passes 180 s.
+   */
+  timeoutMs?: number;
+  /**
+   * Optional context window in tokens. Only Ollama uses it (`num_ctx`), because its server default
+   * window silently drops input that does not fit (review a2-WR-05); hosted providers ignore it.
+   */
+  contextTokens?: number;
 }
 
 export interface CompleteResult<T> {

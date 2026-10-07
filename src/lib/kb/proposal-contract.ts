@@ -144,6 +144,20 @@ export const KB_PROPOSAL_GENERATE_QUEUE = "kb-proposal-generate";
 /** pg-boss retryLimit of the generation job (transient failures only, D-14). */
 export const KB_PROPOSAL_JOB_RETRY_LIMIT = 2;
 
+/**
+ * Run decision K55 (review a2-WR-02): the deadline of one generation call, passed to every adapter
+ * (OpenAI and Anthropic client timeout, Ollama withDeadline). Long-form output does not fit the
+ * 30 s default; 180 s stays far below STUCK_AFTER_MS, so a running call is never seen as stuck.
+ */
+export const PROPOSAL_CALL_TIMEOUT_MS = 180_000;
+
+/**
+ * Run decision K55 (review a2-WR-05): the context window a generation asks Ollama for (num_ctx):
+ * room for the bounded input (MAX_INPUT_CODE_POINTS of ticket text plus the fixed text) and the
+ * PROPOSAL_MAX_OUTPUT_TOKENS output. The chosen local model must support it.
+ */
+export const PROPOSAL_CONTEXT_TOKENS = 32_768;
+
 /** The AuditActionType value of a generation row (D-12). */
 export const KB_PROPOSAL_AUDIT_ACTION = "KB_PROPOSAL_GENERATED" as const;
 

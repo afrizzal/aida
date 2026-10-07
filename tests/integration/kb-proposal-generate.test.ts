@@ -8,8 +8,16 @@
 // request (and Restart generation) really sent.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+type FakeCall = {
+  system: string;
+  prompt: string;
+  model: string;
+  timeoutMs?: number;
+  contextTokens?: number;
+};
+
 const fake = vi.hoisted(() => ({
-  calls: [] as { system: string; prompt: string; model: string }[],
+  calls: [] as FakeCall[],
   /** One-shot responders, used in order before `respond`. */
   queue: [] as ((params: { system: string; prompt: string; model: string }) => Promise<unknown>)[],
   respond: null as
@@ -17,13 +25,28 @@ const fake = vi.hoisted(() => ({
     | ((params: { system: string; prompt: string; model: string }) => Promise<unknown>),
 }));
 
+/** The fake adapter behind complete(): records what complete() passed, answers from the queue. */
+async function fakeAdapter(params: FakeCall): Promise<unknown> {
+  fake.calls.push({
+    system: params.system,
+    prompt: params.prompt,
+    model: params.model,
+    timeoutMs: params.timeoutMs,
+    contextTokens: params.contextTokens,
+  });
+  const next = fake.queue.shift() ?? fake.respond;
+  if (!next) throw new Error("fake adapter: no response configured");
+  return next(params);
+}
+
 vi.mock("@/lib/llm/providers/openai", () => ({
-  completeOpenAi: vi.fn(async (params: { system: string; prompt: string; model: string }) => {
-    fake.calls.push({ system: params.system, prompt: params.prompt, model: params.model });
-    const next = fake.queue.shift() ?? fake.respond;
-    if (!next) throw new Error("fake adapter: no response configured");
-    return next(params);
-  }),
+  completeOpenAi: vi.fn((params: FakeCall) => fakeAdapter(params)),
+}));
+
+// Run decision K55: an organization on Ollama reaches this fake too, so the case below can read
+// the context size complete() passes to the Ollama adapter only.
+vi.mock("@/lib/llm/providers/ollama", () => ({
+  completeOllama: vi.fn((params: FakeCall) => fakeAdapter(params)),
 }));
 
 const bossEnv = vi.hoisted(() => ({
@@ -45,7 +68,12 @@ import {
   KbProposalRetryError,
   setGenerateProposalObserverForTests,
 } from "@/lib/kb/generate-proposal";
-import { KB_PROPOSAL_GENERATE_QUEUE, type ProposalJobPayload } from "@/lib/kb/proposal-contract";
+import {
+  KB_PROPOSAL_GENERATE_QUEUE,
+  PROPOSAL_CALL_TIMEOUT_MS,
+  PROPOSAL_CONTEXT_TOKENS,
+  type ProposalJobPayload,
+} from "@/lib/kb/proposal-contract";
 import { PROPOSAL_SYSTEM_PROMPT } from "@/lib/kb/proposal-prompt";
 import { requestProposal } from "@/lib/kb/proposal-request";
 import { findChangedSources } from "@/lib/kb/proposal-sources";
@@ -328,6 +356,38 @@ describe("generateProposal: tracer (D-10 to D-13)", () => {
       model: MODEL,
       input: call.prompt,
       output: JSON.stringify(output),
+    });
+  });
+});
+
+describe("generateProposal: call deadline and context size (run decision K55)", () => {
+  it("passes the 180 s deadline to OpenAI, and no context size", async () => {
+    const { proposalId, payload } = await setupProposal();
+    respondWith(validOutput());
+    await runJob(payload);
+    expect((await readProposal(proposalId)).status).toBe("DRAFT");
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0].timeoutMs).toBe(PROPOSAL_CALL_TIMEOUT_MS);
+    expect(fake.calls[0].contextTokens).toBeUndefined();
+  });
+
+  it("passes the 180 s deadline and num_ctx 32768 to Ollama", async () => {
+    const { orgId, owner } = await seedOrg({ provider: false });
+    await saveLlmSettings(scopedDb(orgId), orgId, {
+      provider: "ollama",
+      model: "llama3.1",
+      ollamaBaseUrl: "http://127.0.0.1:11434",
+    });
+    const ticket = await seedSource(orgId);
+    const { proposalId, payload } = await request(owner, [ticket.id]);
+    respondWith(validOutput());
+    await runJob(payload);
+    expect((await readProposal(proposalId)).status).toBe("DRAFT");
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0]).toMatchObject({
+      model: "llama3.1",
+      timeoutMs: PROPOSAL_CALL_TIMEOUT_MS,
+      contextTokens: PROPOSAL_CONTEXT_TOKENS,
     });
   });
 });

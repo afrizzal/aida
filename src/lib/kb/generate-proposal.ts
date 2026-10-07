@@ -45,6 +45,8 @@ import { scopedDb } from "../scoped-db";
 import {
   isStuck,
   KB_PROPOSAL_AUDIT_ACTION,
+  PROPOSAL_CALL_TIMEOUT_MS,
+  PROPOSAL_CONTEXT_TOKENS,
   type ProposalFailureCode,
   STUCK_AFTER_MS,
 } from "./proposal-contract";
@@ -348,6 +350,9 @@ async function runClaimed(
       schema: proposalOutputSchema,
       schemaName: PROPOSAL_SCHEMA_NAME,
       maxOutputTokens: PROPOSAL_MAX_OUTPUT_TOKENS,
+      // Run decision K55: a long-form deadline for every adapter, and Ollama's context size.
+      timeoutMs: PROPOSAL_CALL_TIMEOUT_MS,
+      contextTokens: PROPOSAL_CONTEXT_TOKENS,
     });
   } catch (err) {
     return handleProviderError(db, claimed, attempt, err);

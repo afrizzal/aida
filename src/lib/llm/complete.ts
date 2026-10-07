@@ -26,6 +26,7 @@ export async function complete<T>(
     prompt: redactedPrompt,
     schema: params.schema,
     maxOutputTokens: params.maxOutputTokens,
+    timeoutMs: params.timeoutMs, // run decision K55: the caller's deadline, else the default
   };
 
   let output: T;
@@ -37,7 +38,11 @@ export async function complete<T>(
       output = await completeAnthropic({ apiKey: s.apiKey, ...base });
       break;
     case "ollama":
-      output = await completeOllama({ baseUrl: s.ollamaBaseUrl, ...base });
+      output = await completeOllama({
+        baseUrl: s.ollamaBaseUrl,
+        contextTokens: params.contextTokens, // review a2-WR-05: Ollama's num_ctx
+        ...base,
+      });
       break;
     default:
       throw new LlmConfigurationError(`Unsupported provider: ${s.provider}`);
