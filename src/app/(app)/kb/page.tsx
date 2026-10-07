@@ -36,6 +36,9 @@ export default async function KbPage() {
             <Button asChild variant="outline" size="sm" className="text-[13px]">
               <Link href="/kb/proposals">
                 {PROPOSALS_LINK}
+                {/* Review b-IN-03: a separator only screen readers get, so the link's name is
+                    "Proposals, 3" rather than "Proposals3". Not verified with a screen reader. */}
+                {draftProposals > 0 && <span className="sr-only">, </span>}
                 {draftProposals > 0 && (
                   <span className="text-primary-emphasis tabular-nums">{draftProposals}</span>
                 )}
