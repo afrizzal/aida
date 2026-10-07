@@ -29,7 +29,8 @@
 // pg-boss queues the retry with the same payload and so the same epoch) and throws a fixed-text
 // KbProposalRetryError while retryCount is below retryLimit, and is FAILED PROVIDER on the last
 // attempt. A call that throws writes no AuditEvent. Any other exception after the claim is FAILED
-// UNKNOWN by the same conditional update, rethrown only when that FAILED write itself fails. No
+// UNKNOWN by the same conditional update; only when that FAILED write itself fails is an error
+// thrown, and it is a fixed line with the proposal id, never the original text (review a2-IN-03). No
 // raw provider error, prompt or model answer is written to the proposal row or to any log: the log
 // lines below carry the proposal id and a code only.
 //
@@ -458,7 +459,10 @@ export async function generateProposal(
     try {
       result = await failClaimed(db, claimed, "UNKNOWN");
     } catch {
-      throw err;
+      // Review a2-IN-03: neither error is rethrown. Either can carry the model's title or body (a
+      // Prisma validation error prints its arguments) and would land in the pg-boss job row.
+      console.error(`kb-proposal-generate: ${claimed.proposalId} UNKNOWN not written`);
+      throw new Error(`kb-proposal-generate: ${claimed.proposalId} failed, status not written`);
     }
     return result;
   }

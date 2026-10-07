@@ -147,6 +147,14 @@ async function settleAll(promises: Promise<unknown>[]) {
   return results;
 }
 
+/**
+ * Review a2-IN-03: a failed job rethrows only this fixed text (it lands in the pg-boss job row),
+ * never the provider's or the database's own error text.
+ */
+function fixedFailure(articleId: string): RegExp {
+  return new RegExp(`^kb-embed-article: ${articleId} embed failed$`);
+}
+
 function sentFor(articleId: string) {
   return queue.sends.filter(
     (s) =>
@@ -302,7 +310,7 @@ describe("kb-embed-article: FAILED only on a current PENDING article (reviews R2
       throw new Error("embed failed after edit");
     });
 
-    await expect(kbEmbedArticleHandler({ articleId })).rejects.toThrow("embed failed after edit");
+    await expect(kbEmbedArticleHandler({ articleId })).rejects.toThrow(fixedFailure(articleId));
     const row = await articleRow(articleId);
     expect(row?.bodyMarkdown).toBe(V2);
     expect(row?.embeddingStatus).toBe("PENDING");
@@ -315,7 +323,7 @@ describe("kb-embed-article: FAILED only on a current PENDING article (reviews R2
       throw new Error("embed failed");
     });
 
-    await expect(kbEmbedArticleHandler({ articleId })).rejects.toThrow("embed failed");
+    await expect(kbEmbedArticleHandler({ articleId })).rejects.toThrow(fixedFailure(articleId));
     expect((await articleRow(articleId))?.embeddingStatus).toBe("FAILED");
   });
 
@@ -347,7 +355,7 @@ describe("kb-embed-article: FAILED only on a current PENDING article (reviews R2
     const bChunks = await expectOneChunkSet(articleId, BODY, SMALL_ID);
 
     releaseA.resolve();
-    await expect(jobA).rejects.toThrow("job A embed failed");
+    await expect(jobA).rejects.toThrow(fixedFailure(articleId));
     const row = await articleRow(articleId);
     expect(row?.embeddingStatus).toBe("COMPLETED");
     expect(row?.embeddingModel).toBe(SMALL_ID);
@@ -386,8 +394,8 @@ describe("kb-embed-article: FAILED only on a current PENDING article (reviews R2
     const results = await settleAll([jobB, jobA]);
     expect(results[0]?.status).toBe("fulfilled");
     expect(results[1]?.status).toBe("rejected");
-    expect(String((results[1] as PromiseRejectedResult).reason)).toContain(
-      "job A embed failed at once",
+    expect(((results[1] as PromiseRejectedResult).reason as Error).message).toMatch(
+      fixedFailure(articleId),
     );
     const row = await articleRow(articleId);
     expect(row?.embeddingStatus).toBe("COMPLETED");
@@ -490,9 +498,7 @@ describe("kb-embed-article: model freshness (review P6)", () => {
       throw new Error("embed failed after model change");
     });
 
-    await expect(kbEmbedArticleHandler({ articleId })).rejects.toThrow(
-      "embed failed after model change",
-    );
+    await expect(kbEmbedArticleHandler({ articleId })).rejects.toThrow(fixedFailure(articleId));
     expect((await articleRow(articleId))?.embeddingStatus).toBe("PENDING");
   });
 
@@ -560,5 +566,27 @@ describe("kb-embed-article: a settings read error is never a silent skip (review
     await expect(kbEmbedArticleHandler({ articleId })).rejects.toThrow();
     expect(embedMock).not.toHaveBeenCalled();
     expect((await articleRow(articleId))?.embeddingStatus).toBe("PENDING");
+  });
+});
+
+describe("kb-embed-article: fixed-text failure (review a2-IN-03)", () => {
+  it("a provider error carrying server text reaches pg-boss only as the fixed line", async () => {
+    const { orgId } = await seedOrg();
+    const articleId = await seedArticle(orgId, BODY);
+    const providerText = "PROVIDER-SERVER-TEXT-9c1e model not pulled";
+    embedMock.mockImplementationOnce(async () => {
+      throw new Error(providerText);
+    });
+
+    const error = await kbEmbedArticleHandler({ articleId }).then(
+      () => null,
+      (err: unknown) => err,
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(`kb-embed-article: ${articleId} embed failed`);
+    expect(JSON.stringify(error)).not.toContain("PROVIDER-SERVER-TEXT");
+    expect(String((error as Error).stack)).not.toContain("PROVIDER-SERVER-TEXT");
+    expect((error as { cause?: unknown }).cause).toBeUndefined();
+    expect((await articleRow(articleId))?.embeddingStatus).toBe("FAILED");
   });
 });

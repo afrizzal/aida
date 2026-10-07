@@ -241,14 +241,16 @@ export async function kbEmbedArticleHandler(data: { articleId: string }): Promis
     if (kbEmbedArticleObserver?.afterEmbed) await kbEmbedArticleObserver.afterEmbed();
 
     await swapChunks(db, job, readText, jobModel, chunks, embeddings);
-  } catch (err) {
+  } catch {
     try {
       // FAILED only when still current (review R3-1). When the settings cannot be read, nothing
       // proves the article is current, so this write throws and the article stays PENDING.
       await markFailedIfCurrent(db, job, readText, jobModel);
     } catch {
-      // The original error is the one pg-boss must see; a failed status write never replaces it.
+      // A failed status write never replaces the job's failure below.
     }
-    throw err; // pg-boss retries — mirrors ai-triage/email-outbound-send
+    // pg-boss retries — mirrors ai-triage/email-outbound-send. Review a2-IN-03: the job row gets
+    // only this fixed line with the article id, never the provider's or the database's own text.
+    throw new Error(`kb-embed-article: ${article.id} embed failed`);
   }
 }

@@ -557,6 +557,54 @@ describe("generateProposal: provider errors (D-14, run decision K49)", () => {
   });
 });
 
+describe("generateProposal: fixed-text fallback (review a2-IN-03)", () => {
+  it("when the FAILED UNKNOWN write itself fails, only a fixed line is thrown", async () => {
+    const { proposalId, payload } = await setupProposal();
+    respondWith(validOutput());
+    const injected = "INJECTED-STORE-TEXT-4b2d with the model title";
+    setGenerateProposalObserverForTests({
+      beforeStore: () => {
+        throw new Error(injected);
+      },
+    });
+    // A trigger scoped to this one proposal makes its FAILED write fail (test-only, dropped below).
+    const suffix = proposalId.replace(/[^a-zA-Z0-9]/g, "");
+    const fn = `aida_test_refuse_failed_${suffix}`;
+    await prisma.$executeRawUnsafe(`
+      CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.id = '${proposalId}' AND NEW.status = 'FAILED' THEN
+          RAISE EXCEPTION 'DB-ERROR-TEXT-77aa refused FAILED';
+        END IF;
+        RETURN NEW;
+      END $$`);
+    await prisma.$executeRawUnsafe(
+      `CREATE TRIGGER ${fn} BEFORE UPDATE ON "KbProposal" FOR EACH ROW EXECUTE FUNCTION ${fn}()`,
+    );
+    try {
+      const error = await runJob(payload).then(
+        () => null,
+        (err: unknown) => err,
+      );
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe(
+        `kb-proposal-generate: ${proposalId} failed, status not written`,
+      );
+      for (const text of ["INJECTED-STORE-TEXT", "DB-ERROR-TEXT"]) {
+        expect((error as Error).message).not.toContain(text);
+        expect(String((error as Error).stack)).not.toContain(text);
+        expect(JSON.stringify(error)).not.toContain(text);
+      }
+      expect((error as { cause?: unknown }).cause).toBeUndefined();
+      // The FAILED write failed, so the row is still the claimed GENERATING row.
+      expect((await readProposal(proposalId)).status).toBe("GENERATING");
+    } finally {
+      await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS ${fn} ON "KbProposal"`);
+      await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS ${fn}()`);
+    }
+  });
+});
+
 describe("generateProposal: output validation (D-11, review C7, run decision K51)", () => {
   it("a body with a source marker [T1] gives FAILED INVALID_OUTPUT with one audit row", async () => {
     await expectInvalidOutput({ ...validOutput(), bodyMarkdown: "## Steps\n\nRestart it [T1]." });
@@ -597,11 +645,14 @@ See the [guide](\/tickets\/abc) first.`,
     });
   });
 
-  it("a protocol-relative image in the body and an image in the title give FAILED INVALID_OUTPUT (K54)", async () => {
+  it("a protocol-relative image in the body gives FAILED INVALID_OUTPUT (K54)", async () => {
     await expectInvalidOutput({
       ...validOutput(),
       bodyMarkdown: "## Steps\n\n![x](//attacker.example/p.png)",
     });
+  });
+
+  it("an image in the title gives FAILED INVALID_OUTPUT (K54)", async () => {
     await expectInvalidOutput({
       ...validOutput(),
       title: "Printer fix ![x](https://attacker.example/p.png)",
