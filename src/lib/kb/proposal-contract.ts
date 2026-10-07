@@ -55,8 +55,9 @@
 // (INVALID_OUTPUT).
 //
 // Publish lock (review C1, plan 12.2-05): the publish transaction's first statement share-locks
-// the actor's member row, so a concurrent demotion or member removal waits for the publish to
-// commit or roll back.
+// the actor's member rows (all of them in the organization, in id order; admin only when every
+// row is owner or admin, review a-WR-03), so a concurrent demotion or member removal waits for the
+// publish to commit or roll back.
 //
 // Source rules (D-07, D-08, D-10; owner item 12.2-o3 default): 1 to 5 tickets of the organization
 // whose state group is RESOLVED or CLOSED, never a state name. A merged source is refused with

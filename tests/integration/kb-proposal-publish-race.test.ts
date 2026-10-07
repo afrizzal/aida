@@ -428,6 +428,127 @@ describe("publish against a demotion or a member delete (review C1)", () => {
   });
 });
 
+describe("publish by an actor with several member rows in the organization (review a-WR-03)", () => {
+  // The member table (Better Auth's) has no unique key on (organizationId, userId), so one user
+  // can hold two rows. The extra row's id is chosen to sort before ("0") or after ("z") the
+  // fixture's random UUID, so both id orders are proven; it is always inserted second.
+  type Placement = "before" | "after";
+
+  async function seedTwoRows(extraRole: "admin" | "member", placement: Placement) {
+    const { orgId, admin } = await seedOrg();
+    const extraId = `${placement === "before" ? "0" : "z"}-extra-${admin.memberId}`;
+    await prisma.member.create({
+      data: {
+        id: extraId,
+        organizationId: orgId,
+        userId: admin.userId,
+        role: extraRole,
+        createdAt: new Date(),
+      },
+    });
+    const ids = [admin.memberId, extraId].sort();
+    return { orgId, admin, extraId, lowerId: ids[0], higherId: ids[1] };
+  }
+
+  async function demoteHeld(
+    memberId: string,
+    orgId: string,
+    opts: { pid: Deferred<number>; applied?: Deferred<void>; release?: Deferred<void> },
+  ): Promise<void> {
+    return other.$transaction(async (tx) => {
+      opts.pid.resolve(await backendPid(tx));
+      await tx.$executeRaw`
+        UPDATE "member" SET "role" = 'member'
+        WHERE "id" = ${memberId} AND "organizationId" = ${orgId}
+      `;
+      opts.applied?.resolve();
+      if (opts.release) await opts.release.promise;
+    }, TX_OPTIONS);
+  }
+
+  for (const placement of ["before", "after"] as const) {
+    it(`an admin row and a member row (member row sorting ${placement}): NOT_ALLOWED, no article, still DRAFT`, async () => {
+      const { orgId, admin } = await seedTwoRows("member", placement);
+      const p = await seedOne(orgId, { status: "DRAFT", version: 1 });
+
+      const result = await publishProposal(admin, { proposalId: p.id, expectedVersion: 1 });
+
+      expect(result).toEqual({ ok: false, code: "NOT_ALLOWED" });
+      expect(await prisma.kbArticle.count({ where: { organizationId: orgId } })).toBe(0);
+      expect(await proposalRow(p.id)).toMatchObject({ status: "DRAFT", version: 1 });
+      expect(sendsOn("kb-embed-article")).toEqual([]);
+    });
+
+    it(`two admin rows (extra row sorting ${placement}): publish ok with one article`, async () => {
+      const { orgId, admin } = await seedTwoRows("admin", placement);
+      const p = await seedOne(orgId, { status: "DRAFT", version: 1 });
+
+      const result = await publishProposal(admin, { proposalId: p.id, expectedVersion: 1 });
+
+      expect(result).toMatchObject({ ok: true, indexingQueued: true });
+      expect(await prisma.kbArticle.count({ where: { organizationId: orgId } })).toBe(1);
+    });
+  }
+
+  for (const which of ["lowerId", "higherId"] as const) {
+    it(`publish first: a demotion of the ${which === "lowerId" ? "first" : "second"} of two admin rows (by id) waits behind the publish`, async () => {
+      const rows = await seedTwoRows("admin", "after");
+      const target = rows[which];
+      const p = await seedOne(rows.orgId, { status: "DRAFT", version: 1 });
+      const race = holdFirstAt("afterMembershipLock");
+
+      const publish = publishProposal(rows.admin, { proposalId: p.id, expectedVersion: 1 });
+      const publishPid = await race.holderPid;
+      const changerPid = deferred<number>();
+      const changing = demoteHeld(target, rows.orgId, { pid: changerPid });
+      await expectBlocked(`publish then demote ${which}`, publishPid, await changerPid.promise);
+      race.release.resolve();
+
+      const [rp] = values(await settleAll<unknown>([publish, changing]));
+      expect(rp).toMatchObject({ ok: true, indexingQueued: true });
+      expect(await prisma.kbArticle.count({ where: { organizationId: rows.orgId } })).toBe(1);
+      const role = await prisma.member.findUniqueOrThrow({
+        where: { id: target },
+        select: { role: true },
+      });
+      expect(role.role).toBe("member");
+    });
+
+    it(`a held demotion of the ${which === "lowerId" ? "first" : "second"} of two admin rows first: the publish waits behind it, then NOT_ALLOWED`, async () => {
+      const rows = await seedTwoRows("admin", "after");
+      const target = rows[which];
+      const p = await seedOne(rows.orgId, { status: "DRAFT", version: 2 });
+      const changerPid = deferred<number>();
+      const applied = deferred<void>();
+      const releaseChange = hold();
+      const changing = demoteHeld(target, rows.orgId, {
+        pid: changerPid,
+        applied,
+        release: releaseChange,
+      });
+      await applied.promise;
+
+      const publishPid = deferred<number>();
+      setProposalReviewObserverForTests({
+        onTransactionStart: async (tx) => publishPid.resolve(await backendPid(tx)),
+      });
+      const publish = publishProposal(rows.admin, { proposalId: p.id, expectedVersion: 2 });
+      await expectBlocked(
+        `demote ${which} then publish`,
+        await changerPid.promise,
+        await publishPid.promise,
+      );
+      releaseChange.resolve();
+
+      const [, rp] = values(await settleAll<unknown>([changing, publish]));
+      expect(rp).toEqual({ ok: false, code: "NOT_ALLOWED" });
+      expect(await prisma.kbArticle.count({ where: { organizationId: rows.orgId } })).toBe(0);
+      expect(await proposalRow(p.id)).toMatchObject({ status: "DRAFT", version: 2 });
+      expect(sendsOn("kb-embed-article")).toEqual([]);
+    });
+  }
+});
+
 describe("restart race (reviews C5 and R2-3)", () => {
   it("two restarts at one version: one ok, one CONFLICT; version and epoch incremented once; one send with that epoch", async () => {
     const { orgId, owner, admin } = await seedOrg();

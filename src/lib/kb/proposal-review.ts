@@ -5,9 +5,10 @@
 //
 // Authorization (D-01, review C1): every action checks the active membership and then the exact
 // owner or admin role (isAdminRole) inside its transaction, before any read of the proposal. A
-// deleted member row is MEMBERSHIP_ENDED, a plain member NOT_ALLOWED. Publish takes the member row
-// FOR SHARE as its first statement (shareLockActiveMembership), so a demotion or a member delete
-// cannot commit between publish's role check and its commit. Save, reject, restart and retry keep
+// deleted member row is MEMBERSHIP_ENDED, a plain member NOT_ALLOWED. Publish takes the actor's
+// member rows FOR SHARE as its first statement (shareLockActiveMembership: every row of the user in
+// the organization, in id order, admin only when every row is owner or admin, review a-WR-03), so
+// a demotion or a member delete cannot commit between publish's role check and its commit. Save, reject, restart and retry keep
 // the plain findActiveMembership read: they publish nothing. The CHECKs and the status trigger of
 // plan 12.2-01 are integrity fences, not authorization; writes by a privileged database user are
 // out of scope.
@@ -327,7 +328,7 @@ async function publishAttempt(
   return scopedDb(orgId).$transaction(async (tx) => {
     if (reviewObserver?.onTransactionStart) await reviewObserver.onTransactionStart(tx);
 
-    // Review C1: the first statement. The member row stays share-locked until this commits.
+    // Review C1: the first statement. The member rows stay share-locked until this commits.
     const membership = await shareLockActiveMembership(tx, userId, orgId);
     if (reviewObserver?.afterMembershipLock) await reviewObserver.afterMembershipLock(tx);
     if (!membership) throw new ProposalReviewError("MEMBERSHIP_ENDED");

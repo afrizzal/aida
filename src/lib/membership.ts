@@ -55,6 +55,14 @@ export interface MembershipLockClient {
  * (columns id, organizationId, userId, role), outside DOMAIN_MODELS, so both the user and the
  * organization terms are explicit.
  *
+ * Review a-WR-03: the member table has no unique key on (organizationId, userId), so a user can
+ * hold more than one row in an organization. Every such row is locked FOR SHARE, in id order (one
+ * statement, so two publishes lock in the same order), and the result is the deciding row: the
+ * first row, by id, whose role is not an admin role, or else the first row. isAdminRole on the
+ * result is therefore true only when EVERY row of the user in the organization is owner or admin,
+ * and a demotion or a delete of any of those rows waits for the publish. null when there is no
+ * row.
+ *
  * Only publishProposal (src/lib/kb/proposal-review.ts) uses it, as its transaction's first
  * statement. findActiveMembership above is unchanged and stays the plain read of every other path.
  */
@@ -68,10 +76,10 @@ export async function shareLockActiveMembership(
     SELECT "id", "role"
     FROM "member"
     WHERE "userId" = ${userId} AND "organizationId" = ${orgId}
-    LIMIT 1
+    ORDER BY "id"
     FOR SHARE
   `;
-  const row = rows[0];
+  const row = rows.find((candidate) => !isAdminRole(candidate.role)) ?? rows[0];
   return row ? { id: row.id, role: row.role } : null;
 }
 
