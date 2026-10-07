@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MAINTENANCE_REFUSAL_CODES,
+  PROPOSAL_STATUSES,
   REQUEST_REFUSAL_CODES,
   REVIEW_REFUSAL_CODES,
 } from "../../src/lib/kb/proposal-contract";
@@ -18,6 +19,8 @@ import {
 import {
   ACTION_UNKNOWN_CODE,
   type ActionOutcome,
+  anyBecameDraft,
+  finishedAsDraft,
   type ProposalAction,
   resolveActionOutcome,
 } from "../../src/lib/kb/proposal-outcome";
@@ -541,5 +544,26 @@ describe("resolveActionOutcome: accepts the services' typed results unchanged (p
       "success",
       "refusal",
     ]);
+  });
+});
+
+describe("the 'Generation finished announcement' fires only for a new DRAFT (review b-IN-05)", () => {
+  // "A proposal finished drafting." is true only when GENERATING became DRAFT; a proposal that
+  // left GENERATING for FAILED did not finish drafting, so nothing is announced.
+  it("finishedAsDraft is true only for GENERATING to DRAFT", () => {
+    for (const previous of PROPOSAL_STATUSES) {
+      for (const current of PROPOSAL_STATUSES) {
+        expect(finishedAsDraft(previous, current)).toBe(
+          previous === "GENERATING" && current === "DRAFT",
+        );
+      }
+    }
+  });
+
+  it("anyBecameDraft is true only when a row that was GENERATING is now DRAFT", () => {
+    expect(anyBecameDraft(["a", "b"], ["b"])).toBe(true);
+    expect(anyBecameDraft(["a"], [])).toBe(false); // a left GENERATING for FAILED (or vanished)
+    expect(anyBecameDraft([], ["a"])).toBe(false); // already DRAFT before
+    expect(anyBecameDraft(["a"], ["c"])).toBe(false);
   });
 });

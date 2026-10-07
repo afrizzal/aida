@@ -13,6 +13,7 @@
 import {
   MAINTENANCE_REFUSAL_CODES,
   type MaintenanceRefusalCode,
+  type ProposalStatus,
   PUBLISH_REFUSAL_CODES,
   type PublishRefusalCode,
   REQUEST_REFUSAL_CODES,
@@ -240,4 +241,22 @@ export function resolveActionOutcome(action: ProposalAction, outcome: ActionOutc
         ? maintenanceRefusalView(code)
         : unknownView(action);
   }
+}
+
+/**
+ * Review b-IN-05: "Generation finished announcement" ("A proposal finished drafting.") is true
+ * only for a proposal that went from GENERATING to DRAFT; one that ended FAILED did not finish
+ * drafting, so the review page announces nothing for it.
+ */
+export function finishedAsDraft(previous: ProposalStatus, current: ProposalStatus): boolean {
+  return previous === "GENERATING" && current === "DRAFT";
+}
+
+/** The list's form of finishedAsDraft: a row that was GENERATING at the last render is now DRAFT. */
+export function anyBecameDraft(
+  previousGeneratingIds: readonly string[],
+  currentDraftIds: readonly string[],
+): boolean {
+  const drafts = new Set(currentDraftIds);
+  return previousGeneratingIds.some((id) => drafts.has(id));
 }

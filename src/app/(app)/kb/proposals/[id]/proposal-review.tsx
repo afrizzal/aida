@@ -74,6 +74,7 @@ import {
 } from "@/lib/kb/proposal-copy";
 import {
   type ActionOutcome,
+  finishedAsDraft,
   type OutcomeTone,
   type OutcomeView,
   resolveActionOutcome,
@@ -206,7 +207,8 @@ function ActionBar({ children }: { children: ReactNode }) {
 
 /**
  * UI-SPEC 3i "Generation finished (polling)": focus is not moved; a polite live region
- * announces it when the proposal leaves GENERATING while the page is open.
+ * announces it when the proposal goes from GENERATING to DRAFT while the page is open. A proposal
+ * that ended FAILED did not finish drafting and is not announced (review b-IN-05).
  */
 function GenerationFinishedAnnouncer({ status }: { status: ProposalStatus }) {
   const previous = useRef(status);
@@ -215,7 +217,7 @@ function GenerationFinishedAnnouncer({ status }: { status: ProposalStatus }) {
   useEffect(() => {
     const was = previous.current;
     previous.current = status;
-    if (was === "GENERATING" && status !== "GENERATING") {
+    if (finishedAsDraft(was, status)) {
       setAnnouncement(GENERATION_FINISHED_ANNOUNCEMENT);
     }
   }, [status]);

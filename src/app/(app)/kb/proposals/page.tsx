@@ -54,7 +54,10 @@ export default async function KbProposalsPage() {
   }
 
   const { rows, aiEnabled } = result;
-  const generatingCount = rows.filter((row) => row.status === "GENERATING").length;
+  const idsWithStatus = (status: string) =>
+    rows.filter((row) => row.status === status).map((row) => row.id);
+  const generatingIds = idsWithStatus("GENERATING");
+  const draftIds = idsWithStatus("DRAFT");
 
   return (
     <div className="flex flex-col">
@@ -77,7 +80,7 @@ export default async function KbProposalsPage() {
         </div>
       )}
 
-      <ProposalListRefresh generatingCount={generatingCount} />
+      <ProposalListRefresh generatingIds={generatingIds} draftIds={draftIds} />
 
       {rows.length === 0 ? (
         <EmptyState icon={Sparkles} heading={LIST_EMPTY_HEADING} body={LIST_EMPTY_BODY} />
