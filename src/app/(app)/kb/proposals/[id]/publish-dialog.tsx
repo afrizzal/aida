@@ -56,7 +56,7 @@ export interface PublishDialogProps {
   returnFocusRef: RefObject<HTMLButtonElement | null>;
   /** Moves focus to the page h1 now and again after the refresh (UI-SPEC 3i). */
   onFocusHeading(): void;
-  /** "Reload proposal" in the conflict callout. */
+  /** "Reload proposal" in the callout (conflict, not draft, unknown outcome; review b-WR-03). */
   onReload(): void;
 }
 
@@ -74,12 +74,31 @@ export function PublishDialog({
   const checkboxRef = useRef<HTMLButtonElement>(null);
   /** Where focus goes when the dialog closes: the opening button, or the h1 after success or reload. */
   const closeFocus = useRef<"opener" | "heading">("opener");
+  /**
+   * Review b-WR-03: after an unknown outcome the write may have committed, so closing the dialog
+   * reloads the proposal (as "Reload proposal" does, focus on the h1) instead of leaving a stale
+   * DRAFT editor on screen.
+   */
+  const reloadOnClose = useRef(false);
+
+  function close() {
+    if (reloadOnClose.current) {
+      reloadOnClose.current = false;
+      closeFocus.current = "heading";
+      onOpenChange(false);
+      onReload();
+      return;
+    }
+    onOpenChange(false);
+  }
 
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!pending) onOpenChange(next);
+        if (pending) return;
+        if (next) onOpenChange(true);
+        else close();
       }}
     >
       <DialogContent
@@ -89,6 +108,7 @@ export function PublishDialog({
           // UI-SPEC 3i: the dialog opens with focus on the confirm checkbox.
           event.preventDefault();
           closeFocus.current = "opener";
+          reloadOnClose.current = false;
           checkboxRef.current?.focus();
         }}
         onCloseAutoFocus={(event) => {
@@ -114,7 +134,10 @@ export function PublishDialog({
             checkboxRef={checkboxRef}
             pending={pending}
             onPendingChange={setPending}
-            onClose={() => onOpenChange(false)}
+            onClose={close}
+            onUnknown={() => {
+              reloadOnClose.current = true;
+            }}
             onPublished={() => {
               closeFocus.current = "heading";
               onOpenChange(false);
@@ -140,6 +163,8 @@ interface PublishFlowProps {
   pending: boolean;
   onPendingChange(pending: boolean): void;
   onClose(): void;
+  /** An unknown outcome: closing the dialog then reloads the proposal (review b-WR-03). */
+  onUnknown(): void;
   onPublished(): void;
   onReload(): void;
 }
@@ -153,6 +178,7 @@ function PublishFlow({
   pending,
   onPendingChange,
   onClose,
+  onUnknown,
   onPublished,
   onReload,
 }: PublishFlowProps) {
@@ -192,6 +218,7 @@ function PublishFlow({
       onPublished();
       return;
     }
+    if (next.kind === "unknown") onUnknown();
     setView(next);
   }
 

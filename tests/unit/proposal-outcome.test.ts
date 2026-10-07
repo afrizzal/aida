@@ -238,11 +238,12 @@ describe("resolveActionOutcome: save (UI-SPEC 3c, 3e, 3h, 3i)", () => {
   });
 
   it("NOT_DRAFT and NOT_ALLOWED give their row and focus the callout", () => {
+    // Review b-WR-03: the "Save error: not draft" row asks for a reload, so it is offered.
     expect(resolveActionOutcome("save", { ok: false, code: "NOT_DRAFT" })).toMatchObject({
       kind: "refusal",
       message: copy.SAVE_ERROR_NOT_DRAFT,
       focus: "callout",
-      offerReload: false,
+      offerReload: true,
     });
     expect(resolveActionOutcome("save", { ok: false, code: "NOT_ALLOWED" })).toMatchObject({
       kind: "refusal",
@@ -257,7 +258,7 @@ describe("resolveActionOutcome: save (UI-SPEC 3c, 3e, 3h, 3i)", () => {
       tone: "error",
       message: copy.SAVE_OUTCOME_UNKNOWN,
       disableSubmit: true,
-      offerReload: false,
+      offerReload: true,
       focus: "callout",
     });
   });
@@ -311,7 +312,7 @@ describe("resolveActionOutcome: publish and reject (UI-SPEC 3f, 3g, amendment A1
       tone: "error",
       message: `Nothing was changed. ${copy.PUBLISH_ERROR_NOT_DRAFT}`,
       disableSubmit: true,
-      offerReload: false,
+      offerReload: true,
       focus: "dismiss",
     });
     expect(resolveActionOutcome("publish", { ok: false, code: "CONFLICT" })).toStrictEqual({
@@ -327,7 +328,7 @@ describe("resolveActionOutcome: publish and reject (UI-SPEC 3f, 3g, amendment A1
       tone: "error",
       message: copy.PUBLISH_OUTCOME_UNKNOWN,
       disableSubmit: true,
-      offerReload: false,
+      offerReload: true,
       focus: "dismiss",
     });
     for (const code of REVIEW_REFUSAL_CODES) {
@@ -403,7 +404,7 @@ describe("resolveActionOutcome: restart and retry indexing (UI-SPEC 3i, amendmen
       tone: "error",
       message: copy.RESTART_OUTCOME_UNKNOWN,
       disableSubmit: true,
-      offerReload: false,
+      offerReload: true,
       focus: "pressedButton",
     });
   });
@@ -438,7 +439,7 @@ describe("resolveActionOutcome: restart and retry indexing (UI-SPEC 3i, amendmen
       tone: "error",
       message: copy.RETRY_INDEXING_OUTCOME_UNKNOWN,
       disableSubmit: true,
-      offerReload: false,
+      offerReload: true,
       focus: "pressedButton",
     });
   });
@@ -450,6 +451,49 @@ describe("resolveActionOutcome: restart and retry indexing (UI-SPEC 3i, amendmen
         expect(view.kind).toBe("refusal");
         expect(view.message).toBe(copy.maintenanceRefusalCopy(code));
         expect(view.focus).toBe("pressedButton");
+      }
+    }
+  });
+});
+
+describe("resolveActionOutcome: reload offer (review b-WR-03)", () => {
+  // Every row that asks the user to reload ("Reload the proposal…", "Reload it…") offers "Reload
+  // proposal": the outcome-unknown rows of save, publish, reject, restart and retry indexing, and
+  // the NOT_DRAFT rows of save, publish and reject, besides CONFLICT. The Start dialog's row says
+  // "Open Proposals to check", so start never offers it.
+  it("every outcome-unknown view except start offers the reload", () => {
+    for (const action of ACTIONS) {
+      const view = resolveActionOutcome(action, { rejected: true });
+      expect(view.offerReload).toBe(action !== "start");
+      expect(resolveActionOutcome(action, { ok: false, code: ACTION_UNKNOWN_CODE })).toStrictEqual(
+        view,
+      );
+      if (view.offerReload) expect(view.message).toMatch(/Reload (the proposal|it) to check/);
+    }
+  });
+
+  it("NOT_DRAFT offers the reload for save, publish and reject; its rows ask for it", () => {
+    for (const action of ["save", "publish", "reject"] as const) {
+      const view = resolveActionOutcome(action, { ok: false, code: "NOT_DRAFT" });
+      expect(view.kind).toBe("refusal");
+      expect(view.offerReload).toBe(true);
+      expect(view.disableSubmit).toBe(true);
+      expect(view.message).toMatch(/Reload it to see its status\.$/);
+    }
+  });
+
+  it("refusals whose rows do not ask for a reload do not offer it", () => {
+    for (const action of ["save", "publish", "reject"] as const) {
+      for (const code of ["NOT_ALLOWED", "MEMBERSHIP_ENDED", "NOT_FOUND"]) {
+        expect(resolveActionOutcome(action, { ok: false, code }).offerReload).toBe(false);
+      }
+    }
+    expect(
+      resolveActionOutcome("publish", { ok: false, code: "SLUG_UNAVAILABLE" }).offerReload,
+    ).toBe(false);
+    for (const action of ["restart", "retryIndexing"] as const) {
+      for (const code of MAINTENANCE_REFUSAL_CODES) {
+        expect(resolveActionOutcome(action, { ok: false, code }).offerReload).toBe(false);
       }
     }
   });

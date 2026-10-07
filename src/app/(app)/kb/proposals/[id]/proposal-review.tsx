@@ -141,7 +141,15 @@ export function ProposalReview({ proposal, previewHtml, headingId }: ProposalRev
       );
       break;
     case "GENERATING":
-      content = <GeneratingView proposal={proposal} onFocusHeading={focusHeading} />;
+      content = (
+        <GeneratingView
+          // A reload starts the view again, which clears a lock left by an unknown outcome.
+          key={reloadCount}
+          proposal={proposal}
+          onFocusHeading={focusHeading}
+          onReload={reload}
+        />
+      );
       break;
     case "FAILED":
       content = <FailedView proposal={proposal} />;
@@ -150,7 +158,14 @@ export function ProposalReview({ proposal, previewHtml, headingId }: ProposalRev
       content = <RejectedView proposal={proposal} previewHtml={previewHtml} />;
       break;
     case "PUBLISHED":
-      content = <PublishedView proposal={proposal} previewHtml={previewHtml} />;
+      content = (
+        <PublishedView
+          key={reloadCount}
+          proposal={proposal}
+          previewHtml={previewHtml}
+          onReload={reload}
+        />
+      );
       break;
   }
 
@@ -671,6 +686,29 @@ function OutcomeStatusLine({
 }
 
 /**
+ * The role=alert line under "Restart generation" or "Retry indexing" (UI-SPEC 3i), with "Reload
+ * proposal" when the row asks for a reload (an unknown outcome, review b-WR-03).
+ */
+function OutcomeAlertLine({ view, onReload }: { view: OutcomeView; onReload(): void }) {
+  return (
+    <div role="alert" className="space-y-2">
+      <p className="text-[12px] text-destructive">{view.message}</p>
+      {view.offerReload && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="text-[13px]"
+          onClick={onReload}
+        >
+          {RELOAD_BUTTON}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/**
  * UI-SPEC 3e GENERATING (Assumptions 3 and 6, D-13, review C5): skeleton lines with aria-busy,
  * router.refresh() every PROPOSAL_POLL_INTERVAL_MS, and the stuck notice with "Restart
  * generation" while the loader reports isStuck (from generationClaimedAt, else
@@ -679,14 +717,16 @@ function OutcomeStatusLine({
 function GeneratingView({
   proposal,
   onFocusHeading,
+  onReload,
 }: {
   proposal: ProposalReviewData;
   onFocusHeading(): void;
+  onReload(): void;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [locked, setLocked] = useState(false);
-  const [alertLine, setAlertLine] = useState<string | null>(null);
+  const [alertLine, setAlertLine] = useState<OutcomeView | null>(null);
   // Amendment A3: kept here, outside the stuck notice, until the proposal leaves GENERATING
   // (this view unmounts) or the page reloads.
   const [restartLine, setRestartLine] = useState<StatusLine | null>(null);
@@ -740,7 +780,7 @@ function GeneratingView({
       );
     } else {
       setRestartLine(null);
-      setAlertLine(view.message);
+      setAlertLine(view);
       if (view.disableSubmit) setLocked(true);
     }
     // UI-SPEC 3i: the pressed button keeps focus (it stays focusable while aria-disabled).
@@ -782,11 +822,7 @@ function GeneratingView({
             )}
             {RESTART_GENERATION}
           </Button>
-          {alertLine && (
-            <p role="alert" className="text-[12px] text-destructive">
-              {alertLine}
-            </p>
-          )}
+          {alertLine?.message && <OutcomeAlertLine view={alertLine} onReload={onReload} />}
         </div>
       )}
 
@@ -805,15 +841,17 @@ function GeneratingView({
 function PublishedView({
   proposal,
   previewHtml,
+  onReload,
 }: {
   proposal: ProposalReviewData;
   previewHtml: string;
+  onReload(): void;
 }) {
   const router = useRouter();
   const { article } = proposal;
   const [pending, setPending] = useState(false);
   const [locked, setLocked] = useState(false);
-  const [alertLine, setAlertLine] = useState<string | null>(null);
+  const [alertLine, setAlertLine] = useState<OutcomeView | null>(null);
   // Review P5: kept in client state and rendered outside the button's block, so the line survives
   // the router.refresh() after a successful retry, also once the article is COMPLETED and the
   // button is gone, until the page reloads.
@@ -848,7 +886,7 @@ function PublishedView({
     // A refusal, a rejected call and an unexpected error: the alert line under the pressed
     // button, which keeps focus; after an unknown outcome it stays disabled until reload. No
     // refresh.
-    setAlertLine(view.message);
+    setAlertLine(view);
     if (view.disableSubmit) setLocked(true);
     buttonRef.current?.focus();
   }
@@ -900,11 +938,7 @@ function PublishedView({
                 </>
               )}
             </Button>
-            {alertLine && (
-              <p role="alert" className="text-[12px] text-destructive">
-                {alertLine}
-              </p>
-            )}
+            {alertLine?.message && <OutcomeAlertLine view={alertLine} onReload={onReload} />}
           </div>
         )}
 

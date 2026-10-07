@@ -78,7 +78,11 @@ export interface OutcomeView {
   message: string | null;
   /** The submit (or the pressed button) stays disabled until the dialog closes or the page reloads. */
   disableSubmit: boolean;
-  /** "Reload proposal" is offered in the callout (Conflict only). */
+  /**
+   * "Reload proposal" is offered with the message (review b-WR-03): for every row that asks the
+   * user to reload, that is CONFLICT, NOT_DRAFT (save, publish, reject) and the outcome-unknown
+   * rows of every action but start, whose row says "Open Proposals to check" instead.
+   */
   offerReload: boolean;
   focus: OutcomeFocus;
   /** Set for kind "field": the field that failed. */
@@ -107,7 +111,19 @@ function view(
 }
 
 function unknownView(action: ProposalAction): OutcomeView {
-  return view("unknown", "error", outcomeUnknownCopy(action), UNKNOWN_FOCUS[action], true);
+  return view(
+    "unknown",
+    "error",
+    outcomeUnknownCopy(action),
+    UNKNOWN_FOCUS[action],
+    true,
+    action !== "start",
+  );
+}
+
+/** Review b-WR-03: the refusals whose rows ask the user to reload the proposal. */
+function asksForReload(code: string): boolean {
+  return code === "CONFLICT" || code === "NOT_DRAFT";
 }
 
 function isOneOf<T extends string>(list: readonly T[], code: string): code is T {
@@ -166,11 +182,11 @@ function saveRefusalView(code: ReviewRefusalCode, field: string | undefined): Ou
   }
   // CONFLICT (3h), NOT_DRAFT, NOT_ALLOWED, MEMBERSHIP_ENDED and NOT_FOUND cannot succeed again
   // without a reload, so save stays disabled until then.
-  return view("refusal", "error", saveRefusalCopy(code), "callout", true, code === "CONFLICT");
+  return view("refusal", "error", saveRefusalCopy(code), "callout", true, asksForReload(code));
 }
 
 function dialogRefusalView(message: string, code: PublishRefusalCode): OutcomeView {
-  return view("refusal", "error", message, "dismiss", true, code === "CONFLICT");
+  return view("refusal", "error", message, "dismiss", true, asksForReload(code));
 }
 
 function publishRefusalView(code: PublishRefusalCode, field: string | undefined): OutcomeView {
