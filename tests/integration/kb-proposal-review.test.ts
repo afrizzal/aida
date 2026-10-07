@@ -127,13 +127,62 @@ function urlAttributes(html: string): string[] {
   return [...html.matchAll(/\b(?:href|src)="([^"]*)"/g)].map((m) => m[1]);
 }
 
+describe("publishProposal: images (run decision K54, review a2-CR-01)", () => {
+  it("a stored draft body with an image is refused IMAGE_NOT_ALLOWED on the body; no article", async () => {
+    const { orgId, owner } = await seedOrg();
+    const ticket = await seedResolvedTicket(orgId);
+    const proposal = await seedProposal(orgId, {
+      status: "DRAFT",
+      ticketIds: [ticket.id],
+      title: "Reset a forgotten password",
+      bodyMarkdown: "## Steps\n\nOpen Settings.\n\n![p](https://attacker.example/p.png)",
+      version: 2,
+    });
+    bossEnv.sends = [];
+
+    const result = await publishProposal(owner, { proposalId: proposal.id, expectedVersion: 2 });
+
+    expect(result).toEqual({ ok: false, code: "IMAGE_NOT_ALLOWED", field: "bodyMarkdown" });
+    const row = await prisma.kbProposal.findUniqueOrThrow({ where: { id: proposal.id } });
+    expect(row.status).toBe("DRAFT");
+    expect(row.version).toBe(2);
+    expect(await prisma.kbArticle.count({ where: { organizationId: orgId } })).toBe(0);
+    expect(sendsOn("kb-embed-article")).toHaveLength(0);
+  });
+
+  it("saving a body with an image is refused IMAGE_NOT_ALLOWED on the body; nothing stored", async () => {
+    const { orgId, owner } = await seedOrg();
+    const ticket = await seedResolvedTicket(orgId);
+    const proposal = await seedProposal(orgId, {
+      status: "DRAFT",
+      ticketIds: [ticket.id],
+      title: "Reset a forgotten password",
+      bodyMarkdown: "## Steps\n\nOpen Settings.",
+      version: 2,
+    });
+
+    const result = await saveProposalDraft(owner, {
+      proposalId: proposal.id,
+      expectedVersion: 2,
+      title: "Reset a forgotten password",
+      bodyMarkdown: "## Steps\n\nOpen Settings.\n\n![p](//attacker.example/p.png)",
+    });
+
+    expect(result).toEqual({ ok: false, code: "IMAGE_NOT_ALLOWED", field: "bodyMarkdown" });
+    const row = await prisma.kbProposal.findUniqueOrThrow({ where: { id: proposal.id } });
+    expect(row.bodyMarkdown).toBe("## Steps\n\nOpen Settings.");
+    expect(row.version).toBe(2);
+  });
+});
+
 describe("publishProposal: tracer (D-06, D-15, review C1, K51)", () => {
   it("an owner publishes a draft: exactly one article, linked back, embedding enqueued after commit", async () => {
     const { orgId, owner } = await seedOrg();
     const ticket = await seedResolvedTicket(orgId);
     const title = "Reset a forgotten password";
     const bodyMarkdown =
-      "## Steps\n\nOpen **Settings** and choose Reset. See [the guide](https://docs.example.com/guide).\n\n![diagram](/images/reset.png)";
+      // Run decision K54: no image (every image is refused); the link is the URL attribute checked.
+      "## Steps\n\nOpen **Settings** and choose Reset. See [the guide](https://docs.example.com/guide).";
     const citedLabel = `CITED-LABEL-${orgId.slice(0, 8)}`;
     const proposal = await seedProposal(orgId, {
       status: "DRAFT",
@@ -180,7 +229,7 @@ describe("publishProposal: tracer (D-06, D-15, review C1, K51)", () => {
     expect(containsTicketLink(article.bodyMarkdown)).toBe(false);
     expect(renderedBodyLinksToTicket(article.bodyMarkdown)).toBe(false);
     const urls = urlAttributes(article.bodyHtml);
-    expect(urls.length).toBeGreaterThanOrEqual(2); // the href and the img src are checked
+    expect(urls.length).toBeGreaterThanOrEqual(1); // the href is checked
     for (const url of urls) {
       expect(isTicketPageUrl(url)).toBe(false);
       expect(new URL(url, "https://aida.invalid/").pathname.startsWith("/tickets/")).toBe(false);
