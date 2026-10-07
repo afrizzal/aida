@@ -114,8 +114,8 @@ function isOneOf<T extends string>(list: readonly T[], code: string): code is T 
 
 /**
  * The field a field code belongs to when the refusal names none. CITATION_MARKER, TICKET_LINK,
- * BODY_REQUIRED and IMAGE_NOT_ALLOWED (amendment A6, run decision K54: the "Image error" row,
- * focus on Body) belong to the body.
+ * BODY_REQUIRED, IMAGE_NOT_ALLOWED (amendment A6, run decision K54: the "Image error" row, focus
+ * on Body) and BODY_TOO_LONG (amendment A8, review a-IN-02) belong to the body.
  */
 function fieldFor(code: ProposalFieldCode, field: string | undefined): ProposalField {
   if (isProposalField(field)) return field;

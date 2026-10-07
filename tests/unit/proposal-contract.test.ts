@@ -132,6 +132,7 @@ describe("proposal contract: constants and codes", () => {
       "TITLE_TOO_LONG",
       "BODY_REQUIRED",
       "IMAGE_NOT_ALLOWED",
+      "BODY_TOO_LONG",
     ]);
     expect([...MAINTENANCE_REFUSAL_CODES]).toEqual([
       "NOT_ALLOWED",

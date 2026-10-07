@@ -226,7 +226,8 @@ export type TicketRefusalReason = (typeof TICKET_REFUSAL_REASONS)[number];
 
 /**
  * Refusals of list, read, save, reject and publish (TICKET_LINK: review C7, K51;
- * IMAGE_NOT_ALLOWED: run decision K54).
+ * IMAGE_NOT_ALLOWED: run decision K54; BODY_TOO_LONG: review a-IN-02, the generation bound
+ * BODY_MAX of proposal-schema.ts applied at save and publish).
  */
 export const REVIEW_REFUSAL_CODES = [
   "NOT_ALLOWED",
@@ -240,6 +241,7 @@ export const REVIEW_REFUSAL_CODES = [
   "TITLE_TOO_LONG",
   "BODY_REQUIRED",
   "IMAGE_NOT_ALLOWED",
+  "BODY_TOO_LONG",
 ] as const;
 
 export type ReviewRefusalCode = (typeof REVIEW_REFUSAL_CODES)[number];

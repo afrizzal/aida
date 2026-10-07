@@ -175,6 +175,64 @@ describe("publishProposal: images (run decision K54, review a2-CR-01)", () => {
   });
 });
 
+describe("saveProposalDraft and publishProposal: body length (review a-IN-02)", () => {
+  const TITLE = "Reset a forgotten password";
+  const AT_MAX = `## Steps\n\n${"a".repeat(20000 - "## Steps\n\n".length)}`;
+
+  it("a body of 20 001 code points is refused BODY_TOO_LONG on the body; 20 000 is saved", async () => {
+    const { orgId, owner } = await seedOrg();
+    const ticket = await seedResolvedTicket(orgId);
+    const proposal = await seedProposal(orgId, {
+      status: "DRAFT",
+      ticketIds: [ticket.id],
+      title: TITLE,
+      bodyMarkdown: "## Steps\n\nOpen Settings.",
+      version: 2,
+    });
+
+    const refused = await saveProposalDraft(owner, {
+      proposalId: proposal.id,
+      expectedVersion: 2,
+      title: TITLE,
+      bodyMarkdown: `${AT_MAX}b`,
+    });
+    expect(refused).toEqual({ ok: false, code: "BODY_TOO_LONG", field: "bodyMarkdown" });
+    const row = await prisma.kbProposal.findUniqueOrThrow({ where: { id: proposal.id } });
+    expect(row.bodyMarkdown).toBe("## Steps\n\nOpen Settings.");
+    expect(row.version).toBe(2);
+
+    expect(
+      await saveProposalDraft(owner, {
+        proposalId: proposal.id,
+        expectedVersion: 2,
+        title: TITLE,
+        bodyMarkdown: AT_MAX,
+      }),
+    ).toEqual({ ok: true, version: 3 });
+  });
+
+  it("a stored body over the bound is refused at publish; no article", async () => {
+    const { orgId, owner } = await seedOrg();
+    const ticket = await seedResolvedTicket(orgId);
+    const proposal = await seedProposal(orgId, {
+      status: "DRAFT",
+      ticketIds: [ticket.id],
+      title: TITLE,
+      bodyMarkdown: `${AT_MAX}b`,
+      version: 1,
+    });
+    bossEnv.sends = [];
+
+    const result = await publishProposal(owner, { proposalId: proposal.id, expectedVersion: 1 });
+
+    expect(result).toEqual({ ok: false, code: "BODY_TOO_LONG", field: "bodyMarkdown" });
+    const row = await prisma.kbProposal.findUniqueOrThrow({ where: { id: proposal.id } });
+    expect(row).toMatchObject({ status: "DRAFT", version: 1, publishedArticleId: null });
+    expect(await prisma.kbArticle.count({ where: { organizationId: orgId } })).toBe(0);
+    expect(sendsOn("kb-embed-article")).toHaveLength(0);
+  });
+});
+
 describe("publishProposal: tracer (D-06, D-15, review C1, K51)", () => {
   it("an owner publishes a draft: exactly one article, linked back, embedding enqueued after commit", async () => {
     const { orgId, owner } = await seedOrg();

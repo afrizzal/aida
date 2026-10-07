@@ -187,6 +187,28 @@ describe("resolveActionOutcome: save (UI-SPEC 3c, 3e, 3h, 3i)", () => {
     ).toBe(copy.IMAGE_ERROR);
   });
 
+  it("BODY_TOO_LONG gives the A8 row on the Body field (review a-IN-02)", () => {
+    const expected = {
+      kind: "field",
+      tone: "error",
+      message: copy.BODY_TOO_LONG_ERROR,
+      disableSubmit: false,
+      offerReload: false,
+      focus: "field",
+      field: "bodyMarkdown",
+    };
+    expect(
+      resolveActionOutcome("save", { ok: false, code: "BODY_TOO_LONG", field: "bodyMarkdown" }),
+    ).toStrictEqual(expected);
+    expect(resolveActionOutcome("save", { ok: false, code: "BODY_TOO_LONG" })).toStrictEqual(
+      expected,
+    );
+    expect(
+      resolveActionOutcome("publish", { ok: false, code: "BODY_TOO_LONG", field: "bodyMarkdown" })
+        .message,
+    ).toBe(copy.BODY_TOO_LONG_ERROR);
+  });
+
   it("CONFLICT offers reload, disables save until reload and focuses the callout", () => {
     expect(resolveActionOutcome("save", { ok: false, code: "CONFLICT" })).toStrictEqual({
       kind: "refusal",

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  BODY_MAX,
   codePointLength,
   containsSourceMarker,
   containsTicketLink,
@@ -529,6 +530,28 @@ describe("run decision K54: images are refused in title and body (review a2-CR-0
         code: "IMAGE_NOT_ALLOWED",
       });
     }
+  });
+
+  it("review a-IN-02: validateDraftFields applies BODY_MAX in code points (BODY_TOO_LONG)", () => {
+    expect(BODY_MAX).toBe(20000);
+    // Exactly BODY_MAX code points, one of them astral (two UTF-16 units, counted once): allowed.
+    const atMax = `\u{1F600}${"a".repeat(BODY_MAX - 1)}`;
+    expect(codePointLength(atMax)).toBe(BODY_MAX);
+    expect(atMax.length).toBe(BODY_MAX + 1);
+    expect(fields("A valid title", atMax)).toMatchObject({ ok: true });
+    // One more code point: refused on the body, before any marker, link or image check.
+    expect(bodyRefusal(`${atMax}b`)).toEqual({
+      ok: false,
+      field: "bodyMarkdown",
+      code: "BODY_TOO_LONG",
+    });
+    expect(bodyRefusal(`[T1] ${"a".repeat(BODY_MAX)}`)).toEqual({
+      ok: false,
+      field: "bodyMarkdown",
+      code: "BODY_TOO_LONG",
+    });
+    // Surrounding whitespace is trimmed before counting, as everywhere else.
+    expect(fields("A valid title", `  ${atMax}\n\n`)).toMatchObject({ ok: true });
   });
 
   it("keeps the ticket-link check first for an image whose destination is a ticket page", () => {

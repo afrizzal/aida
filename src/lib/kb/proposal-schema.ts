@@ -346,7 +346,8 @@ export type DraftFieldCode =
   | "CITATION_MARKER"
   | "TICKET_LINK"
   | "BODY_REQUIRED"
-  | "IMAGE_NOT_ALLOWED";
+  | "IMAGE_NOT_ALLOWED"
+  | "BODY_TOO_LONG";
 
 export type DraftField = "title" | "bodyMarkdown";
 
@@ -357,9 +358,10 @@ export type DraftFieldsResult =
 /**
  * Checks a title and body in this order and returns the first failure with its field: title
  * under 3 code points, over 120, with a source marker, with a ticket link; body empty or
- * whitespace-only, with a source marker, with a ticket link (raw text or rendered URL attribute),
- * with an image (run decision K54). Fail-closed, nothing stripped; on success the trimmed values
- * are returned.
+ * whitespace-only, over BODY_MAX code points (review a-IN-02: the bound generation applies, so a
+ * saved draft can never be longer than a generated one), with a source marker, with a ticket link
+ * (raw text or rendered URL attribute), with an image (run decision K54). Fail-closed, nothing
+ * stripped; on success the trimmed values are returned.
  */
 export function validateDraftFields(input: {
   title: string;
@@ -375,6 +377,9 @@ export function validateDraftFields(input: {
   if (containsTicketLink(title)) return { ok: false, field: "title", code: "TICKET_LINK" };
 
   if (bodyMarkdown === "") return { ok: false, field: "bodyMarkdown", code: "BODY_REQUIRED" };
+  if (codePointLength(bodyMarkdown) > BODY_MAX) {
+    return { ok: false, field: "bodyMarkdown", code: "BODY_TOO_LONG" };
+  }
   if (containsSourceMarker(bodyMarkdown)) {
     return { ok: false, field: "bodyMarkdown", code: "CITATION_MARKER" };
   }

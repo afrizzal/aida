@@ -254,6 +254,8 @@ describe("proposal-copy: Review (Surface 3)", () => {
     expect(copy.TITLE_TOO_SHORT_ERROR).toBe("Title must be at least 3 characters.");
     expect(copy.TITLE_TOO_LONG_ERROR).toBe("Title must be at most 120 characters.");
     expect(copy.BODY_REQUIRED_ERROR).toBe("Body is required.");
+    // Amendment A8 (review a-IN-02): the Field errors row for a body over BODY_MAX.
+    expect(copy.BODY_TOO_LONG_ERROR).toBe("Body must be at most 20,000 characters.");
   });
 
   it("fieldRefusalCopy maps by field and code (amendment A2, run decisions K51 and K52)", () => {
@@ -267,6 +269,9 @@ describe("proposal-copy: Review (Surface 3)", () => {
     expect(fieldRefusalCopy("bodyMarkdown", "BODY_REQUIRED")).toBe(copy.BODY_REQUIRED_ERROR);
     // Amendment A6: only the body produces IMAGE_NOT_ALLOWED; the title entry exists for totality.
     expect(fieldRefusalCopy("bodyMarkdown", "IMAGE_NOT_ALLOWED")).toBe(copy.IMAGE_ERROR);
+    // Amendment A8: only the body produces BODY_TOO_LONG; the title entry exists for totality.
+    expect(fieldRefusalCopy("bodyMarkdown", "BODY_TOO_LONG")).toBe(copy.BODY_TOO_LONG_ERROR);
+    expect(fieldRefusalCopy("title", "BODY_TOO_LONG")).toBe(copy.BODY_TOO_LONG_ERROR);
     for (const field of PROPOSAL_FIELDS) {
       for (const code of PROPOSAL_FIELD_CODES) {
         expect(fieldRefusalCopy(field, code).length).toBeGreaterThan(0);
@@ -286,6 +291,7 @@ describe("proposal-copy: Review (Surface 3)", () => {
       { title: "Reset guide", bodyMarkdown: "See [T2] for details." },
       { title: "Reset guide", bodyMarkdown: "[g](/tickets/abc)" },
       { title: "Reset guide", bodyMarkdown: "![x](https://attacker.example/p.png)" },
+      { title: "Reset guide", bodyMarkdown: "a".repeat(20001) },
     ];
     const seen = new Set<string>();
     for (const input of cases) {
@@ -307,6 +313,7 @@ describe("proposal-copy: Review (Surface 3)", () => {
         "bodyMarkdown:CITATION_MARKER",
         "bodyMarkdown:TICKET_LINK",
         "bodyMarkdown:IMAGE_NOT_ALLOWED",
+        "bodyMarkdown:BODY_TOO_LONG",
       ].sort(),
     );
   });
@@ -604,6 +611,7 @@ describe("proposal-copy: the 'Nothing was changed.' rule", () => {
       copy.TITLE_TOO_SHORT_ERROR,
       copy.TITLE_TOO_LONG_ERROR,
       copy.BODY_REQUIRED_ERROR,
+      copy.BODY_TOO_LONG_ERROR,
     ]);
     const refusalRows: string[] = [];
     for (const code of REQUEST_REFUSAL_CODES) refusalRows.push(copy.requestRefusalCopy(code));

@@ -1,6 +1,6 @@
-// Phase 12.2 copy rows (UI-SPEC Copywriting Contract and amendments A1 to A6). Each string is one
-// exported constant, or a function of escaped runtime values, used verbatim; the copy-table unit
-// test checks each against its row. Pure and client-safe: server and client components import it.
+// Phase 12.2 copy rows (UI-SPEC Copywriting Contract and amendments A1 to A6 and A8). Each string
+// is one exported constant, or a function of escaped runtime values, used verbatim; the copy-table
+// unit test checks each against its row. Pure and client-safe: server and client components import it.
 // Relative imports only.
 //
 // Rules (UI-SPEC Copywriting Contract, D-03, D-12): every server code maps to exactly one row
@@ -273,6 +273,9 @@ export const TITLE_TOO_LONG_ERROR = "Title must be at most 120 characters.";
 /** Copywriting "Field errors", third part. */
 export const BODY_REQUIRED_ERROR = "Body is required.";
 
+/** Amendment A8 (review a-IN-02) "Body too long error" (Body field, a Field errors row). */
+export const BODY_TOO_LONG_ERROR = "Body must be at most 20,000 characters.";
+
 /** Copywriting "Sources heading". */
 export const SOURCES_HEADING = "Sources";
 
@@ -532,6 +535,7 @@ export const PROPOSAL_FIELD_CODES = [
   "TITLE_TOO_LONG",
   "BODY_REQUIRED",
   "IMAGE_NOT_ALLOWED",
+  "BODY_TOO_LONG",
 ] as const satisfies readonly ReviewRefusalCode[];
 
 export type ProposalFieldCode = (typeof PROPOSAL_FIELD_CODES)[number];
@@ -554,6 +558,7 @@ const DEFAULT_FIELD: Record<ProposalFieldCode, ProposalField> = {
   TITLE_TOO_LONG: "title",
   BODY_REQUIRED: "bodyMarkdown",
   IMAGE_NOT_ALLOWED: "bodyMarkdown",
+  BODY_TOO_LONG: "bodyMarkdown",
 };
 
 /** The actions whose outcome a proposal UI shows (amendment A4). */
@@ -612,6 +617,8 @@ const FIELD_REFUSAL_ROWS: Record<ProposalField, Record<ProposalFieldCode, string
     // Run decision K54: validateDraftFields never refuses an image on the title (the title is
     // plain text everywhere); the entry exists for totality and names the body row.
     IMAGE_NOT_ALLOWED: IMAGE_ERROR,
+    // Amendment A8: only the body is bounded by BODY_TOO_LONG; the entry exists for totality.
+    BODY_TOO_LONG: BODY_TOO_LONG_ERROR,
   },
   bodyMarkdown: {
     CITATION_MARKER: CITATION_MARKER_ERROR,
@@ -620,6 +627,7 @@ const FIELD_REFUSAL_ROWS: Record<ProposalField, Record<ProposalFieldCode, string
     TITLE_TOO_LONG: TITLE_TOO_LONG_ERROR,
     BODY_REQUIRED: BODY_REQUIRED_ERROR,
     IMAGE_NOT_ALLOWED: IMAGE_ERROR,
+    BODY_TOO_LONG: BODY_TOO_LONG_ERROR,
   },
 };
 
