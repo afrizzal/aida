@@ -6,7 +6,6 @@ import { LocalDateTime } from "@/components/tickets/local-date-time";
 import { Button } from "@/components/ui/button";
 import {
   BACK_TO_ARTICLES,
-  failureShortCopy,
   LIST_AI_OFF_NOTICE,
   LIST_EMPTY_BODY,
   LIST_EMPTY_HEADING,
@@ -15,8 +14,8 @@ import {
   NOT_ALLOWED_HEADING,
   PROPOSALS_PAGE_DESCRIPTION,
   PROPOSALS_PAGE_TITLE,
+  proposalListRowText,
   sourceCount,
-  UNTITLED_WHILE_GENERATING,
 } from "@/lib/kb/proposal-copy";
 import { loadProposalList } from "@/lib/kb/proposal-queries";
 import { getSessionActor } from "@/lib/session";
@@ -83,30 +82,39 @@ export default async function KbProposalsPage() {
         <EmptyState icon={Sparkles} heading={LIST_EMPTY_HEADING} body={LIST_EMPTY_BODY} />
       ) : (
         <div className="divide-y divide-border">
-          {rows.map((row) => (
-            <Link
-              key={row.id}
-              href={`/kb/proposals/${row.id}`}
-              className="flex flex-wrap items-center gap-2 px-6 py-3 transition-colors hover:bg-muted/50"
-            >
-              <KbProposalStatusChip status={row.status} />
-              <p className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
-                {row.title ?? UNTITLED_WHILE_GENERATING}
-              </p>
-              {row.status === "FAILED" && row.failureCode && (
-                <span className="text-[12px] text-muted-foreground">
-                  {failureShortCopy(row.failureCode)}
+          {rows.map((row) => {
+            // Review b-WR-04: "Untitled (drafting…)" only for GENERATING; a FAILED row without a
+            // title shows its short reason in the title column instead.
+            const text = proposalListRowText(row);
+            return (
+              <Link
+                key={row.id}
+                href={`/kb/proposals/${row.id}`}
+                className="flex flex-wrap items-center gap-2 px-6 py-3 transition-colors hover:bg-muted/50"
+              >
+                <KbProposalStatusChip status={row.status} />
+                {text.title !== null ? (
+                  <p className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
+                    {text.title}
+                  </p>
+                ) : (
+                  <p className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground">
+                    {text.failureShort}
+                  </p>
+                )}
+                {text.title !== null && text.failureShort && (
+                  <span className="text-[12px] text-muted-foreground">{text.failureShort}</span>
+                )}
+                <span className="text-[12px] text-muted-foreground tabular-nums">
+                  {sourceCount(row.sourceCount)}
                 </span>
-              )}
-              <span className="text-[12px] text-muted-foreground tabular-nums">
-                {sourceCount(row.sourceCount)}
-              </span>
-              <LocalDateTime
-                value={row.createdAt}
-                className="shrink-0 text-[12px] text-muted-foreground"
-              />
-            </Link>
-          ))}
+                <LocalDateTime
+                  value={row.createdAt}
+                  className="shrink-0 text-[12px] text-muted-foreground"
+                />
+              </Link>
+            );
+          })}
         </div>
       )}
     </div>

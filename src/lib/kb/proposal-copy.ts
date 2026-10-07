@@ -743,6 +743,23 @@ export function failureShortCopy(code: ProposalFailureCode): string {
   return FAILURE_SHORT_ROWS[code];
 }
 
+/**
+ * The text of one proposal list row (UI-SPEC Surface 2, review b-WR-04): the title, or "Untitled
+ * while generating" for a GENERATING row without one, and for a FAILED row its short reason. A
+ * row without a title in any other status has no title text: a FAILED row's short reason takes
+ * the title column, so drafting is never claimed for a terminal row.
+ */
+export function proposalListRowText(row: {
+  status: ProposalStatus;
+  title: string | null;
+  failureCode: ProposalFailureCode | null;
+}): { title: string | null; failureShort: string | null } {
+  const title = row.title ?? (row.status === "GENERATING" ? UNTITLED_WHILE_GENERATING : null);
+  const failureShort =
+    row.status === "FAILED" && row.failureCode ? failureShortCopy(row.failureCode) : null;
+  return { title, failureShort };
+}
+
 const OUTCOME_UNKNOWN_ROWS: Record<ProposalAction, string> = {
   start: START_OUTCOME_UNKNOWN,
   save: SAVE_OUTCOME_UNKNOWN,

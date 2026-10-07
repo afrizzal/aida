@@ -375,6 +375,47 @@ describe("proposal-copy: Review (Surface 3)", () => {
   });
 });
 
+describe("proposal-copy: list row text (review b-WR-04)", () => {
+  // "Untitled while generating" is for GENERATING rows only (UI-SPEC Surface 2 partial state). A
+  // row with no title in any other status shows no title text; a FAILED row's short reason then
+  // takes the title column, so it is never shown twice.
+  it("only a GENERATING row without a title shows 'Untitled (drafting…)'", () => {
+    expect(
+      copy.proposalListRowText({ status: "GENERATING", title: null, failureCode: null }),
+    ).toEqual({ title: copy.UNTITLED_WHILE_GENERATING, failureShort: null });
+    for (const status of PROPOSAL_STATUSES) {
+      const text = copy.proposalListRowText({ status, title: null, failureCode: null });
+      if (status !== "GENERATING") expect(text.title).toBeNull();
+    }
+  });
+
+  it("a FAILED row without a title shows its short reason in place of the title", () => {
+    for (const code of PROPOSAL_FAILURE_CODES) {
+      expect(
+        copy.proposalListRowText({ status: "FAILED", title: null, failureCode: code }),
+      ).toEqual({ title: null, failureShort: copy.failureShortCopy(code) });
+    }
+    expect(
+      copy.proposalListRowText({ status: "FAILED", title: null, failureCode: "PROVIDER" }).title,
+    ).not.toBe(copy.UNTITLED_WHILE_GENERATING);
+  });
+
+  it("a titled row keeps its title; only FAILED rows carry a short reason", () => {
+    expect(
+      copy.proposalListRowText({
+        status: "FAILED",
+        title: "Reset a password",
+        failureCode: "UNKNOWN",
+      }),
+    ).toEqual({ title: "Reset a password", failureShort: copy.FAILURE_SHORT_UNKNOWN });
+    for (const status of ["DRAFT", "REJECTED", "PUBLISHED"] as const) {
+      expect(
+        copy.proposalListRowText({ status, title: "Reset a password", failureCode: null }),
+      ).toEqual({ title: "Reset a password", failureShort: null });
+    }
+  });
+});
+
 describe("proposal-copy: Publish (3f)", () => {
   it("dialog rows, including amendment A1", () => {
     expect(copy.PUBLISH_TITLE).toBe("Publish this article?");
