@@ -28,3 +28,4 @@ Status: `belum`, `berjalan`, `selesai`, `menunggu manusia`, `diparkir`.
 | 12.2-o1 | Owner: izin memakai konten tiket pelanggan untuk artikel KB (sementara: hanya pesan PUBLIC, reviewer menghapus detail pelanggan) | menunggu owner | `12.2-CONTEXT.md` |
 | 12.2-o2 | Owner: retensi dan akses baris audit AI yang memuat prompt dan keluaran yang diredaksi (sementara: aturan `AuditEvent` yang ada) | menunggu owner | `12.2-CONTEXT.md` |
 | 12.2-o3 | Owner: apakah CLOSED dihitung pekerjaan selesai dan batas lima tiket (sementara: RESOLVED dan CLOSED, maksimal 5) | menunggu owner | `12.2-CONTEXT.md` |
+| 12.2-o4 | Owner: kunci unik `(organizationId, userId)` pada tabel `member` milik Better Auth (sementara: publish mengunci semua baris member aktor dan hanya mengizinkan bila semuanya owner atau admin; jalur lain membaca satu baris tanpa urutan) | menunggu owner | `12.2-REVIEW-FIX.md` (F2, a-WR-03) |
