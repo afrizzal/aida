@@ -5,14 +5,18 @@
 // LLM or embedding provider is called. The request service is wrapped by a partial mock that
 // delegates to the real requestProposal unless a case arms a one-time throw.
 import { randomUUID } from "node:crypto";
+import { notFound, redirect } from "next/navigation";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const env = vi.hoisted(() => ({
   actor: null as null | { userId: string; orgId: string },
+  /** Review b-WR-01: an error the session read throws instead (a Next redirect or not-found). */
+  sessionThrows: null as unknown,
 }));
 
 vi.mock("@/lib/session", () => ({
   getSessionActor: async () => {
+    if (env.sessionThrows) throw env.sessionThrows;
     if (!env.actor) throw new Error("no session");
     return env.actor;
   },
@@ -84,6 +88,7 @@ beforeEach(() => {
   bossEnv.sends = [];
   requestEnv.throwOnce = null;
   env.actor = null;
+  env.sessionThrows = null;
 });
 
 /** An organization with AI on, an owner, a plain member and a member whose row was deleted. */
@@ -97,6 +102,16 @@ async function seedOrg() {
     member: { userId: users[1].id, orgId },
     removed: { userId: users[2].id, orgId },
   };
+}
+
+/** The error a next/navigation control-flow function throws (redirect, notFound). */
+function thrownBy(control: () => never): unknown {
+  try {
+    control();
+  } catch (error) {
+    return error;
+  }
+  throw new Error("the control-flow function did not throw");
 }
 
 function sendsOn(queue: string) {
@@ -429,6 +444,62 @@ describe("review C6: revalidation never changes a committed result; a thrown ser
     } finally {
       errors.mockRestore();
     }
+  });
+
+  // Review b-WR-01: requireSession() redirects to /login by throwing Next's NEXT_REDIRECT error,
+  // and notFound() throws NEXT_HTTP_ERROR_FALLBACK. Both are framework control flow: every action
+  // rethrows them (unstable_rethrow) instead of mapping them to UNKNOWN, so the browser is sent to
+  // sign in rather than shown "The result is not known". The errors here are the real ones that
+  // next/navigation throws.
+  it("a Next redirect or not-found thrown by the session read is rethrown by every action, never UNKNOWN (review b-WR-01)", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      for (const thrown of [thrownBy(() => redirect("/login")), thrownBy(() => notFound())]) {
+        env.sessionThrows = thrown;
+        await expect(requestProposalAction(["x"])).rejects.toBe(thrown);
+        await expect(loadStartSelectionAction(["x"])).rejects.toBe(thrown);
+        await expect(
+          saveProposalAction({
+            proposalId: "x",
+            expectedVersion: 0,
+            title: "A valid title",
+            bodyMarkdown: "A valid body",
+          }),
+        ).rejects.toBe(thrown);
+        await expect(rejectProposalAction({ proposalId: "x", expectedVersion: 0 })).rejects.toBe(
+          thrown,
+        );
+        await expect(publishProposalAction({ proposalId: "x", expectedVersion: 0 })).rejects.toBe(
+          thrown,
+        );
+        await expect(restartGenerationAction({ proposalId: "x", expectedVersion: 0 })).rejects.toBe(
+          thrown,
+        );
+        await expect(retryIndexingAction({ proposalId: "x" })).rejects.toBe(thrown);
+      }
+      // Nothing was logged as a failed action: the control flow is not an error of the action.
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      errors.mockRestore();
+    }
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("a Next redirect thrown inside the service, or as the cause of an error, is rethrown too (review b-WR-01)", async () => {
+    const { orgId, owner } = await seedOrg();
+    const ticket = await seedResolvedTicket(orgId);
+    env.actor = owner;
+    const thrown = thrownBy(() => redirect("/login"));
+    requestEnv.throwOnce = thrown as Error;
+
+    await expect(requestProposalAction([ticket.id])).rejects.toBe(thrown);
+    expect(revalidatePath).not.toHaveBeenCalled();
+    expect(await prisma.kbProposal.count({ where: { organizationId: orgId } })).toBe(0);
+
+    // A redirect wrapped as the cause of another error is control flow as well.
+    const wrapped = new Error("wrapper", { cause: thrownBy(() => redirect("/login")) });
+    requestEnv.throwOnce = wrapped;
+    await expect(requestProposalAction([ticket.id])).rejects.toBe(wrapped.cause);
   });
 
   it("restart and retry pass queued through, save passes the new version and a field refusal its field", async () => {

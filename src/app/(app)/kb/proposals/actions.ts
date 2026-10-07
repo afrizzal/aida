@@ -12,8 +12,14 @@
 // ok with its proposal id and the UI never invites a duplicate (T-12.2-55). The service's typed
 // result is returned unchanged (publish with indexingQueued, restart and retry with queued,
 // field refusals with their field).
+//
+// Review b-WR-01: getSessionActor() redirects an expired or missing session to /login by throwing
+// Next's redirect error, and a service may throw notFound(). Each catch first passes the error to
+// unstable_rethrow (next/navigation, Next 16), which rethrows Next's control-flow errors (also
+// when one is the cause of another error), so they are never mapped to UNKNOWN.
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { ACTION_UNKNOWN_CODE } from "@/lib/kb/proposal-outcome";
 import { loadStartSelection, type StartSelectionResult } from "@/lib/kb/proposal-queries";
 import { type ProposalRequestResult, requestProposal } from "@/lib/kb/proposal-request";
@@ -73,7 +79,8 @@ export async function requestProposalAction(
   let result: ProposalRequestResult;
   try {
     result = await requestProposal(await getSessionActor(), ticketIds);
-  } catch {
+  } catch (error) {
+    unstable_rethrow(error);
     return unknownResult("request");
   }
   if (result.ok) {
@@ -88,7 +95,8 @@ export async function loadStartSelectionAction(
 ): Promise<StartSelectionResult | ActionUnknown> {
   try {
     return await loadStartSelection(await getSessionActor(), ticketIds);
-  } catch {
+  } catch (error) {
+    unstable_rethrow(error);
     return unknownResult("load start selection");
   }
 }
@@ -100,7 +108,8 @@ export async function saveProposalAction(
   let result: SaveProposalResult;
   try {
     result = await saveProposalDraft(await getSessionActor(), input);
-  } catch {
+  } catch (error) {
+    unstable_rethrow(error);
     return unknownResult("save");
   }
   if (result.ok) {
@@ -116,7 +125,8 @@ export async function rejectProposalAction(
   let result: RejectProposalResult;
   try {
     result = await rejectProposal(await getSessionActor(), input);
-  } catch {
+  } catch (error) {
+    unstable_rethrow(error);
     return unknownResult("reject");
   }
   if (result.ok) {
@@ -132,7 +142,8 @@ export async function publishProposalAction(
   let result: PublishProposalResult;
   try {
     result = await publishProposal(await getSessionActor(), input);
-  } catch {
+  } catch (error) {
+    unstable_rethrow(error);
     return unknownResult("publish");
   }
   if (result.ok) {
@@ -148,7 +159,8 @@ export async function restartGenerationAction(
   let result: RestartProposalResult;
   try {
     result = await restartProposalGeneration(await getSessionActor(), input);
-  } catch {
+  } catch (error) {
+    unstable_rethrow(error);
     return unknownResult("restart");
   }
   if (result.ok) {
@@ -164,7 +176,8 @@ export async function retryIndexingAction(input: {
   let result: RetryIndexingResult;
   try {
     result = await retryProposalIndexing(await getSessionActor(), input);
-  } catch {
+  } catch (error) {
+    unstable_rethrow(error);
     return unknownResult("retry indexing");
   }
   if (result.ok) {
