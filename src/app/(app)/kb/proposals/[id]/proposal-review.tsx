@@ -11,9 +11,13 @@
 // amendment A4, review C6). A rejected call is caught as { rejected: true } and resolves to the
 // same view as an unexpected server error.
 //
-// The preview is the stored body rendered by renderMarkdown on the server (T-12.2-40); the raw
+// The preview is the stored body rendered on the server by renderMarkdownPreview (T-12.2-40): the
+// renderMarkdown pipeline plus the removal of every image source that is not same-origin
+// relative (run decision K54), so the preview never makes the browser fetch another host. The raw
 // body is only ever shown inside the Textarea. The client check validateDraftFields renders the
-// body only to read its URL attribute values and never inserts that HTML (review P8).
+// body only to read its URL attribute values and its image elements and never inserts that HTML
+// (review P8); an image in the body is refused there and by the server as IMAGE_NOT_ALLOWED, shown
+// under Body with the A6 "Image error" row (BODY_HELP says "Images are not allowed.").
 
 import { Check, CircleAlert, Loader2, RotateCw, TriangleAlert, X } from "lucide-react";
 import Link from "next/link";
@@ -288,12 +292,15 @@ function NameTimeCopy({
   );
 }
 
-/** The server-rendered body (renderMarkdown output only, never the raw body; T-12.2-40). */
+/**
+ * The server-rendered body (renderMarkdownPreview output only, never the raw body; T-12.2-40,
+ * run decision K54).
+ */
 function RenderedBody({ html }: { html: string }) {
   return (
     <div
       className="min-w-0 space-y-3 text-[13px] leading-relaxed text-foreground"
-      // biome-ignore lint/security/noDangerouslySetInnerHtml: renderMarkdown output from the server, sanitized there
+      // biome-ignore lint/security/noDangerouslySetInnerHtml: renderMarkdownPreview output from the server, sanitized and stripped of cross-origin image sources there
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );
