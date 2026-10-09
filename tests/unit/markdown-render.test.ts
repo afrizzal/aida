@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderMarkdown, renderMarkdownPreview } from "@/lib/markdown/render";
+import { htmlLinkTargets, renderMarkdown, renderMarkdownPreview } from "@/lib/markdown/render";
 
 describe("renderMarkdown", () => {
   it("renders bold markdown to <strong>", () => {
@@ -64,5 +64,42 @@ describe("renderMarkdownPreview (run decision K54, review a2-CR-01)", () => {
     expect(renderMarkdown("![](https://example.com/p.png)")).toContain(
       'src="https://example.com/p.png"',
     );
+  });
+});
+
+describe("htmlLinkTargets (UI-SPEC amendment A7, review b-WR-07)", () => {
+  // The publish dialog lists every distinct link target of the server-rendered body as plain
+  // text, so a reviewer sees where "[Reset your password](…)" really goes.
+  it("lists each distinct href of the rendered body once, in document order", () => {
+    const html = renderMarkdownPreview(
+      [
+        "[Reset your password](https://attacker.example/reset?x=1)",
+        "See <https://docs.example.com/a> and www.example.org.",
+        "[again](https://attacker.example/reset?x=1) [mail](mailto:help@example.com)",
+        "[relative](/kb/abc)",
+      ].join("\n\n"),
+    );
+    expect(htmlLinkTargets(html)).toEqual([
+      "https://attacker.example/reset?x=1",
+      "https://docs.example.com/a",
+      "http://www.example.org",
+      "mailto:help@example.com",
+      "/kb/abc",
+    ]);
+  });
+
+  it("reads the target, never the link text", () => {
+    const html = renderMarkdown("[https://bank.example](https://attacker.example/p)");
+    expect(htmlLinkTargets(html)).toEqual(["https://attacker.example/p"]);
+  });
+
+  it("gives an empty list for a body without links, and ignores image sources", () => {
+    expect(htmlLinkTargets(renderMarkdown("## Steps\n\n1. Open Settings."))).toEqual([]);
+    expect(htmlLinkTargets(renderMarkdown("![x](/images/a.png)"))).toEqual([]);
+    expect(htmlLinkTargets("")).toEqual([]);
+  });
+
+  it("a link the sanitizer emptied (javascript:) is not listed", () => {
+    expect(htmlLinkTargets(renderMarkdown("[x](javascript:alert(1))"))).toEqual([]);
   });
 });

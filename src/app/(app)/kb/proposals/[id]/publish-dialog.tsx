@@ -28,6 +28,8 @@ import {
 import { Label } from "@/components/ui/label";
 import {
   KEEP_REVIEWING,
+  LINKS_IN_ARTICLE_HEADING,
+  NO_LINKS_IN_ARTICLE,
   PUBLISH_ARTICLE_CTA,
   PUBLISH_CANNOT_BE_UNDONE,
   PUBLISH_CHECKLIST,
@@ -52,6 +54,8 @@ export interface PublishDialogProps {
   expectedVersion: number;
   /** The saved title, shown escaped in the description. */
   title: string;
+  /** The saved body's distinct link targets, listed as plain text (amendment A7, b-WR-07). */
+  linkTargets: readonly string[];
   /** "Approve and publish…": focus returns to it when the dialog closes without acting. */
   returnFocusRef: RefObject<HTMLButtonElement | null>;
   /** Moves focus to the page h1 now and again after the refresh (UI-SPEC 3i). */
@@ -66,6 +70,7 @@ export function PublishDialog({
   proposalId,
   expectedVersion,
   title,
+  linkTargets,
   returnFocusRef,
   onFocusHeading,
   onReload,
@@ -131,6 +136,7 @@ export function PublishDialog({
             proposalId={proposalId}
             expectedVersion={expectedVersion}
             title={title}
+            linkTargets={linkTargets}
             checkboxRef={checkboxRef}
             pending={pending}
             onPendingChange={setPending}
@@ -159,6 +165,7 @@ interface PublishFlowProps {
   proposalId: string;
   expectedVersion: number;
   title: string;
+  linkTargets: readonly string[];
   checkboxRef: RefObject<HTMLButtonElement | null>;
   pending: boolean;
   onPendingChange(pending: boolean): void;
@@ -174,6 +181,7 @@ function PublishFlow({
   proposalId,
   expectedVersion,
   title,
+  linkTargets,
   checkboxRef,
   pending,
   onPendingChange,
@@ -187,6 +195,7 @@ function PublishFlow({
   const [view, setView] = useState<OutcomeView | null>(null);
   const dismissRef = useRef<HTMLButtonElement>(null);
   const checkboxId = useId();
+  const linksHeadingId = useId();
 
   // UI-SPEC 3i "Publish refusal, conflict, rejected call": focus on "Keep reviewing".
   useEffect(() => {
@@ -239,6 +248,31 @@ function PublishFlow({
             <li key={item}>{item}</li>
           ))}
         </ul>
+
+        {/* Amendment A7 (review b-WR-07): where the links really go, as plain text (never a live
+            link), so a link whose text says one thing and points elsewhere is visible. The list
+            scrolls inside the dialog when it is long. */}
+        <section aria-labelledby={linksHeadingId} className="space-y-1">
+          <h3 id={linksHeadingId} className="text-[13px] font-semibold text-foreground">
+            {LINKS_IN_ARTICLE_HEADING}
+          </h3>
+          {linkTargets.length === 0 ? (
+            <p className="text-[13px] text-muted-foreground">{NO_LINKS_IN_ARTICLE}</p>
+          ) : (
+            <ul
+              aria-labelledby={linksHeadingId}
+              // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable list must be reachable by keyboard
+              tabIndex={0}
+              className="max-h-[160px] space-y-1 overflow-y-auto rounded-sm text-[13px] text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            >
+              {linkTargets.map((target) => (
+                <li key={target} className="break-all">
+                  {target}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
         <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 p-4 text-[13px] text-foreground">
           <TriangleAlert className="size-4 shrink-0 text-warning" aria-hidden="true" />

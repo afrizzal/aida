@@ -120,6 +120,24 @@ export function renderMarkdownPreview(markdown: string): string {
   return String(previewProcessor.processSync(markdown));
 }
 
+// Phase 12.2, UI-SPEC amendment A7 (review b-WR-07): the KB proposal publish dialog lists where
+// the article's links really go, because an AI-written "[Reset your password](…)" shows only its
+// text in the preview. Read from HTML this module rendered (renderMarkdown or
+// renderMarkdownPreview), so a target the sanitizer removed is never listed.
+const linkTargetParser = unified().use(rehypeParse, { fragment: true });
+
+/** Every distinct non-empty `a` href of rendered HTML, in document order. */
+export function htmlLinkTargets(html: string): string[] {
+  const tree = linkTargetParser.parse(html) as Root;
+  const targets: string[] = [];
+  visit(tree, "element", (node: Element) => {
+    if (node.tagName !== "a") return;
+    const href = node.properties?.href;
+    if (typeof href === "string" && href !== "" && !targets.includes(href)) targets.push(href);
+  });
+  return targets;
+}
+
 // Privacy-first (D-18): inbound email HTML must never be trusted to not
 // contain remote tracking pixels. Strip the src of any http(s) <img> BEFORE
 // the sanitize pass so the src-less node gets dropped entirely. Relative /

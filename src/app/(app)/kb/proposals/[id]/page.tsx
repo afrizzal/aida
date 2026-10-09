@@ -16,7 +16,7 @@ import {
   TRUNCATION_NOTICE,
 } from "@/lib/kb/proposal-copy";
 import { loadProposalReview } from "@/lib/kb/proposal-queries";
-import { renderMarkdownPreview } from "@/lib/markdown/render";
+import { htmlLinkTargets, renderMarkdownPreview } from "@/lib/markdown/render";
 import { getSessionActor } from "@/lib/session";
 import { ProposalReview } from "./proposal-review";
 
@@ -82,6 +82,10 @@ export default async function ProposalReviewPage({ params }: ProposalReviewPageP
   const { proposal } = result;
   const isDraft = proposal.status === "DRAFT";
   const previewHtml = proposal.bodyMarkdown ? renderMarkdownPreview(proposal.bodyMarkdown) : "";
+  // UI-SPEC amendment A7 (review b-WR-07): the publish dialog lists these link targets as plain
+  // text. Read from the server-rendered body (the image strip of the preview leaves links as
+  // renderMarkdown, the publish renderer, writes them).
+  const linkTargets = isDraft ? htmlLinkTargets(previewHtml) : [];
   const requested = requestedByParts(proposal.requestedByName);
   const changedList = proposal.changedSourceNumbers.map((number) => `#${number}`).join(", ");
 
@@ -137,7 +141,12 @@ export default async function ProposalReviewPage({ params }: ProposalReviewPageP
         </div>
       )}
 
-      <ProposalReview proposal={proposal} previewHtml={previewHtml} headingId={REVIEW_HEADING_ID} />
+      <ProposalReview
+        proposal={proposal}
+        previewHtml={previewHtml}
+        linkTargets={linkTargets}
+        headingId={REVIEW_HEADING_ID}
+      />
     </div>
   );
 }

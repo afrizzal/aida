@@ -90,8 +90,14 @@ import { RejectDialog } from "./reject-dialog";
 
 export interface ProposalReviewProps {
   proposal: ProposalReviewData;
-  /** The stored body rendered by renderMarkdown on the server; empty when there is no body. */
+  /**
+   * The stored body rendered on the server by renderMarkdownPreview (renderMarkdown plus the
+   * removal of every image source that is not same-origin relative, run decision K54); empty when
+   * there is no body.
+   */
   previewHtml: string;
+  /** The distinct link targets of previewHtml, for the publish dialog (amendment A7, b-WR-07). */
+  linkTargets: readonly string[];
   /** The id of the page h1 (tabIndex -1) that takes focus after save, publish, reject, reload. */
   headingId: string;
 }
@@ -106,7 +112,12 @@ const FOCUS_RING =
  */
 const ARIA_DISABLED = "aria-disabled:cursor-not-allowed aria-disabled:opacity-50";
 
-export function ProposalReview({ proposal, previewHtml, headingId }: ProposalReviewProps) {
+export function ProposalReview({
+  proposal,
+  previewHtml,
+  linkTargets,
+  headingId,
+}: ProposalReviewProps) {
   const router = useRouter();
   const [reloadCount, setReloadCount] = useState(0);
   const headingFocusPending = useRef(false);
@@ -152,6 +163,7 @@ export function ProposalReview({ proposal, previewHtml, headingId }: ProposalRev
           key={reloadCount}
           proposal={proposal}
           previewHtml={previewHtml}
+          linkTargets={linkTargets}
           onFocusHeading={requestHeadingFocus}
           onFocusHeadingNow={focusHeading}
           onReload={reload}
@@ -297,6 +309,7 @@ interface DraftValues {
 interface DraftEditorProps {
   proposal: ProposalReviewData;
   previewHtml: string;
+  linkTargets: readonly string[];
   /** The h1 now and again after the refresh (publish, reject: the editor goes away). */
   onFocusHeading(): void;
   /** The h1 now only (save success: the editor stays, review b-WR-02). */
@@ -312,6 +325,7 @@ interface DraftEditorProps {
 function DraftEditor({
   proposal,
   previewHtml,
+  linkTargets,
   onFocusHeading,
   onFocusHeadingNow,
   onReload,
@@ -606,6 +620,8 @@ function DraftEditor({
         expectedVersion={version}
         // The form is clean whenever the dialog can open, so its title is the saved one.
         title={form.getValues("title").trim()}
+        // The saved body's targets: publish waits for the props of the saved version (b-WR-02).
+        linkTargets={linkTargets}
         returnFocusRef={publishTriggerRef}
         onFocusHeading={onFocusHeading}
         onReload={onReload}

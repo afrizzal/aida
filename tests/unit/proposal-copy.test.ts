@@ -422,9 +422,13 @@ describe("proposal-copy: Publish (3f)", () => {
     expect(copy.publishDescription("Reset a password")).toBe(
       '"Reset a password" will be added to the knowledge base, where AIDA uses it to draft replies.',
     );
+    // Amendment A7 (review b-WR-07) adds the fourth item.
     expect(copy.PUBLISH_CHECKLIST.join(" / ")).toBe(
-      "Facts are correct. / Customer names, emails and other personal details are removed. / Nothing in it is private to one customer.",
+      "Facts are correct. / Customer names, emails and other personal details are removed. / Nothing in it is private to one customer. / Every link goes where you expect.",
     );
+    // Amendment A7: the link list under the checklist.
+    expect(copy.LINKS_IN_ARTICLE_HEADING).toBe("Links in this article");
+    expect(copy.NO_LINKS_IN_ARTICLE).toBe("This article has no links.");
     expect(copy.PUBLISH_CANNOT_BE_UNDONE).toBe(
       "Publishing can't be undone here. To change the article later, edit it in the knowledge base.",
     );

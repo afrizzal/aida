@@ -1,4 +1,4 @@
-// Phase 12.2 copy rows (UI-SPEC Copywriting Contract and amendments A1 to A6 and A8). Each string
+// Phase 12.2 copy rows (UI-SPEC Copywriting Contract and amendments A1 to A8). Each string
 // is one exported constant, or a function of escaped runtime values, used verbatim; the copy-table
 // unit test checks each against its row. Pure and client-safe: server and client components import it.
 // Relative imports only.
@@ -343,12 +343,19 @@ export function publishDescription(title: string): string {
   return `"${title}" will be added to the knowledge base, where AIDA uses it to draft replies.`;
 }
 
-/** Copywriting "Publish checklist", one item per entry. */
+/** Copywriting "Publish checklist", one item per entry; amendment A7 adds the last one. */
 export const PUBLISH_CHECKLIST: readonly string[] = [
   "Facts are correct.",
   "Customer names, emails and other personal details are removed.",
   "Nothing in it is private to one customer.",
+  "Every link goes where you expect.",
 ];
+
+/** Amendment A7 (review b-WR-07): the heading of the link list under the checklist. */
+export const LINKS_IN_ARTICLE_HEADING = "Links in this article";
+
+/** Amendment A7: the link list's line when the article has no links. */
+export const NO_LINKS_IN_ARTICLE = "This article has no links.";
 
 /** Copywriting "Publish cannot be undone". */
 export const PUBLISH_CANNOT_BE_UNDONE =
