@@ -815,6 +815,13 @@ function GeneratingView({
   const lineRef = useRef<HTMLParagraphElement>(null);
   const pressed = useRef(false);
   const wasStuck = useRef(proposal.stuck);
+  // Review b-WR-06: a restart succeeded; the button stays aria-disabled until the refreshed
+  // props say the proposal is no longer stuck, so a second press cannot meet NOT_STUCK.
+  const [restarted, setRestarted] = useState(false);
+
+  useEffect(() => {
+    if (!proposal.stuck) setRestarted(false);
+  }, [proposal.stuck]);
 
   useEffect(() => {
     const timer = setInterval(() => router.refresh(), PROPOSAL_POLL_INTERVAL_MS);
@@ -835,7 +842,7 @@ function GeneratingView({
   }, [proposal.stuck, onFocusHeading]);
 
   async function handleRestart() {
-    if (pending || locked) return;
+    if (pending || locked || restarted) return;
     pressed.current = true;
     setPending(true);
     setAlertLine(null);
@@ -859,6 +866,9 @@ function GeneratingView({
           ? { message: view.message ?? RESTART_RECORDED_NOT_STARTED, tone: view.tone }
           : null,
       );
+      // Review b-WR-06: show the restarted state now rather than at the next poll.
+      setRestarted(true);
+      router.refresh();
     } else {
       setRestartLine(null);
       setAlertLine(view);
@@ -868,7 +878,7 @@ function GeneratingView({
     buttonRef.current?.focus();
   }
 
-  const unavailable = pending || locked;
+  const unavailable = pending || locked || restarted;
 
   return (
     <ReviewGrid sources={proposal.sources}>
