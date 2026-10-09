@@ -12,12 +12,13 @@
  * Own organization (review c-WR-01, c-WR-02, c-IN-03): the file runs in an organization of its
  * own, with its own owner and plain member, created in beforeAll through the shared fixture
  * (seedOrgWithMembers) plus a password each, and signed in through the real login page. Its
- * settings, tickets, proposals, articles, Insight runs and AuditEvent rows stay in that
- * organization in the disposable Testcontainers database; nothing is deleted and no trigger is
- * bypassed. The shared E2E organization is never written to: phase4-ai.spec.ts (AI toggle before
- * a provider is configured) and phase5-rag.spec.ts (KB empty state at zero articles) depend on it,
- * and afterAll checks that its articles, proposals, settings and tickets are as beforeAll found
- * them. AuditEvent is append-only, so instead of being removed its rows are checked: every case
+ * tickets, proposals, articles, Insight runs and AuditEvent rows stay in that organization in the
+ * disposable Testcontainers database, and no trigger is bypassed. Only its Setting rows (AI switch
+ * and provider configuration) are removed in afterAll, because later files read settings by key
+ * without an organization term. The shared E2E organization is never written to:
+ * phase4-ai.spec.ts (AI toggle before a provider is configured) and phase5-rag.spec.ts (KB empty
+ * state at zero articles) depend on it, and afterAll checks that its articles, proposals,
+ * settings and tickets are as beforeAll found them. AuditEvent is append-only, so instead of being removed its rows are checked: every case
  * records the rows it expects (action type, proposal, ticket), and the organization's rows must
  * equal that list after each case and once more after the worker has stopped.
  */
@@ -578,7 +579,15 @@ test.afterAll(async () => {
   stub.stop();
   // Nothing more can be written now: the audit trail is complete, and the shared E2E
   // organization is as this file found it (review c-WR-02).
-  if (orgId !== "") await expectAuditTrail();
+  if (orgId !== "") {
+    await expectAuditTrail();
+    // The AI switch and provider rows are workspace configuration, not evidence. Later files
+    // read Setting rows by key without an organization term (phase4-ai.spec.ts T9 polls
+    // aiEnabled; phase4-ai and phase5-rag poll llm:* keys), so this organization's rows go once
+    // the worker has stopped. Every other row of the file stays.
+    await prisma.setting.deleteMany({ where: { organizationId: orgId } });
+    expect(await prisma.setting.count({ where: { organizationId: orgId } })).toBe(0);
+  }
   expect(await e2eOrganizationCounts()).toEqual(e2eCountsBefore);
 });
 
