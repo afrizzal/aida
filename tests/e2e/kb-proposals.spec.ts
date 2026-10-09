@@ -27,6 +27,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { type Browser, expect, type Page, type Route, test } from "@playwright/test";
+import type { StoredKbGap } from "../../src/lib/insight/types";
 import { KB_PROPOSAL_AUDIT_ACTION } from "../../src/lib/kb/proposal-contract";
 import {
   APPROVE_AND_PUBLISH_CTA,
@@ -99,20 +100,30 @@ function proposalFixtures() {
 }
 
 // ---------------------------------------------------------------------------
-// Deterministic embedding vectors: two mutually orthogonal patterns (cosine distance exactly 1),
-// routed by a literal token as in phase5-rag.spec.ts.
+// Deterministic embedding vectors: three mutually orthogonal patterns (cosine distance exactly 1
+// between any two), routed by a literal token as in phase5-rag.spec.ts. RAG_TOKEN text embeds as
+// CANONICAL_VECTOR, GAP_TOKEN text as GAP_VECTOR (the Insight gap cluster of the absence case),
+// anything else as UNRELATED_VECTOR.
 // ---------------------------------------------------------------------------
 const RAG_TOKEN = `aidakbpragtoken${ts}`;
-const HALF = EMBEDDING_DIMENSIONS / 2;
-const CANONICAL_VECTOR: number[] = Array.from({ length: EMBEDDING_DIMENSIONS }, (_, i) =>
-  i < HALF ? 1 : 0,
-);
-const UNRELATED_VECTOR: number[] = Array.from({ length: EMBEDDING_DIMENSIONS }, (_, i) =>
-  i < HALF ? 0 : 1,
-);
+const GAP_TOKEN = `aidakbpgaptoken${ts}`;
+const THIRD = EMBEDDING_DIMENSIONS / 3;
+function band(index: number): number[] {
+  return Array.from({ length: EMBEDDING_DIMENSIONS }, (_, i) =>
+    i >= index * THIRD && i < (index + 1) * THIRD ? 1 : 0,
+  );
+}
+const CANONICAL_VECTOR = band(0);
+const UNRELATED_VECTOR = band(1);
+const GAP_VECTOR = band(2);
 
 const stub = createLlmStub();
-stub.embedFn = (text) => (text.includes(RAG_TOKEN) ? CANONICAL_VECTOR : UNRELATED_VECTOR);
+stub.embedFn = (text) =>
+  text.includes(RAG_TOKEN)
+    ? CANONICAL_VECTOR
+    : text.includes(GAP_TOKEN)
+      ? GAP_VECTOR
+      : UNRELATED_VECTOR;
 
 /** The release function of the hold a case started, if any; afterEach calls it. */
 let releaseHold: (() => void) | null = null;
@@ -375,14 +386,18 @@ async function startFromTicketMenu(page: Page, ticket: SeededTicket): Promise<st
 }
 
 /** A DRAFT proposal seeded directly (no LLM call) from one new resolved ticket. */
-async function seedDraft(label: string, title = `Seeded draft ${label} ${ts}`) {
+async function seedDraft(
+  label: string,
+  title = `Seeded draft ${label} ${ts}`,
+  bodyMarkdown = `## Steps\n\nSeeded body ${label} ${ts}.`,
+) {
   const ticket = await seedTicketWithReply(`kbp${label}${ts}`, label);
   const { seedProposal } = await proposalFixtures();
   const proposal = await seedProposal(orgId, {
     status: "DRAFT",
     ticketIds: [ticket.id],
     title,
-    bodyMarkdown: `## Steps\n\nSeeded body ${label} ${ts}.`,
+    bodyMarkdown,
   });
   return { ticket, proposalId: proposal.id, title };
 }
@@ -966,18 +981,33 @@ test("injection: a fenced attempt to publish in a public reply produces only a D
   await expect(main(page).getByText(title)).toHaveCount(0);
 });
 
-test("absent from RAG and Insight: a Draft's marker is in no drafted-reply or Insight chat request and on neither page", async ({
+test("absent from RAG and Insight: Drafts that would be the nearest KB content reach no drafted-reply or Insight request and neither page", async ({
   page,
 }) => {
   const marker = `aidakbpdraftmarker${ts}`;
-  await seedDraft("absent", `Draft only ${marker}`);
+  // Review c-WR-03: each Draft is built so that, if a KB reader returned it, it would be the
+  // nearest content and so reach the model. Draft A embeds like the drafted reply's question
+  // (RAG_TOKEN, distance 0); Draft B embeds like the Insight gap cluster below (GAP_TOKEN,
+  // distance 0). Both carry the marker in the title and the body.
+  await seedDraft(
+    "absentrag",
+    `Draft only ${marker} ${RAG_TOKEN}`,
+    `## Steps\n\nDraft body ${marker} ${RAG_TOKEN}.`,
+  );
+  await seedDraft(
+    "absentgap",
+    `Draft only ${marker} ${GAP_TOKEN}`,
+    `## Steps\n\nDraft body ${marker} ${GAP_TOKEN}.`,
+  );
   const { createKbArticle } = await import("../../src/lib/kb/create-article");
 
   // A published article the drafted reply can retrieve, embedded by the worker through the stub.
+  // Its phrase is in no ticket, so it reaches a prompt only through retrieval.
   const articleTitle = `RAG source article ${ts}`;
+  const articlePhrase = `aidakbparticlephrase${ts}`;
   const article = await createKbArticle(orgId, {
     title: articleTitle,
-    bodyMarkdown: `# ${articleTitle}\n\nReset the VPN profile from Settings. ${RAG_TOKEN}`,
+    bodyMarkdown: `# ${articleTitle}\n\nReset the VPN profile from Settings (${articlePhrase}). ${RAG_TOKEN}`,
   });
   await expect
     .poll(
@@ -988,7 +1018,7 @@ test("absent from RAG and Insight: a Draft's marker is in no drafted-reply or In
     .toBe("COMPLETED");
   const chunk = await prisma.kbChunk.findFirstOrThrow({ where: { articleId: article.id } });
 
-  // --- A drafted reply: the KB content reaches the prompt, the proposal does not.
+  // --- A drafted reply: retrieval runs and the KB content reaches the prompt, the Draft does not.
   const ticket = await createTicketWithoutTriage({
     subject: `KB proposal absence question ${ts}`,
     priority: "NORMAL",
@@ -1007,15 +1037,39 @@ test("absent from RAG and Insight: a Draft's marker is in no drafted-reply or In
   await page.getByRole("button", { name: "Generate draft" }).click();
   await expect(page.getByText(draftMarkdown)).toBeVisible({ timeout: 30_000 });
   const draftRequests = stub.chatRequests.slice(draftBefore);
-  expect(draftRequests.length).toBeGreaterThan(0);
-  expect(draftRequests.some((request) => allText(request).includes(RAG_TOKEN))).toBe(true);
-  for (const request of draftRequests) expect(allText(request)).not.toContain(marker);
+  expect(draftRequests).toHaveLength(1);
+  const draftPrompt = allText(draftRequests[0]);
+  expect(draftPrompt).toContain(articlePhrase);
+  expect(draftPrompt).toContain(chunk.id);
+  expect(draftPrompt).not.toContain(marker);
+  expectedAudits.push({ actionType: "DRAFT_GENERATED", kbProposalId: null, ticketId: ticket.id });
 
-  // --- An Insight run with clustering and the narrative; one answer fits both schemas.
+  // --- An Insight run with clustering and the narrative; one answer fits both schemas. Three
+  // tickets embed as GAP_VECTOR and form a reported cluster (minClusterSize 3). No article embeds
+  // near it, so the KB-gap lookup must report it as a gap with a nearest article at coverage 0;
+  // a leaked Draft B would be at distance 0 (coverage 1, no gap).
+  const gapTickets: { id: string }[] = [];
+  for (const n of [1, 2, 3]) {
+    gapTickets.push(
+      await createTicketWithoutTriage({
+        subject: `KB proposal insight gap ${n} ${GAP_TOKEN}`,
+        priority: "NORMAL",
+        body: `Insight gap question ${n} ${ts}`,
+        contact: { email: `kbp-gap-${n}-${ts}@example.com` },
+        direction: "INBOUND",
+      }),
+    );
+  }
   const summary = `Insight summary for the absence case ${ts}.`;
   stub.chatResponse = { summary, clusters: [] };
   const insightBefore = stub.chatRequests.length;
-  const runStart = new Date();
+  // The new run is found by id, not by a timestamp from this process's clock (review c-WR-02).
+  const runsBefore = new Set(
+    (
+      await prisma.insightRun.findMany({ where: { organizationId: orgId }, select: { id: true } })
+    ).map((run) => run.id),
+  );
+  let runId = "";
   await gotoWarm(page, "/insights?period=7");
   const generate = page.getByRole("button", { name: "Generate insights" });
   await expect(generate).toBeEnabled();
@@ -1023,12 +1077,14 @@ test("absent from RAG and Insight: a Draft's marker is in no drafted-reply or In
   await expect
     .poll(
       async () => {
-        const run = await prisma.insightRun.findFirst({
-          where: { organizationId: orgId, createdAt: { gte: runStart } },
-          orderBy: { createdAt: "desc" },
+        const runs = await prisma.insightRun.findMany({
+          where: { organizationId: orgId },
           select: { id: true, status: true },
         });
-        return run?.status ?? null;
+        const fresh = runs.filter((run) => !runsBefore.has(run.id));
+        if (fresh.length !== 1) return `${fresh.length} new runs`;
+        runId = fresh[0].id;
+        return fresh[0].status;
       },
       { timeout: 90_000 },
     )
@@ -1036,6 +1092,28 @@ test("absent from RAG and Insight: a Draft's marker is in no drafted-reply or In
   const insightRequests = stub.chatRequests.slice(insightBefore);
   expect(insightRequests.length).toBeGreaterThan(0);
   for (const request of insightRequests) expect(allText(request)).not.toContain(marker);
+
+  // The KB-gap lookup ran for the gap cluster and found a real article, not a Draft.
+  const run = await prisma.insightRun.findUniqueOrThrow({
+    where: { id: runId },
+    select: { kbGaps: true },
+  });
+  const gapIds = gapTickets.map((gapTicket) => gapTicket.id).sort();
+  const gaps = ((run.kbGaps ?? []) as unknown as StoredKbGap[]).filter((gap) =>
+    gap.citations.some((citation) => gapIds.includes(citation.ticketId)),
+  );
+  expect(gaps).toHaveLength(1);
+  const [gap] = gaps;
+  expect(gap.citations.map((citation) => citation.ticketId).sort()).toEqual(gapIds);
+  expect(gap.nearestArticle).not.toBeNull();
+  expect(gap.coverage).not.toBeNull();
+  expect(gap.coverage ?? Number.NaN).toBeCloseTo(0, 6);
+  expect(JSON.stringify(gap)).not.toContain(marker);
+  expectedAudits.push(
+    { actionType: "INSIGHT_CLUSTER_LABELS", kbProposalId: null, ticketId: null },
+    { actionType: "INSIGHT_SUMMARY", kbProposalId: null, ticketId: null },
+  );
+  await expectAuditTrail();
 
   await page.reload();
   await expect(page.getByText(summary)).toBeVisible();
