@@ -47,6 +47,7 @@ import {
   OPEN_ARTICLE,
   outcomeUnknownCopy,
   PROPOSALS_LINK,
+  PROPOSALS_PAGE_TITLE,
   PROPOSE_KB_ARTICLE_ENTRY,
   PUBLISH_ARTICLE_CTA,
   PUBLISH_CONFIRM_CHECKBOX,
@@ -774,6 +775,11 @@ test("AI off: both entries are disabled with the AI-off reason, the list says so
   await expect(bulkEntry).toBeDisabled();
   await expect(bulkEntry).toHaveAccessibleDescription(ENTRY_UNAVAILABLE_AI_OFF);
   await bulkEntry.click({ force: true });
+  // Review c-IN-01: a later interaction proves the click opened nothing. A modal Start dialog
+  // would block this checkbox (bounded wait), and the selection change is the sync point
+  // before the absence check.
+  await rowCheckbox(page, resolved.subject).click({ timeout: 10_000 });
+  await expect(rowCheckbox(page, resolved.subject)).not.toBeChecked();
   await expect(page.getByRole("dialog", { name: START_TITLE })).toHaveCount(0);
 
   // Ticket "More ticket actions" menu, same reason.
@@ -878,6 +884,13 @@ test("menu entry: a resolved ticket's More ticket actions opens the Start dialog
   await expect(disabledItem).toHaveAttribute("aria-disabled", "true");
   await expect(disabledItem).toHaveAccessibleDescription(ENTRY_UNAVAILABLE_NOT_RESOLVED);
   await disabledItem.click({ force: true });
+  // Review c-IN-01: a selected item closes the menu; a refused one leaves it open. Escape then
+  // closes it and returns focus to the trigger, the sync point before the absence check.
+  await expect(page.getByRole("menu")).toBeVisible();
+  await expect(disabledItem).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "More ticket actions" })).toBeFocused();
   await expect(page.getByRole("dialog", { name: START_TITLE })).toHaveCount(0);
 });
 
@@ -915,6 +928,7 @@ test("roles: a plain member sees no Proposals link and 'Owners and admins only' 
 test("isolation: another organization's proposal id shows 'Proposal not found' to an admin of this organization", async ({
   page,
 }) => {
+  const own = await seedDraft("isolation");
   const { seedOrgWithMembers, seedProposal, seedResolvedTicket } = await proposalFixtures();
   const other = await seedOrgWithMembers(prisma, ["owner"]);
   const otherTicket = await seedResolvedTicket(other.orgId);
@@ -931,7 +945,11 @@ test("isolation: another organization's proposal id shows 'Proposal not found' t
   await expect(main(page).getByRole("heading", { name: NOT_FOUND_HEADING })).toBeVisible();
   expect(await page.content()).not.toContain(otherTitle);
 
+  // Review c-IN-01: the list itself is shown (its heading and this organization's Draft) before
+  // the other organization's title is checked absent.
   await gotoWarm(page, "/kb/proposals");
+  await expect(main(page).getByRole("heading", { name: PROPOSALS_PAGE_TITLE })).toBeVisible();
+  await expect(main(page).getByText(own.title, { exact: true })).toBeVisible();
   await expect(main(page).getByText(otherTitle)).toHaveCount(0);
 });
 
@@ -957,9 +975,12 @@ test("injection: a fenced attempt to publish in a public reply produces only a D
   await expect(statusChip(page, "Draft")).toBeVisible({ timeout: 60_000 });
 
   // The attempt reached the model only as fenced data: one T1 block, its close tag escaped.
-  const [request] = stub.chatRequests
+  // Review c-IN-02: exactly one proposal request, as in the other generation cases.
+  const requests = stub.chatRequests
     .slice(requestsBefore)
     .filter((recorded) => messageOf(recorded, "system") === PROPOSAL_SYSTEM_PROMPT);
+  expect(requests).toHaveLength(1);
+  const [request] = requests;
   const blocks = ticketContentBlocks(messageOf(request, "user"));
   expect(blocks).toHaveLength(1);
   expect(blocks[0]).toContain(injection);
