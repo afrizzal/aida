@@ -72,6 +72,7 @@ import {
   TITLE_HELP,
   TITLE_LABEL,
 } from "@/lib/kb/proposal-copy";
+import { classifyVersionChange, isAwaitingSavedVersion } from "@/lib/kb/proposal-editor";
 import {
   type ActionOutcome,
   finishedAsDraft,
@@ -138,12 +139,14 @@ export function ProposalReview({ proposal, previewHtml, headingId }: ProposalRev
     case "DRAFT":
       content = (
         <DraftEditor
-          // A new version (after a save, or another admin's save picked up by a reload) or a
-          // reload starts the editor again from the stored title and body.
-          key={`${proposal.version}:${reloadCount}`}
+          // Review b-WR-02: only a reload starts the editor again. The editor's own save keeps
+          // the instance, so typing after a save survives the refresh; another version arriving
+          // with a reload is taken over inside the editor.
+          key={reloadCount}
           proposal={proposal}
           previewHtml={previewHtml}
           onFocusHeading={requestHeadingFocus}
+          onFocusHeadingNow={focusHeading}
           onReload={reload}
         />
       );
@@ -287,7 +290,10 @@ interface DraftValues {
 interface DraftEditorProps {
   proposal: ProposalReviewData;
   previewHtml: string;
+  /** The h1 now and again after the refresh (publish, reject: the editor goes away). */
   onFocusHeading(): void;
+  /** The h1 now only (save success: the editor stays, review b-WR-02). */
+  onFocusHeadingNow(): void;
   onReload(): void;
 }
 
@@ -296,13 +302,20 @@ interface DraftEditorProps {
  * and publish…" is disabled while the form is dirty, so only the saved version is published
  * (Assumption 5).
  */
-function DraftEditor({ proposal, previewHtml, onFocusHeading, onReload }: DraftEditorProps) {
+function DraftEditor({
+  proposal,
+  previewHtml,
+  onFocusHeading,
+  onFocusHeadingNow,
+  onReload,
+}: DraftEditorProps) {
   const router = useRouter();
   const form = useForm<DraftValues>({
     defaultValues: { title: proposal.title ?? "", bodyMarkdown: proposal.bodyMarkdown ?? "" },
   });
   const { errors, isDirty, dirtyFields } = form.formState;
   const [version, setVersion] = useState(proposal.version);
+  const seenVersion = useRef(proposal.version);
   const [saving, setSaving] = useState(false);
   const [callout, setCallout] = useState<OutcomeView | null>(null);
   const [saveLocked, setSaveLocked] = useState(false);
@@ -322,6 +335,27 @@ function DraftEditor({ proposal, previewHtml, onFocusHeading, onReload }: DraftE
   const bodyHelpId = useId();
   const bodyErrorId = useId();
   const unsavedReasonId = useId();
+
+  // Review b-WR-02: the server props of a new version. When they are the version this editor
+  // just saved, the stored (trimmed) values become the form's defaults and any field typed since
+  // the save keeps its value. Any other version (another admin's save, read by a reload) replaces
+  // the form, as the reload asked.
+  useEffect(() => {
+    const change = classifyVersionChange({
+      seen: seenVersion.current,
+      incoming: proposal.version,
+      local: version,
+    });
+    if (change === "none") return;
+    seenVersion.current = proposal.version;
+    const stored = { title: proposal.title ?? "", bodyMarkdown: proposal.bodyMarkdown ?? "" };
+    if (change === "ownSave") {
+      form.reset(stored, { keepDirtyValues: true });
+      return;
+    }
+    form.reset(stored);
+    setVersion(proposal.version);
+  }, [proposal.version, proposal.title, proposal.bodyMarkdown, version, form]);
 
   // UI-SPEC 3i "Save refusal / conflict / rejected call": the callout takes focus.
   useEffect(() => {
@@ -377,7 +411,9 @@ function DraftEditor({ proposal, previewHtml, onFocusHeading, onReload }: DraftE
       form.reset(values);
       router.refresh();
       // "Save draft" is disabled now (the form is clean), so focus goes to the h1 (UI-SPEC 3i).
-      onFocusHeading();
+      // Only now: the editor stays mounted through the refresh (review b-WR-02), so focus is not
+      // taken again from a field the admin has moved to since.
+      onFocusHeadingNow();
       return;
     }
     if (view.kind === "field" && view.field && view.message) {
@@ -391,9 +427,16 @@ function DraftEditor({ proposal, previewHtml, onFocusHeading, onReload }: DraftE
   }
 
   const bodyDirty = dirtyFields.bodyMarkdown === true;
+  // Review b-WR-02: from a save until the refreshed server props carry the saved version, the
+  // preview HTML and the publish dialog's data are those of the previous version, so Preview and
+  // "Approve and publish…" wait for them.
+  const awaitingSavedVersion = isAwaitingSavedVersion({
+    propsVersion: proposal.version,
+    local: version,
+  });
   const saveDisabled = !isDirty || saving || saveLocked;
-  const publishDisabled = isDirty || saving;
-  const previewDisabled = bodyDirty || saving;
+  const publishDisabled = isDirty || saving || awaitingSavedVersion;
+  const previewDisabled = bodyDirty || saving || awaitingSavedVersion;
 
   return (
     <>
