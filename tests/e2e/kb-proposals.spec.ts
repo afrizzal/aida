@@ -9,16 +9,25 @@
  * deltas from values taken at the start of a case. Waiting is Playwright's auto-waiting
  * assertions and expect.poll only, never a fixed sleep.
  *
- * Cross-file cleanup: this file sorts before phase4-ai.spec.ts and phase5-rag.spec.ts in the
- * shared, single-container e2e run. phase4-ai asserts the AI toggle is disabled before a provider
- * is configured, and phase5-rag's first test asserts the KB empty state at zero articles, so
- * afterAll removes every Setting row, proposal and article this file created (see cleanUp).
+ * Own organization (review c-WR-01, c-WR-02, c-IN-03): the file runs in an organization of its
+ * own, with its own owner and plain member, created in beforeAll through the shared fixture
+ * (seedOrgWithMembers) plus a password each, and signed in through the real login page. Its
+ * settings, tickets, proposals, articles, Insight runs and AuditEvent rows stay in that
+ * organization in the disposable Testcontainers database; nothing is deleted and no trigger is
+ * bypassed. The shared E2E organization is never written to: phase4-ai.spec.ts (AI toggle before
+ * a provider is configured) and phase5-rag.spec.ts (KB empty state at zero articles) depend on it,
+ * and afterAll checks that its articles, proposals, settings and tickets are as beforeAll found
+ * them. AuditEvent is append-only, so instead of being removed its rows are checked: every case
+ * records the rows it expects (action type, proposal, ticket), and the organization's rows must
+ * equal that list after each case and once more after the worker has stopped.
  */
 import { type ChildProcess, execSync, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { type Browser, expect, type Page, type Route, test } from "@playwright/test";
+import { KB_PROPOSAL_AUDIT_ACTION } from "../../src/lib/kb/proposal-contract";
 import {
   APPROVE_AND_PUBLISH_CTA,
   BODY_LABEL,
@@ -58,22 +67,27 @@ import {
 } from "../../src/lib/kb/proposal-copy";
 import { PROPOSAL_SYSTEM_PROMPT } from "../../src/lib/kb/proposal-prompt";
 import { EMBEDDING_DIMENSIONS } from "../../src/lib/rag/types";
-import { createTicket, orgId, prisma, stateIdFor } from "./support/db";
+import { createTicket, orgId as e2eOrgId, prisma } from "./support/db";
 import { CHAT_MODEL, type ChatRequestRecord, createLlmStub, EMBED_MODEL } from "./support/llm-stub";
 import { databaseUrl } from "./support/test-env";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "../..");
-const ADMIN_STORAGE = path.resolve(__dirname, ".auth/admin.json");
-const MEMBER_STORAGE = path.resolve(__dirname, ".auth/member.json");
+// Written by beforeAll after the file's own owner and member sign in (global-setup clears .auth).
+const OWNER_STORAGE = path.resolve(__dirname, ".auth/kb-proposals-owner.json");
+const MEMBER_STORAGE = path.resolve(__dirname, ".auth/kb-proposals-member.json");
+const OWN_PASSWORD = "E2E-kb-proposals-password-1!";
 
-test.use({ storageState: ADMIN_STORAGE });
+test.use({ storageState: OWNER_STORAGE });
 // One budget for every case and hook of this file: the worker's cold start (tsx and pg-boss), the
 // first compile of each route under next dev, and the review page's 5 s polling. Set here so the
 // file needs no per-case timeout call.
 test.describe.configure({ timeout: 180_000 });
 
 const ts = Date.now();
+
+/** The file's own organization, created in beforeAll (see the header). */
+let orgId = "";
 
 /**
  * The proposal fixtures import src/lib/db, which reads DATABASE_URL when it is first evaluated.
@@ -100,10 +114,6 @@ const UNRELATED_VECTOR: number[] = Array.from({ length: EMBEDDING_DIMENSIONS }, 
 const stub = createLlmStub();
 stub.embedFn = (text) => (text.includes(RAG_TOKEN) ? CANONICAL_VECTOR : UNRELATED_VECTOR);
 
-/** Articles and Insight runs a case created outside a proposal; afterAll removes them. */
-const extraArticleIds: string[] = [];
-const insightRunIds: string[] = [];
-
 /** The release function of the hold a case started, if any; afterEach calls it. */
 let releaseHold: (() => void) | null = null;
 
@@ -113,6 +123,8 @@ let releaseHold: (() => void) | null = null;
 // ---------------------------------------------------------------------------
 let worker: ChildProcess | null = null;
 let workerLog = "";
+/** Upper bound on the worker's graceful exit (pg-boss stop) after SIGTERM; never a sleep. */
+const WORKER_STOP_TIMEOUT_MS = 60_000;
 
 function readEnvVar(name: string): string {
   const envFile = fs.readFileSync(path.join(PROJECT_ROOT, ".env"), "utf-8");
@@ -147,32 +159,41 @@ function startWorker(): Promise<void> {
   });
 }
 
-function stopWorker(): void {
-  if (!worker?.pid) return;
+/**
+ * Stops the worker and resolves once the process has closed (review c-IN-06), so no job of this
+ * file still runs while afterAll checks the audit trail or the next file starts its own worker.
+ * Rejects if it has not closed within WORKER_STOP_TIMEOUT_MS.
+ */
+async function stopWorker(): Promise<void> {
+  const child = worker;
+  if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return;
+  const closed = new Promise<void>((resolve) => child.once("close", () => resolve()));
   if (process.platform === "win32") {
     try {
-      execSync(`taskkill /pid ${worker.pid} /t /f`);
+      execSync(`taskkill /pid ${child.pid} /t /f`);
     } catch {
       // already gone
     }
-    return;
+  } else {
+    child.kill("SIGTERM");
   }
-  worker.kill("SIGTERM");
+  let timer: NodeJS.Timeout | undefined;
+  const bound = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`worker did not exit within ${WORKER_STOP_TIMEOUT_MS} ms`)),
+      WORKER_STOP_TIMEOUT_MS,
+    );
+  });
+  try {
+    await Promise.race([closed, bound]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Settings: the workspace's chat and embedding providers point at the stub; AI on.
 // ---------------------------------------------------------------------------
-const SETTING_KEYS_TO_RESET = [
-  "aiEnabled",
-  "llm:provider",
-  "llm:model",
-  "llm:ollamaBaseUrl",
-  "llm:embeddingProvider",
-  "llm:embeddingModel",
-  "llm:embeddingOllamaBaseUrl",
-];
-
 async function setSetting(key: string, value: string): Promise<void> {
   await prisma.setting.upsert({
     where: { organizationId_key: { organizationId: orgId, key } },
@@ -303,11 +324,11 @@ async function seedTicketWithReply(
     contact: { email: `kbp-${label}-${ts}@example.com` },
     direction: "INBOUND",
   });
+  const { seedPublicMessage, stateIdFor } = await proposalFixtures();
   await prisma.ticket.update({
     where: { id: ticket.id },
-    data: { stateId: await stateIdFor(status) },
+    data: { stateId: await stateIdFor(orgId, status) },
   });
-  const { seedPublicMessage } = await proposalFixtures();
   await seedPublicMessage(orgId, ticket.id, replyBody, { direction: "OUTBOUND" });
   return { id: ticket.id, number: ticket.number, subject, replyBody };
 }
@@ -387,12 +408,105 @@ async function proposalState(proposalId: string, title: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Audit trail (review c-WR-01): the expected AuditEvent rows of the own organization.
+// ---------------------------------------------------------------------------
+interface AuditRow {
+  actionType: string;
+  kbProposalId: string | null;
+  ticketId: string | null;
+}
+
+/** Every AuditEvent row the cases that ran so far are expected to have written. */
+const expectedAudits: AuditRow[] = [];
+
+function sortedAudits(rows: readonly AuditRow[]): AuditRow[] {
+  const key = (row: AuditRow) =>
+    `${row.actionType}|${row.kbProposalId ?? ""}|${row.ticketId ?? ""}`;
+  return [...rows].sort((a, b) => key(a).localeCompare(key(b)));
+}
+
+/**
+ * The own organization's AuditEvent rows equal expectedAudits: the same number, action types,
+ * proposals and tickets. A row written by publish, save or reject (D-12), a second generation
+ * row, or a row of a failed call fails here.
+ */
+async function expectAuditTrail(): Promise<void> {
+  const rows = await prisma.auditEvent.findMany({
+    where: { organizationId: orgId },
+    select: { actionType: true, kbProposalId: true, ticketId: true },
+  });
+  const actual = rows.map((row) => ({
+    actionType: String(row.actionType),
+    kbProposalId: row.kbProposalId,
+    ticketId: row.ticketId,
+  }));
+  expect(sortedAudits(actual)).toEqual(sortedAudits(expectedAudits));
+}
+
+/** The rows of the shared E2E organization that later files depend on (see the header). */
+async function e2eOrganizationCounts() {
+  const where = { organizationId: e2eOrgId };
+  return {
+    kbArticles: await prisma.kbArticle.count({ where }),
+    kbProposals: await prisma.kbProposal.count({ where }),
+    settings: await prisma.setting.count({ where }),
+    tickets: await prisma.ticket.count({ where }),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
-let specStart = new Date();
+let e2eCountsBefore: Awaited<ReturnType<typeof e2eOrganizationCounts>> | null = null;
+
+/** Gives a fixture user a password, as Better Auth's email sign-up stores it. */
+async function setPassword(userId: string): Promise<void> {
+  const { hashPassword } = await import("better-auth/crypto");
+  const now = new Date();
+  await prisma.account.create({
+    data: {
+      id: randomUUID(),
+      accountId: userId,
+      providerId: "credential",
+      userId,
+      password: await hashPassword(OWN_PASSWORD),
+      createdAt: now,
+      updatedAt: now,
+    },
+  });
+}
+
+/** Signs a user in through the real login page and saves the session to storagePath. */
+async function signIn(browser: Browser, userId: string, storagePath: string): Promise<void> {
+  const { email } = await prisma.user.findUniqueOrThrow({
+    where: { id: userId },
+    select: { email: true },
+  });
+  // An explicit empty state: this file's storageState is the file signIn is about to write.
+  const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+  const page = await context.newPage();
+  await gotoWarm(page, "/login");
+  await page.getByLabel("Email address").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(OWN_PASSWORD);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.waitForURL(/\/tickets/, { timeout: 60_000 });
+  await context.storageState({ path: storagePath });
+  await context.close();
+}
+
+/** The file's own organization with an owner and a plain member, both signed in. */
+async function createOwnOrganization(browser: Browser): Promise<void> {
+  const { seedOrgWithMembers } = await proposalFixtures();
+  const seeded = await seedOrgWithMembers(prisma, ["owner", "member"]);
+  orgId = seeded.orgId;
+  const [owner, member] = seeded.users;
+  for (const user of seeded.users) await setPassword(user.id);
+  await signIn(browser, owner.id, OWNER_STORAGE);
+  await signIn(browser, member.id, MEMBER_STORAGE);
+}
 
 async function warmRoutes(browser: Browser): Promise<void> {
-  const context = await browser.newContext({ storageState: ADMIN_STORAGE });
+  const context = await browser.newContext({ storageState: OWNER_STORAGE });
   const page = await context.newPage();
   for (const route of ["/kb", "/kb/proposals", "/kb/proposals/warmup", "/tickets"]) {
     await gotoWarm(page, route);
@@ -401,7 +515,8 @@ async function warmRoutes(browser: Browser): Promise<void> {
 }
 
 test.beforeAll(async ({ browser }) => {
-  specStart = new Date();
+  e2eCountsBefore = await e2eOrganizationCounts();
+  await createOwnOrganization(browser);
   await stub.start();
   for (const [key, value] of [
     ["llm:provider", "ollama"],
@@ -426,65 +541,14 @@ test.afterEach(async () => {
   await setAiEnabled(true);
 });
 
-/**
- * Removes what this file created in the shared E2E organization. Every proposal created since
- * the file started is removed with its sources, then the articles those proposals published.
- *
- * A generated proposal has a KB_PROPOSAL_GENERATED AuditEvent that references it with a
- * restricting foreign key, and AuditEvent is append-only by a trigger (it refuses DELETE). In
- * this disposable Testcontainers database, and only for those rows, the delete runs in one
- * transaction with session_replication_role = replica (the e2e user is the container's
- * superuser), which skips that trigger for this transaction only; the role goes back to origin
- * before the other deletes, so their foreign keys are enforced. Without it the article published
- * through the UI would stay and break phase5-rag's KB empty state in a full run.
- */
-async function cleanUp(): Promise<void> {
-  await prisma.setting.deleteMany({
-    where: { organizationId: orgId, key: { in: SETTING_KEYS_TO_RESET } },
-  });
-
-  const proposals = await prisma.kbProposal.findMany({
-    where: { organizationId: orgId, createdAt: { gte: specStart } },
-    select: { id: true, publishedArticleId: true },
-  });
-  const proposalIds = proposals.map((proposal) => proposal.id);
-  const articleIds = proposals
-    .map((proposal) => proposal.publishedArticleId)
-    .filter((id): id is string => id !== null);
-  if (proposalIds.length > 0) {
-    await prisma.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
-      await tx.$executeRaw`DELETE FROM "AuditEvent" WHERE "organizationId" = ${orgId} AND "kbProposalId" = ANY(${proposalIds})`;
-      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = origin");
-      await tx.kbProposalSource.deleteMany({
-        where: { organizationId: orgId, proposalId: { in: proposalIds } },
-      });
-      await tx.kbProposal.deleteMany({ where: { organizationId: orgId, id: { in: proposalIds } } });
-      await tx.kbArticle.deleteMany({ where: { organizationId: orgId, id: { in: articleIds } } });
-    });
-  }
-  await prisma.kbArticle.deleteMany({
-    where: { organizationId: orgId, id: { in: extraArticleIds } },
-  });
-  await prisma.insightRun.deleteMany({
-    where: { organizationId: orgId, id: { in: insightRunIds } },
-  });
-  // The cleanup itself is checked, so a later file never meets this file's rows silently.
-  expect(
-    await prisma.kbProposal.count({
-      where: { organizationId: orgId, createdAt: { gte: specStart } },
-    }),
-  ).toBe(0);
-  expect(
-    await prisma.kbArticle.count({ where: { id: { in: [...articleIds, ...extraArticleIds] } } }),
-  ).toBe(0);
-}
-
 test.afterAll(async () => {
   releaseHold?.();
-  stopWorker();
+  await stopWorker();
   stub.stop();
-  await cleanUp();
+  // Nothing more can be written now: the audit trail is complete, and the shared E2E
+  // organization is as this file found it (review c-WR-02).
+  if (orgId !== "") await expectAuditTrail();
+  expect(await e2eOrganizationCounts()).toEqual(e2eCountsBefore);
 });
 
 // ---------------------------------------------------------------------------
@@ -501,8 +565,9 @@ test("happy path: two resolved tickets from the inbox become a reviewed, edited 
     "RESOLVED",
     `Reply two ${ts}: clear the cached token, then reconnect.`,
   );
+  const { stateIdFor } = await proposalFixtures();
   const resolvedState = await prisma.ticketState.findUniqueOrThrow({
-    where: { id: await stateIdFor("RESOLVED") },
+    where: { id: await stateIdFor(orgId, "RESOLVED") },
     select: { name: true },
   });
 
@@ -560,6 +625,13 @@ test("happy path: two resolved tickets from the inbox become a reviewed, edited 
   await expect(statusChip(page, "Draft")).toBeVisible({ timeout: 30_000 });
   const titleField = page.getByRole("textbox", { name: "Title" });
   await expect(titleField).toHaveValue(proposalTitle);
+  // D-12: the one generation that returned output has its one row.
+  expectedAudits.push({
+    actionType: KB_PROPOSAL_AUDIT_ACTION,
+    kbProposalId: proposalId,
+    ticketId: null,
+  });
+  await expectAuditTrail();
 
   // --- The one chat request of this proposal: fixed system prompt, ticket text fenced in the
   // user prompt only.
@@ -632,6 +704,8 @@ test("happy path: two resolved tickets from the inbox become a reviewed, edited 
   await kbPage.reload();
   await expect(kbPage.getByRole("main").getByText(editedTitle, { exact: true })).toBeVisible();
   await kbPage.close();
+  // Save and publish write no AuditEvent row (D-12).
+  await expectAuditTrail();
 });
 
 // ---------------------------------------------------------------------------
@@ -664,6 +738,8 @@ test("reject: a Draft rejected through its dialog is Rejected with no publish co
   await gotoWarm(page, "/kb");
   await expect(main(page).getByRole("heading", { name: "Knowledge Base" })).toBeVisible();
   await expect(main(page).getByText(title)).toHaveCount(0);
+  // Reject writes no AuditEvent row (D-12).
+  await expectAuditTrail();
 });
 
 test("AI off: both entries are disabled with the AI-off reason, the list says so, and a draft is still edited and published without a chat call", async ({
@@ -708,6 +784,7 @@ test("AI off: both entries are disabled with the AI-off reason, the list says so
   expect(state.status).toBe("PUBLISHED");
   expect(state.articles).toBe(1);
   expect(stub.chatCalls).toBe(callsBefore);
+  await expectAuditTrail();
 });
 
 test("provider failure: a 404 model-not-found answer ends Failed with the configuration row and no provider text", async ({
@@ -733,6 +810,8 @@ test("provider failure: a 404 model-not-found answer ends Failed with the config
     .slice(requestsBefore)
     .filter((request) => messageOf(request, "system") === PROPOSAL_SYSTEM_PROMPT);
   expect(proposalRequests).toHaveLength(1);
+  // A call that returned no output has no AuditEvent row (D-12).
+  await expectAuditTrail();
 });
 
 test("provider failure: an answer that is not JSON ends Failed with the invalid-output row and no provider text", async ({
@@ -757,6 +836,8 @@ test("provider failure: an answer that is not JSON ends Failed with the invalid-
     .slice(requestsBefore)
     .filter((request) => messageOf(request, "system") === PROPOSAL_SYSTEM_PROMPT);
   expect(proposalRequests).toHaveLength(1);
+  // An answer that is not JSON is no output: no AuditEvent row (D-12).
+  await expectAuditTrail();
 });
 
 test("menu entry: a resolved ticket's More ticket actions opens the Start dialog; an open ticket's entry is disabled with its reason", async ({
@@ -874,6 +955,12 @@ test("injection: a fenced attempt to publish in a public reply produces only a D
   expect(state.status).toBe("DRAFT");
   expect(state.publishedArticleId).toBeNull();
   expect(state.articles).toBe(0);
+  expectedAudits.push({
+    actionType: KB_PROPOSAL_AUDIT_ACTION,
+    kbProposalId: proposalId,
+    ticketId: null,
+  });
+  await expectAuditTrail();
   await gotoWarm(page, "/kb");
   await expect(main(page).getByRole("heading", { name: "Knowledge Base" })).toBeVisible();
   await expect(main(page).getByText(title)).toHaveCount(0);
@@ -892,7 +979,6 @@ test("absent from RAG and Insight: a Draft's marker is in no drafted-reply or In
     title: articleTitle,
     bodyMarkdown: `# ${articleTitle}\n\nReset the VPN profile from Settings. ${RAG_TOKEN}`,
   });
-  extraArticleIds.push(article.id);
   await expect
     .poll(
       async () =>
@@ -942,7 +1028,6 @@ test("absent from RAG and Insight: a Draft's marker is in no drafted-reply or In
           orderBy: { createdAt: "desc" },
           select: { id: true, status: true },
         });
-        if (run && !insightRunIds.includes(run.id)) insightRunIds.push(run.id);
         return run?.status ?? null;
       },
       { timeout: 90_000 },
@@ -1006,6 +1091,8 @@ test("review R2-5 (a): a published proposal whose article is PENDING retries ind
   expect(await prisma.kbArticle.count({ where: { organizationId: orgId, title } })).toBe(1);
   const proposal = await prisma.kbProposal.findUniqueOrThrow({ where: { id: seeded.id } });
   expect(proposal.publishedArticleId).toBe(articleId);
+  // Retry indexing writes no AuditEvent row.
+  await expectAuditTrail();
 });
 
 test("review R2-5 (b): an aborted save or publish call shows its outcome-unknown row, keeps the edits and changes nothing", async ({
@@ -1066,4 +1153,5 @@ test("review R2-5 (b): an aborted save or publish call shows its outcome-unknown
   await expect(dialog.getByRole("button", { name: KEEP_REVIEWING })).toBeFocused();
   expect(await proposalState(proposalId, title)).toEqual(before);
   await page.unroute(isReviewPage, abortActions);
+  await expectAuditTrail();
 });
