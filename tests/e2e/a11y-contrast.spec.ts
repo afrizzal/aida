@@ -57,6 +57,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
+import { PROPOSAL_STATUSES } from "../../src/lib/kb/proposal-contract";
 import {
   PROPOSAL_STATUS_LABELS,
   PROPOSALS_PAGE_TITLE,
@@ -119,8 +120,8 @@ const draftMarkdown =
 // Phase 12.2 (12.2-11 Task 3, UI-SPEC E3, E4, E7 contrast backstop): one KB proposal per status,
 // seeded directly (no LLM call, no job queued), each from its own RESOLVED ticket, so
 // /kb/proposals shows every status chip and a Draft review page can be scanned. All are removed
-// in the afterAll, with the article the PUBLISHED fixture creates.
-const PROPOSAL_STATUSES = ["GENERATING", "DRAFT", "REJECTED", "PUBLISHED", "FAILED"] as const;
+// in the afterAll, with the article the PUBLISHED fixture creates. The statuses come from the
+// contract (review c-IN-05), so a status added there gets a chip in this scan too.
 const proposalIds: string[] = [];
 const proposalArticleIds: string[] = [];
 const proposalTicketIds: string[] = [];

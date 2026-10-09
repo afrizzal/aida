@@ -702,6 +702,5 @@ describe("review P3: no snapshotSeq key and no bigint at any depth of a loader r
     const found = findForbidden(sample);
     expect(found.some((entry) => entry.endsWith(": bigint"))).toBe(true);
     expect(found).toContain("$.nested.snapshotSeq");
-    expect(typeof 1n).toBe("bigint");
   });
 });
