@@ -97,6 +97,13 @@ export interface ProposalReviewProps {
 const FOCUS_RING =
   "rounded-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none";
 
+/**
+ * Review b-IN-04: a control that is unavailable for a stated reason stays focusable
+ * (aria-disabled, never native disabled) so its aria-describedby reason is announced; its onClick
+ * returns early. The look matches a natively disabled button.
+ */
+const ARIA_DISABLED = "aria-disabled:cursor-not-allowed aria-disabled:opacity-50";
+
 export function ProposalReview({ proposal, previewHtml, headingId }: ProposalReviewProps) {
   const router = useRouter();
   const [reloadCount, setReloadCount] = useState(0);
@@ -386,6 +393,7 @@ function DraftEditor({ proposal, previewHtml, onFocusHeading, onReload }: DraftE
   const bodyDirty = dirtyFields.bodyMarkdown === true;
   const saveDisabled = !isDirty || saving || saveLocked;
   const publishDisabled = isDirty || saving;
+  const previewDisabled = bodyDirty || saving;
 
   return (
     <>
@@ -422,13 +430,16 @@ function DraftEditor({ proposal, previewHtml, onFocusHeading, onReload }: DraftE
                 type="button"
                 variant="outline"
                 size="sm"
-                className="text-[13px]"
+                className={cn("text-[13px]", ARIA_DISABLED)}
                 aria-pressed={preview}
                 // The preview shows the stored body, so it waits for a save while the body has
                 // unsaved edits.
-                disabled={bodyDirty || saving}
+                aria-disabled={previewDisabled ? true : undefined}
                 aria-describedby={bodyDirty ? unsavedReasonId : undefined}
-                onClick={() => setPreview((on) => !on)}
+                onClick={() => {
+                  if (previewDisabled) return;
+                  setPreview((on) => !on);
+                }}
               >
                 {PREVIEW_TOGGLE}
               </Button>
@@ -520,10 +531,13 @@ function DraftEditor({ proposal, previewHtml, onFocusHeading, onReload }: DraftE
             ref={publishTriggerRef}
             type="button"
             size="sm"
-            className="text-[13px]"
-            disabled={publishDisabled}
+            className={cn("text-[13px]", ARIA_DISABLED)}
+            aria-disabled={publishDisabled ? true : undefined}
             aria-describedby={isDirty ? unsavedReasonId : undefined}
-            onClick={() => setPublishOpen(true)}
+            onClick={() => {
+              if (publishDisabled) return;
+              setPublishOpen(true);
+            }}
           >
             {APPROVE_AND_PUBLISH_CTA}
           </Button>
@@ -594,10 +608,13 @@ function NewProposalAction({ proposal }: { proposal: ProposalReviewData }) {
           type="button"
           variant="outline"
           size="sm"
-          className="text-[13px]"
-          disabled={!proposal.aiEnabled}
+          className={cn("text-[13px]", ARIA_DISABLED)}
+          aria-disabled={proposal.aiEnabled ? undefined : true}
           aria-describedby={proposal.aiEnabled ? undefined : reasonId}
-          onClick={() => setOpen(true)}
+          onClick={() => {
+            if (!proposal.aiEnabled) return;
+            setOpen(true);
+          }}
         >
           {NEW_PROPOSAL_BUTTON}
         </Button>
@@ -813,7 +830,7 @@ function GeneratingView({
             type="button"
             variant="outline"
             size="sm"
-            className="text-[13px] aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+            className={cn("text-[13px]", ARIA_DISABLED)}
             aria-disabled={unavailable ? true : undefined}
             onClick={handleRestart}
           >
@@ -924,7 +941,7 @@ function PublishedView({
               type="button"
               variant="outline"
               size="sm"
-              className="text-[13px] aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+              className={cn("text-[13px]", ARIA_DISABLED)}
               aria-disabled={unavailable ? true : undefined}
               onClick={handleRetry}
             >
