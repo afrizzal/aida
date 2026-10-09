@@ -5,6 +5,7 @@ import { KbEmbeddingStatusChip } from "@/components/kb/kb-embedding-status-chip"
 import { Button } from "@/components/ui/button";
 import { prisma } from "@/lib/db";
 import { formatRelativeTime } from "@/lib/format-relative-time";
+import { listKbArticles } from "@/lib/kb/article-reads";
 import { PROPOSALS_LINK } from "@/lib/kb/proposal-copy";
 import { findActiveMembership, isAdminRole } from "@/lib/membership";
 import { getScopedDb } from "@/lib/session";
@@ -22,10 +23,7 @@ export default async function KbPage() {
     ? await db.kbProposal.count({ where: { organizationId: orgId, status: "DRAFT" } })
     : 0;
 
-  const articles = await db.kbArticle.findMany({
-    orderBy: { updatedAt: "desc" },
-    select: { id: true, title: true, slug: true, embeddingStatus: true, updatedAt: true },
-  });
+  const articles = await listKbArticles(db);
 
   return (
     <div className="flex flex-col">

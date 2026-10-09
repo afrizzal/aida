@@ -1,3 +1,4 @@
+import { countKbArticles } from "@/lib/kb/article-reads";
 import { getLlmSettings, isProviderConfigured } from "@/lib/llm/settings";
 import { getEmbeddingSettings, isEmbeddingConfigured } from "@/lib/rag/settings";
 import { getScopedDb } from "@/lib/session";
@@ -24,7 +25,7 @@ export default async function SettingsPage() {
   // Computed independently from providerConfigured — the embedding provider is a SEPARATE
   // capability from the chat provider (Decision 5).
   const embeddingConfigured = await isEmbeddingConfigured(db);
-  const articleCount = await db.kbArticle.count();
+  const articleCount = await countKbArticles(db);
 
   return (
     <div className="space-y-6">

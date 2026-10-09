@@ -2,6 +2,7 @@ import { BookOpen } from "lucide-react";
 import { EmptyState } from "@/components/empty-state";
 import { KbArticleForm } from "@/components/kb/kb-article-form";
 import { KbEmbeddingStatusChip } from "@/components/kb/kb-embedding-status-chip";
+import { findKbArticle } from "@/lib/kb/article-reads";
 import { getScopedDb } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +19,7 @@ export default async function KbArticleDetailPage({ params }: KbArticleDetailPag
   const { db } = await getScopedDb();
   const { id } = await params;
 
-  const article = await db.kbArticle.findFirst({ where: { id } });
+  const article = await findKbArticle(db, id);
 
   if (!article) {
     return (
