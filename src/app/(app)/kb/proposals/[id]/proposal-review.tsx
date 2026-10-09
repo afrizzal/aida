@@ -42,6 +42,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { takeStartedProposal } from "@/lib/kb/proposal-arrival";
 import { PROPOSAL_POLL_INTERVAL_MS, type ProposalStatus } from "@/lib/kb/proposal-contract";
 import {
   APPROVE_AND_PUBLISH_CTA,
@@ -119,6 +120,12 @@ export function ProposalReview({ proposal, previewHtml, headingId }: ProposalRev
     headingFocusPending.current = true;
     focusHeading();
   }, [focusHeading]);
+
+  // UI-SPEC 3i "Start success → the review page <h1> after navigation" (review b-WR-05): only
+  // when the Start dialog marked this proposal; a normal visit keeps document order.
+  useEffect(() => {
+    if (takeStartedProposal(proposal.id)) focusHeading();
+  }, [proposal.id, focusHeading]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the refreshed proposal or a reload arrives
   useEffect(() => {
@@ -637,10 +644,13 @@ function ReadOnlyArticle({ title, previewHtml }: { title: string | null; preview
 /**
  * "Start a new proposal" (UI-SPEC 3e FAILED and REJECTED, D-16): opens the Start dialog with the
  * same tickets; regeneration always creates a new proposal. Disabled with the AI-off reason when
- * AI is off (D-09). The dialog returns focus to this button when it closes without starting.
+ * AI is off (D-09). The button is not a DialogTrigger, so Radix has no trigger to return focus
+ * to: an explicit onCloseAutoFocus sends it back here when the dialog closes without starting
+ * (UI-SPEC 3i, review b-WR-05, as 12 UI-WR-03).
  */
 function NewProposalAction({ proposal }: { proposal: ProposalReviewData }) {
   const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const reasonId = useId();
   const ticketIds = proposal.sources.map((source) => source.ticketId);
 
@@ -648,6 +658,7 @@ function NewProposalAction({ proposal }: { proposal: ProposalReviewData }) {
     <ActionBar>
       <div className="flex flex-wrap items-center gap-2">
         <Button
+          ref={buttonRef}
           type="button"
           variant="outline"
           size="sm"
@@ -667,7 +678,15 @@ function NewProposalAction({ proposal }: { proposal: ProposalReviewData }) {
           {ENTRY_UNAVAILABLE_AI_OFF}
         </p>
       )}
-      <StartProposalDialog open={open} onOpenChange={setOpen} ticketIds={ticketIds} />
+      <StartProposalDialog
+        open={open}
+        onOpenChange={setOpen}
+        ticketIds={ticketIds}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          buttonRef.current?.focus();
+        }}
+      />
     </ActionBar>
   );
 }

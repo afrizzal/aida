@@ -27,6 +27,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { markStartedProposal } from "@/lib/kb/proposal-arrival";
 import { MAX_PROPOSAL_SOURCES, MIN_PROPOSAL_SOURCES } from "@/lib/kb/proposal-contract";
 import {
   CUSTOMER_CONTENT_NOTICE,
@@ -54,7 +55,11 @@ export interface StartProposalDialogProps {
   onOpenChange(open: boolean): void;
   /** 1 to 5 ticket ids; the caller guarantees the count and the dialog renders nothing otherwise. */
   ticketIds: readonly string[];
-  /** Where focus goes when the dialog closes (a menu trigger, merge-ticket-dialog.tsx pattern). */
+  /**
+   * Where focus goes when the dialog closes without starting (a menu trigger, the bulk button,
+   * merge-ticket-dialog.tsx pattern). Not called after a start: focus then goes to the new
+   * review page's h1 (UI-SPEC 3i, review b-WR-05).
+   */
   onCloseAutoFocus?(event: Event): void;
 }
 
@@ -65,6 +70,8 @@ export function StartProposalDialog({
   onCloseAutoFocus,
 }: StartProposalDialogProps) {
   const [pending, setPending] = useState(false);
+  /** Set by a successful start: the close does not return focus to the trigger (b-WR-05). */
+  const started = useRef(false);
 
   // UI-SPEC 3i: the dialog never opens on an empty selection or on more than five tickets.
   if (ticketIds.length < MIN_PROPOSAL_SOURCES || ticketIds.length > MAX_PROPOSAL_SOURCES) {
@@ -85,9 +92,18 @@ export function StartProposalDialog({
           // Focus moves to the submit button once the tickets are listed (UI-SPEC 3i); until
           // then it stays on the dialog itself.
           event.preventDefault();
+          started.current = false;
           (event.currentTarget as HTMLElement | null)?.focus();
         }}
-        onCloseAutoFocus={onCloseAutoFocus}
+        onCloseAutoFocus={(event) => {
+          // UI-SPEC 3i "Start success": the review page focuses its h1 after the navigation, so
+          // focus is not sent back to a trigger on the page being left.
+          if (started.current) {
+            event.preventDefault();
+            return;
+          }
+          onCloseAutoFocus?.(event);
+        }}
         onEscapeKeyDown={(event) => {
           if (pending) event.preventDefault();
         }}
@@ -104,6 +120,9 @@ export function StartProposalDialog({
             pending={pending}
             onPendingChange={setPending}
             onClose={() => onOpenChange(false)}
+            onStarted={() => {
+              started.current = true;
+            }}
           />
         )}
       </DialogContent>
@@ -121,10 +140,12 @@ interface StartFlowProps {
   pending: boolean;
   onPendingChange(pending: boolean): void;
   onClose(): void;
+  /** A proposal was started; called before the dialog closes and the browser navigates. */
+  onStarted(): void;
 }
 
 /** Mounted per opening, so every opening reads the tickets again and starts without a callout. */
-function StartFlow({ ticketIds, pending, onPendingChange, onClose }: StartFlowProps) {
+function StartFlow({ ticketIds, pending, onPendingChange, onClose, onStarted }: StartFlowProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [selection, setSelection] = useState<Selection>({ kind: "loading" });
@@ -199,6 +220,9 @@ function StartFlow({ ticketIds, pending, onPendingChange, onClose }: StartFlowPr
       const next = resolveActionOutcome("start", outcome);
       onPendingChange(false);
       if (next.kind === "success" && proposalId) {
+        // Review b-WR-05: the review page takes this mark on mount and focuses its h1.
+        markStartedProposal(proposalId);
+        onStarted();
         onClose();
         if (next.message) toast.success(next.message);
         router.push(`/kb/proposals/${proposalId}`);
