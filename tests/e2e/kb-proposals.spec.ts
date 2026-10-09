@@ -37,11 +37,15 @@ import {
   ENTRY_UNAVAILABLE_NOT_RESOLVED,
   FAILURE_CONFIGURATION,
   FAILURE_INVALID_OUTPUT,
+  FAILURE_SHORT_CONFIGURATION,
   GENERATE_PROPOSAL_CTA,
   GENERATING_BODY,
   INDEXING_RESTARTED,
   KEEP_REVIEWING,
+  LINKS_IN_ARTICLE_HEADING,
   LIST_AI_OFF_NOTICE,
+  NEW_PROPOSAL_BUTTON,
+  NO_LINKS_IN_ARTICLE,
   NOT_ALLOWED_HEADING,
   NOT_FOUND_HEADING,
   OPEN_ARTICLE,
@@ -57,8 +61,10 @@ import {
   REJECT_TITLE,
   REJECT_TRIGGER,
   REJECTED_TOAST,
+  RELOAD_BUTTON,
   RETRY_INDEXING,
   RETRY_INDEXING_PENDING_HINT,
+  REVIEW_PAGE_TITLE,
   SAVE_DRAFT_CTA,
   SAVED_TOAST,
   START_DISMISS,
@@ -66,6 +72,7 @@ import {
   START_TITLE,
   STARTED_TOAST,
   TITLE_LABEL,
+  UNTITLED_WHILE_GENERATING,
 } from "../../src/lib/kb/proposal-copy";
 import { PROPOSAL_SYSTEM_PROMPT } from "../../src/lib/kb/proposal-prompt";
 import { EMBEDDING_DIMENSIONS } from "../../src/lib/rag/types";
@@ -282,6 +289,11 @@ async function proposalIdFromUrl(page: Page): Promise<string> {
   return id;
 }
 
+/** The review page h1 (tabIndex -1), which takes focus after a start, a reload and a publish. */
+function reviewHeading(page: Page) {
+  return page.getByRole("heading", { level: 1, name: REVIEW_PAGE_TITLE });
+}
+
 /** A status chip label on the review page, matched exactly. */
 function statusChip(page: Page, label: string) {
   return main(page).getByText(label, { exact: true });
@@ -383,7 +395,10 @@ async function startFromTicketMenu(page: Page, ticket: SeededTicket): Promise<st
   await expect(generate).toBeEnabled();
   await generate.click();
   await expect(page.getByText(STARTED_TOAST)).toBeVisible();
-  return proposalIdFromUrl(page);
+  const proposalId = await proposalIdFromUrl(page);
+  // UI-SPEC 3i "Start success → the review page <h1>" (review b-WR-05).
+  await expect(reviewHeading(page)).toBeFocused();
+  return proposalId;
 }
 
 /** A DRAFT proposal seeded directly (no LLM call) from one new resolved ticket. */
@@ -631,6 +646,8 @@ test("happy path: two resolved tickets from the inbox become a reviewed, edited 
   await generate.click();
   await expect(page.getByText(STARTED_TOAST)).toBeVisible();
   const proposalId = await proposalIdFromUrl(page);
+  // UI-SPEC 3i "Start success → the review page <h1>" (review b-WR-05).
+  await expect(reviewHeading(page)).toBeFocused();
   await expect.poll(() => stub.heldChatCount, { timeout: 30_000 }).toBe(1);
   await expect(statusChip(page, "Generating")).toBeVisible({ timeout: 15_000 });
   await expect(main(page).getByText(GENERATING_BODY)).toBeVisible();
@@ -700,6 +717,8 @@ test("happy path: two resolved tickets from the inbox become a reviewed, edited 
   const publishDialog = page.getByRole("dialog", { name: PUBLISH_TITLE });
   await expect(publishDialog).toBeVisible();
   // "Publish article" (PUBLISH_ARTICLE_CTA) stays disabled until the checkbox is checked.
+  // Amendment A7: a body without links says so under the checklist.
+  await expect(publishDialog.getByText(NO_LINKS_IN_ARTICLE, { exact: true })).toBeVisible();
   const confirm = publishDialog.getByRole("button", { name: PUBLISH_ARTICLE_CTA });
   await expect(confirm).toBeDisabled();
   await publishDialog.getByRole("checkbox", { name: PUBLISH_CONFIRM_CHECKBOX }).check();
@@ -833,6 +852,16 @@ test("provider failure: a 404 model-not-found answer ends Failed with the config
   expect(proposalRequests).toHaveLength(1);
   // A call that returned no output has no AuditEvent row (D-12).
   await expectAuditTrail();
+
+  // Review b-WR-04: the list row of a FAILED proposal without a title shows its short failure
+  // reason, never "Untitled (drafting…)".
+  await gotoWarm(page, "/kb/proposals");
+  await expect(main(page).getByRole("heading", { name: PROPOSALS_PAGE_TITLE })).toBeVisible();
+  const row = main(page).locator(`a[href="/kb/proposals/${proposalId}"]`);
+  await expect(row).toHaveCount(1);
+  await expect(row.getByText("Failed", { exact: true })).toBeVisible();
+  await expect(row.getByText(FAILURE_SHORT_CONFIGURATION, { exact: true })).toBeVisible();
+  await expect(row).not.toContainText(UNTITLED_WHILE_GENERATING);
 });
 
 test("provider failure: an answer that is not JSON ends Failed with the invalid-output row and no provider text", async ({
@@ -859,6 +888,23 @@ test("provider failure: an answer that is not JSON ends Failed with the invalid-
   expect(proposalRequests).toHaveLength(1);
   // An answer that is not JSON is no output: no AuditEvent row (D-12).
   await expectAuditTrail();
+
+  // UI-SPEC 3i "Start dialog closed without starting → the trigger" (review b-WR-05): "Start a
+  // new proposal" opens the Start dialog with the same ticket; closing it returns focus here.
+  const startNew = main(page).getByRole("button", { name: NEW_PROPOSAL_BUTTON });
+  await startNew.click();
+  const startDialog = page.getByRole("dialog", { name: START_TITLE });
+  await expect(startDialog.getByRole("listitem").filter({ hasText: ticket.subject })).toHaveCount(
+    1,
+  );
+  await startDialog.getByRole("button", { name: START_DISMISS }).click();
+  await expect(startDialog).toBeHidden();
+  await expect(startNew).toBeFocused();
+  expect(
+    await prisma.kbProposal.count({
+      where: { organizationId: orgId, sources: { some: { ticketId: ticket.id } } },
+    }),
+  ).toBe(1);
 });
 
 test("menu entry: a resolved ticket's More ticket actions opens the Start dialog; an open ticket's entry is disabled with its reason", async ({
@@ -1228,6 +1274,9 @@ test("review R2-5 (b): an aborted save or publish call shows its outcome-unknown
     .filter({ hasText: outcomeUnknownCopy("save") });
   await expect(saveAlert).toBeVisible();
   await expect(saveAlert).toBeFocused();
+  // Review b-WR-03: the callout offers "Reload proposal".
+  const saveReload = saveAlert.getByRole("button", { name: RELOAD_BUTTON });
+  await expect(saveReload).toBeVisible();
   await expect(page.getByRole("button", { name: SAVE_DRAFT_CTA })).toBeDisabled();
   await expect(titleField).toHaveValue(editedTitle);
   await expect(bodyField).toHaveValue(editedBody);
@@ -1236,21 +1285,78 @@ test("review R2-5 (b): an aborted save or publish call shows its outcome-unknown
     await prisma.kbArticle.count({ where: { organizationId: orgId, title: editedTitle } }),
   ).toBe(0);
 
-  // --- Publish: reload without the route, then abort the publish call.
+  // --- "Reload proposal" (without the route) reads the stored draft again: the local edits are
+  // dropped and focus goes to the h1 (UI-SPEC 3h, 3i).
   await page.unroute(isReviewPage, abortActions);
-  await page.reload();
+  await saveReload.click();
+  await expect(reviewHeading(page)).toBeFocused();
+  await expect(saveAlert).toHaveCount(0);
   await expect(titleField).toHaveValue(title);
+  await expect(bodyField).toHaveValue(`## Steps\n\nSeeded body unknown ${ts}.`);
+
+  // --- Publish: abort the publish call.
   await page.getByRole("button", { name: APPROVE_AND_PUBLISH_CTA }).click();
   const dialog = page.getByRole("dialog", { name: PUBLISH_TITLE });
   await dialog.getByRole("checkbox", { name: PUBLISH_CONFIRM_CHECKBOX }).check();
   await page.route(isReviewPage, abortActions);
   await dialog.getByRole("button", { name: PUBLISH_ARTICLE_CTA }).click();
 
-  // "Publish outcome unknown": "Publish article" stays disabled, focus on "Keep reviewing".
-  await expect(dialog.getByRole("alert")).toHaveText(outcomeUnknownCopy("publish"));
+  // "Publish outcome unknown": "Publish article" stays disabled, focus on "Keep reviewing". Since
+  // review b-WR-03 the alert also holds "Reload proposal" (12.2-REVIEW-FIX F3), so the row is
+  // checked as its own paragraph.
+  const publishAlert = dialog.getByRole("alert");
+  await expect(publishAlert).toContainText(outcomeUnknownCopy("publish"));
+  await expect(
+    publishAlert.getByText(outcomeUnknownCopy("publish"), { exact: true }),
+  ).toBeVisible();
+  const publishReload = publishAlert.getByRole("button", { name: RELOAD_BUTTON });
+  await expect(publishReload).toBeVisible();
   await expect(dialog.getByRole("button", { name: PUBLISH_ARTICLE_CTA })).toBeDisabled();
   await expect(dialog.getByRole("button", { name: KEEP_REVIEWING })).toBeFocused();
   expect(await proposalState(proposalId, title)).toEqual(before);
   await page.unroute(isReviewPage, abortActions);
+
+  // "Reload proposal" in the dialog closes it, reads the proposal again and focuses the h1.
+  await publishReload.click();
+  await expect(dialog).toBeHidden();
+  await expect(reviewHeading(page)).toBeFocused();
+  await expect(statusChip(page, "Draft")).toBeVisible();
+  expect(await proposalState(proposalId, title)).toEqual(before);
   await expectAuditTrail();
+});
+
+test("publish dialog (amendment A7): the article's link targets are listed as plain text, and closing without acting returns focus to the trigger", async ({
+  page,
+}) => {
+  const targets = ["https://docs.example.com/vpn-guide", "https://status.example.com/"];
+  const { proposalId } = await seedDraft(
+    "links",
+    `Linked draft ${ts}`,
+    `## Steps\n\nRead the [VPN guide](${targets[0]}) first.\n\nCheck <${targets[1]}> as well.`,
+  );
+
+  await gotoWarm(page, `/kb/proposals/${proposalId}`);
+  await expect(statusChip(page, "Draft")).toBeVisible();
+  const trigger = page.getByRole("button", { name: APPROVE_AND_PUBLISH_CTA });
+  await expect(trigger).toBeEnabled();
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: PUBLISH_TITLE });
+  await expect(dialog.getByRole("heading", { name: LINKS_IN_ARTICLE_HEADING })).toBeVisible();
+  // One row per distinct target, in document order, as text: the link text never stands in for
+  // the target, and nothing in the dialog is a live link.
+  const links = dialog.getByRole("list", { name: LINKS_IN_ARTICLE_HEADING });
+  await expect(links.getByRole("listitem")).toHaveText(targets);
+  await expect(links).not.toContainText("VPN guide");
+  await expect(dialog.getByRole("link")).toHaveCount(0);
+  await expect(dialog.getByText(NO_LINKS_IN_ARTICLE)).toHaveCount(0);
+
+  // UI-SPEC 3i "Publish dialog closed without acting → the button that opened it".
+  await dialog.getByRole("button", { name: KEEP_REVIEWING }).click();
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+  const state = await prisma.kbProposal.findUniqueOrThrow({
+    where: { id: proposalId },
+    select: { status: true, publishedArticleId: true },
+  });
+  expect(state).toEqual({ status: "DRAFT", publishedArticleId: null });
 });
