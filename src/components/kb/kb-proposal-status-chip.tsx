@@ -5,6 +5,7 @@ import type { ProposalStatus } from "@/lib/kb/proposal-contract";
 import { PROPOSAL_STATUS_LABELS } from "@/lib/kb/proposal-copy";
 import { cn } from "@/lib/utils";
 
+const BADGE = "h-5 gap-1 px-2 py-0.5 text-[12px]";
 const NEUTRAL = "bg-muted text-muted-foreground border border-border";
 
 /**
@@ -36,13 +37,36 @@ const CHIP: Record<ProposalStatus, { icon: LucideIcon; iconClassName: string; cl
     },
   };
 
+export interface ProposalChipPresentation {
+  /** The fixed word of the status (proposal-copy.ts). */
+  label: string;
+  icon: LucideIcon;
+  iconClassName: string;
+  /** Every class of the Badge: the chip size and the status's token classes. */
+  className: string;
+}
+
+/**
+ * What the chip shows for a status: its word, its icon and its classes. The chip renders exactly
+ * this, so a test of this mapping is a test of the chip (review c-WR-05).
+ */
+export function proposalChipPresentation(status: ProposalStatus): ProposalChipPresentation {
+  const { icon, iconClassName, className } = CHIP[status];
+  return {
+    label: PROPOSAL_STATUS_LABELS[status],
+    icon,
+    iconClassName,
+    className: cn(BADGE, className),
+  };
+}
+
 /** Presentational status chip of a KB proposal (UI-SPEC Color, element E7). */
 export function KbProposalStatusChip({ status }: { status: ProposalStatus }) {
-  const { icon: Icon, iconClassName, className } = CHIP[status];
+  const { label, icon: Icon, iconClassName, className } = proposalChipPresentation(status);
   return (
-    <Badge className={cn("h-5 gap-1 px-2 py-0.5 text-[12px]", className)}>
+    <Badge className={className}>
       <Icon className={iconClassName} aria-hidden="true" />
-      {PROPOSAL_STATUS_LABELS[status]}
+      {label}
     </Badge>
   );
 }

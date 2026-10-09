@@ -1,13 +1,15 @@
 // Copy table for Phase 12.2 (UI-SPEC Copywriting Contract and amendments A1 to A5): one
 // expectation per row, each checked against the row text pasted verbatim, plus exhaustive loops
 // over every server code list of proposal-contract.ts.
-import fs from "node:fs";
-import path from "node:path";
+import type { LucideIcon } from "lucide-react";
+import { Check, CircleAlert, FileText, Loader2, X } from "lucide-react";
 import { describe, expect, it } from "vitest";
+import { proposalChipPresentation } from "../../src/components/kb/kb-proposal-status-chip";
 import {
   MAINTENANCE_REFUSAL_CODES,
   PROPOSAL_FAILURE_CODES,
   PROPOSAL_STATUSES,
+  type ProposalStatus,
   REQUEST_REFUSAL_CODES,
   REVIEW_REFUSAL_CODES,
   type ReviewRefusalCode,
@@ -22,11 +24,6 @@ import {
   PROPOSAL_FIELDS,
 } from "../../src/lib/kb/proposal-copy";
 import { type DraftFieldCode, validateDraftFields } from "../../src/lib/kb/proposal-schema";
-
-const CHIP_SOURCE = fs.readFileSync(
-  path.resolve(__dirname, "../../src/components/kb/kb-proposal-status-chip.tsx"),
-  "utf8",
-);
 
 const PREFIX = "Nothing was changed.";
 
@@ -739,19 +736,52 @@ describe("proposal-copy: the 'Nothing was changed.' rule", () => {
   });
 });
 
-describe("KbProposalStatusChip source", () => {
-  it("uses token classes only: no hex, oklch or rgb colour", () => {
-    expect(CHIP_SOURCE).not.toContain("#");
-    expect(CHIP_SOURCE).not.toContain("oklch(");
-    expect(CHIP_SOURCE).not.toContain("rgb(");
+describe("KbProposalStatusChip presentation (UI-SPEC Status chip map, review c-WR-05)", () => {
+  // The chip renders exactly proposalChipPresentation(status), so each status is checked for its
+  // word, its icon component and its classes. The token-only colour rule is the design-tokens.test.ts
+  // scan of src/components, not a text search of this file.
+  const NEUTRAL = "bg-muted text-muted-foreground border border-border";
+  const BADGE = "h-5 gap-1 px-2 py-0.5 text-[12px]";
+  const EXPECTED: Record<
+    ProposalStatus,
+    { icon: LucideIcon; iconClassName: string; tokens: string }
+  > = {
+    GENERATING: {
+      icon: Loader2,
+      iconClassName: "size-3 animate-spin motion-reduce:animate-none",
+      tokens: NEUTRAL,
+    },
+    DRAFT: {
+      icon: FileText,
+      iconClassName: "size-3",
+      tokens: "bg-primary/10 text-primary-emphasis border border-primary/20",
+    },
+    REJECTED: { icon: X, iconClassName: "size-3", tokens: NEUTRAL },
+    PUBLISHED: {
+      icon: Check,
+      iconClassName: "size-3",
+      tokens: "bg-success/10 text-success border border-success/20",
+    },
+    FAILED: {
+      icon: CircleAlert,
+      iconClassName: "size-3",
+      tokens: "bg-destructive/10 text-destructive border border-destructive/20",
+    },
+  };
+
+  it.each(PROPOSAL_STATUSES)("%s: its word, its icon and its classes", (status) => {
+    const expected = EXPECTED[status];
+    expect(proposalChipPresentation(status)).toEqual({
+      label: copy.PROPOSAL_STATUS_LABELS[status],
+      icon: expected.icon,
+      iconClassName: expected.iconClassName,
+      className: `${BADGE} ${expected.tokens}`,
+    });
   });
 
-  it("takes its words from proposal-copy and pairs each status with the UI-SPEC icon", () => {
-    expect(CHIP_SOURCE).toContain('from "@/lib/kb/proposal-copy"');
-    for (const icon of ["Loader2", "FileText", "X", "Check", "CircleAlert"]) {
-      expect(CHIP_SOURCE).toContain(`icon: ${icon}`);
-    }
-    expect(CHIP_SOURCE).toContain("motion-reduce:animate-none");
-    expect(CHIP_SOURCE).toContain("h-5 gap-1 px-2 py-0.5 text-[12px]");
+  it("gives every status its own icon and its own word", () => {
+    const shown = PROPOSAL_STATUSES.map((status) => proposalChipPresentation(status));
+    expect(new Set(shown.map((chip) => chip.icon)).size).toBe(PROPOSAL_STATUSES.length);
+    expect(new Set(shown.map((chip) => chip.label)).size).toBe(PROPOSAL_STATUSES.length);
   });
 });
