@@ -148,9 +148,10 @@ describe("buildProposalPrompt bounds", () => {
     expect(block(prompt, 3)).toContain("c".repeat(4000));
     expect(block(prompt, 3)).toContain("C".repeat(3970));
     expect(block(prompt, 3)).not.toContain("C".repeat(3971));
-    // Sources 4 and 5 keep their labelled block but none of their text.
-    expect(block(prompt, 4)).not.toContain("d");
-    expect(block(prompt, 5)).not.toContain("E");
+    // Sources 4 and 5 keep their labelled block but none of their text: the block is the
+    // "Subject:" label with an empty subject, and no message line (review c-IN-04).
+    expect(block(prompt, 4)).toBe("Subject: ");
+    expect(block(prompt, 5)).toBe("Subject: ");
   });
 
   it("cuts on code-point boundaries and never splits a surrogate pair", () => {
