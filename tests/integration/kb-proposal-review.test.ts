@@ -737,6 +737,54 @@ describe("publishProposal refuses stored references (review C7, K51)", () => {
   });
 });
 
+describe("run decision K58: a ticket or status path carried in a query string or fragment (Codex D2)", () => {
+  const CARRIED = [
+    "https://other.example/?data=/tickets/abc",
+    "https://other.example/?next=https%3A%2F%2Fhelp.example.com%2Fstatus%2Ftok_abc123",
+    "https://other.example/page#/api/public/status/tok_abc123",
+    "https://other.example/page#%2Ftickets%2Fabc",
+  ];
+
+  for (const link of CARRIED) {
+    it(`save refuses ${link} in the body and in the title as TICKET_LINK`, async () => {
+      await expectSaveRefused(
+        { title: VALID.title, bodyMarkdown: `Open [the guide](${link}).` },
+        { code: "TICKET_LINK", field: "bodyMarkdown" },
+      );
+      await expectSaveRefused(
+        { title: `Reset guide ${link}`, bodyMarkdown: VALID.bodyMarkdown },
+        { code: "TICKET_LINK", field: "title" },
+      );
+    });
+
+    it(`publish refuses a stored body with ${link} as TICKET_LINK; no article`, async () => {
+      await expectPublishRefused(
+        { bodyMarkdown: `Open [the guide](${link}).` },
+        { code: "TICKET_LINK", field: "bodyMarkdown" },
+      );
+    });
+  }
+
+  it("an external link with an unrelated query and fragment still saves and publishes", async () => {
+    const { orgId, owner } = await seedOrg();
+    const p = await seedOne(orgId, { status: "DRAFT", version: 0 });
+    const body = "Read the [VPN guide](https://docs.example.com/vpn-guide?lang=en#reset).";
+    expect(
+      await saveProposalDraft(owner, {
+        proposalId: p.id,
+        expectedVersion: 0,
+        title: VALID.title,
+        bodyMarkdown: body,
+      }),
+    ).toEqual({ ok: true, version: 1 });
+    expect(await publishProposal(owner, { proposalId: p.id, expectedVersion: 1 })).toMatchObject({
+      ok: true,
+    });
+    const article = await prisma.kbArticle.findFirstOrThrow({ where: { organizationId: orgId } });
+    expect(article.bodyHtml).toContain('href="https://docs.example.com/vpn-guide?lang=en#reset"');
+  });
+});
+
 // --- NOT_FOUND and authorization (D-01) -----------------------------------------------------------
 
 describe("every action: NOT_FOUND, MEMBERSHIP_ENDED and NOT_ALLOWED (D-01)", () => {

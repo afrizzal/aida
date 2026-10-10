@@ -16,7 +16,7 @@ import {
   TRUNCATION_NOTICE,
 } from "@/lib/kb/proposal-copy";
 import { loadProposalReview } from "@/lib/kb/proposal-queries";
-import { htmlLinkTargets, renderMarkdownPreview } from "@/lib/markdown/render";
+import { htmlLinkTargets, renderMarkdown, renderMarkdownPreview } from "@/lib/markdown/render";
 import { getSessionActor } from "@/lib/session";
 import { ProposalReview } from "./proposal-review";
 
@@ -60,7 +60,9 @@ interface ProposalReviewPageProps {
  * a missing id and another organization's id each get their EmptyState and no proposal data.
  * The preview HTML comes only from renderMarkdownPreview here on the server (T-12.2-40): the
  * renderMarkdown pipeline that also strips every image source that is not same-origin relative
- * (run decision K54), so a stored body can never make the browser fetch another host; the loader's
+ * (run decision K54), so a stored body can never make the browser fetch another host, and renders
+ * every link inert with its target as plain text (run decision K58), so the client never receives
+ * a live anchor for proposal content; the loader's
  * sources are passed to the client component as returned (review P3), and this page never
  * queries sources or tickets itself.
  */
@@ -83,9 +85,10 @@ export default async function ProposalReviewPage({ params }: ProposalReviewPageP
   const isDraft = proposal.status === "DRAFT";
   const previewHtml = proposal.bodyMarkdown ? renderMarkdownPreview(proposal.bodyMarkdown) : "";
   // UI-SPEC amendment A7 (review b-WR-07): the publish dialog lists these link targets as plain
-  // text. Read from the server-rendered body (the image strip of the preview leaves links as
-  // renderMarkdown, the publish renderer, writes them).
-  const linkTargets = isDraft ? htmlLinkTargets(previewHtml) : [];
+  // text. Read on the server from the body as renderMarkdown, the publish renderer, writes it;
+  // the preview HTML has no anchors (run decision K58), and this HTML never leaves the server.
+  const linkTargets =
+    isDraft && proposal.bodyMarkdown ? htmlLinkTargets(renderMarkdown(proposal.bodyMarkdown)) : [];
   const requested = requestedByParts(proposal.requestedByName);
   const changedList = proposal.changedSourceNumbers.map((number) => `#${number}`).join(", ");
 

@@ -1,4 +1,4 @@
-import type { Element, Root } from "hast";
+import type { Element, ElementContent, Root } from "hast";
 import type { Schema } from "hast-util-sanitize";
 import rehypeParse from "rehype-parse";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
@@ -103,6 +103,39 @@ function rehypeStripCrossOriginImageSources() {
   };
 }
 
+// Run decision K58 (Codex diff critique D2): a link the model wrote could carry ticket text or a
+// bearer path to another host when the reviewer clicks it in the preview, before any approval.
+// The preview therefore renders every link inert: after the sanitize pass, each `a` is replaced by
+// its own children, followed by its target as plain text in parentheses (" (https://…)"), so the reviewer sees where the link would go and the browser receives no
+// anchor and no href. The target is omitted when it equals the link's text (an autolink), and a
+// link the sanitizer emptied (such as javascript:) keeps only its text. Published articles keep
+// renderMarkdown and its live links; the publish dialog lists their targets (amendment A7).
+
+function textOf(nodes: readonly ElementContent[]): string {
+  let text = "";
+  for (const node of nodes) {
+    if (node.type === "text") text += node.value;
+    else if (node.type === "element") text += textOf(node.children);
+  }
+  return text;
+}
+
+function rehypeInertLinks() {
+  return (tree: Root) => {
+    visit(tree, "element", (node: Element, index, parent) => {
+      if (node.tagName !== "a" || !parent || index === undefined) return;
+      const href = typeof node.properties?.href === "string" ? node.properties.href : "";
+      const replacement: ElementContent[] = [...node.children];
+      if (href !== "" && textOf(node.children) !== href) {
+        replacement.push({ type: "text", value: ` (${href})` });
+      }
+      parent.children.splice(index, 1, ...replacement);
+      // Visit the link's former children next (they take its place).
+      return index;
+    });
+  };
+}
+
 const previewProcessor = unified()
   .use(remarkParse)
   .use(remarkGfm)
@@ -110,20 +143,22 @@ const previewProcessor = unified()
   .use(rehypeSafeLinks)
   .use(rehypeStripCrossOriginImageSources)
   .use(rehypeSanitize, schema)
+  .use(rehypeInertLinks)
   .use(rehypeStringify);
 
 /**
  * renderMarkdown with every image source that is not same-origin relative removed (run decision
- * K54). For the KB proposal review preview only; published articles keep renderMarkdown.
+ * K54) and every link rendered inert, its target shown as plain text after its text (run decision
+ * K58). For the KB proposal review preview only; published articles keep renderMarkdown.
  */
 export function renderMarkdownPreview(markdown: string): string {
   return String(previewProcessor.processSync(markdown));
 }
 
 // Phase 12.2, UI-SPEC amendment A7 (review b-WR-07): the KB proposal publish dialog lists where
-// the article's links really go, because an AI-written "[Reset your password](…)" shows only its
-// text in the preview. Read from HTML this module rendered (renderMarkdown or
-// renderMarkdownPreview), so a target the sanitizer removed is never listed.
+// the article's links really go. Read from HTML renderMarkdown rendered (the publish renderer; the
+// preview has no anchors since run decision K58), so a target the sanitizer removed is never
+// listed.
 const linkTargetParser = unified().use(rehypeParse, { fragment: true });
 
 /** Every distinct non-empty `a` href of rendered HTML, in document order. */

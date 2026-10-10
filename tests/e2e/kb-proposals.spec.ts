@@ -51,6 +51,7 @@ import {
   NOT_FOUND_HEADING,
   OPEN_ARTICLE,
   outcomeUnknownCopy,
+  PREVIEW_TOGGLE,
   PROPOSALS_LINK,
   PROPOSALS_PAGE_TITLE,
   PROPOSE_KB_ARTICLE_ENTRY,
@@ -1334,7 +1335,7 @@ test("review R2-5 (b): an aborted save or publish call shows its outcome-unknown
   await expectAuditTrail();
 });
 
-test("publish dialog (amendment A7): the article's link targets are listed as plain text, and closing without acting returns focus to the trigger", async ({
+test("publish dialog (amendment A7): the preview shows links inert (K58), the article's link targets are listed as plain text, and closing without acting returns focus to the trigger", async ({
   page,
 }) => {
   const targets = ["https://docs.example.com/vpn-guide", "https://status.example.com/"];
@@ -1346,6 +1347,18 @@ test("publish dialog (amendment A7): the article's link targets are listed as pl
 
   await gotoWarm(page, `/kb/proposals/${proposalId}`);
   await expect(statusChip(page, "Draft")).toBeVisible();
+
+  // Run decision K58 (Codex D2): the preview renders every link inert. Each link's text is
+  // followed by its target as plain text, and the page holds no anchor for either target.
+  await main(page).getByRole("button", { name: PREVIEW_TOGGLE }).click();
+  await expect(main(page).getByText(`VPN guide (${targets[0]})`)).toBeVisible();
+  // An autolink's text is its target, so it is shown once.
+  await expect(main(page).getByText(`Check ${targets[1]} as well.`)).toBeVisible();
+  await expect(main(page).getByRole("link", { name: "VPN guide" })).toHaveCount(0);
+  for (const target of targets) {
+    await expect(page.locator(`a[href="${target}"]`)).toHaveCount(0);
+  }
+
   const trigger = page.getByRole("button", { name: APPROVE_AND_PUBLISH_CTA });
   await expect(trigger).toBeEnabled();
   await trigger.click();

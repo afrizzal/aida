@@ -4,8 +4,10 @@
 //
 // Run decision K51 (reviews C7, R2-2, R3-3 and P8) is the one reference rule of the phase: a source
 // marker [T<n>] and a link to a ticket page are refused in the title and the body, fail-closed,
-// nothing stripped. Run decision K57 widens "ticket page" to the public status bearer links. Generation (validateProposalOutput), save, publish and the editor
-// (validateDraftFields) all use the checks of this module.
+// nothing stripped. Run decision K57 widens "ticket page" to the public status bearer links, and
+// run decision K58 to such a path carried in a link's query string or fragment. Generation
+// (validateProposalOutput), save, publish and the editor (validateDraftFields) all use the checks
+// of this module.
 //
 // Run decision K54 (review a2-CR-01): an image anywhere in the rendered title or body is refused,
 // fail-closed, whatever its URL. A model-chosen image URL would be fetched by the reviewer's
@@ -122,10 +124,14 @@ const TICKET_PATH_PREFIXES = ["/tickets/", "/status/", "/api/public/status/"] as
  * True when the candidate, resolved with the WHATWG URL parser against TICKET_LINK_BASE (dot
  * segments, protocol-relative URLs and backslashes normalised as a browser does; a leading `www.`
  * gets an https:// prefix), has a pathname that, percent-decoded once, starts with /tickets/,
- * /status/ or /api/public/status/ (run decision K57) in any case. A malformed percent escape
- * counts as a ticket link (fail-closed). A candidate the parser rejects is not a URL and is
- * ignored. The host is not checked: a link to another site whose path starts with one of these
- * prefixes is refused too (documented false positive).
+ * /status/ or /api/public/status/ (run decision K57) in any case. Run decision K58 (Codex diff
+ * critique D2): the query string and the fragment, each percent-decoded once, are read too, and
+ * one that contains any of those paths anywhere (in any case) counts as a ticket link, so a bearer
+ * path carried as a parameter of an external link (`https://other.example/?next=/status/…`) is
+ * refused like the path itself. A malformed percent escape in the path, the query string or the
+ * fragment counts as a ticket link (fail-closed). A candidate the parser rejects is not a URL
+ * and is ignored. The host is not checked: a link to another site whose path starts with one of
+ * these prefixes is refused too (documented false positive).
  */
 export function isTicketPageUrl(candidate: string): boolean {
   let raw = candidate.trim();
@@ -138,13 +144,19 @@ export function isTicketPageUrl(candidate: string): boolean {
     return false;
   }
   let path: string;
+  let carried: string[];
   try {
     path = decodeURIComponent(url.pathname);
+    carried = [decodeURIComponent(url.search), decodeURIComponent(url.hash)];
   } catch {
     return true;
   }
   const lower = path.toLowerCase();
-  return TICKET_PATH_PREFIXES.some((prefix) => lower.startsWith(prefix));
+  if (TICKET_PATH_PREFIXES.some((prefix) => lower.startsWith(prefix))) return true;
+  return carried.some((part) => {
+    const text = part.toLowerCase();
+    return TICKET_PATH_PREFIXES.some((prefix) => text.includes(prefix));
+  });
 }
 
 /**

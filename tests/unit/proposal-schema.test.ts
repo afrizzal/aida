@@ -698,6 +698,73 @@ describe("run decision K57: public status bearer links are ticket links (review 
   });
 });
 
+describe("run decision K58: a ticket or status path in the query string or the fragment (Codex D2)", () => {
+  // A bearer path carried as a parameter of an external link reaches the other host on a click
+  // just like a path does. Each of these must be refused; the host is never what decides.
+  const CARRIED = [
+    "https://other.example/?data=/tickets/abc",
+    "https://other.example/?next=https%3A%2F%2Fhelp.example.com%2Fstatus%2Ftok_abc123",
+    "https://other.example/?u=%2Fapi%2Fpublic%2Fstatus%2Ftok_abc123%2Ffollow-up",
+    "https://other.example/page#/tickets/abc",
+    "https://other.example/page#%2Fstatus%2Ftok_abc123",
+    "https://other.example/?r=%2FSTATUS%2Ftok_abc123",
+    "/kb/abc?from=/tickets/abc",
+    "#/status/tok_abc123",
+  ];
+
+  it("isTicketPageUrl reads the percent-decoded query string and fragment", () => {
+    for (const link of CARRIED) expect(isTicketPageUrl(link)).toBe(true);
+  });
+
+  it("fails closed on a malformed escape in the query string or the fragment", () => {
+    expect(isTicketPageUrl("https://other.example/?d=%E0%A4%A")).toBe(true);
+    expect(isTicketPageUrl("https://other.example/page#%E0%A4%A")).toBe(true);
+  });
+
+  it("refuses a carried path in the title and the body, at generation and in the field validator", () => {
+    for (const link of CARRIED) {
+      // The title is plain text: a bare fragment such as "#/status/…" is no link there, so the
+      // title is checked with every candidate that is a URL or a path token.
+      if (!link.startsWith("#")) {
+        expect(titleRefusal(`Track it at ${link}`)).toEqual({
+          ok: false,
+          field: "title",
+          code: "TICKET_LINK",
+        });
+        expect(reason({ title: `Track it at ${link}` })).toBe("TICKET_LINK");
+      }
+      expect(bodyRefusal(`Open [the guide](${link}).`)).toEqual({
+        ok: false,
+        field: "bodyMarkdown",
+        code: "TICKET_LINK",
+      });
+      expect(reason({ bodyMarkdown: `## Steps\n\nOpen [the guide](${link}).` })).toBe(
+        "TICKET_LINK",
+      );
+    }
+  });
+
+  it("an escaped destination is caught on the rendered href", () => {
+    const body = String.raw`Open [guide](https://other.example/?d=\/tickets\/abc).`;
+    expect(renderedBodyLinksToTicket(body)).toBe(true);
+    expect(reason({ bodyMarkdown: `## Steps\n\n${body}` })).toBe("TICKET_LINK");
+  });
+
+  it("external links with other queries and fragments stay allowed", () => {
+    for (const text of [
+      "[docs](https://docs.example.com/vpn-guide?lang=en#reset)",
+      "[search](https://example.com/search?q=status+page&page=2)",
+      "[faq](https://example.com/faq#tickets)",
+      "[kb](/kb/abc?tab=history#steps)",
+      "See https://status.example.com/?region=eu for outages.",
+    ]) {
+      expect(bodyRefusal(text).ok).toBe(true);
+    }
+    expect(isTicketPageUrl("https://example.com/path?status=open")).toBe(false);
+    expect(isTicketPageUrl("https://example.com/path?a=%2Fkb%2Fabc")).toBe(false);
+  });
+});
+
 describe("review a2-IN-01: a fence tag echoed in the title is refused", () => {
   it("refuses a title that echoes a ticket_content tag (FENCE_ECHO)", () => {
     expect(reason({ title: 'Reset <ticket_content id="T1"> guide' })).toBe("FENCE_ECHO");

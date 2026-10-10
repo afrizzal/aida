@@ -723,6 +723,20 @@ See the [guide](\/tickets\/abc) first.`,
     });
   });
 
+  for (const link of [
+    "https://other.example/?data=/tickets/abc",
+    "https://other.example/?next=https%3A%2F%2Fhelp.example.com%2Fstatus%2Ftok_abc",
+    "https://other.example/page#/api/public/status/tok_abc",
+    "https://other.example/page#%2Ftickets%2Fabc",
+  ]) {
+    it(`a ticket or status path carried in a query or fragment (${link}) gives FAILED INVALID_OUTPUT (K58)`, async () => {
+      await expectInvalidOutput({
+        ...validOutput(),
+        bodyMarkdown: `## Steps\n\nOpen [the guide](${link}).`,
+      });
+    });
+  }
+
   it("an answer with no citation gives FAILED INVALID_OUTPUT with one audit row (a2-IN-04)", async () => {
     await expectInvalidOutput({ ...validOutput(), citations: [] });
   });

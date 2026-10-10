@@ -13,7 +13,8 @@
 //
 // The preview is the stored body rendered on the server by renderMarkdownPreview (T-12.2-40): the
 // renderMarkdown pipeline plus the removal of every image source that is not same-origin
-// relative (run decision K54), so the preview never makes the browser fetch another host. The raw
+// relative (run decision K54), so the preview never makes the browser fetch another host, and
+// with every link inert, its target shown as plain text (run decision K58). The raw
 // body is only ever shown inside the Textarea. The client check validateDraftFields renders the
 // body only to read its URL attribute values and its image elements and never inserts that HTML
 // (review P8); an image in the body is refused there and by the server as IMAGE_NOT_ALLOWED, shown
@@ -96,11 +97,14 @@ export interface ProposalReviewProps {
   proposal: ProposalReviewData;
   /**
    * The stored body rendered on the server by renderMarkdownPreview (renderMarkdown plus the
-   * removal of every image source that is not same-origin relative, run decision K54); empty when
-   * there is no body.
+   * removal of every image source that is not same-origin relative, run decision K54, with every
+   * link inert and its target as plain text, run decision K58); empty when there is no body.
    */
   previewHtml: string;
-  /** The distinct link targets of previewHtml, for the publish dialog (amendment A7, b-WR-07). */
+  /**
+   * The distinct link targets of the stored body as renderMarkdown (the publish renderer) writes
+   * it, read on the server, for the publish dialog (amendment A7, b-WR-07).
+   */
   linkTargets: readonly string[];
   /** The id of the page h1 (tabIndex -1) that takes focus after save, publish, reject, reload. */
   headingId: string;
@@ -300,7 +304,7 @@ function RenderedBody({ html }: { html: string }) {
   return (
     <div
       className="min-w-0 space-y-3 text-[13px] leading-relaxed text-foreground"
-      // biome-ignore lint/security/noDangerouslySetInnerHtml: renderMarkdownPreview output from the server, sanitized and stripped of cross-origin image sources there
+      // biome-ignore lint/security/noDangerouslySetInnerHtml: renderMarkdownPreview output from the server, sanitized, stripped of cross-origin image sources and with inert links there
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );
