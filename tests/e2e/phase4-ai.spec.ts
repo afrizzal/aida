@@ -4,7 +4,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
-import { prisma } from "./support/db";
+import { orgId, prisma } from "./support/db";
 import { baseURL, databaseUrl } from "./support/test-env";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -235,7 +235,9 @@ test("T2 provider form: dropdowns, provider-specific fields, reset-on-switch, sa
   // Persisted server-side
   await expect
     .poll(async () => {
-      const row = await prisma.setting.findFirst({ where: { key: "llm:provider" } });
+      const row = await prisma.setting.findUnique({
+        where: { organizationId_key: { organizationId: orgId, key: "llm:provider" } },
+      });
       return row?.value ?? null;
     })
     .toBe("ollama");
@@ -280,7 +282,9 @@ test("T4b AI toggle enabled after provider saved; turning it on persists", async
 
   await expect
     .poll(async () => {
-      const row = await prisma.setting.findFirst({ where: { key: "aiEnabled" } });
+      const row = await prisma.setting.findUnique({
+        where: { organizationId_key: { organizationId: orgId, key: "aiEnabled" } },
+      });
       return row?.value ?? null;
     })
     .toBe("true");
@@ -463,7 +467,9 @@ test("T9 with AI disabled a new ticket gets no triage and shows zero AI chrome",
   await expect(toggle).not.toBeChecked();
   await expect
     .poll(async () => {
-      const row = await prisma.setting.findFirst({ where: { key: "aiEnabled" } });
+      const row = await prisma.setting.findUnique({
+        where: { organizationId_key: { organizationId: orgId, key: "aiEnabled" } },
+      });
       return row?.value ?? null;
     })
     .toBe("false");
@@ -526,7 +532,9 @@ test("T10 blank API key on re-save keeps the stored encrypted key; key never ech
   let blob1 = "";
   await expect
     .poll(async () => {
-      const row = await prisma.setting.findFirst({ where: { key: "llm:apiKeyEnc" } });
+      const row = await prisma.setting.findUnique({
+        where: { organizationId_key: { organizationId: orgId, key: "llm:apiKeyEnc" } },
+      });
       blob1 = row?.value ?? "";
       return blob1.length > 0;
     })
@@ -543,6 +551,8 @@ test("T10 blank API key on re-save keeps the stored encrypted key; key never ech
 
   // Deterministic wait: the save round-trip completed (toast), now compare
   await page.waitForTimeout(1_000);
-  const row = await prisma.setting.findFirst({ where: { key: "llm:apiKeyEnc" } });
+  const row = await prisma.setting.findUnique({
+    where: { organizationId_key: { organizationId: orgId, key: "llm:apiKeyEnc" } },
+  });
   expect(row?.value).toBe(blob1);
 });

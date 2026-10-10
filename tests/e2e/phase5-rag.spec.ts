@@ -186,13 +186,17 @@ test("Settings: LLM + Embedding providers save and round-trip pointed at the RAG
 
   await expect
     .poll(async () => {
-      const row = await prisma.setting.findFirst({ where: { key: "llm:provider" } });
+      const row = await prisma.setting.findUnique({
+        where: { organizationId_key: { organizationId: orgId, key: "llm:provider" } },
+      });
       return row?.value ?? null;
     })
     .toBe("ollama");
   await expect
     .poll(async () => {
-      const row = await prisma.setting.findFirst({ where: { key: "llm:embeddingProvider" } });
+      const row = await prisma.setting.findUnique({
+        where: { organizationId_key: { organizationId: orgId, key: "llm:embeddingProvider" } },
+      });
       return row?.value ?? null;
     })
     .toBe("ollama");
