@@ -30,7 +30,9 @@
 // KbProposalRetryError while retryCount is below retryLimit, and is FAILED PROVIDER on the last
 // attempt. A call that throws writes no AuditEvent. Any other exception after the claim is FAILED
 // UNKNOWN by the same conditional update; only when that FAILED write itself fails is an error
-// thrown, and it is a fixed line with the proposal id, never the original text (review a2-IN-03). No
+// thrown, and it is a fixed line with the proposal id, never the original text (review a2-IN-03).
+// Before that throw the lease is released, best effort, by the same conditional update as after a
+// transient failure (Codex diff critique D3), so pg-boss's retry can claim the row. No
 // raw provider error, prompt or model answer is written to the proposal row or to any log: the log
 // lines below carry the proposal id and a code only.
 //
@@ -462,6 +464,17 @@ export async function generateProposal(
       // Review a2-IN-03: neither error is rethrown. Either can carry the model's title or body (a
       // Prisma validation error prints its arguments) and would land in the pg-boss job row.
       console.error(`kb-proposal-generate: ${claimed.proposalId} UNKNOWN not written`);
+      // Codex diff critique D3: release the lease, best effort, in its own conditional update on
+      // the claimed version and epoch, so the pg-boss retry this throw causes can claim the row
+      // instead of finding LEASE_HELD and ending while the proposal stays GENERATING. A release
+      // that fails or matches no row (superseded) changes nothing; the throw stays the same.
+      try {
+        if (await releaseClaimed(db, claimed)) {
+          console.warn(`kb-proposal-generate: ${claimed.proposalId} lease released for retry`);
+        }
+      } catch {
+        console.error(`kb-proposal-generate: ${claimed.proposalId} lease not released`);
+      }
       throw new Error(`kb-proposal-generate: ${claimed.proposalId} failed, status not written`);
     }
     return result;

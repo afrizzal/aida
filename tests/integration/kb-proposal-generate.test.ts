@@ -661,6 +661,94 @@ describe("generateProposal: fixed-text fallback (review a2-IN-03)", () => {
   });
 });
 
+describe("generateProposal: a failed FAILED write releases the lease (Codex diff critique D3)", () => {
+  it("failed FAILED write, then the retry at the same clock claims and the proposal ends DRAFT", async () => {
+    const { proposalId, payload } = await setupProposal();
+    respondWith(validOutput());
+    setGenerateProposalObserverForTests({
+      beforeStore: () => {
+        throw new Error("injected store failure");
+      },
+    });
+    // A trigger scoped to this one proposal makes its FAILED write fail (test-only, dropped below).
+    const suffix = proposalId.replace(/[^a-zA-Z0-9]/g, "");
+    const fn = `aida_test_refuse_failed_d3_${suffix}`;
+    await prisma.$executeRawUnsafe(`
+      CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.id = '${proposalId}' AND NEW.status = 'FAILED' THEN
+          RAISE EXCEPTION 'refused FAILED';
+        END IF;
+        RETURN NEW;
+      END $$`);
+    await prisma.$executeRawUnsafe(
+      `CREATE TRIGGER ${fn} BEFORE UPDATE ON "KbProposal" FOR EACH ROW EXECUTE FUNCTION ${fn}()`,
+    );
+    try {
+      // Attempt 1: the store fails, the FAILED UNKNOWN write fails, the fixed line is thrown.
+      const error = await runJob(payload, 0).then(
+        () => null,
+        (err: unknown) => err,
+      );
+      expect((error as Error).message).toBe(
+        `kb-proposal-generate: ${proposalId} failed, status not written`,
+      );
+      // The lease was released by its own conditional update (claim + release = version 2).
+      const afterFirst = await readProposal(proposalId);
+      expect(afterFirst).toMatchObject({
+        status: "GENERATING",
+        version: 2,
+        generationEpoch: 1,
+        generationClaimedAt: null,
+        generationQueuedAt: NOW,
+      });
+
+      // pg-boss retries the same payload at once (same clock, well inside the stuck window): it
+      // claims the released lease and stores the draft, the proposal's final state.
+      setGenerateProposalObserverForTests(null);
+      await expect(runJob(payload, 1)).resolves.toBeUndefined();
+      const final = await readProposal(proposalId);
+      expect(final.status).toBe("DRAFT");
+      expect(final.title).toBe(validOutput().title);
+      expect(fake.calls).toHaveLength(2);
+      expect(await auditRows(proposalId)).toHaveLength(2);
+    } finally {
+      await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS ${fn} ON "KbProposal"`);
+      await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS ${fn}()`);
+    }
+  });
+
+  it("a release that matches no row (superseded by Restart generation) changes nothing", async () => {
+    const { proposalId, payload, owner } = await setupProposal();
+    respondWith(validOutput());
+    let restarted = false;
+    setGenerateProposalObserverForTests({
+      beforeStore: async () => {
+        if (restarted) return;
+        restarted = true;
+        // A Restart generation of a stuck proposal moves the epoch on while the job still runs.
+        const later = new Date(NOW.getTime() + STUCK_AFTER_MS + 60_000);
+        const current = await readProposal(proposalId);
+        const result = await restartProposalGeneration(
+          owner,
+          { proposalId, expectedVersion: current.version },
+          { now: later },
+        );
+        expect(result).toMatchObject({ ok: true });
+        throw new Error("injected store failure");
+      },
+    });
+    // The FAILED write and the release both carry the old epoch, so neither matches: no throw,
+    // the newer generation's row is untouched.
+    await expect(runJob(payload, 0)).resolves.toBeUndefined();
+    expect(await readProposal(proposalId)).toMatchObject({
+      status: "GENERATING",
+      generationEpoch: 2,
+      generationClaimedAt: null,
+    });
+  });
+});
+
 describe("generateProposal: output validation (D-11, review C7, run decision K51)", () => {
   it("a body with a source marker [T1] gives FAILED INVALID_OUTPUT with one audit row", async () => {
     await expectInvalidOutput({ ...validOutput(), bodyMarkdown: "## Steps\n\nRestart it [T1]." });
