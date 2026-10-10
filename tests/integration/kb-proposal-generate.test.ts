@@ -825,6 +825,37 @@ See the [guide](\/tickets\/abc) first.`,
     });
   }
 
+  for (const link of [
+    "https://other.example/?next=%252Fstatus%252Ftok_abc",
+    "https://other.example/?next=%25252Ftickets%25252Fabc",
+    "https://other.example/page#%252Ftickets%252Fabc",
+    "https://other.example/page#%25252Fstatus%25252Ftok_abc",
+  ]) {
+    it(`a ticket or status path encoded two or three times (${link}) gives FAILED INVALID_OUTPUT (K58, R2D-1)`, async () => {
+      await expectInvalidOutput({
+        ...validOutput(),
+        bodyMarkdown: `## Steps\n\nOpen [the guide](${link}).`,
+      });
+    });
+  }
+
+  it("an external link whose query holds an ordinary encoded value is stored as DRAFT (R2D-1)", async () => {
+    const { proposalId, payload } = await setupProposal();
+    const output = {
+      ...validOutput(),
+      bodyMarkdown:
+        "## Steps\n\nRead the [VPN guide](https://docs.example.com/search?q=split%20tunnel#step%201).",
+      citations: [{ source: "T1", section: "Steps" }],
+    };
+    respondWith(output);
+
+    await runJob(payload);
+
+    const proposal = await readProposal(proposalId);
+    expect(proposal.status).toBe("DRAFT");
+    expect(proposal.bodyMarkdown).toBe(output.bodyMarkdown);
+  });
+
   it("an answer with no citation gives FAILED INVALID_OUTPUT with one audit row (a2-IN-04)", async () => {
     await expectInvalidOutput({ ...validOutput(), citations: [] });
   });

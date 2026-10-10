@@ -785,6 +785,56 @@ describe("run decision K58: a ticket or status path carried in a query string or
   });
 });
 
+describe("run decision K58 clarified: a path percent-encoded two or three times (Codex round 2, R2D-1)", () => {
+  const LAYERED = [
+    "https://other.example/?next=%252Fstatus%252Ftok_abc123",
+    "https://other.example/?next=%25252Ftickets%25252Fabc",
+    "https://other.example/page#%252Ftickets%252Fabc",
+    "https://other.example/page#%25252Fstatus%25252Ftok_abc123",
+  ];
+
+  for (const link of LAYERED) {
+    it(`save refuses ${link} in the body and in the title as TICKET_LINK`, async () => {
+      await expectSaveRefused(
+        { title: VALID.title, bodyMarkdown: `Open [the guide](${link}).` },
+        { code: "TICKET_LINK", field: "bodyMarkdown" },
+      );
+      await expectSaveRefused(
+        { title: `Reset guide ${link}`, bodyMarkdown: VALID.bodyMarkdown },
+        { code: "TICKET_LINK", field: "title" },
+      );
+    });
+
+    it(`publish refuses a stored body with ${link} as TICKET_LINK; no article`, async () => {
+      await expectPublishRefused(
+        { bodyMarkdown: `Open [the guide](${link}).` },
+        { code: "TICKET_LINK", field: "bodyMarkdown" },
+      );
+    });
+  }
+
+  it("an external link whose query holds an ordinary encoded value still saves and publishes", async () => {
+    const { orgId, owner } = await seedOrg();
+    const p = await seedOne(orgId, { status: "DRAFT", version: 0 });
+    const body = "Read the [VPN guide](https://docs.example.com/search?q=split%20tunnel#step%201).";
+    expect(
+      await saveProposalDraft(owner, {
+        proposalId: p.id,
+        expectedVersion: 0,
+        title: VALID.title,
+        bodyMarkdown: body,
+      }),
+    ).toEqual({ ok: true, version: 1 });
+    expect(await publishProposal(owner, { proposalId: p.id, expectedVersion: 1 })).toMatchObject({
+      ok: true,
+    });
+    const article = await prisma.kbArticle.findFirstOrThrow({ where: { organizationId: orgId } });
+    expect(article.bodyHtml).toContain(
+      'href="https://docs.example.com/search?q=split%20tunnel#step%201"',
+    );
+  });
+});
+
 // --- NOT_FOUND and authorization (D-01) -----------------------------------------------------------
 
 describe("every action: NOT_FOUND, MEMBERSHIP_ENDED and NOT_ALLOWED (D-01)", () => {

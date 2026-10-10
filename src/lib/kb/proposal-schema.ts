@@ -120,18 +120,44 @@ const TICKET_LINK_BASE = "https://aida.invalid/kb/article";
  */
 const TICKET_PATH_PREFIXES = ["/tickets/", "/status/", "/api/public/status/"] as const;
 
+/** At most this many percent-decodes of one URL part (run decision K58, Codex round 2 R2D-1). */
+const MAX_PERCENT_DECODES = 5;
+
+/**
+ * Percent-decodes `value` repeatedly until a decode no longer changes it, so a path encoded two or
+ * more times (`%252Fstatus%252F…`) is read as the path (Codex diff round 2, R2D-1). Returns null,
+ * which the caller treats as a ticket link (fail-closed), when a decode meets a malformed escape or
+ * when MAX_PERCENT_DECODES decodes have all still changed the value.
+ */
+function decodeUntilStable(value: string): string | null {
+  let current = value;
+  for (let i = 0; i < MAX_PERCENT_DECODES; i++) {
+    let next: string;
+    try {
+      next = decodeURIComponent(current);
+    } catch {
+      return null;
+    }
+    if (next === current) return current;
+    current = next;
+  }
+  return null;
+}
+
 /**
  * True when the candidate, resolved with the WHATWG URL parser against TICKET_LINK_BASE (dot
  * segments, protocol-relative URLs and backslashes normalised as a browser does; a leading `www.`
- * gets an https:// prefix), has a pathname that, percent-decoded once, starts with /tickets/,
+ * gets an https:// prefix), has a pathname that, percent-decoded, starts with /tickets/,
  * /status/ or /api/public/status/ (run decision K57) in any case. Run decision K58 (Codex diff
- * critique D2): the query string and the fragment, each percent-decoded once, are read too, and
+ * critique D2): the query string and the fragment, each percent-decoded, are read too, and
  * one that contains any of those paths anywhere (in any case) counts as a ticket link, so a bearer
  * path carried as a parameter of an external link (`https://other.example/?next=/status/…`) is
- * refused like the path itself. A malformed percent escape in the path, the query string or the
- * fragment counts as a ticket link (fail-closed). A candidate the parser rejects is not a URL
- * and is ignored. The host is not checked: a link to another site whose path starts with one of
- * these prefixes is refused too (documented false positive).
+ * refused like the path itself. Each part is decoded repeatedly until a decode no longer changes
+ * it, at most MAX_PERCENT_DECODES times (Codex diff round 2, R2D-1), so a path encoded two or more
+ * times is read too. A malformed percent escape at any decode, or a part still changing after the
+ * last allowed decode, counts as a ticket link (fail-closed). A candidate the parser rejects is
+ * not a URL and is ignored. The host is not checked: a link to another site whose path starts with
+ * one of these prefixes is refused too (documented false positive).
  */
 export function isTicketPageUrl(candidate: string): boolean {
   let raw = candidate.trim();
@@ -143,14 +169,11 @@ export function isTicketPageUrl(candidate: string): boolean {
   } catch {
     return false;
   }
-  let path: string;
-  let carried: string[];
-  try {
-    path = decodeURIComponent(url.pathname);
-    carried = [decodeURIComponent(url.search), decodeURIComponent(url.hash)];
-  } catch {
-    return true;
-  }
+  const path = decodeUntilStable(url.pathname);
+  const search = decodeUntilStable(url.search);
+  const hash = decodeUntilStable(url.hash);
+  if (path === null || search === null || hash === null) return true;
+  const carried = [search, hash];
   const lower = path.toLowerCase();
   if (TICKET_PATH_PREFIXES.some((prefix) => lower.startsWith(prefix))) return true;
   return carried.some((part) => {

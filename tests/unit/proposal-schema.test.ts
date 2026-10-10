@@ -765,6 +765,84 @@ describe("run decision K58: a ticket or status path in the query string or the f
   });
 });
 
+describe("run decision K58 clarified: repeated percent-decoding (Codex diff round 2, R2D-1)", () => {
+  /** encodeURIComponent applied `times` times. */
+  function encoded(value: string, times: number): string {
+    let out = value;
+    for (let i = 0; i < times; i++) out = encodeURIComponent(out);
+    return out;
+  }
+
+  // Each carries /status/ or /tickets/ encoded two or three times, in the query or the fragment.
+  const LAYERED = [
+    "https://other.example/?next=%252Fstatus%252Ftok_abc123",
+    "https://other.example/?next=%25252Ftickets%25252Fabc",
+    "https://other.example/page#%252Ftickets%252Fabc",
+    "https://other.example/page#%25252Fstatus%25252Ftok_abc123",
+    `https://other.example/?u=${encoded("https://help.example.com/status/tok_abc123", 2)}`,
+    `https://other.example/?u=${encoded("/tickets/abc", 3)}`,
+    `https://other.example/page#${encoded("/status/tok_abc123", 3)}`,
+    `https://other.example/page#r=${encoded("/tickets/abc", 2)}`,
+  ];
+
+  it("isTicketPageUrl refuses /status/ and /tickets/ encoded twice or three times", () => {
+    for (const link of LAYERED) expect(isTicketPageUrl(link), link).toBe(true);
+  });
+
+  it("isTicketPageUrl decodes the pathname repeatedly too", () => {
+    // %2574 decodes to %74, then to t: /tickets/abc after two decodes.
+    expect(isTicketPageUrl("https://other.example/%2574ickets/abc")).toBe(true);
+    expect(isTicketPageUrl("https://other.example/%252573tatus/tok_abc123")).toBe(true);
+  });
+
+  it("fails closed when five decodes still change the value", () => {
+    // Four layers: four decodes change it, the fifth finds it stable, so it is read and allowed.
+    expect(isTicketPageUrl(`https://other.example/?q=${encoded("hello world", 4)}`)).toBe(false);
+    // Five layers: the fifth decode still changes it, so the limit is reached (fail-closed).
+    expect(isTicketPageUrl(`https://other.example/?q=${encoded("hello world", 5)}`)).toBe(true);
+    expect(isTicketPageUrl(`https://other.example/page#${encoded("hello world", 6)}`)).toBe(true);
+    expect(isTicketPageUrl(`https://other.example/docs${encoded(" ", 5)}`)).toBe(true);
+    expect(isTicketPageUrl(`https://other.example/docs${encoded(" ", 4)}`)).toBe(false);
+  });
+
+  it("fails closed on an escape that is malformed only after the first decode", () => {
+    expect(isTicketPageUrl("https://other.example/?d=%25E0%25A4%25A")).toBe(true);
+    expect(isTicketPageUrl("https://other.example/page#%25E0%25A4%25A")).toBe(true);
+  });
+
+  it("refuses the layered forms in the title and the body, at generation and in the field validator", () => {
+    for (const link of LAYERED) {
+      expect(titleRefusal(`Track it at ${link}`)).toEqual({
+        ok: false,
+        field: "title",
+        code: "TICKET_LINK",
+      });
+      expect(reason({ title: `Track it at ${link}` })).toBe("TICKET_LINK");
+      expect(bodyRefusal(`Open [the guide](${link}).`)).toEqual({
+        ok: false,
+        field: "bodyMarkdown",
+        code: "TICKET_LINK",
+      });
+      expect(reason({ bodyMarkdown: `## Steps\n\nOpen [the guide](${link}).` })).toBe(
+        "TICKET_LINK",
+      );
+    }
+  });
+
+  it("an external link whose query holds an ordinary encoded value stays allowed", () => {
+    for (const text of [
+      "[search](https://example.com/search?q=reset%20password)",
+      "[docs](https://docs.example.com/vpn-guide?lang=en&q=split%20tunnel#step%201)",
+      "[kb](/kb/abc?q=caf%C3%A9)",
+    ]) {
+      expect(bodyRefusal(text).ok, text).toBe(true);
+      expect(reason({ bodyMarkdown: `## Steps\n\n${text}` }), text).toBe("OK");
+    }
+    expect(isTicketPageUrl("https://example.com/search?q=reset%20password")).toBe(false);
+    expect(isTicketPageUrl("https://example.com/search?q=%2Fkb%2Fabc%20guide")).toBe(false);
+  });
+});
+
 describe("review a2-IN-01: a fence tag echoed in the title is refused", () => {
   it("refuses a title that echoes a ticket_content tag (FENCE_ECHO)", () => {
     expect(reason({ title: 'Reset <ticket_content id="T1"> guide' })).toBe("FENCE_ECHO");
