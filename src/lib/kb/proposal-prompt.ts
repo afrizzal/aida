@@ -23,7 +23,9 @@ export const MAX_MESSAGE_CODE_POINTS = 4000;
 export const MAX_SUBJECT_CODE_POINTS = 300;
 /**
  * Total ticket text across all sources, counted over subjects and message bodies after their own
- * cuts (fence tags, labels and the "Subject:" and "Message n:" lines do not count).
+ * cuts (fence tags, labels and the "Subject:" and "Message n:" lines do not count). Codex diff
+ * critique D4: it is split evenly across the sources (each gets MAX_INPUT_CODE_POINTS / n, rounded
+ * down), so long early sources can never leave a later source without text.
  */
 export const MAX_INPUT_CODE_POINTS = 24000;
 
@@ -56,10 +58,14 @@ function cutCodePoints(text: string, max: number): { text: string; cut: boolean 
   return { text: points.slice(0, max).join(""), cut: true };
 }
 
-/** Running total bound over every subject and message body, in source and seq order. */
+/** Running bound over one source's subject and message bodies, in the order they are taken. */
 class InputBudget {
-  private remaining = MAX_INPUT_CODE_POINTS;
+  private remaining: number;
   truncated = false;
+
+  constructor(limit: number) {
+    this.remaining = limit;
+  }
 
   take(text: string): string {
     const { text: kept, cut } = cutCodePoints(text, this.remaining);
@@ -113,35 +119,56 @@ function keptMessages<M extends { seq: bigint }>(
 }
 
 /**
+ * The order a source's kept messages take its share in (Codex diff critique D4): the first (the
+ * problem), then the last (the resolution), then the middle ones in seq order. Indexes into the
+ * seq-ordered kept list; the prompt still shows the messages in seq order.
+ */
+function reservationOrder(count: number): number[] {
+  if (count <= 1) return count === 1 ? [0] : [];
+  const middle = Array.from({ length: count - 2 }, (_, i) => i + 1);
+  return [0, count - 1, ...middle];
+}
+
+/**
  * Builds the user prompt: one fenced <ticket_content id="T{position}"> block per source, in
  * position order, holding the subject and at most MAX_MESSAGES_PER_SOURCE messages in seq order
  * (a longer thread keeps its first and its latest messages, run decision K56).
- * Subjects, messages and the total are bounded in code points; `truncated` is true whenever a
- * message, a part of a message or a part of a subject was left out, false otherwise. Every source
- * keeps its labelled block, even when the total bound leaves it no text, so labels stay T1 to Tn.
+ * Subjects, messages and the total are bounded in code points. The total is split evenly across
+ * the sources, and within a source the subject, then the first and the last kept messages, then
+ * the middle ones in seq order take the share (Codex diff critique D4); a middle message the share
+ * leaves with no text is left out. `truncated` is true whenever a message, a part of a message or
+ * a part of a subject was left out, false otherwise. Every source keeps its labelled block, so
+ * labels stay T1 to Tn.
  * The input type carries no ticket id, number or contact field, so none can reach the prompt;
  * each message is labelled only with its fixed role, customer or agent (review a2-IN-06).
  */
 export function buildProposalPrompt(sources: readonly ProposalSourceInput[]): ProposalPrompt {
   const ordered = [...sources].sort((a, b) => a.position - b.position);
-  const budget = new InputBudget();
+  const share = Math.floor(MAX_INPUT_CODE_POINTS / Math.max(ordered.length, 1));
+  let truncated = false;
 
   const blocks = ordered.map((source) => {
+    const budget = new InputBudget(share);
     const subjectCut = cutCodePoints(source.subject, MAX_SUBJECT_CODE_POINTS);
-    if (subjectCut.cut) budget.truncated = true;
+    if (subjectCut.cut) truncated = true;
     const subject = budget.take(subjectCut.text);
 
     const { kept, gapAfterFirst } = keptMessages([...source.messages].sort(compareSeq));
-    if (gapAfterFirst) budget.truncated = true;
+    if (gapAfterFirst) truncated = true;
+    const cuts = kept.map((message) => cutCodePoints(message.body, MAX_MESSAGE_CODE_POINTS));
+    if (cuts.some((cut) => cut.cut)) truncated = true;
+    const bodies: string[] = new Array(kept.length).fill("");
+    for (const index of reservationOrder(kept.length)) {
+      bodies[index] = budget.take(cuts[index].text);
+    }
+    if (budget.truncated) truncated = true;
+
     const entries: SourceEntry[] = [];
     kept.forEach((message, index) => {
       if (index === 1 && gapAfterFirst) entries.push({ kind: "gap" });
-      const messageCut = cutCodePoints(message.body, MAX_MESSAGE_CODE_POINTS);
-      if (messageCut.cut) budget.truncated = true;
-      const body = budget.take(messageCut.text);
-      // A message the total bound left with no text is left out (already flagged as truncated).
-      if (body === "" && messageCut.text !== "") return;
-      entries.push({ kind: "message", body, role: message.role });
+      // A message the share left with no text is left out (already flagged as truncated).
+      if (bodies[index] === "" && cuts[index].text !== "") return;
+      entries.push({ kind: "message", body: bodies[index], role: message.role });
     });
 
     return fenceContent(
@@ -159,5 +186,5 @@ export function buildProposalPrompt(sources: readonly ProposalSourceInput[]): Pr
     blocks.join("\n\n"),
   ].join("\n");
 
-  return { prompt, truncated: budget.truncated };
+  return { prompt, truncated };
 }

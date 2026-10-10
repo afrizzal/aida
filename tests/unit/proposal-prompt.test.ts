@@ -126,8 +126,11 @@ describe("buildProposalPrompt bounds", () => {
     expect(text).not.toContain("s".repeat(301));
   });
 
-  it("keeps earlier text and cuts the rest when five sources exceed the total bound", () => {
-    // Each source: a 10-code-point subject and two 4,000-code-point messages (8,010 each).
+  it("splits the total bound evenly when five sources exceed it (Codex diff critique D4)", () => {
+    // Each source: a 10-code-point subject and two 4,000-code-point messages (8,010 each). Each
+    // source's share is MAX_INPUT_CODE_POINTS / 5 = 4,800: the subject (10), the first message
+    // whole (4,000) and the last message cut to the remaining 790. The subject counts against the
+    // share (review c-IN-04): the last message gets 790, not 800.
     const sources: ProposalSourceInput[] = Array.from({ length: 5 }, (_, i) => {
       const ch = String.fromCharCode(97 + i);
       return {
@@ -141,17 +144,62 @@ describe("buildProposalPrompt bounds", () => {
     });
     const { prompt, truncated } = buildProposalPrompt(sources);
     expect(truncated).toBe(true);
-    expect(block(prompt, 1)).toContain("a".repeat(4000));
-    expect(block(prompt, 1)).toContain("A".repeat(4000));
-    expect(block(prompt, 2)).toContain("B".repeat(4000));
-    // Source 3: subject and first message whole, second message cut to the remaining 3,970.
-    expect(block(prompt, 3)).toContain("c".repeat(4000));
-    expect(block(prompt, 3)).toContain("C".repeat(3970));
-    expect(block(prompt, 3)).not.toContain("C".repeat(3971));
-    // Sources 4 and 5 keep their labelled block but none of their text: the block is the
-    // "Subject:" label with an empty subject, and no message line (review c-IN-04).
-    expect(block(prompt, 4)).toBe("Subject: ");
-    expect(block(prompt, 5)).toBe("Subject: ");
+    for (let i = 0; i < 5; i++) {
+      const ch = String.fromCharCode(97 + i);
+      const text = block(prompt, i + 1);
+      expect(text).toContain(`Subject: ${`S${ch}`.padEnd(10, ch)}`);
+      expect(text).toContain(ch.repeat(4000));
+      expect(text).toContain(ch.toUpperCase().repeat(790));
+      expect(text).not.toContain(ch.toUpperCase().repeat(791));
+    }
+  });
+
+  it("keeps every source's last message when several long sources exceed the bound (Codex D4)", () => {
+    // Five sources of six 4,000-code-point messages (24,000 each, 120,000 in all). Each source
+    // keeps its subject, its first message (the problem) and its last message (the resolution),
+    // the last cut to what its 4,800 share leaves; the middle messages are left out.
+    const sources: ProposalSourceInput[] = Array.from({ length: 5 }, (_, i) => ({
+      position: i + 1,
+      subject: `S${i + 1}`,
+      messages: Array.from({ length: 6 }, (_, k) => ({
+        seq: BigInt(i * 10 + k + 1),
+        body: `L${i + 1}M${k + 1}-`.padEnd(4000, "z"),
+        role: k === 5 ? ("agent" as const) : ("customer" as const),
+      })),
+    }));
+    const { prompt, truncated } = buildProposalPrompt(sources);
+    expect(truncated).toBe(true);
+    for (let i = 1; i <= 5; i++) {
+      const text = block(prompt, i);
+      expect(text).toContain(`Subject: S${i}`);
+      expect(text).toContain(`L${i}M1-`.padEnd(4000, "z"));
+      expect(text).toContain(`L${i}M6-`);
+      for (let k = 2; k <= 5; k++) expect(text).not.toContain(`L${i}M${k}-`);
+      // In seq order: the first message, then the last.
+      expect(text.indexOf(`L${i}M1-`)).toBeLessThan(text.indexOf(`L${i}M6-`));
+    }
+  });
+
+  it("within one source the first and last messages are kept before the middle (Codex D4)", () => {
+    // One source of eight 4,000-code-point messages (32,000) under the 24,000 bound: the first and
+    // the last whole, then the middle messages in seq order until the bound runs out.
+    const body = (k: number) => `M${k}-`.padEnd(4000, "q");
+    const { prompt, truncated } = buildProposalPrompt([
+      { position: 1, subject: "Long thread", messages: messages(8, body) },
+    ]);
+    expect(truncated).toBe(true);
+    const text = block(prompt, 1);
+    expect(text).toContain(body(1));
+    expect(text).toContain(body(8));
+    // 24,000 - 11 (subject) - 8,000 = 15,989 for the middle: messages 2 to 4 whole, 5 cut.
+    for (const k of [2, 3, 4]) expect(text).toContain(body(k));
+    expect(text).toContain("M5-");
+    expect(text).not.toContain(body(5));
+    for (const k of [6, 7]) expect(text).not.toContain(`M${k}-`);
+    // Still in seq order, numbered 1 to 6.
+    expect(text.indexOf("M4-")).toBeLessThan(text.indexOf("M5-"));
+    expect(text.indexOf("M5-")).toBeLessThan(text.indexOf("M8-"));
+    expect(text.match(/^Message \d+ \(/gm)).toHaveLength(6);
   });
 
   it("cuts on code-point boundaries and never splits a surrogate pair", () => {
