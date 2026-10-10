@@ -60,19 +60,38 @@ function cutCodePoints(text: string, max: number): { text: string; cut: boolean 
 
 /** Running bound over one source's subject and message bodies, in the order they are taken. */
 class InputBudget {
-  private remaining: number;
+  remaining: number;
   truncated = false;
 
   constructor(limit: number) {
     this.remaining = limit;
   }
 
-  take(text: string): string {
-    const { text: kept, cut } = cutCodePoints(text, this.remaining);
+  /** Takes `text`, cut to what is left and, when given, to `cap` code points. */
+  take(text: string, cap = Number.POSITIVE_INFINITY): string {
+    const { text: kept, cut } = cutCodePoints(text, Math.min(this.remaining, cap));
     if (cut) this.truncated = true;
     this.remaining -= Array.from(kept).length;
     return kept;
   }
+}
+
+/**
+ * Codex diff round 2 (R2D-3): before any middle message, the first and the last kept message each
+ * get at most half of what is left of the source's share after the subject. The last message gets
+ * the odd code point, and a half one of them does not use passes to the other.
+ */
+function endCaps(
+  remaining: number,
+  firstLength: number,
+  lastLength: number,
+): { first: number; last: number } {
+  const firstHalf = Math.floor(remaining / 2);
+  const lastHalf = remaining - firstHalf;
+  return {
+    first: firstHalf + Math.max(0, lastHalf - lastLength),
+    last: lastHalf + Math.max(0, firstHalf - firstLength),
+  };
 }
 
 /**
@@ -119,24 +138,14 @@ function keptMessages<M extends { seq: bigint }>(
 }
 
 /**
- * The order a source's kept messages take its share in (Codex diff critique D4): the first (the
- * problem), then the last (the resolution), then the middle ones in seq order. Indexes into the
- * seq-ordered kept list; the prompt still shows the messages in seq order.
- */
-function reservationOrder(count: number): number[] {
-  if (count <= 1) return count === 1 ? [0] : [];
-  const middle = Array.from({ length: count - 2 }, (_, i) => i + 1);
-  return [0, count - 1, ...middle];
-}
-
-/**
  * Builds the user prompt: one fenced <ticket_content id="T{position}"> block per source, in
  * position order, holding the subject and at most MAX_MESSAGES_PER_SOURCE messages in seq order
  * (a longer thread keeps its first and its latest messages, run decision K56).
  * Subjects, messages and the total are bounded in code points. The total is split evenly across
  * the sources, and within a source the subject, then the first and the last kept messages, then
- * the middle ones in seq order take the share (Codex diff critique D4); a middle message the share
- * leaves with no text is left out. `truncated` is true whenever a message, a part of a message or
+ * the middle ones in seq order take the share (Codex diff critique D4); the first and the last
+ * each get at most half of what the subject leaves, a half one does not use passing to the other
+ * (Codex diff round 2, R2D-3); a middle message the share leaves with no text is left out. `truncated` is true whenever a message, a part of a message or
  * a part of a subject was left out, false otherwise. Every source keeps its labelled block, so
  * labels stay T1 to Tn.
  * The input type carries no ticket id, number or contact field, so none can reach the prompt;
@@ -158,8 +167,20 @@ export function buildProposalPrompt(sources: readonly ProposalSourceInput[]): Pr
     const cuts = kept.map((message) => cutCodePoints(message.body, MAX_MESSAGE_CODE_POINTS));
     if (cuts.some((cut) => cut.cut)) truncated = true;
     const bodies: string[] = new Array(kept.length).fill("");
-    for (const index of reservationOrder(kept.length)) {
-      bodies[index] = budget.take(cuts[index].text);
+    const last = kept.length - 1;
+    if (kept.length === 1) {
+      bodies[0] = budget.take(cuts[0].text);
+    } else if (kept.length >= 2) {
+      // The first (the problem) and the last (the resolution) before the middle (D4), each held
+      // to its half of what the subject left (R2D-3). The prompt still shows seq order.
+      const caps = endCaps(
+        budget.remaining,
+        Array.from(cuts[0].text).length,
+        Array.from(cuts[last].text).length,
+      );
+      bodies[0] = budget.take(cuts[0].text, caps.first);
+      bodies[last] = budget.take(cuts[last].text, caps.last);
+      for (let index = 1; index < last; index++) bodies[index] = budget.take(cuts[index].text);
     }
     if (budget.truncated) truncated = true;
 

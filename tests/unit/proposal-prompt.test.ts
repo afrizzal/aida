@@ -128,9 +128,9 @@ describe("buildProposalPrompt bounds", () => {
 
   it("splits the total bound evenly when five sources exceed it (Codex diff critique D4)", () => {
     // Each source: a 10-code-point subject and two 4,000-code-point messages (8,010 each). Each
-    // source's share is MAX_INPUT_CODE_POINTS / 5 = 4,800: the subject (10), the first message
-    // whole (4,000) and the last message cut to the remaining 790. The subject counts against the
-    // share (review c-IN-04): the last message gets 790, not 800.
+    // source's share is MAX_INPUT_CODE_POINTS / 5 = 4,800: the subject (10), then the remaining
+    // 4,790 split in halves between the first and the last message (Codex round 2, R2D-3), each
+    // cut to 2,395. The subject counts against the share (review c-IN-04): 2,395, not 2,400.
     const sources: ProposalSourceInput[] = Array.from({ length: 5 }, (_, i) => {
       const ch = String.fromCharCode(97 + i);
       return {
@@ -148,16 +148,18 @@ describe("buildProposalPrompt bounds", () => {
       const ch = String.fromCharCode(97 + i);
       const text = block(prompt, i + 1);
       expect(text).toContain(`Subject: ${`S${ch}`.padEnd(10, ch)}`);
-      expect(text).toContain(ch.repeat(4000));
-      expect(text).toContain(ch.toUpperCase().repeat(790));
-      expect(text).not.toContain(ch.toUpperCase().repeat(791));
+      expect(text).toContain(ch.repeat(2395));
+      expect(text).not.toContain(ch.repeat(2396));
+      expect(text).toContain(ch.toUpperCase().repeat(2395));
+      expect(text).not.toContain(ch.toUpperCase().repeat(2396));
     }
   });
 
   it("keeps every source's last message when several long sources exceed the bound (Codex D4)", () => {
     // Five sources of six 4,000-code-point messages (24,000 each, 120,000 in all). Each source
-    // keeps its subject, its first message (the problem) and its last message (the resolution),
-    // the last cut to what its 4,800 share leaves; the middle messages are left out.
+    // keeps its subject, its first message (the problem) and its last message (the resolution);
+    // the 4,798 its 4,800 share leaves after the subject is split in halves between them (Codex
+    // round 2, R2D-3), each cut to 2,399; the middle messages are left out.
     const sources: ProposalSourceInput[] = Array.from({ length: 5 }, (_, i) => ({
       position: i + 1,
       subject: `S${i + 1}`,
@@ -172,8 +174,10 @@ describe("buildProposalPrompt bounds", () => {
     for (let i = 1; i <= 5; i++) {
       const text = block(prompt, i);
       expect(text).toContain(`Subject: S${i}`);
-      expect(text).toContain(`L${i}M1-`.padEnd(4000, "z"));
-      expect(text).toContain(`L${i}M6-`);
+      expect(text).toContain(`L${i}M1-`.padEnd(2399, "z"));
+      expect(text).not.toContain(`L${i}M1-`.padEnd(2400, "z"));
+      expect(text).toContain(`L${i}M6-`.padEnd(2399, "z"));
+      expect(text).not.toContain(`L${i}M6-`.padEnd(2400, "z"));
       for (let k = 2; k <= 5; k++) expect(text).not.toContain(`L${i}M${k}-`);
       // In seq order: the first message, then the last.
       expect(text.indexOf(`L${i}M1-`)).toBeLessThan(text.indexOf(`L${i}M6-`));
@@ -200,6 +204,87 @@ describe("buildProposalPrompt bounds", () => {
     expect(text.indexOf("M4-")).toBeLessThan(text.indexOf("M5-"));
     expect(text.indexOf("M5-")).toBeLessThan(text.indexOf("M8-"));
     expect(text.match(/^Message \d+ \(/gm)).toHaveLength(6);
+  });
+
+  /** Code points in the longest run of `ch` in `text`. */
+  function run(text: string, ch: string): number {
+    let best = 0;
+    for (const match of text.matchAll(new RegExp(`${ch}+`, "g"))) {
+      best = Math.max(best, Array.from(match[0]).length);
+    }
+    return best;
+  }
+
+  it("five long sources: each last message keeps at least as much as its first (R2D-3)", () => {
+    // Five sources, each a 300-code-point subject and six 4,000-code-point messages. Each share is
+    // 4,800; after the subject 4,500 are left, and before D4's middle messages the first and the
+    // last message each get at most half of that (Codex round 2, R2D-3).
+    const sources: ProposalSourceInput[] = Array.from({ length: 5 }, (_, i) => ({
+      position: i + 1,
+      subject: "W".repeat(MAX_SUBJECT_CODE_POINTS),
+      messages: Array.from({ length: 6 }, (_, k) => ({
+        seq: BigInt(i * 10 + k + 1),
+        body: (k === 0 ? "Q" : k === 5 ? "Z" : "X").repeat(MAX_MESSAGE_CODE_POINTS),
+        role: k === 5 ? ("agent" as const) : ("customer" as const),
+      })),
+    }));
+    const { prompt, truncated } = buildProposalPrompt(sources);
+    expect(truncated).toBe(true);
+    let total = 0;
+    for (let i = 1; i <= 5; i++) {
+      const text = block(prompt, i);
+      const first = run(text, "Q");
+      const last = run(text, "Z");
+      const subject = run(text, "W");
+      expect(subject).toBe(300);
+      expect(first).toBeGreaterThan(0);
+      expect(last).toBeGreaterThanOrEqual(first);
+      expect(first).toBe(2250);
+      expect(last).toBe(2250);
+      expect(text).not.toContain("X");
+      expect(subject + first + last).toBeLessThanOrEqual(MAX_INPUT_CODE_POINTS / 5);
+      total += subject + first + last;
+    }
+    expect(total).toBeLessThanOrEqual(MAX_INPUT_CODE_POINTS);
+  });
+
+  it("a short last message leaves the rest of its half to the first message (R2D-3)", () => {
+    // Five sources of a 300-code-point subject, a 4,000-code-point first message and a
+    // 1,000-code-point last message: the last keeps all 1,000, and the first gets its own half
+    // (2,250) plus the 1,250 the last did not use, 3,500 in all.
+    const sources: ProposalSourceInput[] = Array.from({ length: 5 }, (_, i) => ({
+      position: i + 1,
+      subject: "W".repeat(300),
+      messages: [
+        { seq: BigInt(i * 10 + 1), body: "Q".repeat(4000), role: "customer" as const },
+        { seq: BigInt(i * 10 + 2), body: "Z".repeat(1000), role: "agent" as const },
+      ],
+    }));
+    const { prompt, truncated } = buildProposalPrompt(sources);
+    expect(truncated).toBe(true);
+    for (let i = 1; i <= 5; i++) {
+      const text = block(prompt, i);
+      expect(run(text, "Z")).toBe(1000);
+      expect(run(text, "Q")).toBe(3500);
+    }
+  });
+
+  it("a short first message leaves the rest of its half to the last message (R2D-3)", () => {
+    const sources: ProposalSourceInput[] = Array.from({ length: 5 }, (_, i) => ({
+      position: i + 1,
+      subject: "W".repeat(300),
+      messages: [
+        { seq: BigInt(i * 10 + 1), body: "Q".repeat(1000), role: "customer" as const },
+        { seq: BigInt(i * 10 + 2), body: "Z".repeat(4000), role: "agent" as const },
+      ],
+    }));
+    const { prompt, truncated } = buildProposalPrompt(sources);
+    expect(truncated).toBe(true);
+    for (let i = 1; i <= 5; i++) {
+      const text = block(prompt, i);
+      expect(run(text, "Q")).toBe(1000);
+      expect(run(text, "Z")).toBe(3500);
+    }
   });
 
   it("cuts on code-point boundaries and never splits a surrogate pair", () => {
@@ -257,10 +342,18 @@ describe("buildProposalPrompt exact boundaries", () => {
   });
 
   it("a total of MAX_INPUT_CODE_POINTS + 1 is truncated", () => {
+    // Source 5: 100 + 4,000 + 701 = 4,801 against its 4,800 share. The last message (701) fits in
+    // its half of the 4,700 left after the subject, and the unused rest of that half passes to the
+    // first message (Codex round 2, R2D-3): exactly one code point is cut, from the first.
     const { prompt, truncated } = buildProposalPrompt(fiveSources(1));
     expect(truncated).toBe(true);
-    expect(block(prompt, 5)).toContain("y".repeat(700));
-    expect(block(prompt, 5)).not.toContain("y".repeat(701));
+    expect(block(prompt, 5)).toContain("y".repeat(701));
+    expect(block(prompt, 5)).toContain("x".repeat(3999));
+    expect(block(prompt, 5)).not.toContain("x".repeat(4000));
+    for (let i = 1; i <= 4; i++) {
+      expect(block(prompt, i)).toContain("x".repeat(4000));
+      expect(block(prompt, i)).toContain("y".repeat(700));
+    }
   });
 
   it("exactly 20 messages are not truncated", () => {
