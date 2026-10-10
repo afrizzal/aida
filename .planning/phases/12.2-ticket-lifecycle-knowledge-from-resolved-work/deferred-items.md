@@ -16,3 +16,4 @@
 
 | A bare `%` in the query or fragment of an external link in a proposal is refused as a ticket link (fail-closed, K58), and a footnote reference in the preview shows its internal target as text | Fix batch F5 (Codex D2) | Accepted side effects of the fail-closed rule and the inert preview |
 | On the last pg-boss attempt a proposal whose FAILED write failed stays GENERATING until an admin uses Restart generation once it counts as stuck | Fix batch F5 (Codex D3) | pg-boss does not retry after the last attempt; Restart is the visible recovery |
+| A query value whose second decode is malformed (for example `?q=100%25`) or an ordinary value encoded five or more times is refused as a ticket link in a proposal; a token hidden another way (for example base64) is not detected by any URL pattern check | Fix batch F6 (Codex R2D-1, K58 clarified) | Accepted fail-closed false positives; detecting every disguised reference is not claimed |
