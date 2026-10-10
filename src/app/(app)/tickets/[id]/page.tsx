@@ -8,7 +8,7 @@ import { SnoozeControl } from "@/components/tickets/snooze-control";
 import { TicketMetaHeader } from "@/components/tickets/ticket-meta-header";
 import { TicketReplyArea } from "@/components/tickets/ticket-reply-area";
 import { prisma } from "@/lib/db";
-import { findActiveMembership, isAdminRole } from "@/lib/membership";
+import { findConservativeMembership, isAdminRole } from "@/lib/membership";
 import { scopedDb } from "@/lib/scoped-db";
 import { getSessionActor } from "@/lib/session";
 import { loadTicketDetailData } from "@/lib/tickets/ticket-detail-data";
@@ -79,7 +79,7 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
   // 12.2 UI-SPEC 1a (D-01, D-09): the "Propose KB article…" menu item is for owners and admins
   // only, and is disabled while AI is off. Both flags are read here, after the membership check
   // above; the menu only hides or explains the entry, and requestProposalAction decides again.
-  const membership = await findActiveMembership(prisma, actor.userId, actor.orgId);
+  const membership = await findConservativeMembership(prisma, actor.userId, actor.orgId);
   const isAdmin = isAdminRole(membership?.role);
   const aiSetting = isAdmin
     ? await scopedDb(actor.orgId).setting.findFirst({

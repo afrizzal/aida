@@ -4,7 +4,7 @@ import { RedirectType, redirect } from "next/navigation";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { prisma } from "@/lib/db";
-import { findActiveMembership, isAdminRole } from "@/lib/membership";
+import { findConservativeMembership, isAdminRole } from "@/lib/membership";
 import { getScopedDb } from "@/lib/session";
 import {
   legacyRedirectSearch,
@@ -65,10 +65,11 @@ export async function TicketListPanel({
 
   // 12.2 UI-SPEC 1a (D-01, D-09): the bulk bar's "Propose KB article…" is for owners and admins
   // only, and is disabled while AI is off. The actor comes from this panel's own session (it has
-  // no actor prop) and its role from findActiveMembership, read only for an active member. The
-  // bar only hides or explains the entry; requestProposalAction decides again on the server.
+  // no actor prop) and its role from findConservativeMembership (K59, Codex round 2 R2D-2), read
+  // only for an active member. The bar only hides or explains the entry; requestProposalAction
+  // decides again on the server.
   const membership = membershipActive
-    ? await findActiveMembership(prisma, session.user.id, orgId)
+    ? await findConservativeMembership(prisma, session.user.id, orgId)
     : null;
   const isAdmin = isAdminRole(membership?.role);
   const aiSetting = isAdmin
