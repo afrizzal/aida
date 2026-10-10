@@ -41,7 +41,7 @@ import { complete } from "../llm/complete";
 import { classifyLlmError } from "../llm/errors";
 import { getLlmSettings, isProviderConfigured } from "../llm/settings";
 import type { CompleteResult } from "../llm/types";
-import { findActiveMembership, isAdminRole } from "../membership";
+import { findConservativeMembership, isAdminRole } from "../membership";
 import { scopedDb } from "../scoped-db";
 import {
   isStuck,
@@ -310,8 +310,8 @@ async function runClaimed(
   claimed: ClaimedProposal,
   attempt: GenerateProposalAttempt,
 ): Promise<GenerateProposalResult> {
-  // D-01: the requester must still be an active owner or admin.
-  const membership = await findActiveMembership(db, claimed.requestedByUserId, claimed.orgId);
+  // D-01: the requester must still be an active owner or admin, on every member row (K59).
+  const membership = await findConservativeMembership(db, claimed.requestedByUserId, claimed.orgId);
   if (!membership || !isAdminRole(membership.role)) {
     return failClaimed(db, claimed, "REQUESTER_NOT_ALLOWED");
   }

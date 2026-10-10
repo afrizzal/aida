@@ -7,7 +7,7 @@ import { prisma } from "@/lib/db";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import { listKbArticles } from "@/lib/kb/article-reads";
 import { PROPOSALS_LINK } from "@/lib/kb/proposal-copy";
-import { findActiveMembership, isAdminRole } from "@/lib/membership";
+import { findConservativeMembership, isAdminRole } from "@/lib/membership";
 import { getScopedDb } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -16,8 +16,9 @@ export default async function KbPage() {
   const { db, session, orgId } = await getScopedDb();
 
   // UI-SPEC Surface 2 (D-01, pattern finding C1): the Proposals link is for owners and admins
-  // only, and the DRAFT count is read from kbProposal only for them. Members see no link.
-  const membership = await findActiveMembership(prisma, session.user.id, orgId);
+  // only, and the DRAFT count is read from kbProposal only for them. Members see no link. Run
+  // decision K59: every member row of the user must be owner or admin, as on the Proposals pages.
+  const membership = await findConservativeMembership(prisma, session.user.id, orgId);
   const isAdmin = isAdminRole(membership?.role);
   const draftProposals = isAdmin
     ? await db.kbProposal.count({ where: { organizationId: orgId, status: "DRAFT" } })

@@ -8,8 +8,10 @@
 // deleted member row is MEMBERSHIP_ENDED, a plain member NOT_ALLOWED. Publish takes the actor's
 // member rows FOR SHARE as its first statement (shareLockActiveMembership: every row of the user in
 // the organization, in id order, admin only when every row is owner or admin, review a-WR-03), so
-// a demotion or a member delete cannot commit between publish's role check and its commit. Save, reject, restart and retry keep
-// the plain findActiveMembership read: they publish nothing. The CHECKs and the status trigger of
+// a demotion or a member delete cannot commit between publish's role check and its commit. Save,
+// reject, restart and retry read the same rows without a lock (findConservativeMembership, run
+// decision K59: every row, in id order, admin only when every row is owner or admin); they
+// publish nothing. The CHECKs and the status trigger of
 // plan 12.2-01 are integrity fences, not authorization; writes by a privileged database user are
 // out of scope.
 //
@@ -55,7 +57,7 @@
 // second job for one article is safe through plan 12.2-03's locked swap.
 //
 // Relative imports only and no Next.js import: revalidation belongs to the server action.
-import { findActiveMembership, isAdminRole, shareLockActiveMembership } from "../membership";
+import { findConservativeMembership, isAdminRole, shareLockActiveMembership } from "../membership";
 import { getBoss } from "../queue/boss-client";
 import { scopedDb } from "../scoped-db";
 import { createKbArticleInTx, isSlugUniqueViolation } from "./create-article";
@@ -232,12 +234,15 @@ async function sendAfterCommit(queue: string, payload: object, id: string): Prom
   }
 }
 
-/** The client the plain membership check needs (see findActiveMembership). */
-type MembershipReader = Parameters<typeof findActiveMembership>[0];
+/** The client the unlocked membership check needs (see findConservativeMembership). */
+type MembershipReader = Parameters<typeof findConservativeMembership>[0];
 
-/** D-01: active membership, then the exact owner or admin role; before any read of the proposal. */
+/**
+ * D-01, K59: active membership (every member row of the user in the organization), then the exact
+ * owner or admin role on every row; before any read of the proposal.
+ */
 async function requireAdmin(tx: MembershipReader, userId: string, orgId: string): Promise<void> {
-  const membership = await findActiveMembership(tx, userId, orgId);
+  const membership = await findConservativeMembership(tx, userId, orgId);
   if (!membership) throw new ProposalReviewError("MEMBERSHIP_ENDED");
   if (!isAdminRole(membership.role)) throw new ProposalReviewError("NOT_ALLOWED");
 }

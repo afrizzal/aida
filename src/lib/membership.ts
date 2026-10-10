@@ -39,6 +39,58 @@ export async function findActiveMembership(
 }
 
 /**
+ * The client findConservativeMembership needs: every member row of the user in the organization,
+ * in id order. Typed structurally like MembershipClient, so the global prisma client, a scopedDb
+ * client and an interactive transaction client all fit.
+ */
+export interface ConservativeMembershipClient {
+  member: {
+    findMany(args: {
+      where: { userId: string; organizationId: string };
+      select: { id: true; role: true };
+      orderBy: { id: "asc" };
+    }): PromiseLike<ActiveMembership[]>;
+  };
+}
+
+/**
+ * The deciding row of a user's member rows in one organization, given in id order: the first row
+ * whose role is not an admin role, or else the first row; null when there is none. isAdminRole on
+ * the result is therefore true only when EVERY row is owner or admin (review a-WR-03).
+ */
+function decidingRow(rows: readonly ActiveMembership[]): ActiveMembership | null {
+  const row = rows.find((candidate) => !isAdminRole(candidate.role)) ?? rows[0];
+  return row ? { id: row.id, role: row.role } : null;
+}
+
+/**
+ * The conservative membership read of every new Phase 12.2 path (run decision K59, Codex diff
+ * critique D1): the KB proposal loaders, the request, save, reject, restart, retry indexing, the
+ * generation job's requester check and the /kb page's Proposals link. The member table has no
+ * unique key on (organizationId, userId) until owner item 12.2-o4 adds one, so a user can hold
+ * an admin row and a plain member row in the same organization, and findActiveMembership's
+ * single unordered row could be either. This reads ALL rows of the user in the organization,
+ * ordered by id, and returns the deciding row (decidingRow): admin only when every row is owner
+ * or admin, the rule publish applies under its lock (shareLockActiveMembership). null when there
+ * is no row. Read on every call, so a role change on any row is seen by the next one.
+ *
+ * findActiveMembership above is unchanged and stays the read of the paths of earlier phases.
+ */
+export async function findConservativeMembership(
+  client: ConservativeMembershipClient,
+  userId: string,
+  orgId: string,
+): Promise<ActiveMembership | null> {
+  if (!userId || !orgId) return null;
+  const rows = await client.member.findMany({
+    where: { userId, organizationId: orgId },
+    select: { id: true, role: true },
+    orderBy: { id: "asc" },
+  });
+  return decidingRow(rows);
+}
+
+/**
  * The client shareLockActiveMembership needs: any client that runs a tagged raw query (the
  * StateQueryClient shape of tickets/ticket-states.ts), in practice an interactive transaction.
  */
@@ -64,7 +116,8 @@ export interface MembershipLockClient {
  * row.
  *
  * Only publishProposal (src/lib/kb/proposal-review.ts) uses it, as its transaction's first
- * statement. findActiveMembership above is unchanged and stays the plain read of every other path.
+ * statement. findActiveMembership above is unchanged and stays the plain read of the paths of earlier
+ * phases; the other new 12.2 paths use findConservativeMembership (run decision K59).
  */
 export async function shareLockActiveMembership(
   client: MembershipLockClient,
@@ -79,8 +132,7 @@ export async function shareLockActiveMembership(
     ORDER BY "id"
     FOR SHARE
   `;
-  const row = rows.find((candidate) => !isAdminRole(candidate.role)) ?? rows[0];
-  return row ? { id: row.id, role: row.role } : null;
+  return decidingRow(rows);
 }
 
 const ADMIN_ROLES = new Set(["owner", "admin"]);

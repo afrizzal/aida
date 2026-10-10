@@ -1,7 +1,8 @@
 // KB proposal loaders (Phase 12.2, AIDA-18, plan 12.2-08): the reads behind /kb/proposals, the
 // review page /kb/proposals/[id] and the Start dialog. D-01 first: every loader reads the actor's
-// member row through findActiveMembership and requires the exact owner or admin role
-// (isAdminRole) before any proposal or ticket query, and a refusal carries no data.
+// member rows through findConservativeMembership (run decision K59: every row of the user in the
+// organization, admin only when every row is owner or admin) and requires the exact owner or
+// admin role (isAdminRole) before any proposal or ticket query, and a refusal carries no data.
 //
 //   * loadProposalList: every proposal of the organization, newest first, as list rows.
 //   * loadProposalReview: one proposal for the review page. A missing id and another
@@ -23,7 +24,7 @@
 // Relative imports only and no Next.js import: the server actions and pages call these.
 import type { KbEmbeddingStatus, KbProposalFailureCode } from "../../generated/prisma/client";
 import { prisma } from "../db";
-import { findActiveMembership, isAdminRole } from "../membership";
+import { findConservativeMembership, isAdminRole } from "../membership";
 import { scopedDb } from "../scoped-db";
 import { isStuck, MAX_PROPOSAL_SOURCES, type ProposalStatus } from "./proposal-contract";
 import { findChangedSources } from "./proposal-sources";
@@ -126,11 +127,11 @@ export type StartSelectionResult = { kind: "ok"; tickets: StartSelectionTicket[]
 
 // --- Shared ---------------------------------------------------------------------------------------
 
-/** D-01: the member row, then the exact owner or admin role. Runs before any proposal query. */
+/** D-01, K59: the member rows, then the exact owner or admin role. Before any proposal query. */
 async function checkAdmin(actor: ProposalQueryActor): Promise<AccessRefusal | null> {
   const { userId, orgId } = actor;
   if (!userId || !orgId) return { kind: "MEMBERSHIP_ENDED" };
-  const membership = await findActiveMembership(prisma, userId, orgId);
+  const membership = await findConservativeMembership(prisma, userId, orgId);
   if (!membership) return { kind: "MEMBERSHIP_ENDED" };
   if (!isAdminRole(membership.role)) return { kind: "NOT_ALLOWED" };
   return null;

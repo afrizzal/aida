@@ -2,8 +2,9 @@
 // 5 resolved tickets and AIDA starts drafting one KB article from them (D-01, D-07, D-09, D-13).
 //
 // One transaction, checks in this order (merge.ts pattern):
-//   1. findActiveMembership is the first statement: no member row is MEMBERSHIP_ENDED (D-01).
-//   2. The exact owner or admin role through isAdminRole, else NOT_ALLOWED.
+//   1. findConservativeMembership is the first statement: no member row is MEMBERSHIP_ENDED (D-01).
+//   2. The exact owner or admin role through isAdminRole, else NOT_ALLOWED. Every member row of
+//      the user in the organization must be owner or admin (run decision K59).
 //   3. The count, 1 to 5, else COUNT (an empty selection included).
 //   4. aiEnabled read through scopedDb with the organization term; anything but 'true' is AI_OFF
 //      (D-09: complete() does not check it, the caller does).
@@ -25,7 +26,7 @@
 // generationQueuedAt is the durable marker that Restart generation recovers (plan 12.2-05).
 //
 // Relative imports only and no Next.js import: revalidation belongs to the server action.
-import { findActiveMembership, isAdminRole } from "../membership";
+import { findConservativeMembership, isAdminRole } from "../membership";
 import { getBoss } from "../queue/boss-client";
 import { scopedDb } from "../scoped-db";
 import {
@@ -73,7 +74,7 @@ export async function requestProposal(
   opts: ProposalRequestOptions = {},
 ): Promise<ProposalRequestResult> {
   const { userId, orgId } = actor;
-  // findActiveMembership answers null for an empty id; scopedDb would throw first.
+  // findConservativeMembership answers null for an empty id; scopedDb would throw first.
   if (!userId || !orgId) return { ok: false, code: "MEMBERSHIP_ENDED" };
   const now = (opts.now ?? (() => new Date()))();
 
@@ -81,7 +82,7 @@ export async function requestProposal(
   try {
     created = await scopedDb(orgId).$transaction(async (tx) => {
       // D-01: the first statement; nothing about the tickets is read before it.
-      const membership = await findActiveMembership(tx, userId, orgId);
+      const membership = await findConservativeMembership(tx, userId, orgId);
       if (!membership) throw new ProposalRequestError("MEMBERSHIP_ENDED");
       if (!isAdminRole(membership.role)) throw new ProposalRequestError("NOT_ALLOWED");
 
