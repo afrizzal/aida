@@ -261,9 +261,16 @@ describe("findConservativeMembership (run decision K59)", () => {
   }
 
   it("two admin rows: the first row by id, which is admin", async () => {
-    const { orgId, actor, firstId, extraId } = await seedTwoRows("admin", "admin", "before");
+    const { orgId, actor } = await seedTwoRows("admin", "admin", "before");
     const found = await membership.findConservativeMembership(prisma, actor.userId, orgId);
-    expect(found).toEqual({ id: [firstId, extraId].sort()[0], role: "admin" });
+    // "First by id" is the database's own order of the id column (its collation, which need not
+    // match JavaScript's code-unit sort for ids such as "0-k59-…" and "0cf7…").
+    const [first] = await prisma.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "member"
+      WHERE "userId" = ${actor.userId} AND "organizationId" = ${orgId}
+      ORDER BY "id" LIMIT 1
+    `;
+    expect(found).toEqual({ id: first.id, role: "admin" });
   });
 
   it("one row gives what findActiveMembership gives; no row, another organization, or an empty id give null", async () => {
