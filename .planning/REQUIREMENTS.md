@@ -55,7 +55,7 @@ IDs continue at AIDA-25. AIDA-18 keeps its v1 ID.
 - [x] **AIDA-56** `v2` — Tickets move from the fixed status enum to org-defined states grouped into `open`, `pending`, `resolved` and `closed`, without data loss. [Charter, SEED-004] Accept: a migration test on populated data gives every organization its default state set; every reader of status reasons about the group, each one tested: filters, chips, the raw SQL in `src/lib/worker/jobs/sla-flag.ts`, Insight SQL, the public status page, stored saved-view filters, auto-close and demo fixtures.
 - [x] **AIDA-97** `v2` — Admins can create, rename, recolor, reorder and set the default ticket state, and can remove a state only after its tickets are reassigned. [Charter, SEED-004] Accept: an admin gate on the server; org-scoped with an unmocked isolation test; E2E covers each action.
 - [x] **AIDA-57** `v2` — SLA clocks pause while a ticket sits in a `pending`-group state. [Charter, SEED-004] Accept: after several pauses of controlled length, each timer's due time has moved by exactly the paused time, including across a worker restart; the real `sla-flag` worker raises no flag while a ticket is paused and flags correctly after it resumes; tickets already pending at migration time get a defined, tested pause start, with no retroactive deadline change.
-- [ ] **AIDA-18** `v2` — AIDA proposes a new KB article drafted from one or more resolved tickets, for admin review and approval. [Charter, v1 backlog] Accept: generation goes through `src/lib/llm/`, is disabled when AI is off, redacts secrets, treats ticket text as untrusted, and nothing publishes without an admin action.
+- [x] **AIDA-18** `v2` — AIDA proposes a new KB article drafted from one or more resolved tickets, for admin review and approval. [Charter, v1 backlog] Accept: generation goes through `src/lib/llm/`, is disabled when AI is off, redacts secrets, treats ticket text as untrusted, and nothing publishes without an admin action.
 
 ## Integrations
 
@@ -143,7 +143,7 @@ Clean-room rule for this and every later section: `PIAGAM.md` → Clean-room. So
 
 | Requirement | Phase | Status |
 |---|---|---|
-| AIDA-18 | Phase 12.2 | Pending |
+| AIDA-18 | Phase 12.2 | Complete (acceptance verified, `12.2-VERIFICATION.md`; phase visual sign-off and owner items 12.2-o1 to 12.2-o4 pending) |
 | AIDA-25 | Phase 8 | Pending |
 | AIDA-26 | Phase 8 | Pending |
 | AIDA-27 | Phase 8 | Pending |
