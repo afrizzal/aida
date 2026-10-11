@@ -413,7 +413,40 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 6. `git grep -i -n gr8r -- src docs website README.md public prisma tests` is empty.
 7. Task keys stay unique under concurrency, a recurring task produces its next occurrence exactly once, and project progress is derived from tasks.
 
-**Plans:** 0 plans
+**Plans:** 13 plans
+**Wave 1**
+
+- [ ] 14-01-PLAN.md — Frozen contract: access matrix as an operation table, lock order, subtask trigger protocol, activity verbs and cascades, key, date and recurrence formats, refusal codes, delete contract, C1 to C18 and K59, K61 to K68 dispositions, owner defaults (Wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 14-02-PLAN.md — One hand-edited migration for all 18 org-scoped models with composite keys (K67), CHECKs, subtask and append-only triggers; scopedDb registration and parity test; fixtures; schema proofs (Wave 2)
+- [ ] 14-03-PLAN.md — Pure helpers: K65 task Markdown renderer, shared upload validator, rank math, recurrence date rules (Wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 14-04-PLAN.md — Service kit, the one access policy, activity writer and feeds with redaction, project operations; access matrix, isolation and race harness (Wave 3)
+- [ ] 14-05-PLAN.md — Attachment-file cleanup outbox and scheduled sweep (K66); the worker mounts the uploads volume in both compose files (K68), with the inbound-email defect note (Wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 14-06-PLAN.md — Tasks, keys and the key namespace, versioned edits, dates, status, one-level subtasks; counter concurrency, trigger races, isolation (Wave 4)
+- [ ] 14-07-PLAN.md — Comments, attachments (upload, download read, delete), labels and milestones; isolation (Wave 4)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 14-08-PLAN.md — Project members and teams, last-manager rule, 14-o1 team refinement; PID-bound revocation races; isolation (Wave 5)
+- [ ] 14-09-PLAN.md — Recurrence: set and clear, the next occurrence exactly once on completion; month ends, time zones, races; isolation (Wave 5)
+- [ ] 14-10-PLAN.md — Archive, restore, favorites; confirmed hard delete with tombstones, file cleanup and the append-only delete record; races; isolation (Wave 5)
+- [ ] 14-11-PLAN.md — Move with new keys, aliases and label and milestone mapping; duplicate a task and a project with and without tasks; races; isolation (Wave 5)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 14-12-PLAN.md — Reorder, atomic bulk update, derived progress; races; isolation (Wave 6)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 14-13-PLAN.md — Operation inventory proof, phase gate with blocked suites, evidence per requirement and criterion, clean-room grep, open items (Wave 7)
 
 ### Phase 15: Work Views
 
