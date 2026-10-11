@@ -335,3 +335,9 @@ Binding for this phase:
 
 *Phase: 14-projects-foundation*
 *Context gathered: 2026-11-09*
+
+## Amendments after Codex plan review cycle 1 (run-loop orchestrator, 2026-11-09)
+
+- **K69 (amends D-04 and D-15; charter rule 4):** team membership never grants access to a private project by itself. Assigning a team to a private project (a project-manager action) copies the team's current active members into direct `ProjectMember` rows in the same transaction and records it in activity; later changes to the team's membership do not change any private project's access (managers add or remove direct members). For non-private projects, a team assignment is informational, since every active organization member already has access. Reason: with live team-based access, any rule for who may add team members either lets an organization admin reach a private project through a team (against the 14-o1 default) or refuses only when a hidden private link exists, which reveals that link (Codex plan review cycle 1, finding 2). Owner item 14-o1 now also asks whether live team-based access to private projects is wanted.
+- **Move activity (amends D-05 and D-13):** in a `TASK_MOVED` record, every side the reader cannot read is reduced to a fixed safe projection with no identifiers, names, labels, milestone or assignee of that side (Codex finding 1).
+- **Better Auth member deletion is not serialized** against project writes; the services re-read membership inside their transactions, which narrows but does not close the window. This is a stated limitation tied to owner item 12.2-o4, not a claim that every revocation race is closed.
