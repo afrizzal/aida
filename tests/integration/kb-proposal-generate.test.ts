@@ -839,6 +839,35 @@ See the [guide](\/tickets\/abc) first.`,
     });
   }
 
+  for (const link of [
+    "https://other.example/collect//status/tok_abc",
+    "https://other.example/collect/%2Fstatus%2Ftok_abc",
+    "https://other.example/collect/%252Fstatus%252Ftok_abc",
+  ]) {
+    it(`a status path carried inside an external pathname (${link}) gives FAILED INVALID_OUTPUT (K60, R3D-1)`, async () => {
+      await expectInvalidOutput({
+        ...validOutput(),
+        bodyMarkdown: `## Steps\n\nOpen [the guide](${link}).`,
+      });
+    });
+  }
+
+  it("a link to https://example.com/statuses is stored as DRAFT (K60 neighbour)", async () => {
+    const { proposalId, payload } = await setupProposal();
+    const output = {
+      ...validOutput(),
+      bodyMarkdown: "## Steps\n\nRead the [status list](https://example.com/statuses).",
+      citations: [{ source: "T1", section: "Steps" }],
+    };
+    respondWith(output);
+
+    await runJob(payload);
+
+    const proposal = await readProposal(proposalId);
+    expect(proposal.status).toBe("DRAFT");
+    expect(proposal.bodyMarkdown).toBe(output.bodyMarkdown);
+  });
+
   it("an external link whose query holds an ordinary encoded value is stored as DRAFT (R2D-1)", async () => {
     const { proposalId, payload } = await setupProposal();
     const output = {

@@ -843,6 +843,77 @@ describe("run decision K58 clarified: repeated percent-decoding (Codex diff roun
   });
 });
 
+describe("run decision K60: a ticket or status path anywhere in the pathname (Codex diff round 3, R3D-1)", () => {
+  // A bearer path carried inside the pathname of an external link reaches the other host on a
+  // click, decoded or not. Zero, one and two extra encodings of the carried path, for /status/,
+  // /tickets/ and /api/public/status/, absolute and relative, in any case.
+  const IN_PATH = [
+    "https://other.example/collect//status/x",
+    "https://other.example/collect/%2Fstatus%2Fx",
+    "https://other.example/collect/%252Fstatus%252Fx",
+    "https://other.example/collect//tickets/x",
+    "https://other.example/collect/%2Ftickets%2Fx",
+    "https://other.example/collect/%252Ftickets%252Fx",
+    "https://other.example/collect/%2Fapi%2Fpublic%2Fstatus%2Ftok_abc123",
+    "https://other.example/collect/%252FSTATUS%252Fx",
+    "/collect//status/x",
+    "/collect/%2Fstatus%2Fx",
+    "/collect/%252Fstatus%252Fx",
+    "/collect//tickets/x",
+    "/collect/%2Ftickets%2Fx",
+    "/collect/%252Ftickets%252Fx",
+  ];
+
+  it("isTicketPageUrl refuses /status/ and /tickets/ carried inside the pathname", () => {
+    for (const link of IN_PATH) expect(isTicketPageUrl(link), link).toBe(true);
+  });
+
+  it("refuses the carried pathname forms in the title and the body, at generation and in the field validator", () => {
+    for (const link of IN_PATH) {
+      expect(titleRefusal(`Track it at ${link}`), link).toEqual({
+        ok: false,
+        field: "title",
+        code: "TICKET_LINK",
+      });
+      expect(reason({ title: `Track it at ${link}` }), link).toBe("TICKET_LINK");
+      expect(bodyRefusal(`Open [the guide](${link}).`), link).toEqual({
+        ok: false,
+        field: "bodyMarkdown",
+        code: "TICKET_LINK",
+      });
+      expect(reason({ bodyMarkdown: `## Steps\n\nOpen [the guide](${link}).` }), link).toBe(
+        "TICKET_LINK",
+      );
+    }
+  });
+
+  it("refuses the documented false positive https://example.com/blog/status/update", () => {
+    const link = "https://example.com/blog/status/update";
+    expect(isTicketPageUrl(link)).toBe(true);
+    expect(bodyRefusal(`Read [the update](${link}).`)).toEqual({
+      ok: false,
+      field: "bodyMarkdown",
+      code: "TICKET_LINK",
+    });
+    expect(reason({ bodyMarkdown: `## Steps\n\nRead [the update](${link}).` })).toBe(
+      "TICKET_LINK",
+    );
+  });
+
+  it("allows the neighbours /statuses, /ticketsfoo and /kb/how-to", () => {
+    for (const link of [
+      "https://example.com/statuses",
+      "https://example.com/ticketsfoo",
+      "https://example.com/kb/how-to",
+    ]) {
+      expect(isTicketPageUrl(link), link).toBe(false);
+      expect(titleRefusal(`See ${link}`).ok, link).toBe(true);
+      expect(bodyRefusal(`Read [the page](${link}).`).ok, link).toBe(true);
+      expect(reason({ bodyMarkdown: `## Steps\n\nRead [the page](${link}).` }), link).toBe("OK");
+    }
+  });
+});
+
 describe("review a2-IN-01: a fence tag echoed in the title is refused", () => {
   it("refuses a title that echoes a ticket_content tag (FENCE_ECHO)", () => {
     expect(reason({ title: 'Reset <ticket_content id="T1"> guide' })).toBe("FENCE_ECHO");

@@ -835,6 +835,53 @@ describe("run decision K58 clarified: a path percent-encoded two or three times 
   });
 });
 
+describe("run decision K60: a status path carried inside an external pathname (Codex round 3, R3D-1)", () => {
+  const IN_PATH = [
+    "https://other.example/collect//status/tok_abc123",
+    "https://other.example/collect/%2Fstatus%2Ftok_abc123",
+    "https://other.example/collect/%252Fstatus%252Ftok_abc123",
+  ];
+
+  for (const link of IN_PATH) {
+    it(`save refuses ${link} in the body and in the title as TICKET_LINK`, async () => {
+      await expectSaveRefused(
+        { title: VALID.title, bodyMarkdown: `Open [the guide](${link}).` },
+        { code: "TICKET_LINK", field: "bodyMarkdown" },
+      );
+      await expectSaveRefused(
+        { title: `Reset guide ${link}`, bodyMarkdown: VALID.bodyMarkdown },
+        { code: "TICKET_LINK", field: "title" },
+      );
+    });
+
+    it(`publish refuses a stored body with ${link} as TICKET_LINK; no article`, async () => {
+      await expectPublishRefused(
+        { bodyMarkdown: `Open [the guide](${link}).` },
+        { code: "TICKET_LINK", field: "bodyMarkdown" },
+      );
+    });
+  }
+
+  it("a link to https://example.com/statuses still saves and publishes", async () => {
+    const { orgId, owner } = await seedOrg();
+    const p = await seedOne(orgId, { status: "DRAFT", version: 0 });
+    const body = "Read the [status list](https://example.com/statuses).";
+    expect(
+      await saveProposalDraft(owner, {
+        proposalId: p.id,
+        expectedVersion: 0,
+        title: VALID.title,
+        bodyMarkdown: body,
+      }),
+    ).toEqual({ ok: true, version: 1 });
+    expect(await publishProposal(owner, { proposalId: p.id, expectedVersion: 1 })).toMatchObject({
+      ok: true,
+    });
+    const article = await prisma.kbArticle.findFirstOrThrow({ where: { organizationId: orgId } });
+    expect(article.bodyHtml).toContain('href="https://example.com/statuses"');
+  });
+});
+
 // --- NOT_FOUND and authorization (D-01) -----------------------------------------------------------
 
 describe("every action: NOT_FOUND, MEMBERSHIP_ENDED and NOT_ALLOWED (D-01)", () => {

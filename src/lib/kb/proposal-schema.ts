@@ -147,17 +147,22 @@ function decodeUntilStable(value: string): string | null {
 /**
  * True when the candidate, resolved with the WHATWG URL parser against TICKET_LINK_BASE (dot
  * segments, protocol-relative URLs and backslashes normalised as a browser does; a leading `www.`
- * gets an https:// prefix), has a pathname that, percent-decoded, starts with /tickets/,
- * /status/ or /api/public/status/ (run decision K57) in any case. Run decision K58 (Codex diff
- * critique D2): the query string and the fragment, each percent-decoded, are read too, and
- * one that contains any of those paths anywhere (in any case) counts as a ticket link, so a bearer
+ * gets an https:// prefix), has a pathname, query string or fragment that, fully percent-decoded,
+ * contains /tickets/, /status/ or /api/public/status/ (run decision K57) anywhere, in any case.
+ * Run decision K58 (Codex diff critique D2) added the query string and the fragment, so a bearer
  * path carried as a parameter of an external link (`https://other.example/?next=/status/…`) is
  * refused like the path itself. Each part is decoded repeatedly until a decode no longer changes
  * it, at most MAX_PERCENT_DECODES times (Codex diff round 2, R2D-1), so a path encoded two or more
- * times is read too. A malformed percent escape at any decode, or a part still changing after the
- * last allowed decode, counts as a ticket link (fail-closed). A candidate the parser rejects is
- * not a URL and is ignored. The host is not checked: a link to another site whose path starts with
- * one of these prefixes is refused too (documented false positive).
+ * times is read too. Run decision K60 (Codex diff round 3, R3D-1): the pathname is searched
+ * anywhere too, not only at its start, so a bearer path carried inside the pathname of an external
+ * link (`https://other.example/collect/%252Fstatus%252F…`, decoded `/collect//status/…`) is
+ * refused. A malformed percent escape at any decode, or a part still changing after the last
+ * allowed decode, counts as a ticket link (fail-closed); so a bare `%` left after decoding (for
+ * example `/docs/100%25`) is refused, as under R2D-1. A candidate the parser rejects is not a URL
+ * and is ignored. The host is not checked. Known false positive (K60): a link to another site
+ * whose path, query or fragment merely contains one of these segments (for example
+ * `https://example.com/blog/status/update`) is refused with the ticket-link error, and the editor
+ * must remove or change it. Neighbours such as `/statuses` or `/ticketsfoo` stay allowed.
  */
 export function isTicketPageUrl(candidate: string): boolean {
   let raw = candidate.trim();
@@ -173,10 +178,7 @@ export function isTicketPageUrl(candidate: string): boolean {
   const search = decodeUntilStable(url.search);
   const hash = decodeUntilStable(url.hash);
   if (path === null || search === null || hash === null) return true;
-  const carried = [search, hash];
-  const lower = path.toLowerCase();
-  if (TICKET_PATH_PREFIXES.some((prefix) => lower.startsWith(prefix))) return true;
-  return carried.some((part) => {
+  return [path, search, hash].some((part) => {
     const text = part.toLowerCase();
     return TICKET_PATH_PREFIXES.some((prefix) => text.includes(prefix));
   });
