@@ -416,7 +416,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 **Plans:** 13 plans
 **Wave 1**
 
-- [ ] 14-01-PLAN.md — Frozen contract: access matrix as an operation table, lock order, subtask trigger protocol, activity verbs and cascades, key, date and recurrence formats, refusal codes, delete contract, C1 to C18 and K59, K61 to K68 dispositions, owner defaults (Wave 1)
+- [ ] 14-01-PLAN.md — Frozen contract: access matrix as an operation table, lock order, subtask trigger protocol, activity verbs and cascades, key, date and recurrence formats, refusal codes, delete contract, C1 to C18 and K59, K61 to K69 dispositions, review round 1 items, owner defaults (Wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -435,7 +435,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 14-08-PLAN.md — Project members and teams, last-manager rule, 14-o1 team refinement; PID-bound revocation races; isolation (Wave 5)
+- [ ] 14-08-PLAN.md — Project members and teams, last-manager rule, K69 team assignment copies members into private projects; PID-bound revocation races; isolation (Wave 5)
 - [ ] 14-09-PLAN.md — Recurrence: set and clear, the next occurrence exactly once on completion; month ends, time zones, races; isolation (Wave 5)
 - [ ] 14-10-PLAN.md — Archive, restore, favorites; confirmed hard delete with tombstones, file cleanup and the append-only delete record; races; isolation (Wave 5)
 - [ ] 14-11-PLAN.md — Move with new keys, aliases and label and milestone mapping; duplicate a task and a project with and without tasks; races; isolation (Wave 5)
