@@ -45,3 +45,23 @@ Cycle 1 outcome: replan round 1 (`a30e361`) carried P1 to P3 and C1 to C8 into 1
 | R2-3 | MEDIUM | Delete enqueues the file clean-up while deleting attachments and tombstones keys afterwards, against the global order (key rows before the outbox) | Verified: 14-01 line 213; 14-10 line 146 | accept: delete first collects storage keys, then tombstones key rows, then writes the outbox rows, then deletes rows in FK order; contract and plan aligned; a race test of delete against a concurrent task create in the same project |
 
 Cycle outcome: cycle 2 has a HIGH, so replan round 2 carries R2-1 to R2-3, then the plan checker, then Codex cycle 3 (the last).
+
+Cycle 2 outcome: replan round 2 (`3dfeead`) carried R2-1 to R2-3; the plan checker confirmed them and added P4.
+
+| ID | Severity | Finding (short) | Orchestrator check | Disposition |
+|---|---|---|---|---|
+| P4 | MEDIUM | `favoriteProject` and `unfavoriteProject` take no lock against `deleteProject`; an insert may fail with a RESTRICT foreign-key error that surfaces as an exception | Verified: 14-01 lines 171-172 (lock NONE) and line 319 (delete removes ProjectFavorite and Project) | accept: both project toggles use PROJECT_SHARE at READ, still allowed on an archived project; both-order race against `deleteProject` (NOT_FOUND with no row written, or the favorite commits first and the delete removes it); evidence row in 14-13 |
+
+### Cycle 3 (last)
+
+- Question: `run-loop/codex/fase14-plan-r3-tanya.md` (commit `51fb14f`); answer: `run-loop/codex/fase14-plan-r3-jawab.md`. Log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`.
+- Codex verdict: no proven HIGH; revise three MEDIUM before execution. R2-1 to R2-3 confirmed in the plans; the kept activity `id` reveals no project id (cursor implementation not verified); `deleteProject` ordering tasks by id is protected by its exclusive project lock.
+
+| ID | Severity | Finding (short) | Orchestrator check | Disposition |
+|---|---|---|---|---|
+| R3-1 | MEDIUM | 14-11 asks that the whole source feed contain no id of the moved task, but `TASK_CREATED` and other source-side history legitimately stay in the source feed; fixtures that seed tasks directly hide the contradiction | Verified: 14-06 line 91, 14-01 line 244, 14-11 line 107 | accept: the claim is narrowed to the redacted move row (no identifier of the unreadable side in that row); a test creates the task through `createTask`, edits it, moves it, and checks the full source feed: earlier source rows remain as they were, the move row is redacted |
+| R3-2 | MEDIUM | `duplicateProject` holds the project `FOR SHARE` like concurrent content writes, so a copy read in several statements can mix states | Verified: 14-01 lines 179 and 228; 14-11 line 141 | accept: `duplicateProject` locks the source project `FOR UPDATE` (PROJECT_UPDATE) so content writes serialize with it; races against a label edit and a task delete in both orders with the exact expected copy |
+| R3-3 | MEDIUM | The team feed applies the limit and then drops unreadable rows, so hidden rows can change pages, `hasMore` or the cursor | Verified: 14-04 lines 145 and 150 | accept: access filtering happens in the query before the limit and cursor; a test compares the complete page sequence (rows, `hasMore`, cursors) of two worlds that differ only by hidden private rows |
+| R3-4 | LOW | Redaction is tested after a direct test-helper delete, not after a real `deleteProject` | Codex note; 14-04 line 151 | accept: 14-10 Task 3 adds one redaction case after a real `deleteProject` |
+
+Codex plan review is closed at the charter maximum of three cycles with no HIGH open. Replan round 3 carries P4 and R3-1 to R3-4, then the plan checker; execution follows.
