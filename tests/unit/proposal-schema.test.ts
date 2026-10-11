@@ -895,9 +895,7 @@ describe("run decision K60: a ticket or status path anywhere in the pathname (Co
       field: "bodyMarkdown",
       code: "TICKET_LINK",
     });
-    expect(reason({ bodyMarkdown: `## Steps\n\nRead [the update](${link}).` })).toBe(
-      "TICKET_LINK",
-    );
+    expect(reason({ bodyMarkdown: `## Steps\n\nRead [the update](${link}).` })).toBe("TICKET_LINK");
   });
 
   it("allows the neighbours /statuses, /ticketsfoo and /kb/how-to", () => {
