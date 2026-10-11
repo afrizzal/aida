@@ -30,3 +30,18 @@ Reviews run under `run-loop/PIAGAM.md` step 5: Codex reads a `git archive` expor
 | C6 | MEDIUM | `duplicateTask` must place the copy right after the source but holds the project only `FOR SHARE`, while a rebalance needs `FOR UPDATE` | Verified: 14-11 line 125; 14-01 line 265 | accept: `duplicateTask` uses the PROJECT_UPDATE lock mode, rebalances when no integer fits; tests for adjacent ranks and a duplicate racing a reorder |
 | C7 | MEDIUM | The 14-13 inventory checks text co-occurrence and the gate calls that proof of isolation and activity | Verified: 14-13 line 78 | accept: the gate calls the inventory a completeness check only; proof stays in the behaviour tests, which assert per actor the result, snapshot equality and verb values; negative unit tests for the inventory parser |
 | C8 | note | Revocation against a Better Auth member delete is narrowed by re-reading membership, not serialized | Verified: 14-01 line 213 | accept as a stated limitation (CONTEXT amendment, tied to 12.2-o4); no claim that every revocation race is closed |
+
+Cycle 1 outcome: replan round 1 (`a30e361`) carried P1 to P3 and C1 to C8 into 11 plans; the plan checker passed it with no finding (two cross-plan checks sampled only).
+
+### Cycle 2
+
+- Question: `run-loop/codex/fase14-plan-r2-tanya.md` (commit `c5124a9`); answer: `run-loop/codex/fase14-plan-r2-jawab.md`. Log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`.
+- Codex verdict: not ready (1 HIGH, 2 MEDIUM). K69 confirmed consistent with AIDA-69 and AIDA-71; C2, C4 to C8 and P1 to P3 have closing instructions; the three feeds share one redaction function and a deleted project's feed returns NOT_FOUND. A full audit of every verify command and action-acceptance pair was not done.
+
+| ID | Severity | Finding (short) | Orchestrator check | Disposition |
+|---|---|---|---|---|
+| R2-1 | HIGH | Redaction replaces only `before`/`after` and the two project ids; a two-project row's top-level `entityId` (the duplicate's new project or task) and `taskId` stay visible to a reader of the other side | Verified: 14-04 lines 131 and 138; 14-01 lines 240 and 250; 14-11 line 131 tests only the reader of the result | accept: for every two-project row, every top-level column tied to the unreadable side (`entityId`, `taskId`, related ids) is set to null in the redacted projection, keeping only verb, time, actor and the readable side; tests compare the whole response from both sides, for move and duplicate, including after one of the projects is deleted |
+| R2-2 | MEDIUM | `favoriteTask` and `unfavoriteTask` use READ with lock NONE, while the contract says every subtask write locks the parent and is refused under an archived parent | Verified: 14-01 lines 89, 170, 295 | accept: favorites are an explicit archive exception (a user preference, as for projects in section 16); they lock the task `FOR SHARE` so they serialize with delete (`FOR UPDATE`); a favorite after a committed delete returns NOT_FOUND; both-order race tests; contract section 16 records the exception |
+| R2-3 | MEDIUM | Delete enqueues the file clean-up while deleting attachments and tombstones keys afterwards, against the global order (key rows before the outbox) | Verified: 14-01 line 213; 14-10 line 146 | accept: delete first collects storage keys, then tombstones key rows, then writes the outbox rows, then deletes rows in FK order; contract and plan aligned; a race test of delete against a concurrent task create in the same project |
+
+Cycle outcome: cycle 2 has a HIGH, so replan round 2 carries R2-1 to R2-3, then the plan checker, then Codex cycle 3 (the last).
