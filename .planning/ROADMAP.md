@@ -425,7 +425,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 14-04-PLAN.md — Service kit, the one access policy, activity writer and feeds with redaction, project operations; access matrix, isolation and race harness (Wave 3)
+- [x] 14-04-PLAN.md — Service kit, the one access policy, activity writer and feeds with redaction, project operations; access matrix, isolation and race harness (Wave 3)
 - [ ] 14-05-PLAN.md — Attachment-file cleanup outbox and scheduled sweep (K66); the worker mounts the uploads volume in both compose files (K68), with the inbound-email defect note (Wave 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
@@ -554,7 +554,7 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 | 12.1. Ticket Lifecycle (custom states, SLA pause) | v2.0 | 17/17 | Verified: human_needed (visual, dark mode, contrast by eye, screen reader and UAT open; K47 deferred) | - |
 | 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 12/12 | Verified: human_needed (visual, dark mode, screen reader, UI-SPEC amendments A1 to A8 and UAT open; owner items 12.2-o1 to 12.2-o4) | - |
 | 13. Integrations | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
-| 14. Projects Foundation | v2.0 | 3/13 | In progress | - |
+| 14. Projects Foundation | v2.0 | 4/13 | In progress | - |
 | 15. Work Views | v2.0 | 0/0 | Not started | - |
 | 16. Workspace | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
 | 17. Unification | v2.0 | 0/0 | Parked (depends on parked Phases 10, 13 and 16) | - |
