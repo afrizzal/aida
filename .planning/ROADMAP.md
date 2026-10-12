@@ -438,15 +438,18 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 - [ ] 14-08-PLAN.md — Project members and teams, last-manager rule, K69 team assignment copies members into private projects; PID-bound revocation races; isolation (Wave 5)
 - [ ] 14-09-PLAN.md — Recurrence: set and clear, the next occurrence exactly once on completion; month ends, time zones, races; isolation (Wave 5)
 - [ ] 14-10-PLAN.md — Archive, restore, favorites; confirmed hard delete with tombstones, file cleanup and the append-only delete record; races; isolation (Wave 5)
-- [ ] 14-11-PLAN.md — Move with new keys, aliases and label and milestone mapping; duplicate a task and a project with and without tasks; races; isolation (Wave 5)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 14-12-PLAN.md — Reorder, atomic bulk update, derived progress; races; isolation (Wave 6)
+- [ ] 14-11-PLAN.md — Move with new keys, aliases and label and milestone mapping; duplicate a task and a project with and without tasks; races; isolation (Wave 6)
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
-- [ ] 14-13-PLAN.md — Operation inventory proof, phase gate with blocked suites, evidence per requirement and criterion, clean-room grep, open items (Wave 7)
+- [ ] 14-12-PLAN.md — Reorder, atomic bulk update, derived progress; races; isolation (Wave 7)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 14-13-PLAN.md — Operation inventory proof, phase gate with blocked suites, evidence per requirement and criterion, clean-room grep, open items (Wave 8)
 
 ### Phase 15: Work Views
 
