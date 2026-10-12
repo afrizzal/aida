@@ -3,16 +3,27 @@
 // server context and checks it itself: membership first, then the policy of access.ts. Every
 // successful mutation writes exactly one activity row through recordProjectActivity in its own
 // transaction; a no-op or a refusal writes none. Every query writes the organization term (C1).
+import type { Prisma } from "../../generated/prisma/client";
 import { renderTaskMarkdown } from "../markdown/render";
-import { requireMembership, requireProject } from "./access";
-import { recordProjectActivity } from "./activity";
 import {
+  type AccessProject,
+  readableProjectIds,
+  readableProjectWhere,
+  requireMembership,
+  requireProject,
+} from "./access";
+import { changedValues, recordProjectActivity } from "./activity";
+import {
+  type ActivityScalar,
+  type ActivityVerb,
   type CalendarDate,
   codePointLength,
   DEFAULT_PROJECT_COLOR,
   DEFAULT_PROJECT_STATUS,
   fromCalendarDate,
   hasNul,
+  LIST_DEFAULT,
+  LIST_MAX,
   normalizePrefix,
   PROJECT_COLORS,
   PROJECT_DESCRIPTION_MAX,
@@ -29,7 +40,7 @@ import {
   RANK_MAX,
   toCalendarDate,
 } from "./contract";
-import { appendRank } from "./rank";
+import { appendRank, rankBetween, rebalancedRanks } from "./rank";
 import {
   afterLock,
   newBatchId,
@@ -267,6 +278,374 @@ export async function getProject(
       },
       myRole: access.projectRole,
       canManage: access.canManage,
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Edits under MANAGE with a version (contract sections 1 and 14)
+
+type ActivityRecord = Record<string, ActivityScalar>;
+
+interface ProjectEdit {
+  verb: ActivityVerb;
+  data: Prisma.ProjectUpdateManyMutationInput;
+  before: ActivityRecord;
+  after: ActivityRecord;
+  /** Writes that must precede the project update (the prefix reservation). */
+  beforeWrite?: (tx: ProjectDb) => Promise<void>;
+}
+
+/**
+ * A conditional update's miss, classified by an explicit re-read through the read predicate:
+ * gone or unreadable NOT_FOUND, archived ARCHIVED, else CONFLICT (the missRefusal pattern).
+ */
+async function classifyMiss(tx: ProjectDb, actor: ProjectActor, projectId: string): Promise<never> {
+  const row = await tx.project.findFirst({
+    where: { AND: [readableProjectWhere(actor), { id: projectId }] },
+    select: { archivedAt: true },
+  });
+  if (!row) refuse("NOT_FOUND");
+  if (row.archivedAt) refuse("ARCHIVED");
+  return refuse("CONFLICT");
+}
+
+/**
+ * The shared skeleton of the MANAGE edits: MANAGE under PROJECT_UPDATE, afterLock, no-op
+ * detection before any write, a conditional update on (id, organizationId, version) that
+ * increments version, and one activity row with the changed keys only.
+ */
+async function editProject(
+  actor: ProjectActor,
+  operation: string,
+  projectId: string,
+  expectedVersionRaw: unknown,
+  plan: (project: AccessProject) => ProjectEdit | null,
+): Promise<ProjectResult<{ changed: boolean; version?: number }>> {
+  return runProjectTransaction(actor, operation, async (tx) => {
+    const expectedVersion = validVersion(expectedVersionRaw);
+    const access = await requireProject(tx, actor, projectId, { lock: "update", level: "MANAGE" });
+    await afterLock(tx, operation);
+    const edit = plan(access.project);
+    if (!edit) return { changed: false };
+    const diff = changedValues(edit.before, edit.after);
+    if (!diff) return { changed: false };
+    await edit.beforeWrite?.(tx);
+    const updated = await tx.project.updateMany({
+      where: { id: projectId, organizationId: actor.orgId, version: expectedVersion },
+      data: { ...edit.data, version: { increment: 1 } },
+    });
+    if (updated.count !== 1) await classifyMiss(tx, actor, projectId);
+    await recordProjectActivity(tx, {
+      orgId: actor.orgId,
+      projectId,
+      actorUserId: actor.userId,
+      verb: edit.verb,
+      entityType: "PROJECT",
+      entityId: projectId,
+      before: diff.before,
+      after: diff.after,
+      batchId: newBatchId(),
+    });
+    return { changed: true, version: expectedVersion + 1 };
+  });
+}
+
+export interface UpdateProjectPatch {
+  name?: string;
+  description?: string | null;
+  color?: string;
+  icon?: string | null;
+  dueDate?: CalendarDate | null;
+}
+
+/**
+ * Edits name, description, color, icon and dueDate (MANAGE). A description change is recorded
+ * as descriptionChanged, never the text. The same values again are { changed: false }.
+ */
+export async function updateProject(
+  actor: ProjectActor,
+  projectId: string,
+  expectedVersion: number,
+  patch: UpdateProjectPatch,
+): Promise<ProjectResult<{ changed: boolean; version?: number }>> {
+  return editProject(actor, "updateProject", projectId, expectedVersion, (p) => {
+    const data: Prisma.ProjectUpdateManyMutationInput = {};
+    const before: ActivityRecord = {};
+    const after: ActivityRecord = {};
+    if (patch?.name !== undefined) {
+      const name = validName(patch.name);
+      if (name !== p.name) {
+        data.name = name;
+        before.name = p.name;
+        after.name = name;
+      }
+    }
+    if (patch?.description !== undefined) {
+      const description = validDescription(patch.description);
+      if (description !== p.descriptionMarkdown) {
+        data.descriptionMarkdown = description;
+        before.descriptionChanged = false;
+        after.descriptionChanged = true;
+      }
+    }
+    if (patch?.color !== undefined) {
+      const color = validColor(patch.color);
+      if (color !== p.color) {
+        data.color = color;
+        before.color = p.color;
+        after.color = color;
+      }
+    }
+    if (patch?.icon !== undefined) {
+      const icon = validIcon(patch.icon);
+      if (icon !== p.icon) {
+        data.icon = icon;
+        before.icon = p.icon;
+        after.icon = icon;
+      }
+    }
+    if (patch?.dueDate !== undefined) {
+      const dueDate = validDueDate(patch.dueDate);
+      const stored = p.dueDate ? toCalendarDate(p.dueDate) : null;
+      if (dueDate !== stored) {
+        data.dueDate = dueDate ? fromCalendarDate(dueDate) : null;
+        before.dueDate = stored;
+        after.dueDate = dueDate;
+      }
+    }
+    return { verb: "PROJECT_UPDATED", data, before, after };
+  });
+}
+
+/** Sets the project status (MANAGE; AIDA-100, D-11): independent of progress. */
+export async function setProjectStatus(
+  actor: ProjectActor,
+  projectId: string,
+  expectedVersion: number,
+  status: ProjectStatus,
+): Promise<ProjectResult<{ changed: boolean; version?: number }>> {
+  return editProject(actor, "setProjectStatus", projectId, expectedVersion, (p) => {
+    const next = validStatus(status);
+    return {
+      verb: "PROJECT_STATUS_CHANGED",
+      data: { status: next },
+      before: { status: p.status },
+      after: { status: next },
+    };
+  });
+}
+
+/** Makes a project private or non-private (MANAGE). Copies nothing (K69). */
+export async function setProjectPrivacy(
+  actor: ProjectActor,
+  projectId: string,
+  expectedVersion: number,
+  isPrivate: boolean,
+): Promise<ProjectResult<{ changed: boolean; version?: number }>> {
+  return editProject(actor, "setProjectPrivacy", projectId, expectedVersion, (p) => {
+    const next = validBoolean(isPrivate, "isPrivate");
+    return {
+      verb: "PROJECT_PRIVACY_CHANGED",
+      data: { isPrivate: next },
+      before: { isPrivate: p.isPrivate },
+      after: { isPrivate: next },
+    };
+  });
+}
+
+/**
+ * Changes the key prefix (MANAGE; D-08): the new prefix is reserved like createProject does and
+ * the old reservation stays, so no other project can take it and this one may return to it.
+ */
+export async function changeProjectKeyPrefix(
+  actor: ProjectActor,
+  projectId: string,
+  expectedVersion: number,
+  prefix: string,
+): Promise<ProjectResult<{ changed: boolean; version?: number }>> {
+  return editProject(actor, "changeProjectKeyPrefix", projectId, expectedVersion, (p) => {
+    const next = validPrefix(prefix);
+    return {
+      verb: "PROJECT_UPDATED",
+      data: { keyPrefix: next },
+      before: { keyPrefix: p.keyPrefix },
+      after: { keyPrefix: next },
+      beforeWrite: (tx) => reservePrefix(tx, actor.orgId, projectId, next),
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Order (contract section 8, AIDA-64)
+
+/**
+ * Places a project right after another one (null: first) in the organization-wide order (MANAGE,
+ * ORG_PROJECTS_UPDATE). When no integer lies between the neighbours, every project of the
+ * organization is renumbered in its current order with the moved one at its new place. Position
+ * is not a content field, so version stays. One PROJECT_REORDERED row.
+ */
+export async function moveProjectPosition(
+  actor: ProjectActor,
+  projectId: string,
+  opts: { placeAfterProjectId: string | null },
+): Promise<ProjectResult<{ changed: boolean }>> {
+  return runProjectTransaction(actor, "moveProjectPosition", async (tx) => {
+    const placeAfter = opts?.placeAfterProjectId ?? null;
+    if (placeAfter !== null && typeof placeAfter !== "string") {
+      refuse("INVALID_INPUT", "placeAfterProjectId");
+    }
+    const access = await requireProject(tx, actor, projectId, {
+      lock: "org-update",
+      level: "MANAGE",
+    });
+    if (placeAfter === projectId) refuse("INVALID_INPUT", "placeAfterProjectId");
+    if (
+      placeAfter !== null &&
+      !(await readableProjectIds(tx, actor, [placeAfter])).has(placeAfter)
+    ) {
+      refuse("NOT_FOUND");
+    }
+    await afterLock(tx, "moveProjectPosition");
+    const ordered = await tx.project.findMany({
+      where: { organizationId: actor.orgId },
+      orderBy: [{ position: "asc" }, { id: "asc" }],
+      select: { id: true, position: true },
+    });
+    const currentIndex = ordered.findIndex((row) => row.id === projectId);
+    const currentPrev = currentIndex > 0 ? (ordered[currentIndex - 1]?.id ?? null) : null;
+    if (currentPrev === placeAfter) return { changed: false };
+    const others = ordered.filter((row) => row.id !== projectId);
+    const index = placeAfter === null ? 0 : others.findIndex((row) => row.id === placeAfter) + 1;
+    const prev = index > 0 ? (others[index - 1] ?? null) : null;
+    const next = others[index] ?? null;
+    const oldPosition = access.project.position;
+    let newPosition = rankBetween(prev?.position ?? null, next?.position ?? null);
+    if (newPosition === null) {
+      const target = [...others.slice(0, index), { id: projectId }, ...others.slice(index)];
+      const ranks = rebalancedRanks(target.length);
+      const ids = target.map((row) => row.id);
+      newPosition = ranks[index] as number;
+      await tx.$executeRaw`
+        UPDATE "Project" AS p
+        SET "position" = v.pos, "updatedAt" = now()
+        FROM unnest(${ids}::text[], ${ranks}::int[]) AS v(id, pos)
+        WHERE p."id" = v.id AND p."organizationId" = ${actor.orgId}`;
+    } else {
+      await tx.$executeRaw`
+        UPDATE "Project" SET "position" = ${newPosition}, "updatedAt" = now()
+        WHERE "id" = ${projectId} AND "organizationId" = ${actor.orgId}`;
+    }
+    await recordProjectActivity(tx, {
+      orgId: actor.orgId,
+      projectId,
+      actorUserId: actor.userId,
+      verb: "PROJECT_REORDERED",
+      entityType: "PROJECT",
+      entityId: projectId,
+      before: { position: oldPosition },
+      after: { position: newPosition },
+      batchId: newBatchId(),
+    });
+    return { changed: true };
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// listProjects (READ, list predicate)
+
+export interface ProjectListItem {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  color: string;
+  icon: string | null;
+  status: ProjectStatus;
+  isPrivate: boolean;
+  dueDate: CalendarDate | null;
+  archivedAt: Date | null;
+  position: number;
+  version: number;
+}
+
+function encodeProjectCursor(row: { position: number; id: string }): string {
+  return Buffer.from(JSON.stringify([row.position, row.id]), "utf8").toString("base64url");
+}
+
+function decodeProjectCursor(cursor: unknown): { position: number; id: string } {
+  try {
+    if (typeof cursor !== "string") throw new Error("cursor");
+    const parsed: unknown = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+    if (Array.isArray(parsed) && parsed.length === 2) {
+      const [position, id] = parsed as unknown[];
+      if (
+        typeof position === "number" &&
+        Number.isSafeInteger(position) &&
+        typeof id === "string"
+      ) {
+        return { position, id };
+      }
+    }
+  } catch {
+    // falls through to the refusal
+  }
+  return refuse("INVALID_INPUT", "cursor");
+}
+
+/**
+ * The projects the actor can read now (non-private or a direct ProjectMember row), ordered by
+ * (position, id), archived ones only with archived "only" or "include", keyset-paged (limit at
+ * most LIST_MAX).
+ */
+export async function listProjects(
+  actor: ProjectActor,
+  opts: { archived?: "exclude" | "only" | "include"; cursor?: string | null; limit?: number } = {},
+): Promise<
+  ProjectResult<{ projects: ProjectListItem[]; hasMore: boolean; nextCursor: string | null }>
+> {
+  return runProjectRead(actor, "listProjects", async (db) => {
+    const archived = opts.archived ?? "exclude";
+    if (!["exclude", "only", "include"].includes(archived)) refuse("INVALID_INPUT", "archived");
+    const rawLimit = opts.limit ?? LIST_DEFAULT;
+    if (!Number.isInteger(rawLimit) || rawLimit < 1) refuse("INVALID_INPUT", "limit");
+    const limit = Math.min(rawLimit, LIST_MAX);
+    const terms: Prisma.ProjectWhereInput[] = [readableProjectWhere(actor)];
+    if (archived === "exclude") terms.push({ archivedAt: null });
+    if (archived === "only") terms.push({ archivedAt: { not: null } });
+    if (opts.cursor !== undefined && opts.cursor !== null) {
+      const c = decodeProjectCursor(opts.cursor);
+      terms.push({
+        OR: [{ position: { gt: c.position } }, { position: c.position, id: { gt: c.id } }],
+      });
+    }
+    const found = await db.project.findMany({
+      where: { AND: terms },
+      orderBy: [{ position: "asc" }, { id: "asc" }],
+      take: limit + 1,
+      select: {
+        id: true,
+        name: true,
+        keyPrefix: true,
+        color: true,
+        icon: true,
+        status: true,
+        isPrivate: true,
+        dueDate: true,
+        archivedAt: true,
+        position: true,
+        version: true,
+      },
+    });
+    const hasMore = found.length > limit;
+    const page = found.slice(0, limit);
+    const last = page[page.length - 1];
+    return {
+      projects: page.map((row) => ({
+        ...row,
+        dueDate: row.dueDate ? toCalendarDate(row.dueDate) : null,
+      })),
+      hasMore,
+      nextCursor: hasMore && last ? encodeProjectCursor(last) : null,
     };
   });
 }
