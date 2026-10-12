@@ -1,0 +1,1 @@
+| Plain-text and CSV uploads are allowed by MIME list but refused because byte sniffing cannot recognise them (same in the four existing upload paths) | Plan 14-03 summary | Pre-existing behaviour of the shared validator's source code; changing it needs its own decision |
