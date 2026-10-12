@@ -416,7 +416,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 **Plans:** 13 plans
 **Wave 1**
 
-- [ ] 14-01-PLAN.md — Frozen contract: access matrix as an operation table, lock order, subtask trigger protocol, activity verbs and cascades, key, date and recurrence formats, refusal codes, delete contract, C1 to C18 and K59, K61 to K69 dispositions, review round 1 items, owner defaults (Wave 1)
+- [x] 14-01-PLAN.md — Frozen contract: access matrix as an operation table, lock order, subtask trigger protocol, activity verbs and cascades, key, date and recurrence formats, refusal codes, delete contract, C1 to C18 and K59, K61 to K69 dispositions, review round 1 items, owner defaults (Wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -554,7 +554,7 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 | 12.1. Ticket Lifecycle (custom states, SLA pause) | v2.0 | 17/17 | Verified: human_needed (visual, dark mode, contrast by eye, screen reader and UAT open; K47 deferred) | - |
 | 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 12/12 | Verified: human_needed (visual, dark mode, screen reader, UI-SPEC amendments A1 to A8 and UAT open; owner items 12.2-o1 to 12.2-o4) | - |
 | 13. Integrations | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
-| 14. Projects Foundation | v2.0 | 0/0 | Not started | - |
+| 14. Projects Foundation | v2.0 | 1/13 | In progress | - |
 | 15. Work Views | v2.0 | 0/0 | Not started | - |
 | 16. Workspace | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
 | 17. Unification | v2.0 | 0/0 | Parked (depends on parked Phases 10, 13 and 16) | - |

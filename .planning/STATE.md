@@ -2,19 +2,19 @@
 gsd_state_version: "1.0"
 milestone: v2.0
 milestone_name: Helpdesk & Projects
-current_phase: 12
-current_phase_name: ticket-lifecycle
-status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11, 12, 12.1 and 12.2 verified human_needed; Phase 14 (Projects foundation) next
-stopped_at: Phase 12.2 verified human_needed (11 of 11, 12.2-VERIFICATION.md); final gate on 1a2f425 green except audit --prod baseline, O-1 suites blocked; Phase 14 next
-last_updated: "2026-11-09T09:55:00.000Z"
+current_phase: 14
+current_phase_name: projects-foundation
+status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11, 12, 12.1 and 12.2 verified human_needed; Phase 14 (Projects foundation) executing, plan 14-01 complete
+stopped_at: Completed 14-01-PLAN.md (frozen Phase 14 contract); 14-02 and 14-03 next (Wave 2)
+last_updated: "2026-11-09T12:20:00.000Z"
 last_activity: 2026-11-09
-last_activity_desc: Phase 12.2 closed to human_needed. 12 plans, code review in four parts with fix batches F1 to F4, three Codex diff rounds with fixes F5 to F7 (run decisions K53 to K60), final gate on 1a2f425 (lint, typecheck, unit 665, integration without egress 826, E2E full 209 passed 1 skipped, build exit 0; audit --prod exit 1 baseline unchanged; test:egress blocked O-1), verifier 11 of 11 with no code gap. Open for a human: visual and dark mode, screen reader, UI-SPEC amendments A1 to A8, owner items 12.2-o1 to 12.2-o4
+last_activity_desc: Plan 14-01 complete. Frozen Phase 14 contract in src/lib/projects/contract.ts (76 operations, 41 verbs, 20 refusal codes, validators; unit 24 passed, biome and typecheck exit 0) and 14-CONTRACT.md (sections 0 to 17, consistent with the module). Commits 842120a and 301684a
 state_head: 75e5a731b94899099a85ae1ff6bdd0f623debc24
 progress:
   total_phases: 12
   completed_phases: 0
   total_plans: 86
-  completed_plans: 45
+  completed_plans: 46
   percent: 0
 ---
 
@@ -30,8 +30,8 @@ See: .planning/PROJECT.md (updated 2026-11-07, v2.0 opened)
 
 ## Current Position
 
-Phase: 14 (Projects foundation) is next in the run queue. Phases 11, 12, 12.1 and 12.2 are verified human_needed (no code gap; visual, dark-mode and screen-reader checks wait for a human). Phases 08, 09 and 10 are PARKED (owner decision); Phases 13, 16 and 17 are parked by dependency on Phase 10.
-Plan: —
+Phase: 14 (Projects foundation) is executing; plan 14-01 (frozen contract) is complete. Phases 11, 12, 12.1 and 12.2 are verified human_needed (no code gap; visual, dark-mode and screen-reader checks wait for a human). Phases 08, 09 and 10 are PARKED (owner decision); Phases 13, 16 and 17 are parked by dependency on Phase 10.
+Plan: 14-01 complete (frozen contract, 14-01-SUMMARY.md); next 14-02 and 14-03 (Wave 2).
 Status: Milestone v2.0 opened by hand on 2026-11-07. `REQUIREMENTS.md` (91 requirements) and `ROADMAP.md` (Phases 8–17) are written and were revised over three Codex critique rounds (queue item 0b done). The public demo was walked under the clean-room rules and added AIDA-100 to AIDA-114 (item 0c done). Phase 8 context is committed (`08-CONTEXT.md`, `8abbc6c`) and the phase is planned: 23 plans in 14 waves; three Codex review cycles; parked after cycle 3 (owner decision, `run-loop/LAPORAN.md`). No Phase 8 code has been executed. Baseline 0a is done: build passes; integration passes except the egress file; E2E passes 63 with two honesty-invariants flakes that pass alone (fixed by plan 08-17). The egress baseline (0a2) was parked while `binaries.prisma.sh` sent no bytes on GET (07.45 to 09.09); the host recovered and the test waits for the Rekriva regression to finish.
 Last activity: 2026-11-08 — Phase 10 parked after its third Codex plan review (K27); Phases 8 and 9 were parked the same way (K24, K25). v1.0.0 stays complete and archived; its archives are `milestones/v1.0.0-*`.
 
@@ -110,7 +110,7 @@ Also open (not audit items): `milestones/v1.0.0-phases/07-launch-readiness/defer
 ## Session Continuity
 
 **Last session:** 2026-11-08T23:33:18.749Z
-**Stopped at:** Phase 12.2 verified human_needed; Phase 14 next (2026-11-09)
+**Stopped at:** Completed 14-01-PLAN.md; Phase 14 executing, Wave 2 next (2026-11-09)
 **Resume file:** .planning/run-loop/ANTREAN.md
 
 **Last action (2026-11-08):** Phase 10 parked after the third Codex plan review (2 HIGH findings accepted, not yet incorporated). No tag, nothing pushed.
