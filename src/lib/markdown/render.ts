@@ -155,6 +155,56 @@ export function renderMarkdownPreview(markdown: string): string {
   return String(previewProcessor.processSync(markdown));
 }
 
+// Phase 14, run decision K65 (contract C9): task descriptions and task comments are untrusted
+// input that every reader of the project sees. An image of any origin would make each reader's
+// browser send a request on page load, before anyone acts on it: a remote one reports the reader
+// to another host, and a same-origin relative one (such as /api/attachments/{id}) carries the
+// reader's cookie to an app route. K65 therefore removes every image from task content, of every
+// origin, and keeps only its alt text as plain text (nothing when the alt is empty); picture and
+// source elements go too. Links stay live with the safe target and rel attributes from
+// rehypeSafeLinks, because a link needs a click; unsafe schemes are removed by the sanitize pass,
+// and raw HTML never reaches the tree (remark-rehype runs without allowDangerousHtml). Unlike the
+// KB preview there is no inert-link pass.
+
+function rehypeReplaceImagesWithAlt() {
+  return (tree: Root) => {
+    visit(tree, "element", (node: Element, index, parent) => {
+      if (!parent || index === undefined) return;
+      if (node.tagName === "picture" || node.tagName === "source") {
+        parent.children.splice(index, 1);
+        // Visit whatever moved into this position next.
+        return index;
+      }
+      if (node.tagName !== "img") return;
+      const alt = node.properties?.alt;
+      const text = typeof alt === "string" ? alt : Array.isArray(alt) ? alt.join(" ") : "";
+      if (text === "") {
+        parent.children.splice(index, 1);
+        return index;
+      }
+      parent.children.splice(index, 1, { type: "text", value: text });
+      return index + 1;
+    });
+  };
+}
+
+const taskProcessor = unified()
+  .use(remarkParse)
+  .use(remarkGfm)
+  .use(remarkRehype)
+  .use(rehypeSafeLinks)
+  .use(rehypeReplaceImagesWithAlt)
+  .use(rehypeSanitize, schema)
+  .use(rehypeStringify);
+
+/**
+ * The renderer for task descriptions and task comments (run decision K65): no image of any
+ * origin, each replaced by its alt text, and live links with the safe attributes.
+ */
+export function renderTaskMarkdown(markdown: string): string {
+  return String(taskProcessor.processSync(markdown));
+}
+
 // Phase 12.2, UI-SPEC amendment A7 (review b-WR-07): the KB proposal publish dialog lists where
 // the article's links really go. Read from HTML renderMarkdown rendered (the publish renderer; the
 // preview has no anchors since run decision K58), so a target the sanitizer removed is never

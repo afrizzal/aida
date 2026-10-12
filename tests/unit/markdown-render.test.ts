@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { htmlLinkTargets, renderMarkdown, renderMarkdownPreview } from "@/lib/markdown/render";
+import {
+  htmlLinkTargets,
+  renderMarkdown,
+  renderMarkdownPreview,
+  renderTaskMarkdown,
+} from "@/lib/markdown/render";
 
 describe("renderMarkdown", () => {
   it("renders bold markdown to <strong>", () => {
@@ -152,5 +157,81 @@ describe("htmlLinkTargets (UI-SPEC amendment A7, review b-WR-07)", () => {
 
   it("a link the sanitizer emptied (javascript:) is not listed", () => {
     expect(htmlLinkTargets(renderMarkdown("[x](javascript:alert(1))"))).toEqual([]);
+  });
+});
+
+describe("renderTaskMarkdown (run decision K65, contract C9)", () => {
+  // Task descriptions and comments: no image of any origin, each replaced by its alt text, and
+  // live links with the safe attributes (no inert-link pass).
+  it.each([
+    ["remote", "![logo](https://evil.example/a.png)", "logo"],
+    ["same-origin relative", "![shot](/api/attachments/1)", "shot"],
+    ["protocol-relative", "![x](//host/a.png)", "x"],
+    ["data URL", "![d](data:image/png;base64,AAAA)", "d"],
+    ["reference-style", "![ref alt][pic]\n\n[pic]: https://evil.example/r.png", "ref alt"],
+  ])("removes a %s image and keeps its alt text", (_kind, markdown, alt) => {
+    const html = renderTaskMarkdown(markdown);
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("src=");
+    expect(html).toContain(alt);
+  });
+
+  it("removes the same-origin relative image the preview keeps", () => {
+    expect(renderMarkdownPreview("![](/api/attachments/1)")).toContain("<img");
+    const html = renderTaskMarkdown("![](/api/attachments/1)");
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("/api/attachments/1");
+  });
+
+  it("keeps a linked image's link live, with the alt text as its text", () => {
+    const html = renderTaskMarkdown(
+      "[![alt text](https://img.example/a.png)](https://ok.example/page)",
+    );
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("img.example");
+    expect(html).toContain('<a href="https://ok.example/page"');
+    expect(html).toMatch(/<a [^>]*>alt text<\/a>/);
+  });
+
+  it("drops raw HTML: no img, no script, no onerror", () => {
+    for (const markdown of ["<img src=x onerror=alert(1)>", "<script>alert(1)</script>"]) {
+      const html = renderTaskMarkdown(markdown);
+      expect(html).not.toContain("<img");
+      expect(html).not.toContain("<script");
+      expect(html).not.toContain("onerror");
+    }
+  });
+
+  it("renders a live link with the safe target and rel", () => {
+    const html = renderTaskMarkdown("[a](https://ok.example)");
+    expect(html).toContain('href="https://ok.example"');
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('rel="nofollow noopener noreferrer"');
+  });
+
+  it("removes a javascript: href", () => {
+    const html = renderTaskMarkdown("[b](javascript:alert(1))");
+    expect(html).not.toContain("javascript:");
+    expect(html).toContain("b");
+  });
+
+  it("turns a bare https URL into a live link (GFM autolink)", () => {
+    const html = renderTaskMarkdown("See https://ok.example/docs for more.");
+    expect(html).toContain('<a href="https://ok.example/docs"');
+    expect(html).toContain('target="_blank"');
+  });
+
+  it("renders the AIDA-101 rich text set", () => {
+    const html = renderTaskMarkdown(
+      ["## Heading", "**bold** *italic*", "- one\n- two", "[link](https://ok.example)"].join(
+        "\n\n",
+      ),
+    );
+    expect(html).toContain("<h2>Heading</h2>");
+    expect(html).toContain("<strong>bold</strong>");
+    expect(html).toContain("<em>italic</em>");
+    expect(html).toContain("<ul>");
+    expect(html).toContain("<li>one</li>");
+    expect(html).toContain("<a ");
   });
 });
