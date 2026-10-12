@@ -35,6 +35,17 @@ model user {
   assignedTickets  Ticket[]    @relation("TicketAssignee")
   authoredMessages Message[]   @relation("MessageAuthor")
   savedViews       SavedView[]
+
+  // Phase 14 projects (single-column user relations, the SavedView.owner shape, C14)
+  projectsCreated    Project[]         @relation("ProjectCreator")
+  projectMemberships ProjectMember[]
+  teamMemberships    TeamMember[]
+  assignedTasks      Task[]            @relation("TaskAssignee")
+  createdTasks       Task[]            @relation("TaskCreator")
+  taskComments       TaskComment[]
+  taskAttachments    TaskAttachment[]
+  projectFavorites   ProjectFavorite[]
+  taskFavorites      TaskFavorite[]
 }
 
 model session {
@@ -124,6 +135,26 @@ model organization {
   ticketStateConfig TicketStateConfig?
   kbProposals       KbProposal[]
   kbProposalSources KbProposalSource[]
+
+  // Phase 14 projects
+  projects            Project[]
+  projectMembers      ProjectMember[]
+  teams               Team[]
+  teamMembers         TeamMember[]
+  projectTeams        ProjectTeam[]
+  projectLabels       ProjectLabel[]
+  projectMilestones   ProjectMilestone[]
+  tasks               Task[]
+  taskLabels          TaskLabel[]
+  taskComments        TaskComment[]
+  taskAttachments     TaskAttachment[]
+  projectFavorites    ProjectFavorite[]
+  taskFavorites       TaskFavorite[]
+  projectTaskCounters ProjectTaskCounter[]
+  projectKeyPrefixes  ProjectKeyPrefix[]
+  taskKeys            TaskKey[]
+  projectActivities   ProjectActivity[]
+  projectFileCleanups ProjectFileCleanup[]
 }
 
 model member {
@@ -867,4 +898,462 @@ model KbProposalSource {
   @@id([proposalId, ticketId])
   @@unique([proposalId, position])
   @@index([organizationId, ticketId])
+}
+
+// ---------------------------------------------------------------------------
+// Phase 14: Projects foundation (14-CONTRACT.md sections 4 to 8, 12 and 15)
+// ---------------------------------------------------------------------------
+
+enum ProjectStatus {
+  PLANNING
+  ACTIVE
+  AT_RISK
+  ON_HOLD
+  COMPLETED
+}
+
+enum ProjectMemberRole {
+  MANAGER
+  MEMBER
+}
+
+enum TaskStatus {
+  BACKLOG
+  TODO
+  IN_PROGRESS
+  REVIEW
+  DONE
+}
+
+enum TaskPriority {
+  NONE
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum RecurrenceRule {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum TaskKeyKind {
+  ACTIVE
+  ALIAS
+  TOMBSTONE
+}
+
+enum ProjectActivityVerb {
+  PROJECT_CREATED
+  PROJECT_UPDATED
+  PROJECT_STATUS_CHANGED
+  PROJECT_PRIVACY_CHANGED
+  PROJECT_REORDERED
+  PROJECT_ARCHIVED
+  PROJECT_RESTORED
+  PROJECT_DUPLICATED
+  PROJECT_DELETED
+  MEMBER_ADDED
+  MEMBER_REMOVED
+  MEMBER_ROLE_CHANGED
+  TEAM_ASSIGNED
+  TEAM_UNASSIGNED
+  TEAM_CREATED
+  TEAM_UPDATED
+  TEAM_DELETED
+  TEAM_MEMBER_ADDED
+  TEAM_MEMBER_REMOVED
+  TASK_CREATED
+  TASK_UPDATED
+  TASK_STATUS_CHANGED
+  TASK_PARENT_CHANGED
+  TASK_REORDERED
+  TASK_ARCHIVED
+  TASK_RESTORED
+  TASK_MOVED
+  TASK_DUPLICATED
+  TASK_DELETED
+  TASK_RECURRED
+  COMMENT_ADDED
+  COMMENT_EDITED
+  COMMENT_DELETED
+  ATTACHMENT_ADDED
+  ATTACHMENT_DELETED
+  LABEL_CREATED
+  LABEL_UPDATED
+  LABEL_DELETED
+  MILESTONE_CREATED
+  MILESTONE_UPDATED
+  MILESTONE_DELETED
+}
+
+enum ProjectActivityEntity {
+  PROJECT
+  TASK
+  COMMENT
+  ATTACHMENT
+  LABEL
+  MILESTONE
+  PROJECT_MEMBER
+  PROJECT_TEAM
+  TEAM
+  TEAM_MEMBER
+}
+
+// Hand-written objects that live ONLY in migration 20261113100000_projects_foundation, because
+// Prisma cannot express them: the CHECKs Project_name_length_check, Project_description_length_check,
+// Project_color_check, Project_icon_check, Project_key_prefix_check, Project_position_check,
+// Project_version_check, ProjectKeyPrefix_prefix_check, Team_name_length_check,
+// ProjectLabel_name_length_check, ProjectLabel_color_check, ProjectMilestone_name_length_check,
+// ProjectMilestone_description_length_check, ProjectMilestone_version_check,
+// ProjectTaskCounter_last_number_check and ProjectFileCleanup_storage_key_check and
+// ProjectFileCleanup_attempts_check; the expression unique indexes Team_organizationId_lower_name_key,
+// ProjectLabel_project_lower_name_key and ProjectMilestone_project_lower_name_key (lower(name)).
+// Any migration Prisma generates after that one must keep them (delete any DROP statement for them
+// by hand). Every composite relation is RESTRICT on delete and update (D-01, C2, K67).
+model Project {
+  id                  String           @id @default(cuid())
+  organizationId      String
+  name                String
+  descriptionMarkdown String?
+  color               String           @default("blue")
+  icon                String?
+  status              ProjectStatus    @default(PLANNING)
+  dueDate             DateTime?        @db.Date
+  isPrivate           Boolean          @default(false)
+  keyPrefix           String
+  position            Int              @default(0)
+  archivedAt          DateTime?
+  version             Int              @default(0)
+  createdByUserId     String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  organization        organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy           user?            @relation("ProjectCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  members             ProjectMember[]
+  teams               ProjectTeam[]
+  labels              ProjectLabel[]
+  milestones          ProjectMilestone[]
+  tasks               Task[]
+  favorites           ProjectFavorite[]
+  taskCounters        ProjectTaskCounter[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, keyPrefix])
+  @@index([organizationId, archivedAt, position])
+}
+
+model ProjectMember {
+  id             String            @id @default(cuid())
+  organizationId String
+  projectId      String
+  userId         String
+  role           ProjectMemberRole @default(MEMBER)
+  createdAt      DateTime          @default(now())
+  organization   organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project        Project           @relation(fields: [organizationId, projectId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  user           user              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, projectId, userId])
+  @@index([organizationId, userId])
+}
+
+model Team {
+  id             String        @id @default(cuid())
+  organizationId String
+  name           String
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  organization   organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members        TeamMember[]
+  projects       ProjectTeam[]
+
+  @@unique([organizationId, id])
+}
+
+model TeamMember {
+  id             String       @id @default(cuid())
+  organizationId String
+  teamId         String
+  userId         String
+  createdAt      DateTime     @default(now())
+  organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  team           Team         @relation(fields: [organizationId, teamId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  user           user         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, teamId, userId])
+  @@index([organizationId, userId])
+}
+
+model ProjectTeam {
+  id             String       @id @default(cuid())
+  organizationId String
+  projectId      String
+  teamId         String
+  createdAt      DateTime     @default(now())
+  organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project        Project      @relation(fields: [organizationId, projectId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  team           Team         @relation(fields: [organizationId, teamId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([organizationId, projectId, teamId])
+  @@index([organizationId, teamId])
+}
+
+model ProjectLabel {
+  id             String       @id @default(cuid())
+  organizationId String
+  projectId      String
+  name           String
+  color          String       @default("gray")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project        Project      @relation(fields: [organizationId, projectId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  taskLabels     TaskLabel[]
+
+  @@unique([organizationId, projectId, id])
+}
+
+model ProjectMilestone {
+  id                  String       @id @default(cuid())
+  organizationId      String
+  projectId           String
+  name                String
+  descriptionMarkdown String?
+  date                DateTime     @db.Date
+  version             Int          @default(0)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  organization        organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project             Project      @relation(fields: [organizationId, projectId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  tasks               Task[]
+
+  @@unique([organizationId, projectId, id])
+  @@index([organizationId, date])
+}
+
+// Hand-written objects that live ONLY in migration 20261113100000_projects_foundation, because
+// Prisma cannot express them: the CHECKs Task_no_self_parent_check, Task_dates_check,
+// Task_title_length_check, Task_description_length_check, Task_estimate_check, Task_rank_check,
+// Task_version_check, Task_number_check, Task_key_format_check, Task_recurrence_fields_check,
+// Task_recurrence_top_level_check, Task_recurrence_time_zone_check, TaskKey_key_format_check,
+// TaskComment_body_length_check, TaskComment_version_check, TaskAttachment_storage_key_check,
+// TaskAttachment_filename_length_check and TaskAttachment_size_check; the partial unique index
+// Task_recurrence_predecessor_key (organizationId, recurrencePredecessorId WHERE not null, D-09);
+// the function aida_task_subtask_depth_guard and the trigger aida_task_subtask_depth (BEFORE INSERT
+// OR UPDATE OF "parentId" ON "Task": one subtask level, D-03, K61). Any migration Prisma generates
+// after that one must keep them (delete any DROP statement for them by hand).
+// K67: TaskComment, TaskAttachment and TaskFavorite reference (organizationId, taskId) only, so a
+// task tree moved to another project keeps them; TaskLabel references the project too and blocks a
+// move until its rows are deleted (C3). recurrencePredecessorId has no relation (C5).
+model Task {
+  id                      String            @id @default(cuid())
+  organizationId          String
+  projectId               String
+  parentId                String?
+  number                  Int
+  key                     String
+  title                   String
+  descriptionMarkdown     String?
+  status                  TaskStatus        @default(TODO)
+  priority                TaskPriority      @default(NONE)
+  assigneeUserId          String?
+  createdByUserId         String?
+  startDate               DateTime?         @db.Date
+  dueDate                 DateTime?         @db.Date
+  estimateMinutes         Int?
+  milestoneId             String?
+  rank                    Int               @default(0)
+  archivedAt              DateTime?
+  version                 Int               @default(0)
+  recurrenceRule          RecurrenceRule?
+  recurrenceAnchor        DateTime?         @db.Date
+  recurrenceTimeZone      String?
+  recurrencePredecessorId String?
+  recurrenceSpawned       Boolean           @default(false)
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
+  organization            organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project                 Project           @relation(fields: [organizationId, projectId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  parent                  Task?             @relation("TaskSubtasks", fields: [organizationId, projectId, parentId], references: [organizationId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  subtasks                Task[]            @relation("TaskSubtasks")
+  milestone               ProjectMilestone? @relation(fields: [organizationId, projectId, milestoneId], references: [organizationId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  assignee                user?             @relation("TaskAssignee", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  createdBy               user?             @relation("TaskCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  labels                  TaskLabel[]
+  comments                TaskComment[]
+  attachments             TaskAttachment[]
+  favorites               TaskFavorite[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, projectId, id])
+  @@unique([organizationId, key])
+  @@unique([organizationId, projectId, number])
+  @@index([organizationId, projectId, status, rank])
+  @@index([organizationId, projectId, parentId, rank])
+  @@index([organizationId, assigneeUserId])
+  @@index([organizationId, dueDate])
+}
+
+model TaskLabel {
+  organizationId String
+  projectId      String
+  taskId         String
+  labelId        String
+  createdAt      DateTime     @default(now())
+  organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  task           Task         @relation(fields: [organizationId, projectId, taskId], references: [organizationId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  label          ProjectLabel @relation(fields: [organizationId, projectId, labelId], references: [organizationId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([taskId, labelId])
+  @@index([organizationId, projectId, labelId])
+}
+
+model TaskComment {
+  id             String       @id @default(cuid())
+  organizationId String
+  taskId         String
+  authorUserId   String?
+  bodyMarkdown   String
+  version        Int          @default(0)
+  editedAt       DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  task           Task         @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  author         user?        @relation(fields: [authorUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, taskId, createdAt])
+}
+
+model TaskAttachment {
+  id               String       @id @default(cuid())
+  organizationId   String
+  taskId           String
+  storageKey       String
+  originalFilename String
+  mimeType         String
+  sizeBytes        Int
+  uploadedByUserId String?
+  createdAt        DateTime     @default(now())
+  organization     organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  task             Task         @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  uploadedBy       user?        @relation(fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, storageKey])
+  @@index([organizationId, taskId, createdAt])
+}
+
+model ProjectFavorite {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String
+  projectId      String
+  createdAt      DateTime     @default(now())
+  organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           user         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project        Project      @relation(fields: [organizationId, projectId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([organizationId, userId, projectId])
+  @@index([organizationId, projectId])
+}
+
+model TaskFavorite {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String
+  taskId         String
+  createdAt      DateTime     @default(now())
+  organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           user         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task           Task         @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([organizationId, userId, taskId])
+}
+
+// C6: the per-project task number counter, never a column on Project.
+model ProjectTaskCounter {
+  projectId      String       @id
+  organizationId String
+  lastNumber     Int          @default(0)
+  organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project        Project      @relation(fields: [organizationId, projectId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+// C5: prefix reservations are kept forever; projectId carries no relation.
+model ProjectKeyPrefix {
+  id             String       @id @default(cuid())
+  organizationId String
+  prefix         String
+  projectId      String
+  createdAt      DateTime     @default(now())
+  organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, prefix])
+  @@index([organizationId, projectId])
+}
+
+// C5: the task key namespace; taskId and projectId carry no relation (aliases and tombstones
+// outlive their tasks).
+model TaskKey {
+  id             String       @id @default(cuid())
+  organizationId String
+  normalizedKey  String
+  taskId         String
+  projectId      String
+  kind           TaskKeyKind  @default(ACTIVE)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, normalizedKey])
+  @@index([organizationId, taskId])
+}
+
+// Hand-written objects that live ONLY in migration 20261113100000_projects_foundation, because
+// Prisma cannot express them: the CHECKs ProjectActivity_scope_check (projectId or teamId not null),
+// ProjectActivity_before_size_check and ProjectActivity_after_size_check (at most 4096 bytes); the
+// function aida_project_activity_immutable and the trigger aida_project_activity_no_update_delete
+// (BEFORE UPDATE OR DELETE ON "ProjectActivity": append-only, D-05). Any migration Prisma generates
+// after that one must keep them (delete any DROP statement for them by hand).
+// No relation except organization (C5): rows outlive projects, tasks, teams and users.
+model ProjectActivity {
+  id               String                @id @default(cuid())
+  organizationId   String
+  projectId        String?
+  relatedProjectId String?
+  taskId           String?
+  teamId           String?
+  actorUserId      String
+  verb             ProjectActivityVerb
+  entityType       ProjectActivityEntity
+  entityId         String
+  before           Json?
+  after            Json?
+  batchId          String
+  createdAt        DateTime              @default(now())
+  organization     organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, projectId, createdAt, id])
+  @@index([organizationId, relatedProjectId, createdAt])
+  @@index([organizationId, taskId, createdAt])
+  @@index([organizationId, teamId, createdAt])
+  @@index([organizationId, batchId])
+}
+
+// K66: the file cleanup outbox; no relation except organization.
+model ProjectFileCleanup {
+  id             String       @id @default(cuid())
+  organizationId String
+  storageKey     String
+  attempts       Int          @default(0)
+  lastErrorCode  String?
+  nextAttemptAt  DateTime     @default(now())
+  createdAt      DateTime     @default(now())
+  organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, storageKey])
+  @@index([nextAttemptAt, createdAt])
 }

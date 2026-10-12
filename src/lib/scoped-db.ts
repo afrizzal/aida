@@ -36,6 +36,25 @@ export const DOMAIN_MODELS = [
   "TicketStateConfig",
   "KbProposal",
   "KbProposalSource",
+  // Phase 14 projects (C1: every name is checked against Prisma.ModelName by project-schema-parity.test.ts)
+  "Project",
+  "ProjectMember",
+  "Team",
+  "TeamMember",
+  "ProjectTeam",
+  "ProjectLabel",
+  "ProjectMilestone",
+  "Task",
+  "TaskLabel",
+  "TaskComment",
+  "TaskAttachment",
+  "ProjectFavorite",
+  "TaskFavorite",
+  "ProjectTaskCounter",
+  "ProjectKeyPrefix",
+  "TaskKey",
+  "ProjectActivity",
+  "ProjectFileCleanup",
 ] as const;
 
 const isDomain = (model?: string): boolean =>
