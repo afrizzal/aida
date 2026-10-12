@@ -4,17 +4,17 @@ milestone: v2.0
 milestone_name: Helpdesk & Projects
 current_phase: 14
 current_phase_name: projects-foundation
-status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11, 12, 12.1 and 12.2 verified human_needed; Phase 14 (Projects foundation) executing, plans 14-01 and 14-02 complete
-stopped_at: Completed 14-02-PLAN.md (Phase 14 schema, migration 20261113100000_projects_foundation, fixtures); 14-03 next (Wave 2)
-last_updated: "2026-11-09T12:32:00.000Z"
+status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11, 12, 12.1 and 12.2 verified human_needed; Phase 14 (Projects foundation) executing, plans 14-01, 14-02 and 14-03 complete
+stopped_at: Completed 14-03-PLAN.md (pure helpers: renderTaskMarkdown K65, validateUpload, rank math, recurrence date rules); 14-04 next
+last_updated: "2026-11-09T12:40:00.000Z"
 last_activity: 2026-11-09
-last_activity_desc: Plan 14-02 complete. Migration 20261113100000_projects_foundation adds the 18 Phase 14 tables with 16 composite RESTRICT keys, CHECKs, the subtask depth and append-only activity triggers (scratch database aida_p14_projects applied then dropped). Fixtures and proofs: integration 49 passed, unit 35 passed, typecheck and biome exit 0. Commits 3833800, 9c580be and 5cfd3e6
+last_activity_desc: Plan 14-03 complete. Pure helpers for the Phase 14 services, no database: renderTaskMarkdown removes every image and keeps live safe links (K65), validateUpload checks size before reading and sniffs against ALLOWED_MIME (C10), rank math with null meaning rebalance first, and recurrence date rules with at most two counted corrections. Unit 89 passed, biome, next typegen and typecheck exit 0. Commits 7c55f7e, 3b272bc, 19fbd4a, de05f13 and e2c08c5
 state_head: 75e5a731b94899099a85ae1ff6bdd0f623debc24
 progress:
   total_phases: 12
   completed_phases: 0
   total_plans: 86
-  completed_plans: 47
+  completed_plans: 48
   percent: 0
 ---
 
@@ -30,8 +30,8 @@ See: .planning/PROJECT.md (updated 2026-11-07, v2.0 opened)
 
 ## Current Position
 
-Phase: 14 (Projects foundation) is executing; plans 14-01 (frozen contract) and 14-02 (schema foundation) are complete. Phases 11, 12, 12.1 and 12.2 are verified human_needed (no code gap; visual, dark-mode and screen-reader checks wait for a human). Phases 08, 09 and 10 are PARKED (owner decision); Phases 13, 16 and 17 are parked by dependency on Phase 10.
-Plan: 14-02 complete (Phase 14 schema, migration 20261113100000_projects_foundation, fixtures; 14-02-SUMMARY.md); next 14-03 (Wave 2).
+Phase: 14 (Projects foundation) is executing; plans 14-01 (frozen contract), 14-02 (schema foundation) and 14-03 (pure helpers) are complete. Phases 11, 12, 12.1 and 12.2 are verified human_needed (no code gap; visual, dark-mode and screen-reader checks wait for a human). Phases 08, 09 and 10 are PARKED (owner decision); Phases 13, 16 and 17 are parked by dependency on Phase 10.
+Plan: 14-03 complete (renderTaskMarkdown K65, validateUpload, rank math, recurrence date rules; 14-03-SUMMARY.md); next 14-04.
 Status: Milestone v2.0 opened by hand on 2026-11-07. `REQUIREMENTS.md` (91 requirements) and `ROADMAP.md` (Phases 8–17) are written and were revised over three Codex critique rounds (queue item 0b done). The public demo was walked under the clean-room rules and added AIDA-100 to AIDA-114 (item 0c done). Phase 8 context is committed (`08-CONTEXT.md`, `8abbc6c`) and the phase is planned: 23 plans in 14 waves; three Codex review cycles; parked after cycle 3 (owner decision, `run-loop/LAPORAN.md`). No Phase 8 code has been executed. Baseline 0a is done: build passes; integration passes except the egress file; E2E passes 63 with two honesty-invariants flakes that pass alone (fixed by plan 08-17). The egress baseline (0a2) was parked while `binaries.prisma.sh` sent no bytes on GET (07.45 to 09.09); the host recovered and the test waits for the Rekriva regression to finish.
 Last activity: 2026-11-08 — Phase 10 parked after its third Codex plan review (K27); Phases 8 and 9 were parked the same way (K24, K25). v1.0.0 stays complete and archived; its archives are `milestones/v1.0.0-*`.
 
@@ -110,7 +110,7 @@ Also open (not audit items): `milestones/v1.0.0-phases/07-launch-readiness/defer
 ## Session Continuity
 
 **Last session:** 2026-11-08T23:33:18.749Z
-**Stopped at:** Completed 14-02-PLAN.md; Phase 14 executing, 14-03 next (2026-11-09)
+**Stopped at:** Completed 14-03-PLAN.md; Phase 14 executing, 14-04 next (2026-11-09)
 **Resume file:** .planning/run-loop/ANTREAN.md
 
 **Last action (2026-11-08):** Phase 10 parked after the third Codex plan review (2 HIGH findings accepted, not yet incorporated). No tag, nothing pushed.
