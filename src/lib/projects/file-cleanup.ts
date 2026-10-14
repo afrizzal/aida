@@ -67,6 +67,13 @@ export interface FileCleanupSweepOptions {
   storage: FileStorage;
   now?: Date;
   limit?: number;
+  /**
+   * Test hook only (the "test hook where the run is production code" of
+   * tests/support/lock-wait.ts): awaited right after the FOR UPDATE SKIP LOCKED select and before
+   * the first storage call, with the run's transaction and the storage keys it locked. Production
+   * and the worker handler never pass it.
+   */
+  onLocked?: (tx: Prisma.TransactionClient, lockedStorageKeys: readonly string[]) => Promise<void>;
 }
 
 interface DueRow {
@@ -122,6 +129,12 @@ export async function sweepProjectFileCleanup(
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED
     `;
+
+    if (opts.onLocked)
+      await opts.onLocked(
+        tx,
+        due.map((row) => row.storageKey),
+      );
 
     const result: FileCleanupSweepResult = { deleted: 0, missing: 0, failed: 0 };
     for (const row of due) {
