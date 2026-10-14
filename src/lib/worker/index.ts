@@ -2,6 +2,7 @@ import type { Job, JobWithMetadata } from "pg-boss";
 import { PgBoss } from "pg-boss";
 import { KB_PROPOSAL_GENERATE_QUEUE } from "../kb/proposal-contract";
 import { ensureKbProposalQueue } from "../kb/proposal-queue";
+import { PROJECT_FILE_CLEANUP_CRON, PROJECT_FILE_CLEANUP_QUEUE } from "../projects/contract";
 import { aiTriageHandler } from "./jobs/ai-triage";
 import { autoCloseHandler } from "./jobs/auto-close";
 import { emailInboundPollHandler } from "./jobs/email-inbound-poll";
@@ -10,6 +11,7 @@ import { heartbeatHandler } from "./jobs/heartbeat";
 import { insightRunHandler } from "./jobs/insight-run";
 import { kbEmbedArticleHandler } from "./jobs/kb-embed-article";
 import { kbProposalGenerateHandler } from "./jobs/kb-proposal-generate";
+import { projectFileCleanupHandler } from "./jobs/project-file-cleanup";
 import { rateLimitCleanupHandler } from "./jobs/rate-limit-cleanup";
 import { slaFlagHandler } from "./jobs/sla-flag";
 import { snoozeWakeHandler } from "./jobs/snooze-wake";
@@ -132,6 +134,16 @@ async function main() {
       await kbProposalGenerateHandler(job);
     },
   );
+
+  // Project file cleanup (Phase 14, contract section 12, K66): every minute, the files of at most
+  // 100 due ProjectFileCleanup rows per run (FOR UPDATE SKIP LOCKED), retried with backoff;
+  // idempotent. Singleton so a slow run never overlaps the next minute's run. Needs the uploads
+  // volume in the worker (K68).
+  await boss.createQueue(PROJECT_FILE_CLEANUP_QUEUE, { policy: "singleton" });
+  await boss.work(PROJECT_FILE_CLEANUP_QUEUE, async (jobs: Job[]) => {
+    await projectFileCleanupHandler(jobs);
+  });
+  await boss.schedule(PROJECT_FILE_CLEANUP_QUEUE, PROJECT_FILE_CLEANUP_CRON, {});
 
   console.log("[worker] started");
 
