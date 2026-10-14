@@ -4,17 +4,17 @@ milestone: v2.0
 milestone_name: Helpdesk & Projects
 current_phase: 14
 current_phase_name: projects-foundation
-status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11, 12, 12.1 and 12.2 verified human_needed; Phase 14 (Projects foundation) executing, plans 14-01 to 14-05 complete
-stopped_at: Completed 14-05-PLAN.md (file cleanup outbox and every-minute SKIP LOCKED sweep in the worker, worker mounts the uploads volume in both compose files, K66 and K68; compose stack not run, O-1); 14-06 next
+status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11, 12, 12.1 and 12.2 verified human_needed; Phase 14 (Projects foundation) executing, plans 14-01 to 14-06 complete
+stopped_at: Completed 14-06-PLAN.md (task core: keys and the key namespace, createTask under the project FOR SHARE with the parent locked FOR SHARE, versioned edits, dates, status, one-level parenting, lists, lockTaskTreeInTx; trigger and service races PID-bound, section 17 isolation incl. ALIAS keys, K69); 14-07 next
 last_updated: "2026-11-09T13:00:00.000Z"
 last_activity: 2026-11-09
-last_activity_desc: Plan 14-05 complete. ProjectFileCleanup outbox writer (ON CONFLICT DO NOTHING in the caller's transaction), the sweep (FOR UPDATE SKIP LOCKED, ENOENT done, backoff min(2^attempts, 60) minutes, database clock by default) scheduled every minute in the worker with policy singleton, and the worker uploads volume with UPLOADS_DIR in both compose files plus README and OPERATIONS notes. Integration 9 passed, unit 5 passed, both compose files parse, biome, next typegen and typecheck exit 0. Compose stack not run (O-1). Commits 52ede56, 5b5d02d and 57d7432
+last_activity_desc: Plan 14-06 complete. keys.ts (counter UPDATE RETURNING, ACTIVE, ALIAS and TOMBSTONE helpers, resolveTaskKey) and tasks.ts (createTask, getTask, listProjectTasks, listWorkspaceTasks, updateTask, setTaskDates, setTaskStatus, setTaskParent, applyStatusChangeInTx, lockTaskTreeInTx, appendRankInTx, taskInputErrors). 20 parallel creates get keys 1 to 20; the subtask trigger holds in both interleavings; prefix change and createTask serialize both ways; the tree lock includes a subtask committed while it waited. Integration 36 passed in 4 files; next typegen, typecheck and biome exit 0. Commits 8ea4e89, c62584c and 9ac8470
 state_head: 75e5a731b94899099a85ae1ff6bdd0f623debc24
 progress:
   total_phases: 12
   completed_phases: 0
   total_plans: 86
-  completed_plans: 50
+  completed_plans: 51
   percent: 0
 ---
 
@@ -30,8 +30,8 @@ See: .planning/PROJECT.md (updated 2026-11-07, v2.0 opened)
 
 ## Current Position
 
-Phase: 14 (Projects foundation) is executing; plans 14-01 (frozen contract), 14-02 (schema foundation), 14-03 (pure helpers), 14-04 (core services) and 14-05 (file cleanup outbox and sweep, worker uploads volume) are complete. Phases 11, 12, 12.1 and 12.2 are verified human_needed (no code gap; visual, dark-mode and screen-reader checks wait for a human). Phases 08, 09 and 10 are PARKED (owner decision); Phases 13, 16 and 17 are parked by dependency on Phase 10.
-Plan: 14-05 complete (file cleanup outbox, scheduled SKIP LOCKED sweep, worker uploads volume K68; compose stack not run, O-1; 14-05-SUMMARY.md); next 14-06.
+Phase: 14 (Projects foundation) is executing; plans 14-01 (frozen contract), 14-02 (schema foundation), 14-03 (pure helpers), 14-04 (core services), 14-05 (file cleanup outbox and sweep, worker uploads volume) and 14-06 (task core, keys, subtasks) are complete. Phases 11, 12, 12.1 and 12.2 are verified human_needed (no code gap; visual, dark-mode and screen-reader checks wait for a human). Phases 08, 09 and 10 are PARKED (owner decision); Phases 13, 16 and 17 are parked by dependency on Phase 10.
+Plan: 14-06 complete (task keys and namespace, task create, read, lists, versioned edits, dates, status and one-level subtasks; PID-bound races and section 17 isolation; 14-06-SUMMARY.md); next 14-07.
 Status: Milestone v2.0 opened by hand on 2026-11-07. `REQUIREMENTS.md` (91 requirements) and `ROADMAP.md` (Phases 8–17) are written and were revised over three Codex critique rounds (queue item 0b done). The public demo was walked under the clean-room rules and added AIDA-100 to AIDA-114 (item 0c done). Phase 8 context is committed (`08-CONTEXT.md`, `8abbc6c`) and the phase is planned: 23 plans in 14 waves; three Codex review cycles; parked after cycle 3 (owner decision, `run-loop/LAPORAN.md`). No Phase 8 code has been executed. Baseline 0a is done: build passes; integration passes except the egress file; E2E passes 63 with two honesty-invariants flakes that pass alone (fixed by plan 08-17). The egress baseline (0a2) was parked while `binaries.prisma.sh` sent no bytes on GET (07.45 to 09.09); the host recovered and the test waits for the Rekriva regression to finish.
 Last activity: 2026-11-08 — Phase 10 parked after its third Codex plan review (K27); Phases 8 and 9 were parked the same way (K24, K25). v1.0.0 stays complete and archived; its archives are `milestones/v1.0.0-*`.
 
@@ -110,7 +110,7 @@ Also open (not audit items): `milestones/v1.0.0-phases/07-launch-readiness/defer
 ## Session Continuity
 
 **Last session:** 2026-11-09T13:00:00.000Z
-**Stopped at:** Completed 14-05-PLAN.md; Phase 14 executing, 14-06 next (2026-11-09)
+**Stopped at:** Completed 14-06-PLAN.md; Phase 14 executing, 14-07 next (2026-11-09)
 **Resume file:** .planning/run-loop/ANTREAN.md
 
 **Last action (2026-11-08):** Phase 10 parked after the third Codex plan review (2 HIGH findings accepted, not yet incorporated). No tag, nothing pushed.

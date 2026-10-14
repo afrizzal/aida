@@ -430,7 +430,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 14-06-PLAN.md — Tasks, keys and the key namespace, versioned edits, dates, status, one-level subtasks; counter concurrency, trigger races, isolation (Wave 4)
+- [x] 14-06-PLAN.md — Tasks, keys and the key namespace, versioned edits, dates, status, one-level subtasks; counter concurrency, trigger races, isolation (Wave 4)
 - [ ] 14-07-PLAN.md — Comments, attachments (upload, download read, delete), labels and milestones; isolation (Wave 4)
 
 **Wave 5** *(blocked on Wave 4 completion)*
@@ -554,7 +554,7 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 | 12.1. Ticket Lifecycle (custom states, SLA pause) | v2.0 | 17/17 | Verified: human_needed (visual, dark mode, contrast by eye, screen reader and UAT open; K47 deferred) | - |
 | 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 12/12 | Verified: human_needed (visual, dark mode, screen reader, UI-SPEC amendments A1 to A8 and UAT open; owner items 12.2-o1 to 12.2-o4) | - |
 | 13. Integrations | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
-| 14. Projects Foundation | v2.0 | 5/13 | In progress | - |
+| 14. Projects Foundation | v2.0 | 6/13 | In progress | - |
 | 15. Work Views | v2.0 | 0/0 | Not started | - |
 | 16. Workspace | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
 | 17. Unification | v2.0 | 0/0 | Parked (depends on parked Phases 10, 13 and 16) | - |
