@@ -12,10 +12,10 @@ import { renderTaskMarkdown } from "../markdown/render";
 import {
   isEligibleAssignee,
   type ProjectAccess,
+  type RowLockMode,
   readableProjectWhere,
   requireProject,
   requireTask,
-  type RowLockMode,
 } from "./access";
 import { changedValues, recordProjectActivity } from "./activity";
 import {
@@ -199,7 +199,11 @@ export type RankGroup =
   | { projectId: string; status: TaskStatus; parentId?: null }
   | { projectId: string; parentId: string };
 
-function groupWhere(orgId: string, group: RankGroup, excludeTaskId?: string): Prisma.TaskWhereInput {
+function groupWhere(
+  orgId: string,
+  group: RankGroup,
+  excludeTaskId?: string,
+): Prisma.TaskWhereInput {
   const where: Prisma.TaskWhereInput =
     group.parentId != null
       ? { organizationId: orgId, projectId: group.projectId, parentId: group.parentId }
@@ -530,7 +534,11 @@ async function readTaskRow(
  * read predicate (contract section 14): gone or unreadable NOT_FOUND, archived (the task, its
  * parent or its project) ARCHIVED, else CONFLICT.
  */
-async function classifyTaskMiss(tx: ProjectDb, actor: ProjectActor, taskId: string): Promise<never> {
+async function classifyTaskMiss(
+  tx: ProjectDb,
+  actor: ProjectActor,
+  taskId: string,
+): Promise<never> {
   const row = await tx.task.findFirst({
     where: { id: taskId, organizationId: actor.orgId, project: readableProjectWhere(actor) },
     select: {
@@ -691,10 +699,7 @@ export async function setTaskDates(
   dates: { startDate?: CalendarDate | null; dueDate?: CalendarDate | null },
 ): Promise<ProjectResult<{ changed: boolean; version?: number }>> {
   return editTask(actor, "setTaskDates", taskId, expectedVersion, async (_tx, row) => {
-    const value = validTaskInput(
-      { startDate: dates?.startDate, dueDate: dates?.dueDate },
-      false,
-    );
+    const value = validTaskInput({ startDate: dates?.startDate, dueDate: dates?.dueDate }, false);
     const storedStart = calendarOrNull(row.startDate);
     const storedDue = calendarOrNull(row.dueDate);
     const start = value.startDate !== undefined ? value.startDate : storedStart;
@@ -1164,7 +1169,10 @@ export async function listWorkspaceTasks(
     const orgId = actor.orgId;
     const limit = listLimit(f.limit);
     const terms: Prisma.TaskWhereInput[] = [
-      { organizationId: orgId, project: { AND: [readableProjectWhere(actor), { archivedAt: null }] } },
+      {
+        organizationId: orgId,
+        project: { AND: [readableProjectWhere(actor), { archivedAt: null }] },
+      },
       ...archivedTerms(orgId, "exclude"),
     ];
     const status = validStatusFilter(f.status);

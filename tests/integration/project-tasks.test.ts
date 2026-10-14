@@ -123,7 +123,10 @@ function taskRow(orgId: string, id: string) {
   return prisma.task.findFirstOrThrow({ where: { id, organizationId: orgId } });
 }
 
-function rowsOf(orgId: string, verb: "TASK_UPDATED" | "TASK_STATUS_CHANGED" | "TASK_PARENT_CHANGED") {
+function rowsOf(
+  orgId: string,
+  verb: "TASK_UPDATED" | "TASK_STATUS_CHANGED" | "TASK_PARENT_CHANGED",
+) {
   return prisma.projectActivity.findMany({ where: { organizationId: orgId, verb } });
 }
 
@@ -212,17 +215,20 @@ describe("updateTask", () => {
       ).toEqual({ ok: false, code: "NOT_ELIGIBLE" });
     }
     expect(await activityCount(pw.orgA)).toBe(before);
-    expect(await updateTask(manager, pw.task.id, 0, { assigneeUserId: pw.users.manager })).toEqual(
-      { ok: true, changed: true, version: 1 },
-    );
+    expect(await updateTask(manager, pw.task.id, 0, { assigneeUserId: pw.users.manager })).toEqual({
+      ok: true,
+      changed: true,
+      version: 1,
+    });
     // On a non-private project every active organization member is eligible.
     const open = await seedTask(prisma, pw.orgA, pw.openProject.id);
     expect(
       await updateTask(manager, open.id, 0, { assigneeUserId: pw.users.nonMember }),
     ).toMatchObject({ ok: true, changed: true });
-    expect(
-      await updateTask(manager, open.id, 1, { assigneeUserId: pw.users.outsider }),
-    ).toEqual({ ok: false, code: "NOT_ELIGIBLE" });
+    expect(await updateTask(manager, open.id, 1, { assigneeUserId: pw.users.outsider })).toEqual({
+      ok: false,
+      code: "NOT_ELIGIBLE",
+    });
   });
 });
 
@@ -464,9 +470,7 @@ describe("task lists", () => {
       r.ok ? r.tasks.map((t) => t.id) : r.code;
     const [first, second] = [a.id, b.id].sort();
     expect(ids(await listProjectTasks(w.member, w.project.id))).toEqual([c.id, first, second]);
-    expect(ids(await listProjectTasks(w.member, w.project.id, { status: "DONE" }))).toEqual([
-      c.id,
-    ]);
+    expect(ids(await listProjectTasks(w.member, w.project.id, { status: "DONE" }))).toEqual([c.id]);
     expect(ids(await listProjectTasks(w.member, w.project.id, { parentId: a.id }))).toEqual([
       sub.id,
     ]);

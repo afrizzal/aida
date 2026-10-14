@@ -38,9 +38,9 @@ describe("task keys", () => {
     }
     expect(numbers.sort((a, b) => a - b)).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
     expect(new Set(keys).size).toBe(20);
-    expect(
-      await prisma.taskKey.count({ where: { organizationId: w.orgId, kind: "ACTIVE" } }),
-    ).toBe(20);
+    expect(await prisma.taskKey.count({ where: { organizationId: w.orgId, kind: "ACTIVE" } })).toBe(
+      20,
+    );
   });
 
   it("createTask in a project whose counter is at 999999999 is KEY_SPACE_EXHAUSTED and writes nothing", async () => {
