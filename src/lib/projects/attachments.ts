@@ -18,7 +18,11 @@
 import type { FileStorage } from "../attachments/file-storage";
 import { buildStorageKey, localFileStorage } from "../attachments/local-file-storage";
 import { saveStagedFiles } from "../attachments/staged-files";
-import { type UploadCandidate, validateUpload } from "../attachments/validate-upload";
+import {
+  type UploadCandidate,
+  type ValidatedUpload,
+  validateUpload,
+} from "../attachments/validate-upload";
 import { requireMembership, requireProject, requireTask } from "./access";
 import { recordProjectActivity } from "./activity";
 import { cursorDate, decodeCursor, encodeCursor, type PageOpts, pageLimit } from "./comments";
@@ -205,7 +209,7 @@ export async function uploadTaskAttachments(
   });
   if (!precheck.ok) return precheck;
 
-  const validated = [];
+  const validated: (ValidatedUpload & { key: string })[] = [];
   for (const file of files) {
     const result = await validateUpload(file);
     if (!result.ok) return refusalResult(result.code);

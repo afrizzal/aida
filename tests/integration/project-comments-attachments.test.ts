@@ -49,7 +49,7 @@ function fileOf(name: string, data: Buffer, size = data.length) {
   return {
     name,
     size,
-    arrayBuffer: async () => data.buffer.slice(data.byteOffset, data.byteOffset + data.length),
+    arrayBuffer: async () => Uint8Array.from(data).buffer,
   };
 }
 
