@@ -156,6 +156,12 @@ Take a backup before upgrading, as [`docs/OPERATIONS.md`](docs/OPERATIONS.md) de
 - **Writes wait while two indexes are built.** The migration `20261111100000_kb_proposals` builds two unique indexes, on `"Ticket"` and on `"KbArticle"` (`organizationId`, `id`). Prisma runs each migration in one transaction, where `CREATE INDEX CONCURRENTLY` is not allowed, so new tickets, ticket changes and KB article writes wait until each index is built. On a small install this takes moments; on a large ticket table, upgrade in a quiet period.
 - **A local Ollama model needs a 32k context window.** When AIDA drafts a KB article proposal through Ollama, it asks for a context window of 32,768 tokens (`num_ctx`), enough for the bounded ticket input and the answer. Use a model that supports at least that; with a smaller model, the ticket input can be cut off or drafting can fail. OpenAI and Anthropic models are not affected.
 
+### Upgrade notes: Projects foundation
+
+- **The worker now mounts the uploads volume.** In `docker-compose.yml` the `worker` service mounts `uploads_data` at `/data/uploads` and sets `UPLOADS_DIR: /data/uploads`, like the `app` service.
+- **This fixes a defect in earlier versions.** Attachments of inbound email are saved by the worker's poll job. Before this change the worker had no uploads volume, so those files were written inside the worker container instead of the shared volume, and the app could not serve them. The fix applies to email received after the upgrade; attachments saved inside an old worker container are not recovered.
+- **Files of deleted task attachments are removed by a scheduled job.** When a task attachment, a task or a project is deleted, its files are queued for removal in the same transaction as the delete. A scheduled job in the worker runs every minute and removes the queued files; when a removal fails, it is retried later with a growing delay (backoff).
+
 ## Status
 
 **v1 — Minimum Lovable Helpdesk.** Core ticketing, email/web intake, AI triage, RAG drafted replies,

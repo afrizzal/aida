@@ -7,7 +7,7 @@ The day-two runbook for a self-hosted AIDA instance: backups, restore, upgrades,
 A **complete** AIDA backup has two parts, and both are required to restore an instance:
 
 1. A **Postgres logical dump** (`pg_dump --format=custom`) — tickets, contacts, messages, KB articles, insight runs, settings, everything in the database.
-2. A **tarball of the `uploads_data` volume** — every ticket attachment. Files live on disk under `/data/uploads`, not in Postgres, so a database-only dump silently loses every attachment.
+2. A **tarball of the `uploads_data` volume** — every ticket and task attachment. Files live on disk under `/data/uploads`, not in Postgres, so a database-only dump silently loses every attachment. The `app` and `worker` services share this volume: the app stores uploads, and the worker stores inbound email attachments and runs the scheduled job (every minute) that removes the files of deleted task attachments.
 
 **A database-only dump is not a complete backup.** Never treat `pg_dump` alone as sufficient.
 

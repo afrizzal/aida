@@ -113,6 +113,8 @@ services:
       UPLOADS_DIR: /data/uploads
       RATE_LIMIT_PEPPER: egress-test-pepper
       APP_ENCRYPTION_KEY: QSISaCLOEBgxX0yBtkwIvFzcSXJIzb491wuVtK5Ik7g=
+    volumes:
+      - uploads_data:/data/uploads
     dns: [10.90.0.2]
     networks:
       egress_internal:
@@ -135,6 +137,9 @@ services:
     environment:
       DATABASE_URL: postgresql://aida:egress-test-password@db:5432/aida
       APP_ENCRYPTION_KEY: QSISaCLOEBgxX0yBtkwIvFzcSXJIzb491wuVtK5Ik7g=
+      UPLOADS_DIR: /data/uploads
+    volumes:
+      - uploads_data:/data/uploads
     dns: [10.90.0.2]
     networks:
       egress_internal:
@@ -186,3 +191,7 @@ services:
       egress_internal:
         ipv4_address: 10.90.0.17
     profiles: ["control"] # never started by a plain `docker compose up`
+
+volumes:
+  # Shared by app and worker, as in docker-compose.yml (K68).
+  uploads_data:

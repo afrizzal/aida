@@ -102,6 +102,11 @@ services:
       DB_POOL_MAX: "5"
       # Worker decrypts stored IMAP/SMTP credentials for the poll + outbound-send jobs
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
+      # Shared uploads volume (K68): the project file cleanup job deletes stored files and the
+      # inbound email poll stores attachments here, so both reach the files the app serves.
+      UPLOADS_DIR: /data/uploads
+    volumes:
+      - uploads_data:/data/uploads
     restart: unless-stopped
     deploy:
       resources:
@@ -127,8 +132,9 @@ services:
 volumes:
   # Single source of truth for Postgres data — backup = snapshot this volume (D-11)
   postgres_data:
-  # Attachment storage (public intake + composer uploads) — only `app` mounts this;
-  # uploads happen synchronously in the request/response cycle, never via a worker job.
+  # Attachment storage (ticket and task attachments) — mounted by both `app` and `worker`:
+  # the app stores uploads in the request/response cycle; the worker stores inbound email
+  # attachments and reads and deletes files for the scheduled project file cleanup.
   uploads_data:
   caddy_data:
   caddy_config:
