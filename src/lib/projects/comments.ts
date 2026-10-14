@@ -9,7 +9,7 @@
 // an explicit organization term after the membership read; an unknown or unreadable comment is
 // NOT_FOUND, identical to a missing id.
 import { renderTaskMarkdown } from "../markdown/render";
-import { requireTask } from "./access";
+import { requireMembership, requireTask } from "./access";
 import { recordProjectActivity } from "./activity";
 import {
   COMMENT_BODY_MAX,
@@ -24,6 +24,7 @@ import {
   afterLock,
   isPlausibleId,
   newBatchId,
+  type ProjectDb,
   refuse,
   runProjectRead,
   runProjectTransaction,
@@ -190,5 +191,108 @@ export async function addTaskComment(
       batchId: newBatchId(),
     });
     return { commentId: comment.id, version: comment.version };
+  });
+}
+
+/** A non-negative safe integer version, or INVALID_INPUT field expectedVersion. */
+export function validVersion(raw: unknown): number {
+  if (!Number.isSafeInteger(raw) || (raw as number) < 0) refuse("INVALID_INPUT", "expectedVersion");
+  return raw as number;
+}
+
+/** Resolves a comment id to its task (explicit organization term) after the membership read. */
+async function commentRow(
+  tx: ProjectDb,
+  actor: ProjectActor,
+  commentId: string,
+): Promise<{ taskId: string; authorUserId: string | null }> {
+  await requireMembership(tx, actor);
+  if (!isPlausibleId(commentId)) refuse("NOT_FOUND");
+  const row = await tx.taskComment.findFirst({
+    where: { id: commentId, organizationId: actor.orgId },
+    select: { taskId: true, authorUserId: true },
+  });
+  return row ?? refuse("NOT_FOUND");
+}
+
+/**
+ * AUTHOR under PROJECT_SHARE: replaces the body when expectedVersion is current (else CONFLICT),
+ * sets editedAt, increments version and writes COMMENT_EDITED with the id only. The same body is
+ * { changed: false } and writes nothing.
+ */
+export async function editTaskComment(
+  actor: ProjectActor,
+  commentId: string,
+  expectedVersion: number,
+  input: { body: unknown },
+): Promise<ProjectResult<{ changed: boolean; version?: number }>> {
+  return runProjectTransaction(actor, "editTaskComment", async (tx) => {
+    const body = validBody(input?.body);
+    const version = validVersion(expectedVersion);
+    const comment = await commentRow(tx, actor, commentId);
+    const access = await requireTask(tx, actor, comment.taskId, {
+      lock: "share",
+      level: "AUTHOR",
+      taskLock: "share",
+      allow: () => comment.authorUserId !== null && comment.authorUserId === actor.userId,
+    });
+    await afterLock(tx, "editTaskComment");
+    const current = await tx.taskComment.findFirst({
+      where: { id: commentId, organizationId: actor.orgId, taskId: comment.taskId },
+      select: { bodyMarkdown: true, version: true },
+    });
+    if (!current) refuse("NOT_FOUND");
+    if (current.version !== version) refuse("CONFLICT");
+    if (current.bodyMarkdown === body) return { changed: false };
+    const updated = await tx.taskComment.updateMany({
+      where: { id: commentId, organizationId: actor.orgId, version },
+      data: { bodyMarkdown: body, editedAt: new Date(), version: { increment: 1 } },
+    });
+    if (updated.count !== 1) refuse("CONFLICT");
+    await recordProjectActivity(tx, {
+      orgId: actor.orgId,
+      projectId: access.task.projectId,
+      taskId: comment.taskId,
+      actorUserId: actor.userId,
+      verb: "COMMENT_EDITED",
+      entityType: "COMMENT",
+      entityId: commentId,
+      after: { commentId },
+      batchId: newBatchId(),
+    });
+    return { changed: true, version: version + 1 };
+  });
+}
+
+/** AUTHOR_OR_MANAGE under PROJECT_SHARE: removes the comment and writes COMMENT_DELETED. */
+export async function deleteTaskComment(
+  actor: ProjectActor,
+  commentId: string,
+): Promise<ProjectResult<{ deleted: true }>> {
+  return runProjectTransaction(actor, "deleteTaskComment", async (tx) => {
+    const comment = await commentRow(tx, actor, commentId);
+    const access = await requireTask(tx, actor, comment.taskId, {
+      lock: "share",
+      level: "AUTHOR_OR_MANAGE",
+      taskLock: "share",
+      allow: () => comment.authorUserId !== null && comment.authorUserId === actor.userId,
+    });
+    await afterLock(tx, "deleteTaskComment");
+    const removed = await tx.taskComment.deleteMany({
+      where: { id: commentId, organizationId: actor.orgId, taskId: comment.taskId },
+    });
+    if (removed.count !== 1) refuse("NOT_FOUND");
+    await recordProjectActivity(tx, {
+      orgId: actor.orgId,
+      projectId: access.task.projectId,
+      taskId: comment.taskId,
+      actorUserId: actor.userId,
+      verb: "COMMENT_DELETED",
+      entityType: "COMMENT",
+      entityId: commentId,
+      before: { commentId, authorUserId: comment.authorUserId },
+      batchId: newBatchId(),
+    });
+    return { deleted: true as const };
   });
 }
