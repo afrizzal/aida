@@ -45,6 +45,7 @@ import {
 } from "./contract";
 import { issueTaskKeyInTx, nextTaskNumberInTx } from "./keys";
 import { appendRank, rebalancedRanks } from "./rank";
+import { spawnRecurrenceSuccessorInTx } from "./recurrence";
 import {
   afterLock,
   isPlausibleId,
@@ -736,6 +737,8 @@ export interface StatusChangeTask {
   parentId: string | null;
   status: string;
   version: number;
+  /** The task's rule when the caller read it; undefined lets the successor step check itself. */
+  recurrenceRule?: string | null;
 }
 
 /**
@@ -744,8 +747,10 @@ export interface StatusChangeTask {
  * subtask keeps its rank, its group is its parent), version is incremented, and the status part
  * of the change is returned. With record true (the default) one TASK_STATUS_CHANGED row is
  * written; with record false the caller merges the values into its own single row (bulk and
- * reorder, plan 14-12). opts.now is the clock read after the locks (plan 14-09 adds the
- * recurrence successor here).
+ * reorder, plan 14-12). opts.now is the clock read after the locks. Moving a recurring task into
+ * DONE from another status also creates its next occurrence in the same transaction
+ * (spawnRecurrenceSuccessorInTx, plan 14-09; D-09), with the same batch id: every status path
+ * that calls this helper (setTaskStatus, reorderTask, bulkUpdateTasks) gets it.
  */
 export async function applyStatusChangeInTx(
   tx: ProjectDb,
@@ -769,6 +774,15 @@ export async function applyStatusChangeInTx(
     data: { ...data, version: { increment: 1 } },
   });
   if (updated.count !== 1) refuse("CONFLICT");
+  if (task.status !== "DONE" && newStatus === "DONE" && task.recurrenceRule !== null) {
+    await spawnRecurrenceSuccessorInTx(tx, {
+      orgId: context.orgId,
+      actorUserId: context.actorUserId,
+      task: { id: task.id },
+      now: opts.now,
+      batchId: opts.batchId,
+    });
+  }
   const values = {
     before: { status: task.status as TaskStatus },
     after: { status: newStatus },
