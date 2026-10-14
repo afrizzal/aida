@@ -4,17 +4,17 @@ milestone: v2.0
 milestone_name: Helpdesk & Projects
 current_phase: 14
 current_phase_name: projects-foundation
-status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11, 12, 12.1 and 12.2 verified human_needed; Phase 14 (Projects foundation) executing, plans 14-01 to 14-06 complete
-stopped_at: Completed 14-06-PLAN.md (task core: keys and the key namespace, createTask under the project FOR SHARE with the parent locked FOR SHARE, versioned edits, dates, status, one-level parenting, lists, lockTaskTreeInTx; trigger and service races PID-bound, section 17 isolation incl. ALIAS keys, K69); 14-07 next
+status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11, 12, 12.1 and 12.2 verified human_needed; Phase 14 (Projects foundation) executing, plans 14-01 to 14-07 complete
+stopped_at: Completed 14-07-PLAN.md (comments with renderTaskMarkdown, attachments validated, staged and discarded with an access-checked download read and cleanup outbox on delete, per-project labels and milestones with versioned task links; PID-bound deleteLabel race, section 17 isolation over 20 operations); 14-08 next
 last_updated: "2026-11-09T13:00:00.000Z"
 last_activity: 2026-11-09
-last_activity_desc: Plan 14-06 complete. keys.ts (counter UPDATE RETURNING, ACTIVE, ALIAS and TOMBSTONE helpers, resolveTaskKey) and tasks.ts (createTask, getTask, listProjectTasks, listWorkspaceTasks, updateTask, setTaskDates, setTaskStatus, setTaskParent, applyStatusChangeInTx, lockTaskTreeInTx, appendRankInTx, taskInputErrors). 20 parallel creates get keys 1 to 20; the subtask trigger holds in both interleavings; prefix change and createTask serialize both ways; the tree lock includes a subtask committed while it waited. Integration 36 passed in 4 files; next typegen, typecheck and biome exit 0. Commits 8ea4e89, c62584c and 9ac8470
+last_activity_desc: Plan 14-07 complete. comments.ts (add, list with renderTaskMarkdown, edit AUTHOR, delete AUTHOR_OR_MANAGE), attachments.ts (validate before staging, discard on refusal or error, READ-checked download read, delete queues ProjectFileCleanup), labels.ts and milestones.ts (case-insensitive names, MANAGE under PROJECT_UPDATE, versioned setTaskLabels and setTaskMilestone, deletes clear task references first with affectedTaskCount). Integration 42 passed in 3 files; next typegen, typecheck and biome exit 0. Commits da214e3, 8dbaa57 and fe9c698
 state_head: 75e5a731b94899099a85ae1ff6bdd0f623debc24
 progress:
   total_phases: 12
   completed_phases: 0
   total_plans: 86
-  completed_plans: 51
+  completed_plans: 52
   percent: 0
 ---
 
@@ -30,8 +30,8 @@ See: .planning/PROJECT.md (updated 2026-11-07, v2.0 opened)
 
 ## Current Position
 
-Phase: 14 (Projects foundation) is executing; plans 14-01 (frozen contract), 14-02 (schema foundation), 14-03 (pure helpers), 14-04 (core services), 14-05 (file cleanup outbox and sweep, worker uploads volume) and 14-06 (task core, keys, subtasks) are complete. Phases 11, 12, 12.1 and 12.2 are verified human_needed (no code gap; visual, dark-mode and screen-reader checks wait for a human). Phases 08, 09 and 10 are PARKED (owner decision); Phases 13, 16 and 17 are parked by dependency on Phase 10.
-Plan: 14-06 complete (task keys and namespace, task create, read, lists, versioned edits, dates, status and one-level subtasks; PID-bound races and section 17 isolation; 14-06-SUMMARY.md); next 14-07.
+Phase: 14 (Projects foundation) is executing; plans 14-01 (frozen contract), 14-02 (schema foundation), 14-03 (pure helpers), 14-04 (core services), 14-05 (file cleanup outbox and sweep, worker uploads volume) 14-06 (task core, keys, subtasks) and 14-07 (comments, attachments, labels, milestones) are complete. Phases 11, 12, 12.1 and 12.2 are verified human_needed (no code gap; visual, dark-mode and screen-reader checks wait for a human). Phases 08, 09 and 10 are PARKED (owner decision); Phases 13, 16 and 17 are parked by dependency on Phase 10.
+Plan: 14-07 complete (comments, attachments with upload, download read and delete, labels and milestones; PID-bound race and section 17 isolation over 20 operations; 14-07-SUMMARY.md); next 14-08.
 Status: Milestone v2.0 opened by hand on 2026-11-07. `REQUIREMENTS.md` (91 requirements) and `ROADMAP.md` (Phases 8–17) are written and were revised over three Codex critique rounds (queue item 0b done). The public demo was walked under the clean-room rules and added AIDA-100 to AIDA-114 (item 0c done). Phase 8 context is committed (`08-CONTEXT.md`, `8abbc6c`) and the phase is planned: 23 plans in 14 waves; three Codex review cycles; parked after cycle 3 (owner decision, `run-loop/LAPORAN.md`). No Phase 8 code has been executed. Baseline 0a is done: build passes; integration passes except the egress file; E2E passes 63 with two honesty-invariants flakes that pass alone (fixed by plan 08-17). The egress baseline (0a2) was parked while `binaries.prisma.sh` sent no bytes on GET (07.45 to 09.09); the host recovered and the test waits for the Rekriva regression to finish.
 Last activity: 2026-11-08 — Phase 10 parked after its third Codex plan review (K27); Phases 8 and 9 were parked the same way (K24, K25). v1.0.0 stays complete and archived; its archives are `milestones/v1.0.0-*`.
 
@@ -110,7 +110,7 @@ Also open (not audit items): `milestones/v1.0.0-phases/07-launch-readiness/defer
 ## Session Continuity
 
 **Last session:** 2026-11-09T13:00:00.000Z
-**Stopped at:** Completed 14-06-PLAN.md; Phase 14 executing, 14-07 next (2026-11-09)
+**Stopped at:** Completed 14-07-PLAN.md; Phase 14 executing, 14-08 next (2026-11-09)
 **Resume file:** .planning/run-loop/ANTREAN.md
 
 **Last action (2026-11-08):** Phase 10 parked after the third Codex plan review (2 HIGH findings accepted, not yet incorporated). No tag, nothing pushed.
