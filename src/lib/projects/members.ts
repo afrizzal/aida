@@ -12,6 +12,7 @@ import { findConservativeMembership } from "../membership";
 import { requireProject } from "./access";
 import { recordProjectActivity } from "./activity";
 import {
+  LIST_MAX,
   PROJECT_MEMBER_ROLES,
   type ProjectActor,
   type ProjectMemberRole,
@@ -23,8 +24,47 @@ import {
   newBatchId,
   type ProjectDb,
   refuse,
+  runProjectRead,
   runProjectTransaction,
 } from "./service";
+
+export interface ProjectMemberView {
+  userId: string;
+  name: string;
+  role: ProjectMemberRole;
+}
+
+export interface PersonView {
+  userId: string;
+  name: string;
+}
+
+/** Plain code-unit order (never localeCompare). */
+function codeUnitCompare(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function byNameThenId(a: PersonView, b: PersonView): number {
+  return codeUnitCompare(a.name, b.name) || codeUnitCompare(a.userId, b.userId);
+}
+
+/**
+ * The subset of userIds that still have a member row in the organization (C14): one read with the
+ * organization term. Every list of people and every manager count goes through it.
+ */
+export async function activeOrgUserIds(
+  db: ProjectDb,
+  orgId: string,
+  userIds: Iterable<string>,
+): Promise<Set<string>> {
+  const wanted = [...new Set(userIds)];
+  if (wanted.length === 0) return new Set();
+  const rows = await db.member.findMany({
+    where: { organizationId: orgId, userId: { in: wanted } },
+    select: { userId: true },
+  });
+  return new Set(rows.map((row) => row.userId));
+}
 
 function validRole(raw: unknown, fallback?: ProjectMemberRole): ProjectMemberRole {
   if (raw === undefined && fallback) return fallback;
@@ -84,6 +124,185 @@ export async function addProjectMember(
       entityType: "PROJECT_MEMBER",
       entityId: id,
       after: { userId, role },
+      batchId: newBatchId(),
+    });
+    return { changed: true };
+  });
+}
+
+/**
+ * READ: the project's direct members with role and name, managers first, then by name and user
+ * id. A user whose organization member row is gone is left out (C14); the stale row stays.
+ */
+export async function listProjectMembers(
+  actor: ProjectActor,
+  projectId: string,
+): Promise<ProjectResult<{ members: ProjectMemberView[] }>> {
+  return runProjectRead(actor, "listProjectMembers", async (db) => {
+    await requireProject(db, actor, projectId, { lock: "none", level: "READ" });
+    const rows = await db.projectMember.findMany({
+      where: { organizationId: actor.orgId, projectId },
+      select: { userId: true, role: true, user: { select: { name: true } } },
+    });
+    const active = await activeOrgUserIds(
+      db,
+      actor.orgId,
+      rows.map((row) => row.userId),
+    );
+    const members = rows
+      .filter((row) => active.has(row.userId))
+      .map((row) => ({
+        userId: row.userId,
+        name: row.user.name,
+        role: row.role as ProjectMemberRole,
+      }))
+      .sort((a, b) => codeUnitCompare(a.role, b.role) || byNameThenId(a, b))
+      .slice(0, LIST_MAX);
+    return { members };
+  });
+}
+
+/**
+ * READ: who a task of the project may be assigned to (C14, K69): every active organization member
+ * for a non-private project; for a private project the active direct members only (a member of an
+ * assigned team without a direct row is not eligible). By name, then user id.
+ */
+export async function listEligibleAssignees(
+  actor: ProjectActor,
+  projectId: string,
+): Promise<ProjectResult<{ assignees: PersonView[] }>> {
+  return runProjectRead(actor, "listEligibleAssignees", async (db) => {
+    const access = await requireProject(db, actor, projectId, { lock: "none", level: "READ" });
+    const people = new Map<string, string>();
+    if (access.project.isPrivate) {
+      const rows = await db.projectMember.findMany({
+        where: { organizationId: actor.orgId, projectId },
+        select: { userId: true, user: { select: { name: true } } },
+      });
+      // isEligibleAssignee's rule for a private project, for all rows in one read.
+      const active = await activeOrgUserIds(
+        db,
+        actor.orgId,
+        rows.map((row) => row.userId),
+      );
+      for (const row of rows) if (active.has(row.userId)) people.set(row.userId, row.user.name);
+    } else {
+      const rows = await db.member.findMany({
+        where: { organizationId: actor.orgId },
+        select: { userId: true, user: { select: { name: true } } },
+      });
+      for (const row of rows) people.set(row.userId, row.user.name);
+    }
+    const assignees = [...people]
+      .map(([userId, name]) => ({ userId, name }))
+      .sort(byNameThenId)
+      .slice(0, LIST_MAX);
+    return { assignees };
+  });
+}
+
+/**
+ * Last-manager rule (contract section 2, open point 8): refuses with LAST_MANAGER when taking the
+ * MANAGER role from targetUserId would leave no manager that still has an organization member
+ * row. A target that has no member row any more does not count, so removing it never refuses.
+ */
+async function assertNotLastManager(
+  tx: ProjectDb,
+  orgId: string,
+  projectId: string,
+  targetUserId: string,
+): Promise<void> {
+  const managers = await tx.projectMember.findMany({
+    where: { organizationId: orgId, projectId, role: "MANAGER" },
+    select: { userId: true },
+  });
+  const active = await activeOrgUserIds(
+    tx,
+    orgId,
+    managers.map((row) => row.userId),
+  );
+  if (!active.has(targetUserId)) return;
+  const others = [...active].filter((userId) => userId !== targetUserId);
+  if (others.length === 0) refuse("LAST_MANAGER");
+}
+
+/**
+ * SELF_OR_MANAGE under PROJECT_UPDATE: a member leaves (their own row; the project must be
+ * readable and not archived) or a manager removes a member. The last active manager is never
+ * removed (LAST_MANAGER). A user without a row is a no-op. MEMBER_REMOVED (before { userId, role }).
+ */
+export async function removeProjectMember(
+  actor: ProjectActor,
+  projectId: string,
+  userIdRaw: unknown,
+): Promise<ProjectResult<{ changed: boolean }>> {
+  return runProjectTransaction(actor, "removeProjectMember", async (tx) => {
+    const userId = validUserId(userIdRaw);
+    const self = userId === actor.userId;
+    await requireProject(tx, actor, projectId, {
+      lock: "update",
+      level: self ? "CONTENT" : "MANAGE",
+    });
+    await afterLock(tx, "removeProjectMember");
+    if (!isPlausibleId(userId)) return { changed: false };
+    const row = await tx.projectMember.findFirst({
+      where: { organizationId: actor.orgId, projectId, userId },
+      select: { id: true, role: true },
+    });
+    if (!row) return { changed: false };
+    if (row.role === "MANAGER") await assertNotLastManager(tx, actor.orgId, projectId, userId);
+    await tx.projectMember.deleteMany({ where: { id: row.id, organizationId: actor.orgId } });
+    await recordProjectActivity(tx, {
+      orgId: actor.orgId,
+      projectId,
+      actorUserId: actor.userId,
+      verb: "MEMBER_REMOVED",
+      entityType: "PROJECT_MEMBER",
+      entityId: row.id,
+      before: { userId, role: row.role },
+      batchId: newBatchId(),
+    });
+    return { changed: true };
+  });
+}
+
+/**
+ * MANAGE under PROJECT_UPDATE: promotes or demotes a direct member. Demoting the last active
+ * manager is LAST_MANAGER; a user without a row is NOT_FOUND; the same role is a no-op.
+ * MEMBER_ROLE_CHANGED (before { role }, after { role }).
+ */
+export async function setProjectMemberRole(
+  actor: ProjectActor,
+  projectId: string,
+  userIdRaw: unknown,
+  roleRaw: unknown,
+): Promise<ProjectResult<{ changed: boolean }>> {
+  return runProjectTransaction(actor, "setProjectMemberRole", async (tx) => {
+    const userId = validUserId(userIdRaw);
+    const role = validRole(roleRaw);
+    await requireProject(tx, actor, projectId, { lock: "update", level: "MANAGE" });
+    await afterLock(tx, "setProjectMemberRole");
+    if (!isPlausibleId(userId)) refuse("NOT_FOUND");
+    const row = await tx.projectMember.findFirst({
+      where: { organizationId: actor.orgId, projectId, userId },
+      select: { id: true, role: true },
+    });
+    if (!row) refuse("NOT_FOUND");
+    if (row.role === role) return { changed: false };
+    if (row.role === "MANAGER") await assertNotLastManager(tx, actor.orgId, projectId, userId);
+    await tx.projectMember.updateMany({
+      where: { id: row.id, organizationId: actor.orgId },
+      data: { role },
+    });
+    await recordProjectActivity(tx, {
+      orgId: actor.orgId,
+      projectId,
+      actorUserId: actor.userId,
+      verb: "MEMBER_ROLE_CHANGED",
+      entityType: "PROJECT_MEMBER",
+      entityId: row.id,
+      before: { role: row.role },
+      after: { role },
       batchId: newBatchId(),
     });
     return { changed: true };
