@@ -9,8 +9,15 @@
 // Task_dates_check are the database's second fence, mapped by runProjectTransaction.
 import type { Prisma } from "../../generated/prisma/client";
 import { renderTaskMarkdown } from "../markdown/render";
-import { isEligibleAssignee, requireProject, requireTask } from "./access";
-import { recordProjectActivity } from "./activity";
+import {
+  isEligibleAssignee,
+  type ProjectAccess,
+  readableProjectWhere,
+  requireProject,
+  requireTask,
+  type RowLockMode,
+} from "./access";
+import { changedValues, recordProjectActivity } from "./activity";
 import {
   type ActivityScalar,
   type CalendarDate,
@@ -20,6 +27,8 @@ import {
   ESTIMATE_MAX_MINUTES,
   fromCalendarDate,
   hasNul,
+  LIST_DEFAULT,
+  LIST_MAX,
   type ProjectActor,
   type ProjectRefusalCode,
   type ProjectResult,
@@ -474,6 +483,724 @@ export async function getTask(
         archivedViaParent: Boolean(access.parent?.archivedAt),
         subtasks: subtasks.map((s) => ({ ...s, status: s.status as TaskStatus })),
       },
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Shared write helpers (contract sections 3 and 14)
+
+const TASK_ROW_SELECT = {
+  id: true,
+  projectId: true,
+  parentId: true,
+  key: true,
+  title: true,
+  descriptionMarkdown: true,
+  status: true,
+  priority: true,
+  assigneeUserId: true,
+  startDate: true,
+  dueDate: true,
+  estimateMinutes: true,
+  rank: true,
+  archivedAt: true,
+  version: true,
+  recurrenceRule: true,
+} as const;
+
+type TaskRow = Prisma.TaskGetPayload<{ select: typeof TASK_ROW_SELECT }>;
+
+async function readTaskRow(
+  tx: ProjectDb,
+  orgId: string,
+  taskId: string,
+  projectId: string,
+): Promise<TaskRow> {
+  const row = await tx.task.findFirst({
+    where: { id: taskId, organizationId: orgId, projectId },
+    select: TASK_ROW_SELECT,
+  });
+  if (!row) refuse("NOT_FOUND");
+  return row;
+}
+
+/**
+ * A stale version or a conditional update's miss, classified by an explicit re-read through the
+ * read predicate (contract section 14): gone or unreadable NOT_FOUND, archived (the task, its
+ * parent or its project) ARCHIVED, else CONFLICT.
+ */
+async function classifyTaskMiss(tx: ProjectDb, actor: ProjectActor, taskId: string): Promise<never> {
+  const row = await tx.task.findFirst({
+    where: { id: taskId, organizationId: actor.orgId, project: readableProjectWhere(actor) },
+    select: {
+      projectId: true,
+      parentId: true,
+      archivedAt: true,
+      project: { select: { archivedAt: true } },
+    },
+  });
+  if (!row) refuse("NOT_FOUND");
+  if (row.archivedAt || row.project.archivedAt) refuse("ARCHIVED");
+  if (row.parentId) {
+    const parent = await tx.task.findFirst({
+      where: { id: row.parentId, organizationId: actor.orgId, projectId: row.projectId },
+      select: { archivedAt: true },
+    });
+    if (parent?.archivedAt) refuse("ARCHIVED");
+  }
+  return refuse("CONFLICT");
+}
+
+interface TaskEdit {
+  data: Prisma.TaskUncheckedUpdateManyInput;
+  before: ActivityRecord;
+  after: ActivityRecord;
+}
+
+/**
+ * The skeleton of the content edits (CONTENT, PROJECT_SHARE): the task FOR UPDATE through
+ * requireTask (a subtask's parent FOR SHARE first), afterLock, a stale version classified, no-op
+ * detection before any write, a conditional update on (id, organizationId, version) that
+ * increments version, and one TASK_UPDATED row with the changed keys only.
+ */
+async function editTask(
+  actor: ProjectActor,
+  operation: string,
+  taskId: string,
+  expectedVersionRaw: unknown,
+  plan: (tx: ProjectDb, row: TaskRow, access: ProjectAccess) => Promise<TaskEdit | null>,
+): Promise<ProjectResult<{ changed: boolean; version?: number }>> {
+  return runProjectTransaction(actor, operation, async (tx) => {
+    const expectedVersion = validVersion(expectedVersionRaw);
+    const access = await requireTask(tx, actor, taskId, {
+      lock: "share",
+      level: "CONTENT",
+      taskLock: "update",
+    });
+    await afterLock(tx, operation);
+    const row = await readTaskRow(tx, actor.orgId, taskId, access.task.projectId);
+    if (row.version !== expectedVersion) await classifyTaskMiss(tx, actor, taskId);
+    const edit = await plan(tx, row, access);
+    const diff = edit ? changedValues(edit.before, edit.after) : null;
+    if (!edit || !diff) return { changed: false };
+    const updated = await tx.task.updateMany({
+      where: { id: taskId, organizationId: actor.orgId, version: expectedVersion },
+      data: { ...edit.data, version: { increment: 1 } },
+    });
+    if (updated.count !== 1) await classifyTaskMiss(tx, actor, taskId);
+    await recordProjectActivity(tx, {
+      orgId: actor.orgId,
+      projectId: row.projectId,
+      taskId,
+      actorUserId: actor.userId,
+      verb: "TASK_UPDATED",
+      entityType: "TASK",
+      entityId: taskId,
+      before: diff.before,
+      after: diff.after,
+      batchId: newBatchId(),
+    });
+    return { changed: true, version: expectedVersion + 1 };
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Edits
+
+export interface UpdateTaskPatch {
+  title?: string;
+  description?: string | null;
+  priority?: TaskPriority;
+  assigneeUserId?: string | null;
+  estimateMinutes?: number | null;
+}
+
+/**
+ * Edits title, description, priority, assignee and estimate (CONTENT, PROJECT_SHARE, the task FOR
+ * UPDATE). A description change is recorded as descriptionChanged, never the text. An assignee
+ * must be eligible (an active organization member and, on a private project, a direct project
+ * member; K69): otherwise NOT_ELIGIBLE. The same values again are { changed: false }.
+ */
+export async function updateTask(
+  actor: ProjectActor,
+  taskId: string,
+  expectedVersion: number,
+  patch: UpdateTaskPatch,
+): Promise<ProjectResult<{ changed: boolean; version?: number }>> {
+  return editTask(actor, "updateTask", taskId, expectedVersion, async (tx, row) => {
+    const p = (patch ?? {}) as UpdateTaskPatch;
+    const value = validTaskInput(
+      {
+        title: p.title,
+        description: p.description,
+        priority: p.priority,
+        assigneeUserId: p.assigneeUserId,
+        estimateMinutes: p.estimateMinutes,
+      },
+      false,
+    );
+    const data: Prisma.TaskUncheckedUpdateManyInput = {};
+    const before: ActivityRecord = {};
+    const after: ActivityRecord = {};
+    if (value.title !== undefined && value.title !== row.title) {
+      data.title = value.title;
+      before.title = row.title;
+      after.title = value.title;
+    }
+    if (value.description !== undefined && value.description !== row.descriptionMarkdown) {
+      data.descriptionMarkdown = value.description;
+      before.descriptionChanged = false;
+      after.descriptionChanged = true;
+    }
+    if (value.priority !== undefined && value.priority !== row.priority) {
+      data.priority = value.priority;
+      before.priority = row.priority;
+      after.priority = value.priority;
+    }
+    if (value.assigneeUserId !== undefined && value.assigneeUserId !== row.assigneeUserId) {
+      if (
+        value.assigneeUserId !== null &&
+        !(await isEligibleAssignee(tx, actor.orgId, row.projectId, value.assigneeUserId))
+      ) {
+        refuse("NOT_ELIGIBLE");
+      }
+      data.assigneeUserId = value.assigneeUserId;
+      before.assigneeUserId = row.assigneeUserId;
+      after.assigneeUserId = value.assigneeUserId;
+    }
+    if (value.estimateMinutes !== undefined && value.estimateMinutes !== row.estimateMinutes) {
+      data.estimateMinutes = value.estimateMinutes;
+      before.estimateMinutes = row.estimateMinutes;
+      after.estimateMinutes = value.estimateMinutes;
+    }
+    return { data, before, after };
+  });
+}
+
+/**
+ * Sets the start and due dates (CONTENT, PROJECT_SHARE). A field left undefined keeps its stored
+ * value; null clears it. A start date after the due date (after merging) is INVALID_DATE_RANGE,
+ * and Task_dates_check refuses the same in the database. One TASK_UPDATED row with the changed
+ * dates only.
+ */
+export async function setTaskDates(
+  actor: ProjectActor,
+  taskId: string,
+  expectedVersion: number,
+  dates: { startDate?: CalendarDate | null; dueDate?: CalendarDate | null },
+): Promise<ProjectResult<{ changed: boolean; version?: number }>> {
+  return editTask(actor, "setTaskDates", taskId, expectedVersion, async (_tx, row) => {
+    const value = validTaskInput(
+      { startDate: dates?.startDate, dueDate: dates?.dueDate },
+      false,
+    );
+    const storedStart = calendarOrNull(row.startDate);
+    const storedDue = calendarOrNull(row.dueDate);
+    const start = value.startDate !== undefined ? value.startDate : storedStart;
+    const due = value.dueDate !== undefined ? value.dueDate : storedDue;
+    if (start && due && start > due) refuse("INVALID_DATE_RANGE");
+    const data: Prisma.TaskUncheckedUpdateManyInput = {};
+    const before: ActivityRecord = {};
+    const after: ActivityRecord = {};
+    if (start !== storedStart) {
+      data.startDate = dateOrNull(start);
+      before.startDate = storedStart;
+      after.startDate = start;
+    }
+    if (due !== storedDue) {
+      data.dueDate = dateOrNull(due);
+      before.dueDate = storedDue;
+      after.dueDate = due;
+    }
+    return { data, before, after };
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Status (contract sections 1, 5 and 8)
+
+export interface StatusChangeContext {
+  orgId: string;
+  actorUserId: string;
+}
+
+export interface StatusChangeTask {
+  id: string;
+  projectId: string;
+  parentId: string | null;
+  status: string;
+  version: number;
+}
+
+/**
+ * Writes a new status under the caller's project FOR UPDATE and task FOR UPDATE locks: a top-level
+ * task is appended to the end of its new status group (rebalancing that group when needed; a
+ * subtask keeps its rank, its group is its parent), version is incremented, and the status part
+ * of the change is returned. With record true (the default) one TASK_STATUS_CHANGED row is
+ * written; with record false the caller merges the values into its own single row (bulk and
+ * reorder, plan 14-12). opts.now is the clock read after the locks (plan 14-09 adds the
+ * recurrence successor here).
+ */
+export async function applyStatusChangeInTx(
+  tx: ProjectDb,
+  context: StatusChangeContext,
+  task: StatusChangeTask,
+  newStatus: TaskStatus,
+  opts: { now: Date; batchId: string; record?: boolean },
+): Promise<{ before: { status: TaskStatus }; after: { status: TaskStatus }; version: number }> {
+  const record = opts.record ?? true;
+  const data: Prisma.TaskUncheckedUpdateManyInput = { status: newStatus };
+  if (task.parentId === null) {
+    data.rank = await appendRankInTx(
+      tx,
+      context.orgId,
+      { projectId: task.projectId, status: newStatus, parentId: null },
+      { canRebalance: true, excludeTaskId: task.id },
+    );
+  }
+  const updated = await tx.task.updateMany({
+    where: { id: task.id, organizationId: context.orgId, version: task.version },
+    data: { ...data, version: { increment: 1 } },
+  });
+  if (updated.count !== 1) refuse("CONFLICT");
+  const values = {
+    before: { status: task.status as TaskStatus },
+    after: { status: newStatus },
+  };
+  if (record) {
+    await recordProjectActivity(tx, {
+      orgId: context.orgId,
+      projectId: task.projectId,
+      taskId: task.id,
+      actorUserId: context.actorUserId,
+      verb: "TASK_STATUS_CHANGED",
+      entityType: "TASK",
+      entityId: task.id,
+      before: values.before,
+      after: values.after,
+      batchId: opts.batchId,
+    });
+  }
+  return { ...values, version: task.version + 1 };
+}
+
+/**
+ * Moves a task to another status (CONTENT, PROJECT_UPDATE; the parent FOR SHARE and the task FOR
+ * UPDATE through requireTask). A status outside TASK_STATUSES is INVALID_INPUT; the same status
+ * is { changed: false }; a stale version is CONFLICT.
+ */
+export async function setTaskStatus(
+  actor: ProjectActor,
+  taskId: string,
+  expectedVersion: number,
+  status: TaskStatus,
+  opts: { now?: Date } = {},
+): Promise<ProjectResult<{ changed: boolean; version?: number }>> {
+  return runProjectTransaction(actor, "setTaskStatus", async (tx) => {
+    const version = validVersion(expectedVersion);
+    const access = await requireTask(tx, actor, taskId, {
+      lock: "update",
+      level: "CONTENT",
+      taskLock: "update",
+    });
+    await afterLock(tx, "setTaskStatus");
+    const now = opts?.now ?? new Date();
+    if (!(TASK_STATUSES as readonly unknown[]).includes(status)) refuse("INVALID_INPUT", "status");
+    const row = await readTaskRow(tx, actor.orgId, taskId, access.task.projectId);
+    if (row.version !== version) await classifyTaskMiss(tx, actor, taskId);
+    if (row.status === status) return { changed: false };
+    const result = await applyStatusChangeInTx(
+      tx,
+      { orgId: actor.orgId, actorUserId: actor.userId },
+      row,
+      status,
+      { now, batchId: newBatchId() },
+    );
+    return { changed: true, version: result.version };
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Parent (contract section 4)
+
+interface LockedTaskRow {
+  id: string;
+  projectId: string;
+  parentId: string | null;
+  status: string;
+  rank: number;
+  version: number;
+  archivedAt: Date | null;
+  recurrenceRule: string | null;
+}
+
+/**
+ * Makes a task a subtask of another top-level task of the same project, or top-level again with
+ * null (CONTENT, PROJECT_UPDATE; then the task and the new parent FOR UPDATE in one statement in
+ * id order). Refused before any write: the task itself INVALID_INPUT (field parentId), a parent
+ * outside the project NOT_FOUND, a parent that is a subtask or a task with subtasks
+ * SUBTASK_DEPTH, a recurring task RECURRENCE_ON_SUBTASK, an archived parent ARCHIVED. The trigger
+ * aida_task_subtask_depth is the second fence. The task is appended to its new group; one
+ * TASK_PARENT_CHANGED row.
+ */
+export async function setTaskParent(
+  actor: ProjectActor,
+  taskId: string,
+  expectedVersion: number,
+  parentId: string | null,
+): Promise<ProjectResult<{ changed: boolean; version?: number }>> {
+  return runProjectTransaction(actor, "setTaskParent", async (tx) => {
+    const version = validVersion(expectedVersion);
+    const access = await requireTask(tx, actor, taskId, { lock: "update", level: "CONTENT" });
+    const projectId = access.task.projectId;
+    const newParentId = parentId ?? null;
+    if (newParentId !== null && !isPlausibleId(newParentId)) refuse("NOT_FOUND");
+    if (newParentId === taskId) refuse("INVALID_INPUT", "parentId");
+    const ids = newParentId ? [taskId, newParentId] : [taskId];
+    const locked = await tx.$queryRaw<LockedTaskRow[]>`
+      SELECT "id", "projectId", "parentId", "status"::text AS "status", "rank", "version",
+             "archivedAt", "recurrenceRule"::text AS "recurrenceRule"
+      FROM "Task"
+      WHERE "organizationId" = ${actor.orgId} AND "projectId" = ${projectId}
+        AND "id" = ANY(${ids}::text[])
+      ORDER BY "id"
+      FOR UPDATE`;
+    await afterLock(tx, "setTaskParent");
+    const task = locked.find((row) => row.id === taskId);
+    if (!task) refuse("NOT_FOUND");
+    if (task.archivedAt) refuse("ARCHIVED");
+    if (task.version !== version) await classifyTaskMiss(tx, actor, taskId);
+    if (task.parentId === newParentId) return { changed: false };
+    let rank: number;
+    if (newParentId !== null) {
+      const parent = locked.find((row) => row.id === newParentId);
+      if (!parent) refuse("NOT_FOUND");
+      if (parent.parentId !== null) refuse("SUBTASK_DEPTH");
+      if (parent.archivedAt) refuse("ARCHIVED");
+      const child = await tx.task.findFirst({
+        where: { organizationId: actor.orgId, projectId, parentId: taskId },
+        select: { id: true },
+      });
+      if (child) refuse("SUBTASK_DEPTH");
+      if (task.recurrenceRule !== null) refuse("RECURRENCE_ON_SUBTASK");
+      rank = await appendRankInTx(
+        tx,
+        actor.orgId,
+        { projectId, parentId: newParentId },
+        { canRebalance: true, excludeTaskId: taskId },
+      );
+    } else {
+      rank = await appendRankInTx(
+        tx,
+        actor.orgId,
+        { projectId, status: task.status as TaskStatus, parentId: null },
+        { canRebalance: true, excludeTaskId: taskId },
+      );
+    }
+    const updated = await tx.task.updateMany({
+      where: { id: taskId, organizationId: actor.orgId, version },
+      data: { parentId: newParentId, rank, version: { increment: 1 } },
+    });
+    if (updated.count !== 1) await classifyTaskMiss(tx, actor, taskId);
+    await recordProjectActivity(tx, {
+      orgId: actor.orgId,
+      projectId,
+      taskId,
+      actorUserId: actor.userId,
+      verb: "TASK_PARENT_CHANGED",
+      entityType: "TASK",
+      entityId: taskId,
+      before: { parentId: task.parentId },
+      after: { parentId: newParentId },
+      batchId: newBatchId(),
+    });
+    return { changed: true, version: version + 1 };
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Tree lock (contract section 3, review C3)
+
+export interface TreeTaskRow {
+  id: string;
+  projectId: string;
+  parentId: string | null;
+  number: number;
+  key: string;
+  status: string;
+  rank: number;
+  version: number;
+  archivedAt: Date | null;
+}
+
+/**
+ * Locks a task tree (deleteTask, moveTask): first the root in its own statement, then, in a second
+ * statement that runs after the root lock, its subtasks in id order, both with the organization
+ * term. A subtask committed while the root lock waited is therefore included. Null when the root
+ * is gone. The caller holds the project lock of its operation.
+ */
+export async function lockTaskTreeInTx(
+  tx: ProjectDb,
+  orgId: string,
+  rootTaskId: string,
+  mode: RowLockMode,
+): Promise<{ root: TreeTaskRow; subtasks: TreeTaskRow[] } | null> {
+  if (!isPlausibleId(rootTaskId)) return null;
+  const roots =
+    mode === "update"
+      ? await tx.$queryRaw<TreeTaskRow[]>`
+          SELECT "id", "projectId", "parentId", "number", "key", "status"::text AS "status",
+                 "rank", "version", "archivedAt"
+          FROM "Task" WHERE "id" = ${rootTaskId} AND "organizationId" = ${orgId}
+          FOR UPDATE`
+      : await tx.$queryRaw<TreeTaskRow[]>`
+          SELECT "id", "projectId", "parentId", "number", "key", "status"::text AS "status",
+                 "rank", "version", "archivedAt"
+          FROM "Task" WHERE "id" = ${rootTaskId} AND "organizationId" = ${orgId}
+          FOR SHARE`;
+  const root = roots[0];
+  if (!root) return null;
+  const subtasks =
+    mode === "update"
+      ? await tx.$queryRaw<TreeTaskRow[]>`
+          SELECT "id", "projectId", "parentId", "number", "key", "status"::text AS "status",
+                 "rank", "version", "archivedAt"
+          FROM "Task" WHERE "parentId" = ${rootTaskId} AND "organizationId" = ${orgId}
+          ORDER BY "id"
+          FOR UPDATE`
+      : await tx.$queryRaw<TreeTaskRow[]>`
+          SELECT "id", "projectId", "parentId", "number", "key", "status"::text AS "status",
+                 "rank", "version", "archivedAt"
+          FROM "Task" WHERE "parentId" = ${rootTaskId} AND "organizationId" = ${orgId}
+          ORDER BY "id"
+          FOR SHARE`;
+  return { root, subtasks };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Lists (contract sections 2, 10 and 15)
+
+export interface TaskListItem {
+  id: string;
+  projectId: string;
+  parentId: string | null;
+  key: string;
+  title: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  assigneeUserId: string | null;
+  startDate: CalendarDate | null;
+  dueDate: CalendarDate | null;
+  rank: number;
+  archivedAt: Date | null;
+  version: number;
+}
+
+const TASK_LIST_SELECT = {
+  id: true,
+  projectId: true,
+  parentId: true,
+  key: true,
+  title: true,
+  status: true,
+  priority: true,
+  assigneeUserId: true,
+  startDate: true,
+  dueDate: true,
+  rank: true,
+  archivedAt: true,
+  version: true,
+} as const;
+
+function toListItem(row: Prisma.TaskGetPayload<{ select: typeof TASK_LIST_SELECT }>): TaskListItem {
+  return {
+    ...row,
+    status: row.status as TaskStatus,
+    priority: row.priority as TaskPriority,
+    startDate: calendarOrNull(row.startDate),
+    dueDate: calendarOrNull(row.dueDate),
+  };
+}
+
+function listLimit(raw: unknown): number {
+  const limit = raw ?? LIST_DEFAULT;
+  if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1) {
+    refuse("INVALID_INPUT", "limit");
+  }
+  return Math.min(limit, LIST_MAX);
+}
+
+function encodeCursor(value: unknown[]): string {
+  return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+}
+
+function decodeCursor(cursor: unknown): unknown[] {
+  try {
+    if (typeof cursor !== "string") throw new Error("cursor");
+    const parsed: unknown = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+    if (Array.isArray(parsed)) return parsed;
+  } catch {
+    // falls through to the refusal
+  }
+  return refuse("INVALID_INPUT", "cursor");
+}
+
+function validStatusFilter(raw: unknown): TaskStatus | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!(TASK_STATUSES as readonly unknown[]).includes(raw)) refuse("INVALID_INPUT", "status");
+  return raw as TaskStatus;
+}
+
+function validAssigneeFilter(filters: object): Prisma.TaskWhereInput | null {
+  if (!("assigneeUserId" in filters)) return null;
+  const raw = (filters as { assigneeUserId?: unknown }).assigneeUserId;
+  if (raw === undefined) return null;
+  if (raw === null) return { assigneeUserId: null };
+  if (!isPlausibleId(raw)) refuse("INVALID_INPUT", "assigneeUserId");
+  return { assigneeUserId: raw };
+}
+
+function archivedTerms(orgId: string, archived: unknown): Prisma.TaskWhereInput[] {
+  const mode = archived ?? "exclude";
+  if (mode === "include") return [];
+  const parentLive: Prisma.TaskWhereInput = {
+    OR: [{ parentId: null }, { parent: { organizationId: orgId, archivedAt: null } }],
+  };
+  if (mode === "exclude") return [{ archivedAt: null }, parentLive];
+  if (mode === "only") {
+    return [
+      {
+        OR: [
+          { archivedAt: { not: null } },
+          { parent: { organizationId: orgId, archivedAt: { not: null } } },
+        ],
+      },
+    ];
+  }
+  return refuse("INVALID_INPUT", "archived");
+}
+
+export interface ListProjectTasksFilters {
+  status?: TaskStatus;
+  /** Top-level tasks when absent or null; the subtasks of that task otherwise. */
+  parentId?: string | null;
+  /** null lists unassigned tasks. */
+  assigneeUserId?: string | null;
+  archived?: "exclude" | "only" | "include";
+  cursor?: string | null;
+  limit?: number;
+}
+
+/**
+ * The tasks of one project (READ): top-level by default or the subtasks of parentId, filtered by
+ * status, assignee and archive state (default exclude; a subtask of an archived parent counts as
+ * archived), ordered by (rank, id), keyset-paged (limit at most LIST_MAX).
+ */
+export async function listProjectTasks(
+  actor: ProjectActor,
+  projectId: string,
+  filters: ListProjectTasksFilters = {},
+): Promise<ProjectResult<{ tasks: TaskListItem[]; hasMore: boolean; nextCursor: string | null }>> {
+  return runProjectRead(actor, "listProjectTasks", async (db) => {
+    await requireProject(db, actor, projectId, { lock: "none", level: "READ" });
+    const f = filters ?? {};
+    const orgId = actor.orgId;
+    const limit = listLimit(f.limit);
+    const parentId = f.parentId ?? null;
+    if (parentId !== null && !isPlausibleId(parentId)) refuse("INVALID_INPUT", "parentId");
+    const terms: Prisma.TaskWhereInput[] = [{ organizationId: orgId, projectId, parentId }];
+    const status = validStatusFilter(f.status);
+    if (status) terms.push({ status });
+    const assignee = validAssigneeFilter(f);
+    if (assignee) terms.push(assignee);
+    terms.push(...archivedTerms(orgId, f.archived));
+    if (f.cursor !== undefined && f.cursor !== null) {
+      const [rank, id] = decodeCursor(f.cursor);
+      if (typeof rank !== "number" || !Number.isSafeInteger(rank) || typeof id !== "string") {
+        refuse("INVALID_INPUT", "cursor");
+      }
+      terms.push({ OR: [{ rank: { gt: rank } }, { rank, id: { gt: id } }] });
+    }
+    const found = await db.task.findMany({
+      where: { AND: terms },
+      orderBy: [{ rank: "asc" }, { id: "asc" }],
+      take: limit + 1,
+      select: TASK_LIST_SELECT,
+    });
+    const hasMore = found.length > limit;
+    const page = found.slice(0, limit);
+    const last = page[page.length - 1];
+    return {
+      tasks: page.map(toListItem),
+      hasMore,
+      nextCursor: hasMore && last ? encodeCursor([last.rank, last.id]) : null,
+    };
+  });
+}
+
+export interface ListWorkspaceTasksFilters {
+  /** null lists unassigned tasks. */
+  assigneeUserId?: string | null;
+  status?: TaskStatus;
+  dueFrom?: CalendarDate;
+  dueTo?: CalendarDate;
+  cursor?: string | null;
+  limit?: number;
+}
+
+/**
+ * Tasks across every project the actor can read now (READ, isolation LIST: a non-private project
+ * or a direct ProjectMember row, K69), leaving out archived projects, archived tasks and subtasks
+ * of archived parents, filtered by assignee, status and a due-date range (inclusive), ordered by
+ * id, keyset-paged.
+ */
+export async function listWorkspaceTasks(
+  actor: ProjectActor,
+  filters: ListWorkspaceTasksFilters = {},
+): Promise<ProjectResult<{ tasks: TaskListItem[]; hasMore: boolean; nextCursor: string | null }>> {
+  return runProjectRead(actor, "listWorkspaceTasks", async (db) => {
+    const f = filters ?? {};
+    const orgId = actor.orgId;
+    const limit = listLimit(f.limit);
+    const terms: Prisma.TaskWhereInput[] = [
+      { organizationId: orgId, project: { AND: [readableProjectWhere(actor), { archivedAt: null }] } },
+      ...archivedTerms(orgId, "exclude"),
+    ];
+    const status = validStatusFilter(f.status);
+    if (status) terms.push({ status });
+    const assignee = validAssigneeFilter(f);
+    if (assignee) terms.push(assignee);
+    const range: { gte?: Date; lte?: Date } = {};
+    if (f.dueFrom !== undefined) {
+      const from = parseCalendarDate(f.dueFrom);
+      if (from === null) refuse("INVALID_INPUT", "dueFrom");
+      range.gte = fromCalendarDate(from);
+    }
+    if (f.dueTo !== undefined) {
+      const to = parseCalendarDate(f.dueTo);
+      if (to === null) refuse("INVALID_INPUT", "dueTo");
+      range.lte = fromCalendarDate(to);
+    }
+    if (range.gte || range.lte) terms.push({ dueDate: range });
+    if (f.cursor !== undefined && f.cursor !== null) {
+      const [id] = decodeCursor(f.cursor);
+      if (typeof id !== "string") refuse("INVALID_INPUT", "cursor");
+      terms.push({ id: { gt: id } });
+    }
+    const found = await db.task.findMany({
+      where: { AND: terms },
+      orderBy: [{ id: "asc" }],
+      take: limit + 1,
+      select: TASK_LIST_SELECT,
+    });
+    const hasMore = found.length > limit;
+    const page = found.slice(0, limit);
+    const last = page[page.length - 1];
+    return {
+      tasks: page.map(toListItem),
+      hasMore,
+      nextCursor: hasMore && last ? encodeCursor([last.id]) : null,
     };
   });
 }
