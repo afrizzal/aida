@@ -2,10 +2,13 @@
 // Testcontainers. Each describe names the finding it proves. Every case seeds fresh organizations.
 import { describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
+import { listProjectActivity } from "@/lib/projects/activity";
 import { setProjectMemberRole } from "@/lib/projects/members";
 import {
   createProject,
   getProject,
+  listProjects,
+  moveProjectPosition,
   setProjectPrivacy,
   setProjectStatus,
   updateProject,
@@ -164,5 +167,136 @@ describe("a-IN-04: setProjectMemberRole to MANAGER requires an active organizati
       ok: true,
       changed: true,
     });
+  });
+});
+
+describe("a-CR-01, K71: hidden private projects change no visible order value, cursor, result or activity", () => {
+  type Normalized = unknown;
+
+  /** One world: the reader's projects V1..V3, with or without private projects of another user. */
+  async function orderWorld(hidden: boolean) {
+    const org = await seedOrgWithMembers(prisma, ["owner", "member", "member"]);
+    const readerId = org.users[1]?.id as string;
+    const otherId = org.users[2]?.id as string;
+    const reader = actorOf(readerId, org.orgId);
+    const other = actorOf(otherId, org.orgId);
+    const ids: Record<string, string> = {};
+    const create = async (actor: typeof reader, name: string, isPrivate: boolean) => {
+      const r = await createProject(actor, { name, keyPrefix: name, isPrivate });
+      if (!r.ok) throw new Error(`createProject ${name}: ${r.code}`);
+      return r.projectId;
+    };
+    ids.V1 = await create(reader, "VA", false);
+    if (hidden) await create(other, "HA", true);
+    ids.V2 = await create(reader, "VB", false);
+    if (hidden) {
+      await create(other, "HB", true);
+      await create(other, "HC", true);
+    }
+    ids.V3 = await create(reader, "VC", false);
+    const placeholders = new Map<string, string>([
+      [org.orgId, "ORG"],
+      [readerId, "READER"],
+      [otherId, "OTHER"],
+      [ids.V1, "V1"],
+      [ids.V2, "V2"],
+      [ids.V3, "V3"],
+    ]);
+    return { orgId: org.orgId, reader, ids, placeholders };
+  }
+
+  type OrderWorld = Awaited<ReturnType<typeof orderWorld>>;
+
+  /** Ids to placeholders, cursors decoded, per-row generated values fixed. */
+  function normalize(w: OrderWorld, value: unknown): Normalized {
+    const decodeCursors = (v: unknown): unknown => {
+      if (Array.isArray(v)) return v.map(decodeCursors);
+      if (v && typeof v === "object" && !(v instanceof Date)) {
+        const out: Record<string, unknown> = {};
+        for (const [k, item] of Object.entries(v)) {
+          if (k === "nextCursor" && typeof item === "string") {
+            out[k] = Buffer.from(item, "base64url").toString("utf8");
+          } else if (
+            k === "createdAt" ||
+            k === "updatedAt" ||
+            k === "batchId" ||
+            (k === "id" && "verb" in v)
+          ) {
+            out[k] = "generated";
+          } else {
+            out[k] = decodeCursors(item);
+          }
+        }
+        return out;
+      }
+      return v;
+    };
+    let text = JSON.stringify(decodeCursors(value));
+    for (const [id, name] of w.placeholders) text = text.split(id).join(name);
+    return JSON.parse(text);
+  }
+
+  async function story(w: OrderWorld): Promise<Normalized[]> {
+    const out: unknown[] = [];
+    const listAll = async () => {
+      const pages: unknown[] = [];
+      let cursor: string | null = null;
+      for (let i = 0; i < 10; i++) {
+        const page = await listProjects(w.reader, { limit: 1, cursor });
+        pages.push(page);
+        if (!page.ok || !page.hasMore) break;
+        cursor = page.nextCursor;
+      }
+      return pages;
+    };
+    out.push(await listAll());
+    for (const id of [w.ids.V1, w.ids.V2, w.ids.V3]) out.push(await getProject(w.reader, id));
+    // V2 is visibly right after V1 in both worlds: a no-op in both.
+    out.push(
+      await moveProjectPosition(w.reader, w.ids.V2 as string, { placeAfterProjectId: w.ids.V1 }),
+    );
+    // Halve the same gap until the organization-wide order is renumbered.
+    for (let i = 0; i < 14; i++) {
+      const moved = i % 2 === 0 ? w.ids.V3 : w.ids.V2;
+      out.push(
+        await moveProjectPosition(w.reader, moved as string, { placeAfterProjectId: w.ids.V1 }),
+      );
+    }
+    out.push(
+      await moveProjectPosition(w.reader, w.ids.V1 as string, { placeAfterProjectId: null }),
+    );
+    out.push(
+      await moveProjectPosition(w.reader, w.ids.V3 as string, { placeAfterProjectId: null }),
+    );
+    out.push(await listAll());
+    for (const id of [w.ids.V1, w.ids.V2, w.ids.V3]) {
+      out.push(await getProject(w.reader, id as string));
+      out.push(await listProjectActivity(w.reader, id as string));
+    }
+    // A project created now sits last among the visible ones.
+    const late = await createProject(w.reader, { name: "Late", keyPrefix: "VD" });
+    if (!late.ok) throw new Error(late.code);
+    w.placeholders.set(late.projectId, "V4");
+    out.push(await getProject(w.reader, late.projectId));
+    out.push(await listAll());
+    return out.map((item) => normalize(w, item));
+  }
+
+  it("two worlds that differ only by hidden private projects give identical results", async () => {
+    const plain = await orderWorld(false);
+    const withHidden = await orderWorld(true);
+    const expected = await story(plain);
+    const actual = await story(withHidden);
+    expect(actual).toEqual(expected);
+    // The story did move projects, and the visible order is the expected one.
+    const finalList = expected[expected.length - 1] as { ok: true; projects: { id: string }[] }[];
+    expect(finalList.flatMap((page) => page.projects.map((p) => p.id))).toEqual([
+      "V3",
+      "V1",
+      "V2",
+      "V4",
+    ]);
+    // The raw organization-wide value is never returned or recorded.
+    expect(JSON.stringify(actual)).not.toMatch(/"position"/);
   });
 });

@@ -434,8 +434,9 @@ describe("moveProjectPosition and listProjects", () => {
     expect(reordered[0]).toMatchObject({
       verb: "PROJECT_REORDERED",
       projectId: d,
-      before: { position: 13 },
-      after: { position: 2048 },
+      // K71: no stored position and no neighbour is recorded.
+      before: null,
+      after: null,
     });
 
     // c first (null), then b after d (between two positions, no rebalance).

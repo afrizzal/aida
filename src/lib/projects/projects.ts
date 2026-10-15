@@ -45,6 +45,7 @@ import { activeOrgUserIds } from "./members";
 import { appendRank, rankBetween, rebalancedRanks } from "./rank";
 import {
   afterLock,
+  isPlausibleId,
   newBatchId,
   type ProjectDb,
   refuse,
@@ -262,7 +263,6 @@ export interface ProjectView {
   dueDate: CalendarDate | null;
   isPrivate: boolean;
   keyPrefix: string;
-  position: number;
   archivedAt: Date | null;
   version: number;
   createdByUserId: string | null;
@@ -292,7 +292,6 @@ export async function getProject(
         dueDate: p.dueDate ? toCalendarDate(p.dueDate) : null,
         isPrivate: p.isPrivate,
         keyPrefix: p.keyPrefix,
-        position: p.position,
         archivedAt: p.archivedAt,
         version: p.version,
         createdByUserId: p.createdByUserId,
@@ -511,10 +510,14 @@ export async function changeProjectKeyPrefix(
 // Order (contract section 8, AIDA-64)
 
 /**
- * Places a project right after another one (null: first) in the organization-wide order (MANAGE,
- * ORG_PROJECTS_UPDATE). When no integer lies between the neighbours, every project of the
- * organization is renumbered in its current order with the moved one at its new place. Position
- * is not a content field, so version stays. One PROJECT_REORDERED row.
+ * Places a project right after another readable one (null: first) in the organization-wide order
+ * (MANAGE, ORG_PROJECTS_UPDATE). Run decision K71 (review a-CR-01): the stored position is
+ * internal; the no-op test uses the order among the projects the caller can read, the project is
+ * placed directly after its anchor in the full order (hidden rows keep their places), and when no
+ * integer fits every project of the organization is renumbered internally. Neither the result nor
+ * the activity row carries a position or a neighbour, so nothing depends on projects the caller or
+ * a later reader of the feed cannot read. Position is not a content field, so version stays. One
+ * PROJECT_REORDERED row with before and after null.
  */
 export async function moveProjectPosition(
   actor: ProjectActor,
@@ -526,10 +529,7 @@ export async function moveProjectPosition(
     if (placeAfter !== null && typeof placeAfter !== "string") {
       refuse("INVALID_INPUT", "placeAfterProjectId");
     }
-    const access = await requireProject(tx, actor, projectId, {
-      lock: "org-update",
-      level: "MANAGE",
-    });
+    await requireProject(tx, actor, projectId, { lock: "org-update", level: "MANAGE" });
     if (placeAfter === projectId) refuse("INVALID_INPUT", "placeAfterProjectId");
     if (
       placeAfter !== null &&
@@ -543,14 +543,19 @@ export async function moveProjectPosition(
       orderBy: [{ position: "asc" }, { id: "asc" }],
       select: { id: true, position: true },
     });
-    const currentIndex = ordered.findIndex((row) => row.id === projectId);
-    const currentPrev = currentIndex > 0 ? (ordered[currentIndex - 1]?.id ?? null) : null;
-    if (currentPrev === placeAfter) return { changed: false };
+    const readable = await readableProjectIds(
+      tx,
+      actor,
+      ordered.map((row) => row.id),
+    );
+    const visible = ordered.filter((row) => readable.has(row.id));
+    const visibleIndex = visible.findIndex((row) => row.id === projectId);
+    const visiblePrev = visibleIndex > 0 ? (visible[visibleIndex - 1]?.id ?? null) : null;
+    if (visiblePrev === placeAfter) return { changed: false };
     const others = ordered.filter((row) => row.id !== projectId);
     const index = placeAfter === null ? 0 : others.findIndex((row) => row.id === placeAfter) + 1;
     const prev = index > 0 ? (others[index - 1] ?? null) : null;
     const next = others[index] ?? null;
-    const oldPosition = access.project.position;
     let newPosition = rankBetween(prev?.position ?? null, next?.position ?? null);
     if (newPosition === null) {
       const target = [...others.slice(0, index), { id: projectId }, ...others.slice(index)];
@@ -574,8 +579,8 @@ export async function moveProjectPosition(
       verb: "PROJECT_REORDERED",
       entityType: "PROJECT",
       entityId: projectId,
-      before: { position: oldPosition },
-      after: { position: newPosition },
+      before: null,
+      after: null,
       batchId: newBatchId(),
     });
     return { changed: true };
@@ -595,27 +600,20 @@ export interface ProjectListItem {
   isPrivate: boolean;
   dueDate: CalendarDate | null;
   archivedAt: Date | null;
-  position: number;
   version: number;
 }
 
-function encodeProjectCursor(row: { position: number; id: string }): string {
-  return Buffer.from(JSON.stringify([row.position, row.id]), "utf8").toString("base64url");
+/** K71: the cursor names the last returned project only, never its stored position. */
+function encodeProjectCursor(row: { id: string }): string {
+  return Buffer.from(JSON.stringify([row.id]), "utf8").toString("base64url");
 }
 
-function decodeProjectCursor(cursor: unknown): { position: number; id: string } {
+function decodeProjectCursor(cursor: unknown): string {
   try {
-    if (typeof cursor !== "string") throw new Error("cursor");
+    if (typeof cursor !== "string" || cursor.length > 512) throw new Error("cursor");
     const parsed: unknown = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
-    if (Array.isArray(parsed) && parsed.length === 2) {
-      const [position, id] = parsed as unknown[];
-      if (
-        typeof position === "number" &&
-        Number.isSafeInteger(position) &&
-        typeof id === "string"
-      ) {
-        return { position, id };
-      }
+    if (Array.isArray(parsed) && parsed.length === 1 && isPlausibleId(parsed[0])) {
+      return parsed[0];
     }
   } catch {
     // falls through to the refusal
@@ -624,8 +622,9 @@ function decodeProjectCursor(cursor: unknown): { position: number; id: string } 
 }
 
 /**
- * The projects the actor can read now (non-private or a direct ProjectMember row), ordered by
- * (position, id), archived ones only with archived "only" or "include", keyset-paged (limit at
+ * The projects the actor can read now (non-private or a direct ProjectMember row), in the
+ * organization's order (stored position, then id; neither the position nor a cursor holding it is
+ * returned, K71), archived ones only with archived "only" or "include", keyset-paged (limit at
  * most LIST_MAX).
  */
 export async function listProjects(
@@ -644,7 +643,13 @@ export async function listProjects(
     if (archived === "exclude") terms.push({ archivedAt: null });
     if (archived === "only") terms.push({ archivedAt: { not: null } });
     if (opts.cursor !== undefined && opts.cursor !== null) {
-      const c = decodeProjectCursor(opts.cursor);
+      // The cursor's project is re-read under the read predicate (K71); unreadable or gone:
+      // INVALID_INPUT, the same as a malformed cursor.
+      const c = await db.project.findFirst({
+        where: { AND: [readableProjectWhere(actor), { id: decodeProjectCursor(opts.cursor) }] },
+        select: { id: true, position: true },
+      });
+      if (!c) refuse("INVALID_INPUT", "cursor");
       terms.push({
         OR: [{ position: { gt: c.position } }, { position: c.position, id: { gt: c.id } }],
       });
@@ -663,7 +668,6 @@ export async function listProjects(
         isPrivate: true,
         dueDate: true,
         archivedAt: true,
-        position: true,
         version: true,
       },
     });
