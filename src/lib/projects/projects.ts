@@ -40,6 +40,7 @@ import {
   RANK_MAX,
   toCalendarDate,
 } from "./contract";
+import { activeOrgUserIds } from "./members";
 import { appendRank, rankBetween, rebalancedRanks } from "./rank";
 import {
   afterLock,
@@ -138,6 +139,20 @@ async function reservePrefix(
     select: { projectId: true },
   });
   if (!row || row.projectId !== projectId) refuse("PREFIX_TAKEN");
+}
+
+/** LAST_MANAGER unless a MANAGER row of the project belongs to an active organization member. */
+async function assertActiveManager(tx: ProjectDb, orgId: string, projectId: string): Promise<void> {
+  const managers = await tx.projectMember.findMany({
+    where: { organizationId: orgId, projectId, role: "MANAGER" },
+    select: { userId: true },
+  });
+  const active = await activeOrgUserIds(
+    tx,
+    orgId,
+    managers.map((row) => row.userId),
+  );
+  if (active.size === 0) refuse("LAST_MANAGER");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -441,7 +456,11 @@ export async function setProjectStatus(
   });
 }
 
-/** Makes a project private or non-private (MANAGE). Copies nothing (K69). */
+/**
+ * Makes a project private or non-private (MANAGE). Copies nothing (K69). Making it private needs at
+ * least one MANAGER row of an active organization member (review a-WR-04): owners and admins do
+ * not bypass privacy, so without one nobody could reach the project afterwards; LAST_MANAGER.
+ */
 export async function setProjectPrivacy(
   actor: ProjectActor,
   projectId: string,
@@ -455,6 +474,7 @@ export async function setProjectPrivacy(
       data: { isPrivate: next },
       before: { isPrivate: p.isPrivate },
       after: { isPrivate: next },
+      beforeWrite: next ? (tx) => assertActiveManager(tx, actor.orgId, projectId) : undefined,
     };
   });
 }

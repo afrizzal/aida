@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import {
   createProject,
   getProject,
+  setProjectPrivacy,
   setProjectStatus,
   updateProject,
 } from "@/lib/projects/projects";
@@ -12,6 +13,7 @@ import { createTask, getTask, updateTask } from "@/lib/projects/tasks";
 import {
   actorOf,
   projectTableSnapshot,
+  removeOrgMember,
   seedOrgWithMembers,
   seedProject,
 } from "../support/project-fixtures";
@@ -110,3 +112,30 @@ describe("a-IN-02: editProject checks expectedVersion before the no-op test", ()
     });
   });
 });
+
+describe("a-WR-04: setProjectPrivacy(true) needs an active manager to remain", () => {
+  it("an org admin cannot make a project private when no MANAGER row belongs to an active member", async () => {
+    const w = await managerWorld();
+    const admin = actorOf(w.org.users[0]?.id as string, w.orgId);
+    await removeOrgMember(prisma, w.orgId, w.managerId);
+    const before = await projectTableSnapshot(prisma, w.orgId);
+    expect(await setProjectPrivacy(admin, w.project.id, 0, true)).toEqual({
+      ok: false,
+      code: "LAST_MANAGER",
+    });
+    expect(await projectTableSnapshot(prisma, w.orgId)).toEqual(before);
+    // Making it non-private again, or a project with an active manager, is unaffected.
+    const other = await managerWorld();
+    expect(await setProjectPrivacy(other.manager, other.project.id, 0, true)).toEqual({
+      ok: true,
+      changed: true,
+      version: 1,
+    });
+    expect(await setProjectPrivacy(other.manager, other.project.id, 1, false)).toEqual({
+      ok: true,
+      changed: true,
+      version: 2,
+    });
+  });
+});
+
