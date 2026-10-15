@@ -14,7 +14,7 @@
 // given) that increments version, followed by one activity row; a miss is classified by a re-read
 // through the read predicate (the missRefusal pattern of section 14). Every statement writes the
 // organization term (C1).
-import { readableProjectWhere, requireProject } from "./access";
+import { readableProjectWhere, requireProject, requireTask } from "./access";
 import { recordProjectActivity } from "./activity";
 import type { ProjectActor, ProjectResult } from "./contract";
 import { afterLock, newBatchId, type ProjectDb, refuse, runProjectTransaction } from "./service";
@@ -38,6 +38,33 @@ async function classifyProjectMiss(
   });
   if (!row) refuse("NOT_FOUND");
   if (row.archivedAt) refuse("ARCHIVED");
+  return refuse("CONFLICT");
+}
+
+/** A task miss: gone or unreadable NOT_FOUND, archived (task, parent or project) ARCHIVED, else CONFLICT. */
+async function classifyTaskMiss(
+  tx: ProjectDb,
+  actor: ProjectActor,
+  taskId: string,
+): Promise<never> {
+  const row = await tx.task.findFirst({
+    where: { id: taskId, organizationId: actor.orgId, project: readableProjectWhere(actor) },
+    select: {
+      projectId: true,
+      parentId: true,
+      archivedAt: true,
+      project: { select: { archivedAt: true } },
+    },
+  });
+  if (!row) refuse("NOT_FOUND");
+  if (row.archivedAt || row.project.archivedAt) refuse("ARCHIVED");
+  if (row.parentId) {
+    const parent = await tx.task.findFirst({
+      where: { id: row.parentId, organizationId: actor.orgId, projectId: row.projectId },
+      select: { archivedAt: true },
+    });
+    if (parent?.archivedAt) refuse("ARCHIVED");
+  }
   return refuse("CONFLICT");
 }
 
@@ -112,5 +139,90 @@ export async function restoreProject(
       batchId: newBatchId(),
     });
     return { changed: true, version: access.project.version + 1 };
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Tasks
+
+/**
+ * Archives a task (CONTENT under PROJECT_SHARE): the task FOR UPDATE through requireTask (a
+ * subtask's parent FOR SHARE first, review C3), archive state read from the locked rows, a
+ * conditional update of this row only (archivedAt null and the version matching), version
+ * incremented, one TASK_ARCHIVED row. A parent's subtasks keep their own archivedAt and count as
+ * archived through the parent.
+ */
+export async function archiveTask(
+  actor: ProjectActor,
+  taskId: string,
+  expectedVersion: number,
+): Promise<ProjectResult<{ changed: boolean; version: number }>> {
+  return runProjectTransaction(actor, "archiveTask", async (tx) => {
+    const version = validVersion(expectedVersion);
+    const access = await requireTask(tx, actor, taskId, {
+      lock: "share",
+      level: "CONTENT",
+      taskLock: "update",
+    });
+    await afterLock(tx, "archiveTask");
+    const now = new Date();
+    const updated = await tx.task.updateMany({
+      where: { id: taskId, organizationId: actor.orgId, version, archivedAt: null },
+      data: { archivedAt: now, version: { increment: 1 } },
+    });
+    if (updated.count !== 1) await classifyTaskMiss(tx, actor, taskId);
+    await recordProjectActivity(tx, {
+      orgId: actor.orgId,
+      projectId: access.task.projectId,
+      taskId,
+      actorUserId: actor.userId,
+      verb: "TASK_ARCHIVED",
+      entityType: "TASK",
+      entityId: taskId,
+      before: { archived: false },
+      after: { archived: true, archivedAt: now.toISOString() },
+      batchId: newBatchId(),
+    });
+    return { changed: true, version: version + 1 };
+  });
+}
+
+/**
+ * Restores an archived task (CONTENT_ARCHIVED_TASK under PROJECT_SHARE): the task FOR UPDATE the
+ * same way; an archived project or an archived parent is ARCHIVED (restore those first); a task
+ * that is not archived is a no-op `{ changed: false }`. One TASK_RESTORED row.
+ */
+export async function restoreTask(
+  actor: ProjectActor,
+  taskId: string,
+): Promise<ProjectResult<{ changed: boolean; version?: number }>> {
+  return runProjectTransaction(actor, "restoreTask", async (tx) => {
+    const access = await requireTask(tx, actor, taskId, {
+      lock: "share",
+      level: "CONTENT_ARCHIVED_TASK",
+      taskLock: "update",
+    });
+    await afterLock(tx, "restoreTask");
+    const archivedAt = access.task.archivedAt;
+    if (!archivedAt) return { changed: false };
+    const rows = await tx.$queryRaw<{ version: number }[]>`
+      UPDATE "Task" SET "archivedAt" = NULL, "version" = "version" + 1, "updatedAt" = now()
+      WHERE "id" = ${taskId} AND "organizationId" = ${actor.orgId} AND "archivedAt" IS NOT NULL
+      RETURNING "version"`;
+    const version = rows[0]?.version;
+    if (version === undefined) return { changed: false };
+    await recordProjectActivity(tx, {
+      orgId: actor.orgId,
+      projectId: access.task.projectId,
+      taskId,
+      actorUserId: actor.userId,
+      verb: "TASK_RESTORED",
+      entityType: "TASK",
+      entityId: taskId,
+      before: { archived: true, archivedAt: new Date(archivedAt).toISOString() },
+      after: { archived: false },
+      batchId: newBatchId(),
+    });
+    return { changed: true, version: Number(version) };
   });
 }

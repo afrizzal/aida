@@ -18,7 +18,7 @@
 // actor can read now (the read predicate of section 2), archived entries only on request.
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "../../generated/prisma/client";
-import { readableProjectWhere, requireProject } from "./access";
+import { readableProjectWhere, requireProject, requireTask } from "./access";
 import { LIST_DEFAULT, LIST_MAX, type ProjectActor, type ProjectResult } from "./contract";
 import { afterLock, refuse, runProjectRead, runProjectTransaction } from "./service";
 
@@ -52,6 +52,53 @@ export async function unfavoriteProject(
     await afterLock(tx, "unfavoriteProject");
     const removed = await tx.projectFavorite.deleteMany({
       where: { organizationId: actor.orgId, userId: actor.userId, projectId },
+    });
+    return { changed: removed.count > 0 };
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Task favorites
+
+/**
+ * Favorites a task (READ under PROJECT_SHARE; review R2-2): the task FOR SHARE through requireTask
+ * (a subtask's parent FOR SHARE first). READ applies no archive check, so archived work is
+ * allowed; a task a locking read no longer finds is NOT_FOUND. No activity.
+ */
+export async function favoriteTask(
+  actor: ProjectActor,
+  taskId: string,
+): Promise<ProjectResult<{ changed: boolean }>> {
+  return runProjectTransaction(actor, "favoriteTask", async (tx) => {
+    const access = await requireTask(tx, actor, taskId, {
+      lock: "share",
+      level: "READ",
+      taskLock: "share",
+    });
+    await afterLock(tx, "favoriteTask");
+    const inserted = await tx.$queryRaw<{ id: string }[]>`
+      INSERT INTO "TaskFavorite" ("id", "organizationId", "userId", "taskId")
+      VALUES (${randomUUID()}, ${actor.orgId}, ${actor.userId}, ${access.task.id})
+      ON CONFLICT ("organizationId", "userId", "taskId") DO NOTHING
+      RETURNING "id"`;
+    return { changed: inserted.length === 1 };
+  });
+}
+
+/** Removes the actor's favorite of a task (READ under PROJECT_SHARE, the task FOR SHARE). */
+export async function unfavoriteTask(
+  actor: ProjectActor,
+  taskId: string,
+): Promise<ProjectResult<{ changed: boolean }>> {
+  return runProjectTransaction(actor, "unfavoriteTask", async (tx) => {
+    const access = await requireTask(tx, actor, taskId, {
+      lock: "share",
+      level: "READ",
+      taskLock: "share",
+    });
+    await afterLock(tx, "unfavoriteTask");
+    const removed = await tx.taskFavorite.deleteMany({
+      where: { organizationId: actor.orgId, userId: actor.userId, taskId: access.task.id },
     });
     return { changed: removed.count > 0 };
   });
