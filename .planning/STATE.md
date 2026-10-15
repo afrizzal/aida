@@ -4,17 +4,17 @@ milestone: v2.0
 milestone_name: Helpdesk & Projects
 current_phase: 14
 current_phase_name: projects-foundation
-status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11, 12, 12.1 and 12.2 verified human_needed; Phase 14 (Projects foundation) executing, plans 14-01 to 14-11 complete
-stopped_at: Completed 14-11-PLAN.md (moveTask with new keys, aliases, label and milestone mapping by name and one redacted TASK_MOVED row; duplicateTask with placement after its source; duplicateProject under the source FOR UPDATE lock; PID-bound races; redaction from both sides; isolation of 3 operations); 14-12 next
-last_updated: "2026-11-09T16:00:00.000Z"
+status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11, 12, 12.1 and 12.2 verified human_needed; Phase 14 (Projects foundation) executing, plans 14-01 to 14-12 complete
+stopped_at: Completed 14-12-PLAN.md (reorderTask with placement across status columns and one activity row; bulkUpdateTasks of up to 100 tasks, atomic, one row per changed task with a shared batch id; derived progress; PID-bound races in both orders; isolation of 5 operations)
+last_updated: "2026-11-09T17:00:00.000Z"
 last_activity: 2026-11-09
-last_activity_desc: Plan 14-11 complete. move.ts (moveTask locks both projects in id order, one tree UPDATE with new keys, mapped milestone and eligible assignee, label links re-created by name, old keys ALIAS, one TASK_MOVED row) and duplicate.ts (duplicateTask placed after its source with rebalance; duplicateProject reads its source after the source FOR UPDATE lock). Integration 36 passed in 3 files; next typegen, typecheck and biome exit 0. Commits 6ae1b66, 2c68f56 and 6eaa500
-state_head: 6eaa500
+last_activity_desc: Plan 14-12 complete. ordering.ts (reorderTask under PROJECT_UPDATE, rankBetween with rebalance, status change through applyStatusChangeInTx, one TASK_STATUS_CHANGED or TASK_REORDERED row), bulk.ts (bulkUpdateTasks, projects then tasks FOR UPDATE in id order, whole-batch refusals, shared batchId) and progress.ts (three reads computed on read); 34 integration tests pass across 4 files; typecheck and biome clean
+state_head: be96dce
 progress:
   total_phases: 12
   completed_phases: 0
   total_plans: 111
-  completed_plans: 59
+  completed_plans: 60
   percent: 0
 ---
 
@@ -30,8 +30,8 @@ See: .planning/PROJECT.md (updated 2026-11-07, v2.0 opened)
 
 ## Current Position
 
-Phase: 14 (Projects foundation) is executing; plans 14-01 (frozen contract), 14-02 (schema foundation), 14-03 (pure helpers), 14-04 (core services), 14-05 (file cleanup outbox and sweep, worker uploads volume) 14-06 (task core, keys, subtasks), 14-07 (comments, attachments, labels, milestones), 14-08 (members, teams, K69 assignment copy), 14-09 (recurring tasks, exactly-once successor), 14-10 (archive, favorites, confirmed hard delete) and 14-11 (move and duplicate) are complete. Phases 11, 12, 12.1 and 12.2 are verified human_needed (no code gap; visual, dark-mode and screen-reader checks wait for a human). Phases 08, 09 and 10 are PARKED (owner decision); Phases 13, 16 and 17 are parked by dependency on Phase 10.
-Plan: 14-11 complete (moveTask with new keys from the target counter, old keys as aliases, labels and milestone mapped by name, eligible assignees kept, one TASK_MOVED row redacted per reader; duplicateTask placed directly after its source with a rebalance when needed; duplicateProject copying one committed state of its source under the source FOR UPDATE lock; PID-bound races including both orders against setTaskLabels and deleteTask; redaction from both sides and after a delete; isolation of 3 operations; 14-11-SUMMARY.md); next 14-12.
+Phase: 14 (Projects foundation) is executing; plans 14-01 (frozen contract), 14-02 (schema foundation), 14-03 (pure helpers), 14-04 (core services), 14-05 (file cleanup outbox and sweep, worker uploads volume) 14-06 (task core, keys, subtasks), 14-07 (comments, attachments, labels, milestones), 14-08 (members, teams, K69 assignment copy), 14-09 (recurring tasks, exactly-once successor), 14-10 (archive, favorites, confirmed hard delete), 14-11 (move and duplicate) and 14-12 (reorder, bulk update, derived progress) are complete. Phases 11, 12, 12.1 and 12.2 are verified human_needed (no code gap; visual, dark-mode and screen-reader checks wait for a human). Phases 08, 09 and 10 are PARKED (owner decision); Phases 13, 16 and 17 are parked by dependency on Phase 10.
+Plan: 14-12 complete (reorderTask places a task after a given task of its group or first, optionally in another status column, with one TASK_STATUS_CHANGED or TASK_REORDERED row; bulkUpdateTasks changes up to 100 tasks atomically with one row per changed task and a shared batch id; getProjectProgress, getProjectsProgress and getTaskProgress derived on read; races in both orders and section 17 isolation). Next: 14-13.
 Status: Milestone v2.0 opened by hand on 2026-11-07. `REQUIREMENTS.md` (91 requirements) and `ROADMAP.md` (Phases 8–17) are written and were revised over three Codex critique rounds (queue item 0b done). The public demo was walked under the clean-room rules and added AIDA-100 to AIDA-114 (item 0c done). Phase 8 context is committed (`08-CONTEXT.md`, `8abbc6c`) and the phase is planned: 23 plans in 14 waves; three Codex review cycles; parked after cycle 3 (owner decision, `run-loop/LAPORAN.md`). No Phase 8 code has been executed. Baseline 0a is done: build passes; integration passes except the egress file; E2E passes 63 with two honesty-invariants flakes that pass alone (fixed by plan 08-17). The egress baseline (0a2) was parked while `binaries.prisma.sh` sent no bytes on GET (07.45 to 09.09); the host recovered and the test waits for the Rekriva regression to finish.
 Last activity: 2026-11-08 — Phase 10 parked after its third Codex plan review (K27); Phases 8 and 9 were parked the same way (K24, K25). v1.0.0 stays complete and archived; its archives are `milestones/v1.0.0-*`.
 
