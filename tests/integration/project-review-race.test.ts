@@ -8,6 +8,7 @@ import type { PrismaClient } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { addTaskComment } from "@/lib/projects/comments";
 import { moveTask } from "@/lib/projects/move";
+import { changeProjectKeyPrefix, createProject } from "@/lib/projects/projects";
 import type { ProjectDb } from "@/lib/projects/service";
 import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
 import {
@@ -98,6 +99,55 @@ describe("a-WR-01, b-IN-02: requireTask never locks a second project", () => {
     expect(moved).toMatchObject({ ok: true });
     expect(commented).toEqual({ ok: false, code: "CONFLICT" });
     expect(await prisma.taskComment.count({ where: { organizationId: org.orgId } })).toBe(0);
+  });
+});
+
+describe("a-WR-02: createProject and changeProjectKeyPrefix take the prefix rows in one order", () => {
+  it("a create holding its new Project row and a prefix change to the same prefix never deadlock: the create wins, the change is PREFIX_TAKEN", async () => {
+    const org = await seedOrgWithMembers(prisma, ["owner", "member", "member"]);
+    const creatorId = org.users[1]?.id as string;
+    const changerId = org.users[2]?.id as string;
+    const q = await seedProject(prisma, org.orgId, {
+      createdByUserId: changerId,
+      managerUserIds: [changerId],
+    });
+    race = createServiceRace();
+
+    // The blocker holds the creator's user row FOR UPDATE, so the create stops at the foreign
+    // key check of its Project insert, after the row's unique index entries are written.
+    const blocker = parkedTransaction(
+      (tx) => tx.$queryRaw`SELECT "id" FROM "user" WHERE "id" = ${creatorId} FOR UPDATE`,
+    );
+    const blockerPid = await blocker.pid;
+    const createPid = race.nextStartPid("createProject");
+    const create = createProject(actorOf(creatorId, org.orgId), { name: "Foo", keyPrefix: "FOO" });
+    const creator = await createPid;
+    await waitForBlockedBy(observer, blockerPid, [creator]);
+
+    const changePid = race.nextStartPid("changeProjectKeyPrefix");
+    const change = changeProjectKeyPrefix(actorOf(changerId, org.orgId), q.id, 0, "FOO");
+    const changer = await changePid;
+    await waitForBlockedBy(observer, creator, [changer]);
+    racePids.push({ race: "prefix: user blocker vs create", holder: blockerPid, waiter: creator });
+    racePids.push({ race: "prefix: create vs change", holder: creator, waiter: changer });
+    blocker.release();
+
+    const results = await settleAll<unknown>([create, change, blocker.done]);
+    assertNoDeadlock(results);
+    const [created, changed] = results.map((r) => (r.status === "fulfilled" ? r.value : r));
+    expect(created).toMatchObject({ ok: true, keyPrefix: "FOO" });
+    expect(changed).toEqual({ ok: false, code: "PREFIX_TAKEN" });
+    const reservation = await prisma.projectKeyPrefix.findFirst({
+      where: { organizationId: org.orgId, prefix: "FOO" },
+      select: { projectId: true },
+    });
+    expect(reservation?.projectId).toBe((created as { projectId: string }).projectId);
+    expect(
+      await prisma.project.findFirst({
+        where: { id: q.id, organizationId: org.orgId },
+        select: { keyPrefix: true, version: true },
+      }),
+    ).toEqual({ keyPrefix: q.keyPrefix, version: 0 });
   });
 });
 

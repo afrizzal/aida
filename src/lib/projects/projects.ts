@@ -3,6 +3,7 @@
 // server context and checks it itself: membership first, then the policy of access.ts. Every
 // successful mutation writes exactly one activity row through recordProjectActivity in its own
 // transaction; a no-op or a refusal writes none. Every query writes the organization term (C1).
+import { randomUUID } from "node:crypto";
 import type { Prisma } from "../../generated/prisma/client";
 import { renderTaskMarkdown } from "../markdown/render";
 import {
@@ -169,8 +170,8 @@ export interface CreateProjectInput {
 }
 
 /**
- * Any active member creates a project (MEMBER, no lock): the Project at the end of the
- * organization's order, its prefix reservation, its task counter, the creator's MANAGER row and
+ * Any active member creates a project (MEMBER, no lock): its prefix reservation first, then the
+ * Project at the end of the organization's order, its task counter, the creator's MANAGER row and
  * one PROJECT_CREATED row, all through scalar foreign keys (C1).
  */
 export async function createProject(
@@ -195,8 +196,14 @@ export async function createProject(
     const max = largest._max.position;
     // No project lock here, so never a rebalance (contract section 8).
     const position = appendRank(max) ?? Math.min((max ?? 0) + 1, RANK_MAX);
+    // The prefix reservation comes before the Project row (review a-WR-02): changeProjectKeyPrefix
+    // also writes ProjectKeyPrefix before the Project prefix index, so two writers of one prefix
+    // meet first on ProjectKeyPrefix and never wait for each other in opposite orders.
+    const projectId = randomUUID();
+    await reservePrefix(tx, actor.orgId, projectId, keyPrefix);
     const project = await tx.project.create({
       data: {
+        id: projectId,
         organizationId: actor.orgId,
         name,
         descriptionMarkdown,
@@ -222,7 +229,6 @@ export async function createProject(
     await tx.projectTaskCounter.create({
       data: { organizationId: actor.orgId, projectId: project.id },
     });
-    await reservePrefix(tx, actor.orgId, project.id, keyPrefix);
     await recordProjectActivity(tx, {
       orgId: actor.orgId,
       projectId: project.id,
