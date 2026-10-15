@@ -61,6 +61,18 @@ function cutToCodePoints(value: string, max: number): string {
   return codePointLength(value) > max ? Array.from(value).slice(0, max).join("") : value;
 }
 
+/**
+ * The byte length of the value as `jsonb::text`, which the size CHECKs measure (review a-IN-03):
+ * compact JSON plus the space PostgreSQL prints after every ':' and ',' (one per key, one between
+ * keys, one between array items). String escapes are the same in both forms.
+ */
+function jsonbTextBytes(value: Record<string, ActivityScalar | readonly string[]>): number {
+  const entries = Object.values(value);
+  let spaces = entries.length + Math.max(0, entries.length - 1);
+  for (const item of entries) if (Array.isArray(item)) spaces += Math.max(0, item.length - 1);
+  return Buffer.byteLength(JSON.stringify(value), "utf8") + spaces;
+}
+
 /** Validates one before or after value and returns it with long strings cut (section 5). */
 function boundedValue(value: ActivityValue | undefined, side: string): ActivityValue {
   if (value === undefined || value === null) return null;
@@ -101,7 +113,7 @@ function boundedValue(value: ActivityValue | undefined, side: string): ActivityV
       throw new Error(`recordProjectActivity: ${side}.${key} has an unsupported value`);
     }
   }
-  if (Buffer.byteLength(JSON.stringify(out), "utf8") > ACTIVITY_VALUE_MAX_BYTES) {
+  if (jsonbTextBytes(out) > ACTIVITY_VALUE_MAX_BYTES) {
     throw new Error(`recordProjectActivity: ${side} exceeds ${ACTIVITY_VALUE_MAX_BYTES} bytes`);
   }
   return out;

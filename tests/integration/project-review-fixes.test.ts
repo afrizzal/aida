@@ -2,7 +2,7 @@
 // Testcontainers. Each describe names the finding it proves. Every case seeds fresh organizations.
 import { describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
-import { listProjectActivity } from "@/lib/projects/activity";
+import { listProjectActivity, recordProjectActivity } from "@/lib/projects/activity";
 import { bulkUpdateTasks } from "@/lib/projects/bulk";
 import { setProjectMemberRole } from "@/lib/projects/members";
 import {
@@ -376,3 +376,71 @@ describe("b-IN-03: getTask returns no predecessor id the reader cannot read", ()
   });
 });
 
+describe("a-IN-03: the activity writer measures size as the database does (jsonb::text)", () => {
+  /** 16 keys (15 arrays of 80-character strings and one padded string) of exactly `target` compact bytes. */
+  function valueWithCompactBytes(target: number): Record<string, string | string[]> {
+    const value: Record<string, string | string[]> = {};
+    for (let i = 0; i < 15; i++) {
+      value[`k${String(i).padStart(2, "0")}`] = Array.from({ length: i === 0 ? 4 : 3 }, () =>
+        "x".repeat(80),
+      );
+    }
+    value.pad = "";
+    const pad = target - Buffer.byteLength(JSON.stringify(value));
+    if (pad < 0 || pad > 200) throw new Error(`pad ${pad} out of range`);
+    value.pad = "p".repeat(pad);
+    return value;
+  }
+
+  /** jsonb::text writes ": " and ", " where compact JSON writes ":" and ",". */
+  function jsonbSpaces(value: Record<string, string | string[]>): number {
+    const keys = Object.keys(value).length;
+    const arrays = Object.values(value).reduce(
+      (n, v) => n + (Array.isArray(v) ? Math.max(0, v.length - 1) : 0),
+      0,
+    );
+    return keys + (keys - 1) + arrays;
+  }
+
+  it("a value within 4096 bytes compact but over 4096 as jsonb::text is refused by the writer itself", async () => {
+    const w = await managerWorld();
+    const value = valueWithCompactBytes(4096);
+    expect(Buffer.byteLength(JSON.stringify(value))).toBe(4096);
+    await expect(
+      prisma.$transaction((tx) =>
+        recordProjectActivity(tx as never, {
+          orgId: w.orgId,
+          projectId: w.project.id,
+          actorUserId: w.managerId,
+          verb: "PROJECT_UPDATED",
+          entityType: "PROJECT",
+          entityId: w.project.id,
+          after: value,
+          batchId: "b1",
+        }),
+      ),
+    ).rejects.toThrow(/recordProjectActivity: after exceeds 4096 bytes/);
+  });
+
+  it("a value of exactly 4096 bytes as jsonb::text is written and passes the CHECK", async () => {
+    const w = await managerWorld();
+    const probe = valueWithCompactBytes(4000);
+    const value = valueWithCompactBytes(4096 - jsonbSpaces(probe));
+    const row = await prisma.$transaction((tx) =>
+      recordProjectActivity(tx as never, {
+        orgId: w.orgId,
+        projectId: w.project.id,
+        actorUserId: w.managerId,
+        verb: "PROJECT_UPDATED",
+        entityType: "PROJECT",
+        entityId: w.project.id,
+        after: value,
+        batchId: "b2",
+      }),
+    );
+    const size = await prisma.$queryRaw<{ size: number }[]>`
+      SELECT octet_length("after"::text)::int AS size FROM "ProjectActivity"
+      WHERE "id" = ${row.id} AND "organizationId" = ${w.orgId}`;
+    expect(size[0]?.size).toBe(4096);
+  });
+});
