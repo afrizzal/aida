@@ -324,6 +324,10 @@ export const PROJECT_FILE_CLEANUP_QUEUE = "project-file-cleanup";
 export const PROJECT_FILE_CLEANUP_CRON = "* * * * *";
 export const PROJECT_FILE_CLEANUP_BATCH = 100;
 export const PROJECT_FILE_CLEANUP_MAX_BACKOFF_MINUTES = 60;
+/** Review b-IN-05: a row that failed this many times is no longer selected; it stays as a report. */
+export const PROJECT_FILE_CLEANUP_MAX_ATTEMPTS = 20;
+/** Review b-IN-05: file I/O of one run stops after this many ms, under the 30 s transaction timeout. */
+export const PROJECT_FILE_CLEANUP_IO_BUDGET_MS = 20_000;
 
 export const TRANSACTION_OPTIONS = Object.freeze({ maxWait: 10_000, timeout: 30_000 });
 

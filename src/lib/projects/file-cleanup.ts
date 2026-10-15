@@ -11,6 +11,10 @@
 //   through FileStorage with the row's own organization; removes the row on success or ENOENT
 //   (a missing file counts as done, C10); on any other error keeps the row with attempts + 1,
 //   lastErrorCode and nextAttemptAt = now + min(2^attempts, 60) minutes.
+// - Bounds (review b-IN-05): a row that failed PROJECT_FILE_CLEANUP_MAX_ATTEMPTS times is no longer
+//   selected and stays as the operator's report (attempts and lastErrorCode); the file I/O of one
+//   run stops after PROJECT_FILE_CLEANUP_IO_BUDGET_MS, under the transaction timeout: a delete that
+//   has not settled by then is recorded as ETIMEDOUT and the rows not reached stay untouched.
 //
 // This is the one cross-organization reader of ProjectFileCleanup (like the snooze-wake system
 // job): every statement after the select names the row's own organizationId. It writes no
@@ -24,6 +28,8 @@ import type { Prisma, PrismaClient } from "../../generated/prisma/client";
 import type { FileStorage } from "../attachments/file-storage";
 import {
   PROJECT_FILE_CLEANUP_BATCH,
+  PROJECT_FILE_CLEANUP_IO_BUDGET_MS,
+  PROJECT_FILE_CLEANUP_MAX_ATTEMPTS,
   PROJECT_FILE_CLEANUP_MAX_BACKOFF_MINUTES,
   TRANSACTION_OPTIONS,
 } from "./contract";
@@ -67,6 +73,8 @@ export interface FileCleanupSweepOptions {
   storage: FileStorage;
   now?: Date;
   limit?: number;
+  /** Milliseconds of file I/O per run (default PROJECT_FILE_CLEANUP_IO_BUDGET_MS). */
+  ioBudgetMs?: number;
   /**
    * Test hook only (the "test hook where the run is production code" of
    * tests/support/lock-wait.ts): awaited right after the FOR UPDATE SKIP LOCKED select and before
@@ -104,6 +112,33 @@ function logFailure(key: string, code: string): void {
   }
 }
 
+class IoBudgetExceeded extends Error {
+  readonly code = "ETIMEDOUT";
+}
+
+/** Settles with the delete, or rejects with ETIMEDOUT after ms (the delete may still finish). */
+async function withinBudget(work: Promise<void>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new IoBudgetExceeded("file I/O budget exceeded")), ms);
+  });
+  try {
+    await Promise.race([work, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function logStopped(key: string, code: string): void {
+  try {
+    console.error(
+      `[project-file-cleanup] retries stopped after ${PROJECT_FILE_CLEANUP_MAX_ATTEMPTS} attempts: key=${key} code=${code}`,
+    );
+  } catch {
+    // Logging never changes the sweep's outcome.
+  }
+}
+
 async function databaseNow(tx: Prisma.TransactionClient): Promise<Date> {
   const rows = await tx.$queryRaw<{ now: Date }[]>`SELECT now() AS now`;
   const value = rows[0]?.now;
@@ -115,6 +150,7 @@ export async function sweepProjectFileCleanup(
   opts: FileCleanupSweepOptions,
 ): Promise<FileCleanupSweepResult> {
   const limit = opts.limit ?? PROJECT_FILE_CLEANUP_BATCH;
+  const budgetMs = opts.ioBudgetMs ?? PROJECT_FILE_CLEANUP_IO_BUDGET_MS;
   const { storage } = opts;
 
   return opts.client.$transaction(async (tx) => {
@@ -124,7 +160,7 @@ export async function sweepProjectFileCleanup(
     const due = await tx.$queryRaw<DueRow[]>`
       SELECT id, "organizationId", "storageKey", attempts
       FROM "ProjectFileCleanup"
-      WHERE "nextAttemptAt" <= ${now}
+      WHERE "nextAttemptAt" <= ${now} AND attempts < ${PROJECT_FILE_CLEANUP_MAX_ATTEMPTS}
       ORDER BY "createdAt" ASC, id ASC
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED
@@ -137,12 +173,21 @@ export async function sweepProjectFileCleanup(
       );
 
     const result: FileCleanupSweepResult = { deleted: 0, missing: 0, failed: 0 };
+    const deadline = Date.now() + budgetMs;
     for (const row of due) {
+      const remaining = deadline - Date.now();
+      // Out of budget: the rows not reached stay as they are for the next run.
+      if (remaining <= 0) break;
       let code: string | null = null;
+      let outOfBudget = false;
       try {
-        await storage.delete({ orgId: row.organizationId, key: row.storageKey });
+        await withinBudget(
+          storage.delete({ orgId: row.organizationId, key: row.storageKey }),
+          remaining,
+        );
       } catch (err) {
         code = errorCode(err);
+        outOfBudget = err instanceof IoBudgetExceeded;
       }
 
       if (code === null || code === "ENOENT") {
@@ -165,7 +210,9 @@ export async function sweepProjectFileCleanup(
         WHERE id = ${row.id} AND "organizationId" = ${row.organizationId}
       `;
       logFailure(row.storageKey, code);
+      if (attempts + 1 >= PROJECT_FILE_CLEANUP_MAX_ATTEMPTS) logStopped(row.storageKey, code);
       result.failed += 1;
+      if (outOfBudget) break;
     }
     return result;
   }, TRANSACTION_OPTIONS);

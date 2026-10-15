@@ -16,6 +16,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { PrismaClient } from "@/generated/prisma/client";
 import type { FileStorage } from "@/lib/attachments/file-storage";
 import { prisma } from "@/lib/db";
+import { PROJECT_FILE_CLEANUP_MAX_ATTEMPTS } from "@/lib/projects/contract";
 import { enqueueFileCleanupInTx, sweepProjectFileCleanup } from "@/lib/projects/file-cleanup";
 import { backendPid, type Deferred, deferred } from "../support/lock-wait";
 import { seedFileCleanup, seedOrgWithMembers } from "../support/project-fixtures";
@@ -385,5 +386,66 @@ describe("project file cleanup sweep edge cases", () => {
     expect(logged[0]).toContain(key);
     expect(logged[0]).toContain("EACCES");
     expect(logged.join("\n")).not.toContain(marker);
+  });
+});
+
+describe("b-IN-05: bounded sweep", () => {
+  it("a permanent failure stops after PROJECT_FILE_CLEANUP_MAX_ATTEMPTS attempts and stays in the row as a report", async () => {
+    const orgA = await newOrg();
+    const key = newKey();
+    await seedFileCleanup(prisma, orgA, key, {
+      nextAttemptAt: T0,
+      attempts: PROJECT_FILE_CLEANUP_MAX_ATTEMPTS - 1,
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    let calls = 0;
+    const failing = stubStorage(async () => {
+      calls += 1;
+      throw codedError("EACCES");
+    });
+    expect(await sweepProjectFileCleanup({ client: prisma, storage: failing, now: T0 })).toEqual({
+      deleted: 0,
+      missing: 0,
+      failed: 1,
+    });
+    expect(await cleanupRow(orgA, key)).toMatchObject({
+      attempts: PROJECT_FILE_CLEANUP_MAX_ATTEMPTS,
+      lastErrorCode: "EACCES",
+    });
+    // Much later: the row is no longer selected and stays as it is.
+    const later = new Date(T0.getTime() + 30 * 24 * 60 * MINUTE);
+    expect(await sweepProjectFileCleanup({ client: prisma, storage: failing, now: later })).toEqual(
+      { deleted: 0, missing: 0, failed: 0 },
+    );
+    expect(calls).toBe(1);
+    expect(await cleanupRow(orgA, key)).toMatchObject({
+      attempts: PROJECT_FILE_CLEANUP_MAX_ATTEMPTS,
+      lastErrorCode: "EACCES",
+    });
+  });
+
+  it("a storage delete that does not settle within the I/O budget is a failure, and the run ends inside the budget", async () => {
+    const orgA = await newOrg();
+    const stuck = newKey();
+    const next = newKey();
+    await seedFileCleanup(prisma, orgA, stuck, { nextAttemptAt: T0 });
+    await seedFileCleanup(prisma, orgA, next, { nextAttemptAt: T0 });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const touched: string[] = [];
+    const hanging = stubStorage((k) => {
+      touched.push(k);
+      return new Promise<void>(() => {});
+    });
+    expect(
+      await sweepProjectFileCleanup({ client: prisma, storage: hanging, now: T0, ioBudgetMs: 300 }),
+    ).toEqual({ deleted: 0, missing: 0, failed: 1 });
+    expect(touched).toHaveLength(1);
+    const first = touched[0] as string;
+    const other = first === stuck ? next : stuck;
+    expect(await cleanupRow(orgA, first)).toMatchObject({
+      attempts: 1,
+      lastErrorCode: "ETIMEDOUT",
+    });
+    expect(await cleanupRow(orgA, other)).toMatchObject({ attempts: 0, lastErrorCode: null });
   });
 });
