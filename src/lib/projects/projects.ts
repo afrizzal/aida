@@ -64,9 +64,11 @@ function validName(raw: unknown): string {
 function validDescription(raw: unknown): string | null {
   if (raw === null || raw === undefined) return null;
   if (typeof raw !== "string" || hasNul(raw)) refuse("INVALID_INPUT", "description");
-  if (raw.trim().length === 0) return null;
-  if (codePointLength(raw.trim()) > PROJECT_DESCRIPTION_MAX) refuse("INVALID_INPUT", "description");
-  return raw;
+  // The stored value is the validated one (review a-WR-05): the CHECK measures what is stored.
+  const text = raw.trim();
+  if (text.length === 0) return null;
+  if (codePointLength(text) > PROJECT_DESCRIPTION_MAX) refuse("INVALID_INPUT", "description");
+  return text;
 }
 
 function validColor(raw: unknown): ProjectColor {

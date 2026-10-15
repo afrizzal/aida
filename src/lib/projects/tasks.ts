@@ -110,9 +110,13 @@ function parseTaskInput(
   if (raw.description !== undefined) {
     if (raw.description === null) value.description = null;
     else if (typeof raw.description !== "string" || hasNul(raw.description)) bad("description");
-    else if (raw.description.trim().length === 0) value.description = null;
-    else if (codePointLength(raw.description.trim()) > TASK_DESCRIPTION_MAX) bad("description");
-    else value.description = raw.description;
+    else {
+      // The stored value is the validated one (review b-WR-02): the CHECK measures what is stored.
+      const text = raw.description.trim();
+      if (text.length === 0) value.description = null;
+      else if (codePointLength(text) > TASK_DESCRIPTION_MAX) bad("description");
+      else value.description = text;
+    }
   }
   if (raw.status !== undefined) {
     if ((TASK_STATUSES as readonly unknown[]).includes(raw.status)) {
