@@ -285,7 +285,8 @@ const TASK_FIELDS = {
  * Task resolution of contract section 2 (review C3): reads the task's projectId and parentId,
  * runs requireProject on that project, then for a write (taskLock given) locks the parent FOR
  * SHARE (organization and project terms) and then the task in taskLock mode; a changed projectId
- * or parentId starts over once, then CONFLICT. Archive checks use the locked rows.
+ * is CONFLICT at once (no second project lock), a changed parentId starts over once, then
+ * CONFLICT. Archive checks use the locked rows.
  */
 export async function requireTask(
   client: ProjectDb,
@@ -296,12 +297,16 @@ export async function requireTask(
   if (!TASK_LEVELS.has(opts.level)) throw new Error(`requireTask: unsupported level ${opts.level}`);
   if (!isPlausibleId(taskId)) refuse("NOT_FOUND");
   await requireMembership(client, actor);
+  let firstProjectId: string | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     const plain = await client.task.findFirst({
       where: { id: taskId, organizationId: actor.orgId },
       select: { projectId: true, parentId: true },
     });
     if (!plain) refuse("NOT_FOUND");
+    // The second attempt never locks another project than the first one (a-WR-01).
+    if (firstProjectId !== null && plain.projectId !== firstProjectId) refuse("CONFLICT");
+    firstProjectId = plain.projectId;
     const access = await requireProject(client, actor, plain.projectId, {
       lock: opts.lock,
       level: opts.level === "READ" ? "READ" : "CONTENT",
@@ -311,11 +316,23 @@ export async function requireTask(
     if (opts.taskLock) {
       if (plain.parentId) {
         parent = await lockTaskRow(client, actor.orgId, plain.parentId, plain.projectId, "share");
-        if (!parent) continue;
+        if (!parent) {
+          // The parent left this project (a move of the tree) or was deleted.
+          const now = await client.task.findFirst({
+            where: { id: taskId, organizationId: actor.orgId },
+            select: { projectId: true },
+          });
+          if (!now) refuse("NOT_FOUND");
+          if (now.projectId !== plain.projectId) refuse("CONFLICT");
+          continue;
+        }
       }
       task = await lockTaskRow(client, actor.orgId, taskId, null, opts.taskLock);
       if (!task) refuse("NOT_FOUND");
-      if (task.projectId !== plain.projectId || task.parentId !== plain.parentId) continue;
+      // A changed project is CONFLICT: starting over would lock a second project while this one
+      // is still held, out of id order (review a-WR-01, b-IN-02). Only a changed parent restarts.
+      if (task.projectId !== plain.projectId) refuse("CONFLICT");
+      if (task.parentId !== plain.parentId) continue;
     } else {
       task = await client.task.findFirst({
         where: { id: taskId, organizationId: actor.orgId, projectId: plain.projectId },
