@@ -116,6 +116,20 @@ async function gotoReady(page: Page, url: string) {
   await expect.poll(async () => (await page.goto(url))?.status(), { timeout: 60_000 }).toBe(200);
 }
 
+/**
+ * Renews the session cookie cache (better-auth cookieCache, maxAge 5 minutes). Each test starts
+ * from the storage state written at the global-setup sign-in. Once that cookie is older than
+ * 5 minutes, the first server action sets a new one, and Next.js then re-renders the page in
+ * the action's response: a refused action shows the server's current list, so a state deleted
+ * behind the page disappears with its Options button. `disableCookieCache` makes the server
+ * read the session row and set a fresh cookie even when the old one has not yet expired.
+ */
+async function renewSessionCookieCache(page: Page) {
+  const res = await page.request.get("/api/auth/get-session?disableCookieCache=true");
+  expect(res.status()).toBe(200);
+  expect(res.headers()["set-cookie"] ?? "").toContain("better-auth.session_data=");
+}
+
 /** The ordered list of a group card on /settings/statuses. */
 function groupList(page: Page, group: StateGroupKey) {
   return page.getByRole("list", { name: GROUP_LABELS[group], exact: true });
@@ -129,6 +143,10 @@ async function chooseTopBarState(page: Page, name: string) {
 
 test.describe
   .serial("Ticket statuses", () => {
+    test.beforeEach(async ({ page }) => {
+      await renewSessionCookieCache(page);
+    });
+
     test.afterAll(async () => {
       const ids = {} as Record<LegacyStatusKey, string>;
       // (1) The five migrated states: active, with their seeded names, colours and order.
