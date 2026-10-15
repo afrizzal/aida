@@ -177,3 +177,14 @@ Phase 14 has no UI, so the DESIGN-SYSTEM section 9 checklist does not apply, and
 - Manual item of plan 14-05: once O-1 allows, run the stack and check attachment cleanup and inbound email attachments.
 
 Nothing in this phase is claimed for an owner item, and no human, visual or UAT result is recorded.
+
+---
+
+## E2E red diagnosed and fixed (run-loop orchestrator)
+
+The red E2E step above (3 failed, 15 not run on `4d6a498`) was diagnosed by a debugger (session file `.planning/debug/e2e-14-gate-t7-statuses.md`): two timing races in specs older than Phase 14, not a product regression and not caused by Phase 14 code, tests or data (the E2E database is a fresh container per run).
+
+1. `tests/e2e/phase4-ai.spec.ts` T7 (and T8 through it): the `ai-triage` queue has `retryBackoff` without `retryDelay`, so pg-boss 12.23 retries a failed job at once; that retry completed after the stub switched to "ok" and before the Re-run click wrote PENDING. Fix `1092d7a`: T7 waits until no `ai-triage` job for the ticket is waiting, retrying or running before switching the stub. Failing-first probe: one unfinished job right after FAILED.
+2. `tests/e2e/ticket-statuses.spec.ts` set-default refusal: the 5-minute session cookie cache expired mid-suite, and the renewed cookie made Next.js re-render the page inside the refused action's response. Fix `059b3e9`: renew the session cookie cache before each test in that spec. Failing-first: deleting the session-data cookie reproduced the gate failure.
+
+Full `pnpm test:e2e` after both fixes: exit 0, 209 passed, 1 skipped, 0 failed. Open notes (not fixed here): other specs could hit the same cookie expiry (a shared fixture would cover them); while pg-boss still retries, the UI offers Re-run (pre-existing, may cause a second LLM call); the other queues' zero retry delay is the item deferred in Phase 12.2 (a2-WR-03, K55). This gate result is superseded by the final gate after code review.
