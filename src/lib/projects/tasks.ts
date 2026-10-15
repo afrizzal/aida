@@ -13,6 +13,7 @@ import {
   isEligibleAssignee,
   type ProjectAccess,
   type RowLockMode,
+  readableProjectIds,
   readableProjectWhere,
   requireProject,
   requireTask,
@@ -476,10 +477,25 @@ export async function getTask(
       orderBy: [{ rank: "asc" }, { id: "asc" }],
       select: { id: true, key: true, title: true, status: true, rank: true, archivedAt: true },
     });
+    // Review b-IN-03: the predecessor's id only when the reader can read its project now.
+    let recurrencePredecessorId: string | null = null;
+    if (row.recurrencePredecessorId) {
+      const predecessor = await db.task.findFirst({
+        where: { id: row.recurrencePredecessorId, organizationId: orgId },
+        select: { projectId: true },
+      });
+      if (
+        predecessor &&
+        (await readableProjectIds(db, actor, [predecessor.projectId])).has(predecessor.projectId)
+      ) {
+        recurrencePredecessorId = row.recurrencePredecessorId;
+      }
+    }
     const { milestoneId: _milestoneId, ...rest } = row;
     return {
       task: {
         ...rest,
+        recurrencePredecessorId,
         status: row.status as TaskStatus,
         priority: row.priority as TaskPriority,
         descriptionHtml: renderTaskMarkdown(row.descriptionMarkdown ?? ""),

@@ -354,3 +354,25 @@ describe("b-WR-01: a bulk completion creates the recurrence successor from the p
   });
 });
 
+describe("b-IN-03: getTask returns no predecessor id the reader cannot read", () => {
+  it("a successor moved out of a private predecessor's project shows recurrencePredecessorId null to a target-only reader", async () => {
+    const w = await managerWorld();
+    const reader = await addOrgMember(prisma, w.orgId, "member");
+    const secret = await seedProject(prisma, w.orgId, {
+      createdByUserId: w.managerId,
+      managerUserIds: [w.managerId],
+      isPrivate: true,
+    });
+    const predecessor = await seedTask(prisma, w.orgId, secret.id, { title: "Origin" });
+    const successor = await seedTask(prisma, w.orgId, w.project.id, { title: "Next" });
+    await prisma.task.updateMany({
+      where: { id: successor.id, organizationId: w.orgId },
+      data: { recurrencePredecessorId: predecessor.id },
+    });
+    const asReader = await getTask(actorOf(reader.id, w.orgId), successor.id);
+    expect(asReader.ok && asReader.task.recurrencePredecessorId).toBeNull();
+    const asManager = await getTask(w.manager, successor.id);
+    expect(asManager.ok && asManager.task.recurrencePredecessorId).toBe(predecessor.id);
+  });
+});
+
