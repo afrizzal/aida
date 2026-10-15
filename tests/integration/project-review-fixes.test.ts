@@ -2,6 +2,7 @@
 // Testcontainers. Each describe names the finding it proves. Every case seeds fresh organizations.
 import { describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
+import { setProjectMemberRole } from "@/lib/projects/members";
 import {
   createProject,
   getProject,
@@ -12,6 +13,7 @@ import {
 import { createTask, getTask, updateTask } from "@/lib/projects/tasks";
 import {
   actorOf,
+  addOrgMember,
   projectTableSnapshot,
   removeOrgMember,
   seedOrgWithMembers,
@@ -139,3 +141,28 @@ describe("a-WR-04: setProjectPrivacy(true) needs an active manager to remain", (
   });
 });
 
+describe("a-IN-04: setProjectMemberRole to MANAGER requires an active organization member", () => {
+  it("promoting a stale ProjectMember row whose member row is gone is NOT_ELIGIBLE", async () => {
+    const w = await managerWorld();
+    const leaver = await addOrgMember(prisma, w.orgId, "member");
+    await prisma.projectMember.create({
+      data: { organizationId: w.orgId, projectId: w.project.id, userId: leaver.id, role: "MEMBER" },
+    });
+    await removeOrgMember(prisma, w.orgId, leaver.id);
+    const before = await projectTableSnapshot(prisma, w.orgId);
+    expect(await setProjectMemberRole(w.manager, w.project.id, leaver.id, "MANAGER")).toEqual({
+      ok: false,
+      code: "NOT_ELIGIBLE",
+    });
+    expect(await projectTableSnapshot(prisma, w.orgId)).toEqual(before);
+    // An active member is still promoted.
+    const active = await addOrgMember(prisma, w.orgId, "member");
+    await prisma.projectMember.create({
+      data: { organizationId: w.orgId, projectId: w.project.id, userId: active.id, role: "MEMBER" },
+    });
+    expect(await setProjectMemberRole(w.manager, w.project.id, active.id, "MANAGER")).toEqual({
+      ok: true,
+      changed: true,
+    });
+  });
+});

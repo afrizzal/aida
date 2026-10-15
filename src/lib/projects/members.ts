@@ -267,9 +267,10 @@ export async function removeProjectMember(
 }
 
 /**
- * MANAGE under PROJECT_UPDATE: promotes or demotes a direct member. Demoting the last active
- * manager is LAST_MANAGER; a user without a row is NOT_FOUND; the same role is a no-op.
- * MEMBER_ROLE_CHANGED (before { role }, after { role }).
+ * MANAGE under PROJECT_UPDATE: promotes or demotes a direct member. Promoting a user without an
+ * organization member row is NOT_ELIGIBLE; demoting the last active manager is LAST_MANAGER; a
+ * user without a project row is NOT_FOUND; the same role is a no-op. MEMBER_ROLE_CHANGED (before
+ * { role }, after { role }).
  */
 export async function setProjectMemberRole(
   actor: ProjectActor,
@@ -289,6 +290,11 @@ export async function setProjectMemberRole(
     });
     if (!row) refuse("NOT_FOUND");
     if (row.role === role) return { changed: false };
+    // A stale row of a user without a member row is never promoted (C14, review a-IN-04): such a
+    // manager would never count for LAST_MANAGER and could never act.
+    if (role === "MANAGER" && !(await activeOrgUserIds(tx, actor.orgId, [userId])).has(userId)) {
+      refuse("NOT_ELIGIBLE");
+    }
     if (row.role === "MANAGER") await assertNotLastManager(tx, actor.orgId, projectId, userId);
     await tx.projectMember.updateMany({
       where: { id: row.id, organizationId: actor.orgId },
