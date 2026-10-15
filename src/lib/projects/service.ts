@@ -6,9 +6,10 @@
 // as `{ ok: false, code, field? }` (field only with INVALID_INPUT). The database errors of
 // contract section 14 are a second fence and come back the same way: a unique violation maps by
 // index name (prefix indexes to PREFIX_TAKEN, label, milestone and team name indexes to
-// NAME_TAKEN), the two subtask trigger messages to SUBTASK_DEPTH and Task_dates_check to
-// INVALID_DATE_RANGE. Every other error rolls back and is rethrown (a programming error or an
-// outage, never a refusal).
+// NAME_TAKEN), the two subtask trigger messages to SUBTASK_DEPTH, Task_dates_check to
+// INVALID_DATE_RANGE, the text length CHECKs to INVALID_INPUT with their field and a deadlock
+// (40P01) to CONFLICT, always by SQLSTATE and constraint name (db-errors.ts). Every other error
+// rolls back and is rethrown (a programming error or an outage, never a refusal).
 //
 // Test seam (C17, one style for all services): setProjectServiceObserverForTests installs an
 // observer whose onTransactionStart is awaited as the first statement of every service
@@ -26,6 +27,9 @@ import {
   type ProjectResult,
   TRANSACTION_OPTIONS,
 } from "./contract";
+import { mapDatabaseError } from "./db-errors";
+
+export { mapDatabaseError };
 
 /** The client every projects helper takes: an interactive transaction or a scoped client. */
 export type ProjectDb = Prisma.TransactionClient;
@@ -83,64 +87,6 @@ export function newBatchId(): string {
 /** Contract section 2 step 1: a well-formed id (1 to 64 of A-Z, a-z, 0-9, _ and -). */
 export function isPlausibleId(value: unknown): value is string {
   return isWellFormedId(value);
-}
-
-const PREFIX_INDEXES = [
-  "ProjectKeyPrefix_organizationId_prefix_key",
-  "Project_organizationId_keyPrefix_key",
-];
-const NAME_INDEXES = [
-  "ProjectLabel_project_lower_name_key",
-  "ProjectMilestone_project_lower_name_key",
-  "Team_organizationId_lower_name_key",
-];
-const SUBTASK_MESSAGES = [
-  "Task subtask depth exceeded",
-  "Task with subtasks cannot become a subtask",
-];
-
-/** Code, message, meta and cause chain of a Prisma or pg error, as one string. */
-function errorText(err: unknown): string {
-  const parts: string[] = [];
-  let current: unknown = err;
-  for (let depth = 0; current && typeof current === "object" && depth < 6; depth++) {
-    const e = current as {
-      code?: unknown;
-      message?: unknown;
-      meta?: unknown;
-      constraint?: unknown;
-      cause?: unknown;
-    };
-    parts.push(
-      String(e.code ?? ""),
-      String(e.message ?? ""),
-      JSON.stringify(e.meta ?? {}),
-      String(e.constraint ?? ""),
-    );
-    current = e.cause;
-  }
-  return parts.join(" ");
-}
-
-function isUniqueViolation(err: unknown, text: string): boolean {
-  const e = err as { code?: unknown };
-  return e?.code === "P2002" || e?.code === "23505" || /23505|UniqueConstraintViolation/.test(text);
-}
-
-/** The refusal a database error stands for (contract section 14), or null to rethrow it. */
-export function mapDatabaseError(err: unknown): ProjectRefusalResult | null {
-  if (!err || typeof err !== "object") return null;
-  const text = errorText(err);
-  if (SUBTASK_MESSAGES.some((m) => text.includes(m))) return refusalResult("SUBTASK_DEPTH");
-  if (text.includes("Task_dates_check")) return refusalResult("INVALID_DATE_RANGE");
-  if (!isUniqueViolation(err, text)) return null;
-  if (PREFIX_INDEXES.some((name) => text.includes(name))) return refusalResult("PREFIX_TAKEN");
-  if (NAME_INDEXES.some((name) => text.includes(name))) return refusalResult("NAME_TAKEN");
-  // Prisma P2002 may name the fields instead of the index.
-  if (/"modelName":"(Project|ProjectKeyPrefix)"/.test(text) && /keyPrefix|"prefix"/.test(text)) {
-    return refusalResult("PREFIX_TAKEN");
-  }
-  return null;
 }
 
 function hasActor(actor: ProjectActor): boolean {
