@@ -7,15 +7,18 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { PrismaClient } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { addTaskComment } from "@/lib/projects/comments";
+import { deleteProject } from "@/lib/projects/delete";
 import { moveTask } from "@/lib/projects/move";
 import { changeProjectKeyPrefix, createProject } from "@/lib/projects/projects";
 import type { ProjectDb } from "@/lib/projects/service";
+import { deleteTeam } from "@/lib/projects/teams";
 import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
 import {
   actorOf,
   seedOrgWithMembers,
   seedProject,
   seedTask,
+  seedTeam,
 } from "../support/project-fixtures";
 import {
   assertNoDeadlock,
@@ -151,3 +154,44 @@ describe("a-WR-02: createProject and changeProjectKeyPrefix take the prefix rows
   });
 });
 
+describe("a-WR-03: deleteTeam locks the linked projects before it reads the links", () => {
+  it("a project delete committed while deleteTeam waits for the project lock leaves deleteTeam successful", async () => {
+    const org = await seedOrgWithMembers(prisma, ["owner", "member"]);
+    const admin = actorOf(org.users[0]?.id as string, org.orgId);
+    const managerId = org.users[1]?.id as string;
+    const p = await seedProject(prisma, org.orgId, {
+      createdByUserId: managerId,
+      managerUserIds: [managerId],
+      name: "Doomed",
+    });
+    const kept = await seedProject(prisma, org.orgId, {
+      createdByUserId: managerId,
+      managerUserIds: [managerId],
+    });
+    const team = await seedTeam(prisma, org.orgId, { projectIds: [p.id, kept.id] });
+    race = createServiceRace();
+
+    const held = race.holdAt("deleteProject");
+    const del = deleteProject(actorOf(managerId, org.orgId), p.id, { confirmName: "Doomed" });
+    const holder = await held;
+    const waiterPid = race.nextStartPid("deleteTeam");
+    const teamDelete = deleteTeam(admin, team.id);
+    const waiter = await waiterPid;
+    await waitForBlockedBy(observer, holder, [waiter]);
+    racePids.push({ race: "deleteTeam vs deleteProject", holder, waiter });
+    race.release();
+
+    const results = await settleAll<unknown>([del, teamDelete]);
+    assertNoDeadlock(results);
+    const [deleted, teamDeleted] = results.map((r) => (r.status === "fulfilled" ? r.value : r));
+    expect(deleted).toMatchObject({ ok: true });
+    expect(teamDeleted).toEqual({ ok: true });
+    expect(await prisma.team.count({ where: { organizationId: org.orgId } })).toBe(0);
+    const unassigned = await prisma.projectActivity.findMany({
+      where: { organizationId: org.orgId, verb: "TEAM_UNASSIGNED" },
+      select: { projectId: true },
+    });
+    // Only the link deleteTeam removed itself is recorded.
+    expect(unassigned).toEqual([{ projectId: kept.id }]);
+  });
+});

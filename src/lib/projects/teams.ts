@@ -17,13 +17,7 @@
 // so a concurrent addTeamMember either commits before the copy (and is in it) or waits.
 import { randomUUID } from "node:crypto";
 import { isAdminRole } from "../membership";
-import {
-  lockProjectsInIdOrder,
-  lockTeam,
-  readableProjectIds,
-  requireMembership,
-  requireProject,
-} from "./access";
+import { lockTeam, readableProjectIds, requireMembership, requireProject } from "./access";
 import { recordProjectActivity } from "./activity";
 import {
   codePointLength,
@@ -277,19 +271,26 @@ export async function deleteTeam(
   return runProjectTransaction(actor, "deleteTeam", async (tx) => {
     await requireOrgAdmin(tx, actor);
     const team = await requireTeamLock(tx, actor, teamId, "update");
+    // Review a-WR-03: lock the linked projects first, skipping a project deleted meanwhile (never
+    // a refusal, which would depend on a link the admin may not be able to read), and read the
+    // links only under those locks. A new link needs the team FOR SHARE, which this holds.
+    const candidates = await tx.projectTeam.findMany({
+      where: { organizationId: actor.orgId, teamId },
+      select: { projectId: true },
+    });
+    if (candidates.length > 0) {
+      const ids = [...new Set(candidates.map((link) => link.projectId))];
+      await tx.$queryRaw`
+        SELECT "id" FROM "Project"
+        WHERE "organizationId" = ${actor.orgId} AND "id" = ANY(${ids}::text[])
+        ORDER BY "id"
+        FOR UPDATE`;
+    }
     const links = await tx.projectTeam.findMany({
       where: { organizationId: actor.orgId, teamId },
       orderBy: { projectId: "asc" },
       select: { id: true, projectId: true },
     });
-    if (links.length > 0) {
-      await lockProjectsInIdOrder(
-        tx,
-        actor.orgId,
-        links.map((link) => link.projectId),
-        "update",
-      );
-    }
     await afterLock(tx, "deleteTeam");
     const memberCount = await tx.teamMember.count({
       where: { organizationId: actor.orgId, teamId },
