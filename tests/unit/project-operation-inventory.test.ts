@@ -133,6 +133,65 @@ function blocksOf(sources: Sources, pattern: RegExp): Block[] {
   return filesMatching(sources, pattern).flatMap((file) => parseBlocks(file, sources[file]));
 }
 
+// Run decision K70: a marker also counts when it sits in a helper function or constant that the
+// block itself references, defined at module level in the same test file or in tests/support/*.ts,
+// following that helper's own references in turn. A sibling block is never a definition, so its
+// text still never counts, and a helper that the block does not reference never counts. The
+// marker functions themselves (projectTableSnapshot, missingId) are not expanded: what they read
+// is checked by their own rule (snapshotGaps), so calling projectTableSnapshot( never stands in
+// for the separate ProjectActivity check.
+const SUPPORT_FILE = /^tests\/support\/[^/]*\.ts$/;
+const NOT_EXPANDED = new Set(["projectTableSnapshot", "missingId"]);
+const DEFINITION =
+  /^(?:export\s+)?(?:(?:async\s+)?function\s*\*?\s*|(?:const|let|var)\s+)([A-Za-z_$][\w$]*)/;
+
+/** Module-level function and constant definitions of one file: name to non-comment text. */
+function moduleDefinitions(source: string): Map<string, string> {
+  const lines = source.split(/\r?\n/);
+  const defs = new Map<string, string>();
+  lines.forEach((line, start) => {
+    const match = DEFINITION.exec(line);
+    if (!match) return;
+    let end = start + 1;
+    while (end < lines.length && !/^[^\s})\]]/.test(lines[end])) end++;
+    const text = lines
+      .slice(start, end)
+      .filter((l) => !isCommentLine(l))
+      .join("\n");
+    defs.set(match[1], text);
+  });
+  return defs;
+}
+
+/**
+ * The block's own text plus the text of every module-level helper or constant it references,
+ * transitively (K70). Definitions of the block's own file win over tests/support ones.
+ */
+function resolvedText(sources: Sources, file: string, text: string): string {
+  const own = moduleDefinitions(sources[file] ?? "");
+  const support = new Map<string, string>();
+  for (const f of filesMatching(sources, SUPPORT_FILE)) {
+    for (const [name, def] of moduleDefinitions(sources[f])) {
+      if (!support.has(name)) support.set(name, def);
+    }
+  }
+  const seen = new Set<string>();
+  const parts = [text];
+  const queue = [text];
+  while (queue.length > 0) {
+    const current = queue.shift() ?? "";
+    for (const [name] of current.matchAll(/[A-Za-z_$][\w$]*/g)) {
+      if (seen.has(name) || NOT_EXPANDED.has(name)) continue;
+      const def = own.get(name) ?? support.get(name);
+      if (def === undefined) continue;
+      seen.add(name);
+      parts.push(def);
+      queue.push(def);
+    }
+  }
+  return parts.join("\n");
+}
+
 function isWriteOperation(op: string, spec: ProjectOperationSpec): boolean {
   return spec.verbs.length > 0 || (WRITES_WITHOUT_VERB as readonly string[]).includes(op);
 }
@@ -175,11 +234,19 @@ function isolationGaps(sources: Sources, ops: Ops): string[] {
       );
       continue;
     }
-    const markers = isolationMarkers(op, spec);
-    const missingPerBlock = titled.map((block) => ({
-      block,
-      missing: markers.filter(([, test]) => !test(block.text)).map(([name]) => name),
-    }));
+    const [callMarker, ...otherMarkers] = isolationMarkers(op, spec);
+    const missingPerBlock = titled.map((block) => {
+      // The operation call must be in the block's own text; the other markers may also sit in a
+      // helper or constant the block references (K70).
+      const resolved = resolvedText(sources, block.file, block.text);
+      return {
+        block,
+        missing: [
+          ...(callMarker[1](block.text) ? [] : [callMarker[0]]),
+          ...otherMarkers.filter(([, test]) => !test(resolved)).map(([name]) => name),
+        ],
+      };
+    });
     if (missingPerBlock.some(({ missing }) => missing.length === 0)) continue;
     const best = missingPerBlock.reduce((a, b) => (b.missing.length < a.missing.length ? b : a));
     gaps.push(
@@ -260,13 +327,11 @@ function snapshotGaps(sources: Sources): string[] {
     /^(\s*)(?:export\s+)?(?:async\s+)?function\s+projectTableSnapshot\b/.test(l),
   );
   if (start === -1) return [`${FIXTURES_FILE}: no projectTableSnapshot function`];
-  const indent = /^(\s*)/.exec(lines[start])?.[1] ?? "";
-  const end = closingLine(lines, start, indent);
-  const text = lines
-    .slice(start, (end === -1 ? lines.length - 1 : end) + 1)
-    .filter((l) => !isCommentLine(l))
-    .join("\n");
-  return /[pP]rojectActivity/.test(text)
+  // The whole function up to the next module-level statement: biome puts the `): Type {` line of
+  // a wrapped signature at column 0, so a closing-line search would stop before the body.
+  const text = moduleDefinitions(source).get("projectTableSnapshot") ?? "";
+  // K70: module-level constants the function references (such as SNAPSHOT_ORDER) count.
+  return /[pP]rojectActivity/.test(resolvedText(sources, FIXTURES_FILE, text))
     ? []
     : [
         `${FIXTURES_FILE}:${start + 1}: the projectTableSnapshot function block names no projectActivity or ProjectActivity`,
@@ -309,6 +374,7 @@ const REPO: Sources = {
   ...readDir("src/lib/projects", SERVICE_FILE),
   ...readDir("tests/integration", PROJECT_TEST_FILE),
   ...readDir("tests/unit", PROJECT_TEST_FILE),
+  ...readDir("tests/support", SUPPORT_FILE),
   [FIXTURES_FILE]: readFileSync(path.join(ROOT, FIXTURES_FILE), "utf8"),
 };
 
@@ -538,6 +604,84 @@ describe("tasks", () => {
     expect(activityGaps({ [ACT]: source }, pick("updateTask"))).toEqual([
       "updateTask / TASK_UPDATED: no it or test block calls updateTask( and names TASK_UPDATED",
     ]);
+  });
+
+  it("negative: a helper holding the marker is defined but not called by the block (K70)", () => {
+    const source = `
+const ENDED = { ok: false, code: "MEMBERSHIP_ENDED" };
+
+async function expectEnded(call: () => Promise<unknown>): Promise<void> {
+  expect(await call()).toEqual({ ok: false, code: "MEMBERSHIP_ENDED" });
+}
+
+describe("getTask (TARGET)", () => {
+  it("x", async () => {
+    expect(await getTask(actor, missingId())).toEqual(refused);
+  });
+});
+`;
+    expect(isolationGaps({ [ISO]: source }, pick("getTask"))[0]).toMatch(/lacks MEMBERSHIP_ENDED$/);
+  });
+
+  it("negative: projectTableSnapshot( never stands in for the ProjectActivity check (K70)", () => {
+    const support = `
+const ORDER = { ProjectActivity: [{ id: "asc" }] } as const;
+
+export async function projectTableSnapshot(prisma: PrismaClient, orgId: string) {
+  return Object.keys(ORDER);
+}
+`;
+    const source = `
+describe("updateTask (TARGET)", () => {
+  it("x", async () => {
+    const before = await projectTableSnapshot(prisma, orgA);
+    expect(await updateTask(actor, missingId(), 0, {})).toEqual({ ok: false, code: "MEMBERSHIP_ENDED" });
+    expect(await projectTableSnapshot(prisma, orgA)).toEqual(before);
+  });
+});
+`;
+    const sources = { [ISO]: source, [FIXTURES_FILE]: support };
+    expect(isolationGaps(sources, pick("updateTask"))[0]).toMatch(
+      /lacks projectActivity or ProjectActivity$/,
+    );
+    expect(snapshotGaps(sources)).toEqual([]);
+  });
+
+  it("positive: markers reached through helpers and constants the block references count (K70)", () => {
+    const support = `
+export function missingId(): string {
+  return "missing";
+}
+`;
+    const source = `
+const ENDED = { ok: false, code: "MEMBERSHIP_ENDED" };
+
+async function activityCount(orgId: string): Promise<number> {
+  return prisma.projectActivity.count({ where: { organizationId: orgId } });
+}
+
+async function refusedWrite(w: World, run: () => Promise<unknown>): Promise<unknown> {
+  const before = await projectTableSnapshot(prisma, w.orgA);
+  const count = await activityCount(w.orgA);
+  const result = await run();
+  expect(await projectTableSnapshot(prisma, w.orgA)).toEqual(before);
+  expect(await activityCount(w.orgA)).toBe(count);
+  return result;
+}
+
+async function expectTargetWrite(w: World, call: Call): Promise<void> {
+  expect(await refusedWrite(w, () => call(actor, missingId()))).toEqual(refused);
+  expect(await refusedWrite(w, () => call(outsiderInA(w), id))).toEqual(ENDED);
+}
+
+describe("updateTask (TARGET)", () => {
+  it("x", async () => {
+    await expectTargetWrite(w, (actor, id) => updateTask(actor, id, 0, {}));
+  });
+});
+`;
+    const sources = { [ISO]: source, "tests/support/project-fixtures.ts": support };
+    expect(isolationGaps(sources, pick("updateTask"))).toEqual([]);
   });
 
   it("negative: an it.skip( case", () => {
