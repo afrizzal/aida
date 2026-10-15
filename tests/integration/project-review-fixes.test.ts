@@ -2,9 +2,19 @@
 // Testcontainers. Each describe names the finding it proves. Every case seeds fresh organizations.
 import { describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
-import { createProject, getProject, updateProject } from "@/lib/projects/projects";
+import {
+  createProject,
+  getProject,
+  setProjectStatus,
+  updateProject,
+} from "@/lib/projects/projects";
 import { createTask, getTask, updateTask } from "@/lib/projects/tasks";
-import { actorOf, seedOrgWithMembers, seedProject } from "../support/project-fixtures";
+import {
+  actorOf,
+  projectTableSnapshot,
+  seedOrgWithMembers,
+  seedProject,
+} from "../support/project-fixtures";
 
 async function managerWorld() {
   const org = await seedOrgWithMembers(prisma, ["owner", "member"]);
@@ -75,5 +85,28 @@ describe("a-WR-05, b-WR-02: descriptions are stored as the trimmed text that was
       select: { descriptionMarkdown: true },
     });
     expect(row?.descriptionMarkdown).toBe("body");
+  });
+});
+
+describe("a-IN-02: editProject checks expectedVersion before the no-op test", () => {
+  it("a stale version with values equal to the stored ones is CONFLICT, not a no-op", async () => {
+    const w = await managerWorld();
+    const first = await updateProject(w.manager, w.project.id, 0, { name: "Renamed" });
+    expect(first).toEqual({ ok: true, changed: true, version: 1 });
+    const before = await projectTableSnapshot(prisma, w.orgId);
+    expect(await updateProject(w.manager, w.project.id, 0, { name: "Renamed" })).toEqual({
+      ok: false,
+      code: "CONFLICT",
+    });
+    expect(await setProjectStatus(w.manager, w.project.id, 0, "PLANNING")).toEqual({
+      ok: false,
+      code: "CONFLICT",
+    });
+    expect(await projectTableSnapshot(prisma, w.orgId)).toEqual(before);
+    // The current version with the same values stays a no-op.
+    expect(await updateProject(w.manager, w.project.id, 1, { name: "Renamed" })).toEqual({
+      ok: true,
+      changed: false,
+    });
   });
 });

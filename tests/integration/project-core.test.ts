@@ -212,9 +212,10 @@ describe("updateProject", () => {
     });
     expect(JSON.stringify(rows[0])).not.toContain("Secret plan text");
 
-    // The same call again is a no-op with no row.
+    // The same call again with the current version is a no-op with no row (a stale version is
+    // CONFLICT first, review a-IN-02).
     const count = await activityCount(w.orgId);
-    expect(await updateProject(w.manager, w.projectId, 0, patch)).toEqual({
+    expect(await updateProject(w.manager, w.projectId, 1, patch)).toEqual({
       ok: true,
       changed: false,
     });

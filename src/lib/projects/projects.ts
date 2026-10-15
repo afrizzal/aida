@@ -313,8 +313,9 @@ async function classifyMiss(tx: ProjectDb, actor: ProjectActor, projectId: strin
 }
 
 /**
- * The shared skeleton of the MANAGE edits: MANAGE under PROJECT_UPDATE, afterLock, no-op
- * detection before any write, a conditional update on (id, organizationId, version) that
+ * The shared skeleton of the MANAGE edits: MANAGE under PROJECT_UPDATE, afterLock, the version
+ * check (stale: CONFLICT, also when the values equal the stored ones), no-op detection before any
+ * write, a conditional update on (id, organizationId, version) that
  * increments version, and one activity row with the changed keys only.
  */
 async function editProject(
@@ -328,6 +329,8 @@ async function editProject(
     const expectedVersion = validVersion(expectedVersionRaw);
     const access = await requireProject(tx, actor, projectId, { lock: "update", level: "MANAGE" });
     await afterLock(tx, operation);
+    // The row is locked FOR UPDATE: a stale version is CONFLICT before the no-op test (a-IN-02).
+    if (access.project.version !== expectedVersion) refuse("CONFLICT");
     const edit = plan(access.project);
     if (!edit) return { changed: false };
     const diff = changedValues(edit.before, edit.after);
