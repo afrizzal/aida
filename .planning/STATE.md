@@ -4,17 +4,17 @@ milestone: v2.0
 milestone_name: Helpdesk & Projects
 current_phase: 14
 current_phase_name: projects-foundation
-status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11, 12, 12.1 and 12.2 verified human_needed; Phase 14 (Projects foundation) executing, plans 14-01 to 14-12 complete
-stopped_at: "Plan 14-13 stopped at Task 1: the operation inventory (completeness check only) fails with 59 gaps; gate and 14-GATE.md not run; gap closure for the orchestrator"
-last_updated: "2026-11-09T14:45:00.000Z"
+status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11, 12, 12.1 and 12.2 verified human_needed; Phase 14 (Projects foundation) executed, plans 14-01 to 14-13 complete, gate recorded with E2E red; verification next
+stopped_at: "Completed 14-13-PLAN.md: inventory passes after K70 (21/21); gate on 4d6a498 in 14-GATE.md (E2E red 3 failed, audit baseline 141, egress and compose blocked O-1)"
+last_updated: "2026-11-09T17:50:00.000Z"
 last_activity: 2026-11-09
-last_activity_desc: Plan 14-13 stopped at Task 1. tests/unit/project-operation-inventory.test.ts committed red (d5ceb9c) - 58 operations whose isolation block holds the required markers only through helpers or constants (plans 14-04, 14-06 to 14-12) and the projectTableSnapshot block naming no ProjectActivity (14-02); exports, verb pairs, skip and focus and imports pass. Tasks 2 and 3 not run, no tested commit, no 14-GATE.md; see 14-13-SUMMARY.md
-state_head: be96dce
+last_activity_desc: Plan 14-13 complete. Inventory revised under K70 (4d6a498) passes 21 of 21. Gate on 4d6a498 - lint, typecheck, unit 795, integration 1198 without egress, build green; E2E red (3 failed, 15 did not run - phase4-ai T7 and T8, ticket-statuses set-default focus); audit 141 unchanged; clean-room grep empty; egress, full integration and compose blocked (O-1). 14-GATE.md (0e4df7c) maps requirements, SC1 to SC7, decisions, findings and review items; owner items open.
+state_head: 0e4df7c
 progress:
   total_phases: 12
   completed_phases: 0
   total_plans: 111
-  completed_plans: 60
+  completed_plans: 61
   percent: 0
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-11-07, v2.0 opened)
 ## Current Position
 
 Phase: 14 (Projects foundation) is executing; plans 14-01 (frozen contract), 14-02 (schema foundation), 14-03 (pure helpers), 14-04 (core services), 14-05 (file cleanup outbox and sweep, worker uploads volume) 14-06 (task core, keys, subtasks), 14-07 (comments, attachments, labels, milestones), 14-08 (members, teams, K69 assignment copy), 14-09 (recurring tasks, exactly-once successor), 14-10 (archive, favorites, confirmed hard delete), 14-11 (move and duplicate) and 14-12 (reorder, bulk update, derived progress) are complete. Phases 11, 12, 12.1 and 12.2 are verified human_needed (no code gap; visual, dark-mode and screen-reader checks wait for a human). Phases 08, 09 and 10 are PARKED (owner decision); Phases 13, 16 and 17 are parked by dependency on Phase 10.
-Plan: 14-13 stopped at Task 1 (operation inventory red with 59 gaps, listed with owning plans in 14-13-SUMMARY.md; gate not run). Before it: 14-12 complete (reorderTask places a task after a given task of its group or first, optionally in another status column, with one TASK_STATUS_CHANGED or TASK_REORDERED row; bulkUpdateTasks changes up to 100 tasks atomically with one row per changed task and a shared batch id; getProjectProgress, getProjectsProgress and getTaskProgress derived on read; races in both orders and section 17 isolation). Next: 14-13.
+Plan: 14-13 complete (inventory passes after K70; gate on 4d6a498 recorded in 14-GATE.md with E2E red, 3 failures in pre-Phase-14 UI specs, not rerun; egress, full integration and compose blocked O-1). All 13 Phase 14 plans complete. Next: Phase 14 verification (orchestrator).
 Status: Milestone v2.0 opened by hand on 2026-11-07. `REQUIREMENTS.md` (91 requirements) and `ROADMAP.md` (Phases 8–17) are written and were revised over three Codex critique rounds (queue item 0b done). The public demo was walked under the clean-room rules and added AIDA-100 to AIDA-114 (item 0c done). Phase 8 context is committed (`08-CONTEXT.md`, `8abbc6c`) and the phase is planned: 23 plans in 14 waves; three Codex review cycles; parked after cycle 3 (owner decision, `run-loop/LAPORAN.md`). No Phase 8 code has been executed. Baseline 0a is done: build passes; integration passes except the egress file; E2E passes 63 with two honesty-invariants flakes that pass alone (fixed by plan 08-17). The egress baseline (0a2) was parked while `binaries.prisma.sh` sent no bytes on GET (07.45 to 09.09); the host recovered and the test waits for the Rekriva regression to finish.
 Last activity: 2026-11-08 — Phase 10 parked after its third Codex plan review (K27); Phases 8 and 9 were parked the same way (K24, K25). v1.0.0 stays complete and archived; its archives are `milestones/v1.0.0-*`.
 

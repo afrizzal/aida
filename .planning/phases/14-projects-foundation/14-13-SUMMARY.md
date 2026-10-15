@@ -2,139 +2,95 @@
 phase: 14-projects-foundation
 plan: 13
 subsystem: projects
-tags: [inventory, completeness-check, gate, review-C5, review-C7]
-status: blocked
-stopped_at: "Task 1: the inventory fails with 59 gaps; Tasks 2 and 3 (gate, 14-GATE.md) not run, per the plan's stop-and-report rule"
+tags: [inventory, completeness-check, gate, review-C5, review-C7, K70]
+status: complete
 requires: ["14-08", "14-09", "14-10", "14-11", "14-12"]
 provides:
-  - tests/unit/project-operation-inventory.test.ts (completeness check only, red on the repository)
-affects: [14-02, 14-04, 14-06, 14-07, 14-08, 14-09, 14-10, 14-11, 14-12]
+  - tests/unit/project-operation-inventory.test.ts (completeness check only, 21 of 21 passed after K70)
+  - .planning/phases/14-projects-foundation/14-GATE.md (gate on 4d6a498 with evidence and open items)
+affects: [phase-14-verification]
 tech-stack:
   added: []
-  patterns: ["pure block parser and rules over a path-to-text map, shared by the repository run and fixed-string negative cases"]
+  patterns: ["pure block parser and rules over a path-to-text map; markers resolved through module-level helpers and constants the block references (K70)"]
 key-files:
-  created: [tests/unit/project-operation-inventory.test.ts]
+  created: [tests/unit/project-operation-inventory.test.ts, .planning/phases/14-projects-foundation/14-GATE.md]
   modified: []
 decisions:
-  - "The inventory is committed red as written; no earlier plan's file was edited and no rule was loosened"
-  - "Export rule matches the plan's literal `export async function <name>(actor` (no generic parameter), so the generic helpers runProjectTransaction and runProjectRead of service.ts are not operations"
+  - "K70: isolation markers other than the operation call may sit in a module-level helper or constant the block references (same file or tests/support/*.ts), followed transitively; the operation call itself must stay in the block's own text"
+  - "projectTableSnapshot and missingId are not expanded during resolution, so calling the snapshot never stands in for the separate ProjectActivity check"
+  - "The environment-file diff check of Task 3 (d) was replaced by a name-only diff of every path outside src, tests, .planning and prisma, because the secret-file guard refuses any command naming that file"
 metrics:
-  duration: "about 25 minutes"
+  duration: "about 25 minutes (first run) plus about 40 minutes (K70 revision and gate)"
   completed: 2026-11-09
-  tasks_completed: "1 of 3 (Task 1 committed red; Tasks 2 and 3 not run)"
+  tasks_completed: "3 of 3"
 plan_head_before: 0b51266902038c694ea4561bb67a584bb371f516
 actuals:
-  tokens: 6500
-  tasks: 1
-  commits: 1
+  tokens: 21000
+  tasks: 3
+  commits: 5
 ---
 
 # Phase 14 Plan 13: Operation inventory and gate Summary
 
-**Outcome: stopped at Task 1.** The operation inventory (a completeness check only, review C7) runs red on the repository with 59 gaps. Following the plan, the inventory test was committed as written (`d5ceb9c`), no file of an earlier plan was touched, and Tasks 2 and 3 did not run: there is no tested commit, no gate run and no `14-GATE.md`. The orchestrator plans the gap closure.
+**The operation inventory passes after run decision K70 (21 of 21), and the Phase 14 gate ran on tested commit `4d6a498319774712de8870c503cf951831be92cd`. Lint, typecheck, unit (795), integration without the egress file (1198) and build are green. E2E is red (3 failed, 15 did not run) and stays red. The audit baseline is unchanged (141), the clean-room grep is empty, and the three O-1 rows are blocked.**
 
-## What the inventory checks and what passed
+`commits: 5` is measured as `git rev-list --count 0b51266..HEAD` before this SUMMARY's own commit. It includes the orchestrator's `32ec6a0` (RUN-LOG). This plan's commits are `d5ceb9c`, `27accb7`, `4d6a498` and `0e4df7c`, plus the SUMMARY/STATE commit.
 
-`tests/unit/project-operation-inventory.test.ts` reads `src/lib/projects`, `tests/integration/project-*.test.ts`, `tests/unit/project*-*.test.ts` (itself excluded, its fixtures are strings) and `tests/support/project-fixtures.ts` with `node:fs`, and checks them against `PROJECT_OPERATIONS` through pure functions. Run: `pnpm exec vitest run tests/unit/project-operation-inventory.test.ts`, exit 1, 18 tests: 16 passed, 2 failed (log `${TMPDIR}/aida-14-13-inventory.log`).
+## Task 1: inventory after K70
 
-| Rule | Result |
-|---|---|
-| 76 operations; NO_TARGET_ID_OPERATIONS equals the CREATE, LIST and KEY operations plus listTeams and createTeam (review C5) | pass |
-| Exported `export async function <name>(actor` of src/lib/projects equal the 76 operations, each in its module file | pass |
-| Isolation block per operation (call, MEMBERSHIP_ENDED, missingId() by class, "hidden private link" for TEAM except createTeam, projectTableSnapshot( and ProjectActivity for writes), all in one block's own non-comment text | **fail: 58 gaps** |
-| projectTableSnapshot function block of the fixtures names ProjectActivity | **fail: 1 gap** |
-| Every (operation, verb) pair: one it or test block calls the operation and names the verb | pass (every pair found) |
-| No skipped, focused or todo case in a project test file | pass |
-| No path-alias import, Next.js import or `findActiveMembership` in src/lib/projects | pass |
-| 10 cases "negative: ..." (near-miss title getTaskProgress for getTask, title without call, MEMBERSHIP_ENDED only in a sibling, call only in a comment, write block without projectTableSnapshot(, TARGET block without missingId(, TEAM block without hidden private link, verb in another it block, it.skip(, describe.only() and "positive control" (including CREATE, LIST and KEY blocks without missingId()) | pass |
+- First run (`d5ceb9c`): red with 59 gaps. The markers sat in file-level helpers and constants, and the rule only counted a block's own text. The previous SUMMARY version (`27accb7`) records this.
+- K70 revision (`4d6a498`): `resolvedText()` adds the text of every module-level function or constant that the block references, defined in the same file (which wins) or in `tests/support/*.ts`. It follows each helper's own references in turn. Sibling blocks are never definitions, and helpers the block does not reference never count. The operation call must still appear in the block's own text. `projectTableSnapshot` and `missingId` are not expanded. The snapshot rule now counts module-level constants that the function references (`SNAPSHOT_ORDER`).
+- Own-parser fix: the snapshot rule took the first column-0 line starting with `)` as the end of the block, and biome writes the `): Promise<...> {` line of a wrapped signature at column 0. So the body was cut off, which was the actual cause of the 59th gap together with `SNAPSHOT_ORDER`. The rule now takes the whole module-level definition.
+- New cases:
+  - "negative: a helper holding the marker is defined but not called by the block (K70)".
+  - "negative: projectTableSnapshot( never stands in for the ProjectActivity check (K70)".
+  - "positive: markers reached through helpers and constants the block references count (K70)".
+- Unchanged: every earlier rule, `PROJECT_OPERATIONS`, `NO_TARGET_ID_OPERATIONS`, all ten earlier negative cases and the positive control.
+- Result: `pnpm exec vitest run tests/unit/project-operation-inventory.test.ts` exit 0, 21 passed. `biome check` exit 0. 12 "negative: " cases and the positive control. `git diff --name-only 0b51266..HEAD -- . ':!.planning'` lists only the inventory test.
+- No real gap remained, so no gap list or owning plan applies.
 
-`pnpm exec biome check` on the file: exit 0.
+## Task 2: gate on `4d6a498`
 
-Nature of the 58 isolation gaps: the titled blocks exist and call their operation, but the markers sit outside the block's own text, in file-level helpers (`expectTargetRead`, `expectTargetWrite`, `refusedWrite`, `expectRefusedWrites`, `activityCount`) or constants (`ENDED`). Under the plan's rule ("that block's own text contains ..."; the negative case "MEMBERSHIP_ENDED present only in a sibling block") these count as missing. This is a gap between the test shape contract section 17 prescribes and the shape the isolation files use; the inventory does not claim that the behaviour itself is untested.
+| Step | Exit | Counts / note | Verdict |
+|---|---|---|---|
+| `pnpm lint` | 0 | 544 files | green |
+| `pnpm exec next typegen` + `pnpm typecheck` | 0 + 0 | | green |
+| `pnpm test` | 0 | 49 files, 795 passed | green |
+| integration with `--exclude tests/integration/egress-isolation.test.ts` | 0 | 88 files, 1198 passed, 0 skipped | green |
+| `pnpm test:e2e` | 1 | 191 passed, 3 failed, 1 skipped, 15 did not run | red: `phase4-ai.spec.ts:387` T7 ("Re-run AI triage" button not found), `phase4-ai.spec.ts:433` T8 (`triagedTicketId` empty, serial state from T7), `ticket-statuses.spec.ts:313` (Options button not found for focus). Cause not diagnosed, not rerun. Phase 14 changed no file under `src/app` or `src/components`. |
+| `pnpm build` | 0 | known NFT warning for `next.config.ts` | green |
+| `pnpm audit --prod` | 1 | 141 (13 low, 69 moderate, 52 high, 7 critical) | baseline unchanged (not passed) |
+| `git grep -i -n gr8r -- src docs website README.md public prisma tests` | 1 | no output | green |
+| full integration with egress, `pnpm test:egress`, compose stack | not run | | blocked (O-1) |
 
-## Gaps, with the plan that owns the file concerned
+No flake was observed and no command was rerun. Logs: `${TMPDIR}/aida-14-gate-{lint,typegen,typecheck,unit,integration,e2e,build,audit,cleanroom}.log`.
 
-Each line: operation (Isolation class), the closest titled block (file:line) and the markers it lacks in its own text.
+## Task 3: evidence
 
-### 14-02 (fixtures, `tests/support/project-fixtures.ts`)
+`14-GATE.md` contains:
 
-- `projectTableSnapshot` (line 383): its function block names no `projectActivity` or `ProjectActivity`; it reads the 18 tables through `SNAPSHOT_ORDER` (whose `ProjectActivity` key is at line 371, outside the function block).
+- one row per acceptance clause of AIDA-64 to AIDA-71 and AIDA-100 to AIDA-105, with "recorded in ProjectActivity, owner confirmation pending" for the audit clauses of AIDA-103 and AIDA-104;
+- rows SC1 to SC7, where SC2 to SC4 name integration behaviour tests and SC6 names the clean-room grep, followed by the completeness-check sentence;
+- D-01 to D-17, K59 and K61 to K69, C1 to C18, and review items P1 to P3, C1 to C8, R2-1 to R2-3, P4 and R3-1 to R3-4;
+- the phase-diff greps (no package change, no egress or LLM import, no single-row membership read, no path alias, the one migration);
+- a note that the design checklist does not apply;
+- the open items, ending with the fixed owner sentence.
 
-### 14-04 (`tests/integration/project-core-isolation.test.ts`; modules projects and activity)
-
-- createProject (CREATE), :89: projectTableSnapshot(
-- getProject (TARGET), :120: MEMBERSHIP_ENDED, missingId(
-- updateProject (TARGET), :145: MEMBERSHIP_ENDED, missingId(, projectTableSnapshot(, ProjectActivity
-- setProjectStatus (TARGET), :152: MEMBERSHIP_ENDED, missingId(, projectTableSnapshot(, ProjectActivity
-- setProjectPrivacy (TARGET), :159: MEMBERSHIP_ENDED, missingId(, projectTableSnapshot(, ProjectActivity
-- changeProjectKeyPrefix (TARGET), :166: MEMBERSHIP_ENDED, missingId(, projectTableSnapshot(, ProjectActivity
-- moveProjectPosition (TARGET), :173: MEMBERSHIP_ENDED, missingId(, projectTableSnapshot(, ProjectActivity
-- listProjectActivity (TARGET), :187: MEMBERSHIP_ENDED, missingId(
-- listTaskActivity (TARGET), :195: MEMBERSHIP_ENDED, missingId(
-
-### 14-06 (`tests/integration/project-tasks-isolation.test.ts`; modules keys and tasks)
-
-- createTask (TARGET), :43: MEMBERSHIP_ENDED, ProjectActivity
-- getTask (TARGET), :62: MEMBERSHIP_ENDED
-- listWorkspaceTasks (LIST), :95: MEMBERSHIP_ENDED
-- listProjectTasks (TARGET), :79: MEMBERSHIP_ENDED
-- updateTask (TARGET), :115: MEMBERSHIP_ENDED, ProjectActivity
-- setTaskDates (TARGET), :141: MEMBERSHIP_ENDED, ProjectActivity
-- setTaskParent (TARGET), :189: MEMBERSHIP_ENDED, ProjectActivity
-- resolveTaskKey (KEY), :215: MEMBERSHIP_ENDED
-
-### 14-07 (`tests/integration/project-content-isolation.test.ts`; comments, attachments, labels, milestones)
-
-Each lacks ProjectActivity only: addTaskComment :96, editTaskComment :117, deleteTaskComment :143, uploadTaskAttachments :219, deleteTaskAttachment :240, createLabel :279, updateLabel :303, deleteLabel :326, setTaskLabels :345, createMilestone :382, updateMilestone :405, deleteMilestone :431, setTaskMilestone :452 (all TARGET).
-
-### 14-08 (`tests/integration/project-members-isolation.test.ts`; members and teams)
-
-- addProjectMember (TARGET), :184: MEMBERSHIP_ENDED, projectTableSnapshot(, ProjectActivity
-- removeProjectMember (TARGET), :192: MEMBERSHIP_ENDED, projectTableSnapshot(, ProjectActivity
-- setProjectMemberRole (TARGET), :207: MEMBERSHIP_ENDED, projectTableSnapshot(, ProjectActivity
-- assignTeamToProject (TARGET), :221: MEMBERSHIP_ENDED, projectTableSnapshot(, ProjectActivity
-- unassignTeamFromProject (TARGET), :230: MEMBERSHIP_ENDED, projectTableSnapshot(, ProjectActivity
-- createTeam (TEAM), :291: projectTableSnapshot(, ProjectActivity
-- renameTeam (TEAM), :315: projectTableSnapshot(, ProjectActivity
-- deleteTeam (TEAM), :333: projectTableSnapshot(
-- addTeamMember (TEAM), :356: projectTableSnapshot(, ProjectActivity
-- removeTeamMember (TEAM), :382: projectTableSnapshot(, ProjectActivity
-
-### 14-09 (`tests/integration/project-recurrence-isolation.test.ts`)
-
-- setTaskRecurrence (TARGET), :61: MEMBERSHIP_ENDED
-- clearTaskRecurrence (TARGET), :95: MEMBERSHIP_ENDED
-- setTaskStatus (TARGET, module tasks of 14-06; its isolation block lives in this 14-09 file), :128: MEMBERSHIP_ENDED
-
-### 14-10 (`tests/integration/project-archive-delete-isolation.test.ts`; archive, favorites, delete)
-
-Each lacks ProjectActivity only: archiveProject :103, restoreProject :121, archiveTask :136, restoreTask :155, favoriteProject :171, unfavoriteProject :186, favoriteTask :206, unfavoriteTask :221, deleteTask :294, deleteProject :312 (all TARGET).
-
-### 14-11 (`tests/integration/project-move-duplicate-isolation.test.ts`)
-
-Each lacks projectTableSnapshot( only: moveTask :45, duplicateTask :88, duplicateProject :117 (all TARGET).
-
-### 14-12 (`tests/integration/project-ops-isolation.test.ts`)
-
-Each lacks projectTableSnapshot( only: reorderTask :49, bulkUpdateTasks :84 (both TARGET).
-
-Operations with no gap (18): listProjects, listTeamActivity, listLabels, listProjectMilestones, listWorkspaceMilestones, listTaskComments, listTaskAttachments, listProjectAttachments, getTaskAttachmentForDownload, listProjectMembers, listEligibleAssignees, listTeams, getTeam, listProjectTeams, listFavorites, getProjectProgress, getProjectsProgress, getTaskProgress.
+Every test file it names exists, and every case title it quotes was checked against the test sources (one title corrected to its full text before the commit). The Task 2 and Task 3 verify loops both pass when run in bash. The post-gate check is empty: `git diff --stat 4d6a498..HEAD -- . ':!.planning'` and `git status --porcelain -- . ':!.planning'` print nothing.
 
 ## Deviations from Plan
 
-1. **[Parser alignment, own file only] Export pattern.** The first draft also accepted a generic parameter (`<name><T ...>(actor`), which reported `runProjectTransaction` and `runProjectRead` of `service.ts` as operations missing from the table. The plan's rule is the literal `export async function <name>(actor` (biome may wrap after the parenthesis, which is still accepted), so the parser was aligned with it; the 76 operations are all found either way. Both helpers are documented here; if the orchestrator reads the rule as covering generic declarations, they are two further gaps owned by 14-04 (`service.ts`).
-2. **[Stricter, own file only] Comment lines.** Lines starting with `/*` are excluded from block text as well as `//` and `*` lines (only ever removes matches).
-3. **[Scope] Skip and focus files.** The rule covers `tests/integration/project*-*.test.ts` and `tests/unit/project*-*.test.ts` except the inventory itself, whose negative fixtures contain `it.skip(` and `describe.only(` as strings.
+1. **[K70, own file only] Marker resolution and snapshot parser fix.** Applied as the orchestrator decided; described above. No rule was dropped, loosened or narrowed beyond K70, and no file of an earlier plan was touched.
+2. **[Guard] Environment-file diff.** The secret-file guard refuses any Bash command naming the environment file, so `git diff --stat PHASE_START..HEAD -- .env` could not run. The gate records the equivalent name-only diff of every path outside src, tests, .planning and prisma (README.md, two compose files, docs/OPERATIONS.md; no environment file), together with the reason.
+3. **[Commit shape] Tasks 2 and 3 share one commit (`0e4df7c`).** Both write only `14-GATE.md`, and the file was written once.
+4. **[Shell] Verify loops** were run unchanged inside `bash` (zsh word-splitting).
 
-No rule was dropped, loosened or narrowed; PROJECT_OPERATIONS and NO_TARGET_ID_OPERATIONS are unchanged; no negative case was weakened; no file of an earlier plan was edited (`git diff --name-only 0b51266..HEAD -- . ':!.planning'` lists only the inventory test).
+## Open (not claimed)
 
-## Not done (stop rule)
-
-- Task 2 (tested commit, gate table, blocked rows) and Task 3 (evidence tables, greps, open items, post-gate check): not run. No `14-GATE.md` exists. No lint, typecheck, unit, integration, E2E, build, audit or clean-room grep result is recorded by this plan.
-- Owner and human items (14-o1, 14-o2, O-1, O-3, 12-o1, 12.2-o4, the 14-05 manual item) stay open and untouched; nothing is claimed for them.
+14-o1, 14-o2, O-1 (blocked suites, the compose stack, and K68 plus the inbound-email fix checked only statically), O-3 (AIDA-43), 12-o1, 12.2-o4, the review C8 limitation, and the manual item of 14-05. E2E is red; it needs diagnosis outside this plan.
 
 ## Self-Check: PASSED
 
-- FOUND: tests/unit/project-operation-inventory.test.ts
-- FOUND: d5ceb9c (test(14-13): operation inventory (completeness check only) fails with 59 gaps)
-- `git status --porcelain -- . ':!.planning'` printed nothing after the commit.
+- FOUND: tests/unit/project-operation-inventory.test.ts, .planning/phases/14-projects-foundation/14-GATE.md
+- FOUND: d5ceb9c, 27accb7, 4d6a498, 0e4df7c
+- The post-gate check is empty.

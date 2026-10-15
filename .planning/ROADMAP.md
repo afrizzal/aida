@@ -449,7 +449,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 **Wave 8** *(blocked on Wave 7 completion)*
 
-- [ ] 14-13-PLAN.md — Operation inventory proof, phase gate with blocked suites, evidence per requirement and criterion, clean-room grep, open items (Wave 8)
+- [x] 14-13-PLAN.md — Operation inventory proof, phase gate with blocked suites, evidence per requirement and criterion, clean-room grep, open items (Wave 8)
 
 ### Phase 15: Work Views
 
@@ -554,7 +554,7 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 | 12.1. Ticket Lifecycle (custom states, SLA pause) | v2.0 | 17/17 | Verified: human_needed (visual, dark mode, contrast by eye, screen reader and UAT open; K47 deferred) | - |
 | 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 12/12 | Verified: human_needed (visual, dark mode, screen reader, UI-SPEC amendments A1 to A8 and UAT open; owner items 12.2-o1 to 12.2-o4) | - |
 | 13. Integrations | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
-| 14. Projects Foundation | v2.0 | 12/13 | In progress | - |
+| 14. Projects Foundation | v2.0 | 13/13 | In progress | - |
 | 15. Work Views | v2.0 | 0/0 | Not started | - |
 | 16. Workspace | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
 | 17. Unification | v2.0 | 0/0 | Parked (depends on parked Phases 10, 13 and 16) | - |
