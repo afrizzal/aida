@@ -142,6 +142,15 @@ test.afterAll(async () => {
   stub.server?.close();
 });
 
+/** ai-triage jobs for one ticket that pg-boss has not finished (waiting, retry or running). */
+async function pendingTriageJobs(ticketId: string): Promise<number> {
+  const rows = await prisma.$queryRaw<{ n: number }[]>`
+    SELECT count(*)::int AS n FROM pgboss.job
+    WHERE name = 'ai-triage' AND data->>'ticketId' = ${ticketId}
+      AND state IN ('created', 'retry', 'active')`;
+  return rows[0]?.n ?? 0;
+}
+
 // ---------------------------------------------------------------------------
 // UAT Test 1 — Cold Start Smoke Test
 // (fresh DB container + `migrate deploy` + next dev boot happened in globalSetup;
@@ -403,6 +412,13 @@ test("T7 re-run triage: failure shows Triage failed + Re-run; retry succeeds", a
       { timeout: 60_000 },
     )
     .toBe("FAILED");
+
+  // pg-boss retries the failed job at once (ai-triage: retryLimit 2, no retry delay). A retry
+  // that ran after the switch to "ok" below could complete the triage just before the Re-run
+  // click writes PENDING: the poll would see that COMPLETED, and the page would then show
+  // "Triaging…" for the Re-run's own job. Wait until the retries are used up, so the Re-run
+  // under test is the only job that can complete the triage.
+  await expect.poll(() => pendingTriageJobs(triagedTicketId), { timeout: 60_000 }).toBe(0);
 
   await page.goto(`/tickets/${triagedTicketId}`);
   await expect(page.getByText("Triage failed")).toBeVisible();
