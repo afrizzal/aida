@@ -346,26 +346,19 @@ export async function bulkUpdateTasks(
       const fieldsChanged = Object.keys(plan.data).length > 0;
       const labelsChanged = plan.addLabelIds.length > 0 || plan.removeLabelIds.length > 0;
       if (plan.newStatus === null && !fieldsChanged && !labelsChanged) continue;
-      if (plan.newStatus !== null) {
-        await applyStatusChangeInTx(
-          tx,
-          { orgId: actor.orgId, actorUserId: actor.userId },
-          task,
-          plan.newStatus,
-          { now, batchId, record: false },
-        );
-        if (fieldsChanged) {
-          await tx.task.updateMany({
-            where: { id: task.id, organizationId: actor.orgId },
-            data: plan.data,
-          });
-        }
-      } else {
+      if (plan.newStatus === null) {
         const updated = await tx.task.updateMany({
           where: { id: task.id, organizationId: actor.orgId, version: task.version },
           data: { ...plan.data, version: { increment: 1 } },
         });
         if (updated.count !== 1) refuse("CONFLICT");
+      } else if (fieldsChanged) {
+        // Review b-WR-01: the other fields first (the version stays, so the status change's
+        // conditional update still matches), so a recurrence successor is built from them.
+        await tx.task.updateMany({
+          where: { id: task.id, organizationId: actor.orgId },
+          data: plan.data,
+        });
       }
       if (plan.removeLabelIds.length > 0) {
         await tx.taskLabel.deleteMany({
@@ -385,6 +378,16 @@ export async function bulkUpdateTasks(
             labelId,
           })),
         });
+      }
+      // The status change last: a completion's successor reads the patched row and labels.
+      if (plan.newStatus !== null) {
+        await applyStatusChangeInTx(
+          tx,
+          { orgId: actor.orgId, actorUserId: actor.userId },
+          task,
+          plan.newStatus,
+          { now, batchId, record: false },
+        );
       }
       await recordProjectActivity(tx, {
         orgId: actor.orgId,

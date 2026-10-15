@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { listProjectActivity } from "@/lib/projects/activity";
+import { bulkUpdateTasks } from "@/lib/projects/bulk";
 import { setProjectMemberRole } from "@/lib/projects/members";
 import {
   createProject,
@@ -19,8 +20,10 @@ import {
   addOrgMember,
   projectTableSnapshot,
   removeOrgMember,
+  seedLabel,
   seedOrgWithMembers,
   seedProject,
+  seedTask,
 } from "../support/project-fixtures";
 
 async function managerWorld() {
@@ -300,3 +303,54 @@ describe("a-CR-01, K71: hidden private projects change no visible order value, c
     expect(JSON.stringify(actual)).not.toMatch(/"position"/);
   });
 });
+
+describe("b-WR-01: a bulk completion creates the recurrence successor from the patched task", () => {
+  it("the successor carries the new due date, priority, assignee and labels of the same bulk call", async () => {
+    const w = await managerWorld();
+    const assignee = await addOrgMember(prisma, w.orgId, "member");
+    const kept = await seedLabel(prisma, w.orgId, w.project.id, { name: "kept" });
+    const added = await seedLabel(prisma, w.orgId, w.project.id, { name: "added" });
+    const removed = await seedLabel(prisma, w.orgId, w.project.id, { name: "removed" });
+    const task = await seedTask(prisma, w.orgId, w.project.id, {
+      title: "Weekly",
+      dueDate: "2026-11-01",
+      labelIds: [kept.id, removed.id],
+      recurrence: { rule: "WEEKLY", anchor: "2026-11-01", timeZone: "UTC" },
+    });
+    const result = await bulkUpdateTasks(
+      w.manager,
+      [task.id],
+      {
+        status: "DONE",
+        dueDate: "2026-12-01",
+        priority: "HIGH",
+        assigneeUserId: assignee.id,
+        addLabelIds: [added.id],
+        removeLabelIds: [removed.id],
+      },
+      { now: new Date("2026-11-20T10:00:00Z") },
+    );
+    expect(result).toMatchObject({ ok: true, changedCount: 1 });
+    const successor = await prisma.task.findFirstOrThrow({
+      where: { organizationId: w.orgId, recurrencePredecessorId: task.id },
+      select: { id: true, dueDate: true, priority: true, assigneeUserId: true },
+    });
+    expect({
+      dueDate: successor.dueDate?.toISOString().slice(0, 10),
+      priority: successor.priority,
+      assigneeUserId: successor.assigneeUserId,
+    }).toEqual({ dueDate: "2026-12-06", priority: "HIGH", assigneeUserId: assignee.id });
+    const labels = await prisma.taskLabel.findMany({
+      where: { organizationId: w.orgId, taskId: successor.id },
+      select: { labelId: true },
+      orderBy: { labelId: "asc" },
+    });
+    expect(labels.map((l) => l.labelId)).toEqual([added.id, kept.id].sort());
+    const recurred = await prisma.projectActivity.findFirstOrThrow({
+      where: { organizationId: w.orgId, verb: "TASK_RECURRED" },
+      select: { after: true },
+    });
+    expect(recurred.after).toMatchObject({ dueDate: "2026-12-06" });
+  });
+});
+
