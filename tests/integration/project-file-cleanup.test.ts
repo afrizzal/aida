@@ -40,6 +40,12 @@ afterAll(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
+// Review c-IN-01: this wipe, and the sweeps below that run over every organization, are safe only
+// because integration files run one at a time (vitest.integration.config.ts sets
+// fileParallelism: false, and docs/ops/local-dev.md allows one test process at a time). With files
+// in parallel, or a second process on the same database, the wipe would delete outbox rows that
+// project-delete.test.ts and project-comments-attachments.test.ts assert on, and the exact counts
+// here would change.
 beforeEach(async () => {
   await prisma.$executeRaw`DELETE FROM "ProjectFileCleanup"`;
 });
@@ -282,10 +288,14 @@ describe("project file cleanup sweep edge cases", () => {
     expect(["idle in transaction", "active"]).toContain(sweep1State[0]?.state);
 
     // Sweep 2: limit 100, its own counting stub; completes while sweep 1 is still parked.
+    // Review c-IN-03: while sweep 2 runs, the observer checks without pause for any backend that
+    // sweep 1 blocks. A SKIP LOCKED regression makes sweep 2 wait on sweep 1's rows; the watchdog
+    // then fails at once naming the blocked PID, instead of the test hanging until its timeout.
     let sweep2Pid = 0;
-    let sweep2Blockers: number[] = [];
+    let sweep2Settled = false;
+    let watchdogChecks = 0;
     const sweep2Seen: string[] = [];
-    const sweep2 = await sweepProjectFileCleanup({
+    const sweep2Run = sweepProjectFileCleanup({
       client: prisma,
       now: T0,
       limit: 100,
@@ -295,16 +305,30 @@ describe("project file cleanup sweep edge cases", () => {
       }),
       onLocked: async (tx) => {
         sweep2Pid = await backendPid(tx);
-        const rows = await observerClient.$queryRaw<{ blockers: number[] }[]>`
-          SELECT pg_blocking_pids(${sweep2Pid}::int) AS blockers
-        `;
-        sweep2Blockers = (rows[0]?.blockers ?? []).map(Number);
       },
+    }).finally(() => {
+      sweep2Settled = true;
     });
+    const blockedBehindSweep1 = (async (): Promise<void> => {
+      while (!sweep2Settled) {
+        const rows = await observerClient.$queryRaw<{ pid: number }[]>`
+          SELECT pid FROM pg_stat_activity WHERE ${sweep1Pid}::int = ANY(pg_blocking_pids(pid))
+        `;
+        watchdogChecks++;
+        if (rows.length > 0) {
+          release.resolve();
+          throw new Error(
+            `sweep 2 blocked behind sweep 1: PID(s) ${rows.map((r) => Number(r.pid)).join(", ")} wait on ${sweep1Pid}`,
+          );
+        }
+      }
+    })();
+    const sweep2 = await Promise.race([sweep2Run, blockedBehindSweep1.then(() => sweep2Run)]);
+    await blockedBehindSweep1;
+    expect(watchdogChecks).toBeGreaterThan(0);
     expect(sweep2).toEqual({ deleted: 20, missing: 0, failed: 0 });
     expect(sweep2Pid).toBeGreaterThan(0);
     expect(sweep2Pid).not.toBe(sweep1Pid);
-    expect(sweep2Blockers).not.toContain(sweep1Pid);
     const notLockedBySweep1 = keys.filter((key) => !sweep1Locked.includes(key));
     expect([...sweep2Seen].sort()).toEqual([...notLockedBySweep1].sort());
     expect(sweep2Seen.some((key) => sweep1Locked.includes(key))).toBe(false);
