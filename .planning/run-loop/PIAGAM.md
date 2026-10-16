@@ -49,6 +49,8 @@ Ditambahkan oleh owner dan mengikat seperti Larangan. Seluruh isi bagian ini, te
 
 **G. Push.** Jangan push kecuali owner memintanya langsung. AIDA publik, jadi push langsung mempublikasikan kode. Larangan push dan kunci `pushurl` di bawah tetap berlaku penuh.
 
+**H. Batas disk dan sisa Testcontainers.** Di awal setiap putaran, jalankan `df -h /System/Volumes/Data`. Kalau Avail di bawah 12 GiB: jangan kerjakan putaran itu, jangan jadwalkan putaran berikutnya, dan laporkan angkanya. Di akhir putaran, hapus container Testcontainers yang tertinggal milik putaran itu saja. Jangan sentuh container, image, atau volume proyek lain.
+
 ## Urutan fase
 
 Nomor melanjutkan v1. Kerjakan berurutan. Fase boleh dipecah, tetapi isinya tidak boleh dibuang.
