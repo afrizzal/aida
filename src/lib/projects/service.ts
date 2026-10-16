@@ -98,6 +98,64 @@ export function listLimit(
   return raw;
 }
 
+/** A page request of a keyset-paged list: the previous page's opaque cursor and a limit. */
+export interface ListPageOpts {
+  cursor?: string | null;
+  limit?: number;
+}
+
+/** An opaque keyset cursor over sort values ending with the row id (contract section 15). */
+export function encodeKeyset(values: readonly (string | number)[]): string {
+  return Buffer.from(JSON.stringify(values), "utf8").toString("base64url");
+}
+
+/**
+ * The decoded keyset cursor (its values match `kinds`, the last one a well-formed id), null for no
+ * cursor, or INVALID_INPUT field cursor.
+ */
+export function decodeKeyset(
+  raw: unknown,
+  kinds: readonly ("string" | "number")[],
+): (string | number)[] | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "string" || raw.length > 4096) refuse("INVALID_INPUT", "cursor");
+  try {
+    const parsed: unknown = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+    if (
+      Array.isArray(parsed) &&
+      parsed.length === kinds.length &&
+      parsed.every((value, i) => typeof value === kinds[i]) &&
+      isWellFormedId(parsed[parsed.length - 1])
+    ) {
+      return parsed as (string | number)[];
+    }
+  } catch {
+    // falls through to the refusal
+  }
+  return refuse("INVALID_INPUT", "cursor");
+}
+
+/**
+ * One page of a list already sorted in memory by `compare` (people lists, which re-check the
+ * `member` table and so are filtered after the read): the rows strictly after the cursor's key,
+ * at most `limit`, with hasMore and the next cursor from the last returned row.
+ */
+export function pageInMemory<T>(
+  sorted: readonly T[],
+  opts: ListPageOpts,
+  keyOf: (row: T) => (string | number)[],
+  compareKeys: (a: (string | number)[], b: (string | number)[]) => number,
+  kinds: readonly ("string" | "number")[],
+): { rows: T[]; hasMore: boolean; nextCursor: string | null } {
+  const limit = listLimit(opts.limit);
+  const cursor = decodeKeyset(opts.cursor, kinds);
+  const after = cursor ? sorted.filter((row) => compareKeys(keyOf(row), cursor) > 0) : sorted;
+  const rows = after.slice(0, limit);
+  const hasMore = after.length > limit;
+  const last = rows[rows.length - 1];
+  return { rows, hasMore, nextCursor: hasMore && last ? encodeKeyset(keyOf(last)) : null };
+}
+
 /** One batch id per mutation call (contract section 5). */
 export function newBatchId(): string {
   return randomUUID();

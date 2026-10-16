@@ -12,7 +12,6 @@ import { findConservativeMembership } from "../membership";
 import { requireProject } from "./access";
 import { recordProjectActivity } from "./activity";
 import {
-  LIST_MAX,
   PROJECT_MEMBER_ROLES,
   type ProjectActor,
   type ProjectMemberRole,
@@ -21,8 +20,10 @@ import {
 import {
   afterLock,
   isPlausibleId,
+  type ListPageOpts,
   newBatchId,
   type ProjectDb,
+  pageInMemory,
   refuse,
   runProjectRead,
   runProjectTransaction,
@@ -52,6 +53,15 @@ function byNameThenId(a: PersonView, b: PersonView): number {
  * The subset of userIds that still have a member row in the organization (C14): one read with the
  * organization term. Every list of people and every manager count goes through it.
  */
+/** Code-unit comparison of two string keys, element by element (the sort order of the lists). */
+function compareStringKeys(a: (string | number)[], b: (string | number)[]): number {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    const c = codeUnitCompare(String(a[i]), String(b[i]));
+    if (c !== 0) return c;
+  }
+  return a.length - b.length;
+}
+
 export async function activeOrgUserIds(
   db: ProjectDb,
   orgId: string,
@@ -137,7 +147,10 @@ export async function addProjectMember(
 export async function listProjectMembers(
   actor: ProjectActor,
   projectId: string,
-): Promise<ProjectResult<{ members: ProjectMemberView[] }>> {
+  opts: ListPageOpts = {},
+): Promise<
+  ProjectResult<{ members: ProjectMemberView[]; hasMore: boolean; nextCursor: string | null }>
+> {
   return runProjectRead(actor, "listProjectMembers", async (db) => {
     await requireProject(db, actor, projectId, { lock: "none", level: "READ" });
     const rows = await db.projectMember.findMany({
@@ -156,9 +169,16 @@ export async function listProjectMembers(
         name: row.user.name,
         role: row.role as ProjectMemberRole,
       }))
-      .sort((a, b) => codeUnitCompare(a.role, b.role) || byNameThenId(a, b))
-      .slice(0, LIST_MAX);
-    return { members };
+      .sort((a, b) => codeUnitCompare(a.role, b.role) || byNameThenId(a, b));
+    // Keyset (role, name, userId), review a-WR-07.
+    const page = pageInMemory(
+      members,
+      opts ?? {},
+      (m) => [m.role, m.name, m.userId],
+      compareStringKeys,
+      ["string", "string", "string"],
+    );
+    return { members: page.rows, hasMore: page.hasMore, nextCursor: page.nextCursor };
   });
 }
 
@@ -170,7 +190,10 @@ export async function listProjectMembers(
 export async function listEligibleAssignees(
   actor: ProjectActor,
   projectId: string,
-): Promise<ProjectResult<{ assignees: PersonView[] }>> {
+  opts: ListPageOpts = {},
+): Promise<
+  ProjectResult<{ assignees: PersonView[]; hasMore: boolean; nextCursor: string | null }>
+> {
   return runProjectRead(actor, "listEligibleAssignees", async (db) => {
     const access = await requireProject(db, actor, projectId, { lock: "none", level: "READ" });
     const people = new Map<string, string>();
@@ -193,11 +216,13 @@ export async function listEligibleAssignees(
       });
       for (const row of rows) people.set(row.userId, row.user.name);
     }
-    const assignees = [...people]
-      .map(([userId, name]) => ({ userId, name }))
-      .sort(byNameThenId)
-      .slice(0, LIST_MAX);
-    return { assignees };
+    const assignees = [...people].map(([userId, name]) => ({ userId, name })).sort(byNameThenId);
+    // Keyset (name, userId), review a-WR-07.
+    const page = pageInMemory(assignees, opts ?? {}, (p) => [p.name, p.userId], compareStringKeys, [
+      "string",
+      "string",
+    ]);
+    return { assignees: page.rows, hasMore: page.hasMore, nextCursor: page.nextCursor };
   });
 }
 

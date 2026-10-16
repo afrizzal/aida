@@ -278,6 +278,8 @@ describe("listFavorites (LIST)", () => {
         tasks: [],
         hasMoreProjects: false,
         hasMoreTasks: false,
+        nextProjectsCursor: null,
+        nextTasksCursor: null,
       });
       const text = JSON.stringify(r);
       for (const id of [w.project.id, w.task.id, w.subtask.id]) {

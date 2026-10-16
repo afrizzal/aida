@@ -16,13 +16,13 @@
 // the team FOR SHARE, then the project FOR UPDATE, and reads the team's members under that lock,
 // so a concurrent addTeamMember either commits before the copy (and is in it) or waits.
 import { randomUUID } from "node:crypto";
+import type { Prisma } from "../../generated/prisma/client";
 import { isAdminRole } from "../membership";
 import { lockTeam, readableProjectIds, requireMembership, requireProject } from "./access";
 import { recordProjectActivity } from "./activity";
 import {
   codePointLength,
   hasNul,
-  LIST_MAX,
   type ProjectActor,
   type ProjectResult,
   TEAM_NAME_MAX,
@@ -30,7 +30,11 @@ import {
 import { activeOrgUserIds, type PersonView } from "./members";
 import {
   afterLock,
+  decodeKeyset,
+  encodeKeyset,
   isPlausibleId,
+  type ListPageOpts,
+  listLimit,
   newBatchId,
   type ProjectDb,
   refuse,
@@ -111,17 +115,29 @@ async function activeTeamMembers(
     .sort((a, b) => codeUnitCompare(a.name, b.name) || codeUnitCompare(a.userId, b.userId));
 }
 
+/** Keyset (name, id) after a cursor, in the database's order of the orderBy (review a-WR-07). */
+function nameKeysetWhere(cursor: (string | number)[] | null): Prisma.TeamWhereInput {
+  if (!cursor) return {};
+  const [name, id] = cursor as [string, string];
+  return { OR: [{ name: { gt: name } }, { name, id: { gt: id } }] };
+}
+
 /** MEMBER: the organization's teams with id, name and active member count; no project data. */
 export async function listTeams(
   actor: ProjectActor,
-): Promise<ProjectResult<{ teams: TeamSummary[] }>> {
+  opts: ListPageOpts = {},
+): Promise<ProjectResult<{ teams: TeamSummary[]; hasMore: boolean; nextCursor: string | null }>> {
   return runProjectRead(actor, "listTeams", async (db) => {
-    const teams = await db.team.findMany({
-      where: { organizationId: actor.orgId },
+    const limit = listLimit(opts?.limit);
+    const cursor = decodeKeyset(opts?.cursor, ["string", "string"]);
+    const found = await db.team.findMany({
+      where: { AND: [{ organizationId: actor.orgId }, nameKeysetWhere(cursor)] },
       orderBy: [{ name: "asc" }, { id: "asc" }],
-      take: LIST_MAX,
+      take: limit + 1,
       select: { id: true, name: true },
     });
+    const hasMore = found.length > limit;
+    const teams = found.slice(0, limit);
     const rows = await db.teamMember.findMany({
       where: { organizationId: actor.orgId, teamId: { in: teams.map((team) => team.id) } },
       select: { teamId: true, userId: true },
@@ -135,12 +151,15 @@ export async function listTeams(
     for (const row of rows) {
       if (active.has(row.userId)) counts.set(row.teamId, (counts.get(row.teamId) ?? 0) + 1);
     }
+    const last = teams[teams.length - 1];
     return {
       teams: teams.map((team) => ({
         id: team.id,
         name: team.name,
         memberCount: counts.get(team.id) ?? 0,
       })),
+      hasMore,
+      nextCursor: hasMore && last ? encodeKeyset([last.name, last.id]) : null,
     };
   });
 }
@@ -409,23 +428,40 @@ export async function removeTeamMember(
 export async function listProjectTeams(
   actor: ProjectActor,
   projectId: string,
-): Promise<ProjectResult<{ teams: { id: string; name: string }[] }>> {
+  opts: ListPageOpts = {},
+): Promise<
+  ProjectResult<{
+    teams: { id: string; name: string }[];
+    hasMore: boolean;
+    nextCursor: string | null;
+  }>
+> {
   return runProjectRead(actor, "listProjectTeams", async (db) => {
     await requireProject(db, actor, projectId, { lock: "none", level: "READ" });
-    const links = await db.projectTeam.findMany({
-      where: { organizationId: actor.orgId, projectId },
-      select: { teamId: true },
+    const limit = listLimit(opts?.limit);
+    const cursor = decodeKeyset(opts?.cursor, ["string", "string"]);
+    const found = await db.team.findMany({
+      where: {
+        AND: [
+          {
+            organizationId: actor.orgId,
+            projects: { some: { organizationId: actor.orgId, projectId } },
+          },
+          nameKeysetWhere(cursor),
+        ],
+      },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+      take: limit + 1,
+      select: { id: true, name: true },
     });
-    const teams =
-      links.length === 0
-        ? []
-        : await db.team.findMany({
-            where: { organizationId: actor.orgId, id: { in: links.map((link) => link.teamId) } },
-            orderBy: [{ name: "asc" }, { id: "asc" }],
-            take: LIST_MAX,
-            select: { id: true, name: true },
-          });
-    return { teams };
+    const hasMore = found.length > limit;
+    const teams = found.slice(0, limit);
+    const last = teams[teams.length - 1];
+    return {
+      teams,
+      hasMore,
+      nextCursor: hasMore && last ? encodeKeyset([last.name, last.id]) : null,
+    };
   });
 }
 

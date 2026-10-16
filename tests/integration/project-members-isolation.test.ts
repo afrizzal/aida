@@ -237,9 +237,19 @@ describe("unassignTeamFromProject (TARGET)", () => {
 describe("listTeams (TEAM)", () => {
   it("every active member of A gets the same list with no project data; outsider sees its own organization; outsider in A MEMBERSHIP_ENDED", async () => {
     const w = await seedPrivacyWorld(prisma);
-    const expected = { ok: true, teams: [{ id: w.team.id, name: w.team.name, memberCount: 1 }] };
+    const expected = {
+      ok: true,
+      teams: [{ id: w.team.id, name: w.team.name, memberCount: 1 }],
+      hasMore: false,
+      nextCursor: null,
+    };
     for (const actor of activeMembersOfA(w)) expect(await listTeams(actor)).toEqual(expected);
-    expect(await listTeams(w.actors.outsider)).toEqual({ ok: true, teams: [] });
+    expect(await listTeams(w.actors.outsider)).toEqual({
+      ok: true,
+      teams: [],
+      hasMore: false,
+      nextCursor: null,
+    });
     expect(await listTeams(outsiderInA(w))).toEqual({ ok: false, code: "MEMBERSHIP_ENDED" });
   });
 

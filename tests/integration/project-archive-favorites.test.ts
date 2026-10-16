@@ -424,6 +424,8 @@ describe("task favorites", () => {
       tasks: [],
       hasMoreProjects: false,
       hasMoreTasks: false,
+      nextProjectsCursor: null,
+      nextTasksCursor: null,
     });
     expect(
       await prisma.projectFavorite.count({

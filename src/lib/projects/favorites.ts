@@ -20,7 +20,15 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "../../generated/prisma/client";
 import { readableProjectWhere, requireProject, requireTask } from "./access";
 import type { ProjectActor, ProjectResult } from "./contract";
-import { afterLock, listLimit, refuse, runProjectRead, runProjectTransaction } from "./service";
+import {
+  afterLock,
+  decodeKeyset,
+  encodeKeyset,
+  listLimit,
+  refuse,
+  runProjectRead,
+  runProjectTransaction,
+} from "./service";
 
 // ---------------------------------------------------------------------------------------------
 // Project favorites
@@ -130,6 +138,29 @@ export interface ListFavoritesOpts {
   includeArchived?: boolean;
   /** At most this many projects and this many tasks (default LIST_DEFAULT, at most LIST_MAX). */
   limit?: number;
+  /** nextProjectsCursor of the previous call (review b-WR-05). */
+  projectsCursor?: string | null;
+  /** nextTasksCursor of the previous call (review b-WR-05). */
+  tasksCursor?: string | null;
+}
+
+/** Keyset (createdAt desc, id desc) before a favorite cursor of [ISO time, favorite id]. */
+function favoriteKeysetWhere(
+  cursor: (string | number)[] | null,
+): Prisma.ProjectFavoriteWhereInput & Prisma.TaskFavoriteWhereInput {
+  if (!cursor) return {};
+  const [iso, id] = cursor as [string, string];
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) refuse("INVALID_INPUT", "cursor");
+  return { OR: [{ createdAt: { lt: at } }, { createdAt: at, id: { lt: id } }] };
+}
+
+function favoriteCursor(
+  hasMore: boolean,
+  rows: readonly { id: string; createdAt: Date }[],
+): string | null {
+  const last = rows[rows.length - 1];
+  return hasMore && last ? encodeKeyset([last.createdAt.toISOString(), last.id]) : null;
 }
 
 /**
@@ -137,7 +168,8 @@ export interface ListFavoritesOpts {
  * of projects the actor can no longer read stay in the table and are left out here. Without
  * includeArchived, archived projects, archived tasks, tasks of archived projects and subtasks of
  * archived parents are left out. Each list holds at most `limit` entries; hasMoreProjects and
- * hasMoreTasks say whether more exist.
+ * hasMoreTasks say whether more exist, and nextProjectsCursor and nextTasksCursor fetch them
+ * (keyset over the favorite's createdAt and id, newest first; review b-WR-05).
  */
 export async function listFavorites(
   actor: ProjectActor,
@@ -148,6 +180,8 @@ export async function listFavorites(
     tasks: FavoriteTaskItem[];
     hasMoreProjects: boolean;
     hasMoreTasks: boolean;
+    nextProjectsCursor: string | null;
+    nextTasksCursor: string | null;
   }>
 > {
   return runProjectRead(actor, "listFavorites", async (db) => {
@@ -155,15 +189,23 @@ export async function listFavorites(
     if (typeof includeArchived !== "boolean") refuse("INVALID_INPUT", "includeArchived");
     const limit = listLimit(opts?.limit);
     const orgId = actor.orgId;
+    const projectsCursor = decodeKeyset(opts?.projectsCursor, ["string", "string"]);
+    const tasksCursor = decodeKeyset(opts?.tasksCursor, ["string", "string"]);
 
     const projectWhere: Prisma.ProjectWhereInput = includeArchived
       ? readableProjectWhere(actor)
       : { AND: [readableProjectWhere(actor), { archivedAt: null }] };
     const projectRows = await db.projectFavorite.findMany({
-      where: { organizationId: orgId, userId: actor.userId, project: projectWhere },
+      where: {
+        AND: [
+          { organizationId: orgId, userId: actor.userId, project: projectWhere },
+          favoriteKeysetWhere(projectsCursor),
+        ],
+      },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: limit + 1,
       select: {
+        id: true,
         createdAt: true,
         project: { select: { id: true, name: true, keyPrefix: true, archivedAt: true } },
       },
@@ -177,10 +219,16 @@ export async function listFavorites(
       });
     }
     const taskRows = await db.taskFavorite.findMany({
-      where: { organizationId: orgId, userId: actor.userId, task: { AND: taskTerms } },
+      where: {
+        AND: [
+          { organizationId: orgId, userId: actor.userId, task: { AND: taskTerms } },
+          favoriteKeysetWhere(tasksCursor),
+        ],
+      },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: limit + 1,
       select: {
+        id: true,
         createdAt: true,
         task: {
           select: {
@@ -214,6 +262,8 @@ export async function listFavorites(
       })),
       hasMoreProjects: projectRows.length > limit,
       hasMoreTasks: taskRows.length > limit,
+      nextProjectsCursor: favoriteCursor(projectRows.length > limit, projectRows.slice(0, limit)),
+      nextTasksCursor: favoriteCursor(taskRows.length > limit, taskRows.slice(0, limit)),
     };
   });
 }

@@ -406,6 +406,8 @@ describe("team management", () => {
       expect(await listTeams(actor)).toEqual({
         ok: true,
         teams: [{ id: team.id, name: "Alpha", memberCount: 1 }],
+        hasMore: false,
+        nextCursor: null,
       });
     }
     const asOther = await getTeam(w.other, team.id);
@@ -430,7 +432,12 @@ describe("team management", () => {
       code: "NOT_FOUND",
     });
     expect(await deleteTeam(w.admin, team.id)).toEqual({ ok: true });
-    expect(await listTeams(w.member)).toEqual({ ok: true, teams: [] });
+    expect(await listTeams(w.member)).toEqual({
+      ok: true,
+      teams: [],
+      hasMore: false,
+      nextCursor: null,
+    });
   });
 });
 
@@ -518,6 +525,8 @@ describe("K69: team assignment copies members, a team grants nothing on a privat
     expect(await listProjectTeams(w.u1, w.project.id)).toEqual({
       ok: true,
       teams: [{ id: w.team.id, name: w.team.name }],
+      hasMore: false,
+      nextCursor: null,
     });
   });
 

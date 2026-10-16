@@ -20,7 +20,6 @@ import {
   codePointLength,
   fromCalendarDate,
   hasNul,
-  LIST_MAX,
   MILESTONE_DESCRIPTION_MAX,
   MILESTONE_NAME_MAX,
   type ProjectActor,
@@ -31,7 +30,11 @@ import {
 import { classifyTaskMissInTx } from "./labels";
 import {
   afterLock,
+  decodeKeyset,
+  encodeKeyset,
   isPlausibleId,
+  type ListPageOpts,
+  listLimit,
   newBatchId,
   type ProjectDb,
   refuse,
@@ -91,21 +94,45 @@ function view(row: {
 // ---------------------------------------------------------------------------------------------
 // Reads
 
+/** Keyset (date, id) after a cursor of [CalendarDate, id] (review b-WR-05). */
+function dateKeysetWhere(cursor: (string | number)[] | null): Prisma.ProjectMilestoneWhereInput {
+  if (!cursor) return {};
+  const [rawDate, id] = cursor as [string, string];
+  const parsed = parseCalendarDate(rawDate);
+  if (parsed === null) refuse("INVALID_INPUT", "cursor");
+  const date = fromCalendarDate(parsed);
+  return { OR: [{ date: { gt: date } }, { date, id: { gt: id } }] };
+}
+
+function dateCursor(hasMore: boolean, rows: readonly { id: string; date: Date }[]): string | null {
+  const last = rows[rows.length - 1];
+  return hasMore && last ? encodeKeyset([toCalendarDate(last.date), last.id]) : null;
+}
+
 /** READ: the project's milestones by date, with task and done counts (non-archived tasks). */
 export async function listProjectMilestones(
   actor: ProjectActor,
   projectId: string,
+  opts: ListPageOpts = {},
 ): Promise<
-  ProjectResult<{ milestones: (MilestoneView & { taskCount: number; doneCount: number })[] }>
+  ProjectResult<{
+    milestones: (MilestoneView & { taskCount: number; doneCount: number })[];
+    hasMore: boolean;
+    nextCursor: string | null;
+  }>
 > {
   return runProjectRead(actor, "listProjectMilestones", async (db) => {
     await requireProject(db, actor, projectId, { lock: "none", level: "READ" });
-    const rows = await db.projectMilestone.findMany({
-      where: { organizationId: actor.orgId, projectId },
+    const limit = listLimit(opts?.limit);
+    const cursor = decodeKeyset(opts?.cursor, ["string", "string"]);
+    const found = await db.projectMilestone.findMany({
+      where: { AND: [{ organizationId: actor.orgId, projectId }, dateKeysetWhere(cursor)] },
       orderBy: [{ date: "asc" }, { id: "asc" }],
-      take: LIST_MAX,
+      take: limit + 1,
       select: MILESTONE_SELECT,
     });
+    const hasMore = found.length > limit;
+    const rows = found.slice(0, limit);
     const counts = new Map<string, { taskCount: number; doneCount: number }>();
     if (rows.length > 0) {
       const groups = await db.task.groupBy({
@@ -131,18 +158,26 @@ export async function listProjectMilestones(
         ...view(row),
         ...(counts.get(row.id) ?? { taskCount: 0, doneCount: 0 }),
       })),
+      hasMore,
+      nextCursor: dateCursor(hasMore, rows),
     };
   });
 }
 
 /**
  * READ (LIST): dated milestones of readable, non-archived projects between from and to
- * (inclusive, both optional), by date then id, at most LIST_MAX.
+ * (inclusive, both optional), by date then id, keyset-paged (review b-WR-05).
  */
 export async function listWorkspaceMilestones(
   actor: ProjectActor,
-  opts: { from?: string; to?: string } = {},
-): Promise<ProjectResult<{ milestones: (MilestoneView & { projectName: string })[] }>> {
+  opts: { from?: string; to?: string } & ListPageOpts = {},
+): Promise<
+  ProjectResult<{
+    milestones: (MilestoneView & { projectName: string })[];
+    hasMore: boolean;
+    nextCursor: string | null;
+  }>
+> {
   return runProjectRead(actor, "listWorkspaceMilestones", async (db) => {
     const from = opts.from === undefined ? null : validDate(opts.from, "from");
     const to = opts.to === undefined ? null : validDate(opts.to, "to");
@@ -150,18 +185,29 @@ export async function listWorkspaceMilestones(
     const date: Prisma.DateTimeFilter = {};
     if (from) date.gte = fromCalendarDate(from);
     if (to) date.lte = fromCalendarDate(to);
-    const rows = await db.projectMilestone.findMany({
+    const limit = listLimit(opts.limit);
+    const cursor = decodeKeyset(opts.cursor, ["string", "string"]);
+    const found = await db.projectMilestone.findMany({
       where: {
-        organizationId: actor.orgId,
-        project: { AND: [readableProjectWhere(actor), { archivedAt: null }] },
-        ...(from || to ? { date } : {}),
+        AND: [
+          {
+            organizationId: actor.orgId,
+            project: { AND: [readableProjectWhere(actor), { archivedAt: null }] },
+            ...(from || to ? { date } : {}),
+          },
+          dateKeysetWhere(cursor),
+        ],
       },
       orderBy: [{ date: "asc" }, { id: "asc" }],
-      take: LIST_MAX,
+      take: limit + 1,
       select: { ...MILESTONE_SELECT, project: { select: { name: true } } },
     });
+    const hasMore = found.length > limit;
+    const rows = found.slice(0, limit);
     return {
       milestones: rows.map(({ project, ...row }) => ({ ...view(row), projectName: project.name })),
+      hasMore,
+      nextCursor: dateCursor(hasMore, rows),
     };
   });
 }

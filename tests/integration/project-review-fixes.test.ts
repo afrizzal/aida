@@ -10,8 +10,13 @@ import {
 } from "@/lib/projects/activity";
 import { bulkUpdateTasks } from "@/lib/projects/bulk";
 import { listTaskComments } from "@/lib/projects/comments";
-import { listFavorites } from "@/lib/projects/favorites";
-import { setProjectMemberRole } from "@/lib/projects/members";
+import { favoriteProject, favoriteTask, listFavorites } from "@/lib/projects/favorites";
+import {
+  listEligibleAssignees,
+  listProjectMembers,
+  setProjectMemberRole,
+} from "@/lib/projects/members";
+import { listProjectMilestones, listWorkspaceMilestones } from "@/lib/projects/milestones";
 import {
   createProject,
   getProject,
@@ -28,12 +33,14 @@ import {
   listWorkspaceTasks,
   updateTask,
 } from "@/lib/projects/tasks";
+import { listProjectTeams, listTeams } from "@/lib/projects/teams";
 import {
   actorOf,
   addOrgMember,
   projectTableSnapshot,
   removeOrgMember,
   seedLabel,
+  seedMilestone,
   seedOrgWithMembers,
   seedProject,
   seedTask,
@@ -483,5 +490,200 @@ describe("b-IN-09: one rule for list limits, a limit above the maximum is refuse
       expect({ name, result: await call(max + 1) }).toEqual({ name, result: refused });
       expect({ name, ok: (await call(max)).ok }).toEqual({ name, ok: true });
     }
+  });
+});
+
+describe("a-WR-07, b-WR-05: people, team, milestone and favorite lists are keyset-paged with hasMore and nextCursor", () => {
+  type Page = { ok: boolean; hasMore?: boolean; nextCursor?: string | null } & Record<
+    string,
+    unknown
+  >;
+
+  /** Pages with limit 2 until hasMore is false; returns the ids in order and the page count. */
+  async function pageAll(
+    call: (opts: { limit: number; cursor: string | null }) => Promise<Page>,
+    itemsKey: string,
+    idOf: (item: Record<string, unknown>) => string,
+  ): Promise<{ ids: string[]; pages: number }> {
+    const ids: string[] = [];
+    let cursor: string | null = null;
+    for (let pages = 1; pages <= 50; pages++) {
+      const page = await call({ limit: 2, cursor });
+      if (!page.ok) throw new Error(`refused: ${JSON.stringify(page)}`);
+      const items = page[itemsKey] as Record<string, unknown>[];
+      expect(items.length).toBeLessThanOrEqual(2);
+      ids.push(...items.map(idOf));
+      if (!page.hasMore) {
+        expect(page.nextCursor).toBeNull();
+        return { ids, pages };
+      }
+      expect(typeof page.nextCursor).toBe("string");
+      cursor = page.nextCursor as string;
+    }
+    throw new Error("too many pages");
+  }
+
+  it("every list returns all its rows across pages, in its order, without duplicates", async () => {
+    const w = await managerWorld();
+    const people = [];
+    for (let i = 0; i < 4; i++) people.push(await addOrgMember(prisma, w.orgId, "member"));
+    for (const person of people) {
+      await prisma.projectMember.create({
+        data: {
+          organizationId: w.orgId,
+          projectId: w.project.id,
+          userId: person.id,
+          role: "MEMBER",
+        },
+      });
+    }
+    const teams = [];
+    for (let i = 0; i < 5; i++) {
+      teams.push(
+        await seedTeam(prisma, w.orgId, { name: `Team ${i % 2}${i}`, projectIds: [w.project.id] }),
+      );
+    }
+    for (let i = 0; i < 5; i++) {
+      await seedMilestone(prisma, w.orgId, w.project.id, {
+        name: `M${i}`,
+        date: `2027-01-0${(i % 3) + 1}`,
+      });
+    }
+    const favTasks = [];
+    for (let i = 0; i < 5; i++) {
+      const t = await seedTask(prisma, w.orgId, w.project.id, { title: `F${i}` });
+      favTasks.push(t);
+      expect(await favoriteTask(w.manager, t.id)).toEqual({ ok: true, changed: true });
+    }
+    const extraProjects = [];
+    for (let i = 0; i < 4; i++) {
+      const p = await seedProject(prisma, w.orgId, { createdByUserId: w.managerId });
+      extraProjects.push(p);
+      expect(await favoriteProject(w.manager, p.id)).toEqual({ ok: true, changed: true });
+    }
+
+    const cases: [
+      string,
+      (o: { limit: number; cursor: string | null }) => Promise<Page>,
+      string,
+      (i: Record<string, unknown>) => string,
+      (max: number) => Promise<Page>,
+    ][] = [
+      [
+        "listProjectMembers",
+        (o) => listProjectMembers(w.manager, w.project.id, o) as Promise<Page>,
+        "members",
+        (i) => i.userId as string,
+        (limit) => listProjectMembers(w.manager, w.project.id, { limit }) as Promise<Page>,
+      ],
+      [
+        "listEligibleAssignees",
+        (o) => listEligibleAssignees(w.manager, w.project.id, o) as Promise<Page>,
+        "assignees",
+        (i) => i.userId as string,
+        (limit) => listEligibleAssignees(w.manager, w.project.id, { limit }) as Promise<Page>,
+      ],
+      [
+        "listTeams",
+        (o) => listTeams(w.manager, o) as Promise<Page>,
+        "teams",
+        (i) => i.id as string,
+        (limit) => listTeams(w.manager, { limit }) as Promise<Page>,
+      ],
+      [
+        "listProjectTeams",
+        (o) => listProjectTeams(w.manager, w.project.id, o) as Promise<Page>,
+        "teams",
+        (i) => i.id as string,
+        (limit) => listProjectTeams(w.manager, w.project.id, { limit }) as Promise<Page>,
+      ],
+      [
+        "listProjectMilestones",
+        (o) => listProjectMilestones(w.manager, w.project.id, o) as Promise<Page>,
+        "milestones",
+        (i) => i.id as string,
+        (limit) => listProjectMilestones(w.manager, w.project.id, { limit }) as Promise<Page>,
+      ],
+      [
+        "listWorkspaceMilestones",
+        (o) => listWorkspaceMilestones(w.manager, o) as Promise<Page>,
+        "milestones",
+        (i) => i.id as string,
+        (limit) => listWorkspaceMilestones(w.manager, { limit }) as Promise<Page>,
+      ],
+      [
+        "listFavorites projects",
+        (o) =>
+          listFavorites(w.manager, { limit: o.limit, projectsCursor: o.cursor }).then((r) =>
+            r.ok
+              ? {
+                  ok: true,
+                  items: r.projects,
+                  hasMore: r.hasMoreProjects,
+                  nextCursor: r.nextProjectsCursor,
+                }
+              : r,
+          ) as Promise<Page>,
+        "items",
+        (i) => i.projectId as string,
+        (limit) =>
+          listFavorites(w.manager, { limit }).then((r) =>
+            r.ok ? { ok: true, items: r.projects, hasMore: r.hasMoreProjects } : r,
+          ) as Promise<Page>,
+      ],
+      [
+        "listFavorites tasks",
+        (o) =>
+          listFavorites(w.manager, { limit: o.limit, tasksCursor: o.cursor }).then((r) =>
+            r.ok
+              ? { ok: true, items: r.tasks, hasMore: r.hasMoreTasks, nextCursor: r.nextTasksCursor }
+              : r,
+          ) as Promise<Page>,
+        "items",
+        (i) => i.taskId as string,
+        (limit) =>
+          listFavorites(w.manager, { limit }).then((r) =>
+            r.ok ? { ok: true, items: r.tasks, hasMore: r.hasMoreTasks } : r,
+          ) as Promise<Page>,
+      ],
+    ];
+    for (const [name, call, key, idOf, full] of cases) {
+      const all = await full(200);
+      expect({ name, ok: all.ok, hasMore: all.hasMore }).toEqual({
+        name,
+        ok: true,
+        hasMore: false,
+      });
+      const expected = (all[key] as Record<string, unknown>[]).map(idOf);
+      expect({ name, enough: expected.length >= 4 }).toEqual({ name, enough: true });
+      const paged = await pageAll(call, key, idOf);
+      expect({ name, ids: paged.ids }).toEqual({ name, ids: expected });
+      expect(paged.pages).toBeGreaterThan(1);
+    }
+    // A malformed cursor is INVALID_INPUT field cursor.
+    expect(await listTeams(w.manager, { cursor: "not-a-cursor" })).toEqual({
+      ok: false,
+      code: "INVALID_INPUT",
+      field: "cursor",
+    });
+  });
+
+  it("an organization with more than 200 members: assignees after the 200th are reachable on the next page", async () => {
+    const w = await managerWorld();
+    const seeded = new Set<string>([w.managerId, w.org.users[0]?.id as string]);
+    for (let i = 0; i < 201; i++) seeded.add((await addOrgMember(prisma, w.orgId, "member")).id);
+    const first = await listEligibleAssignees(w.manager, w.project.id, { limit: 200 });
+    if (!first.ok) throw new Error(first.code);
+    expect(first.assignees).toHaveLength(200);
+    expect(first.hasMore).toBe(true);
+    const second = await listEligibleAssignees(w.manager, w.project.id, {
+      limit: 200,
+      cursor: first.nextCursor,
+    });
+    if (!second.ok) throw new Error(second.code);
+    expect(second.hasMore).toBe(false);
+    const ids = [...first.assignees, ...second.assignees].map((a) => a.userId);
+    expect(new Set(ids)).toEqual(seeded);
+    expect(ids).toHaveLength(seeded.size);
   });
 });
