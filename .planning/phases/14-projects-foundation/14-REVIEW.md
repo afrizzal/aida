@@ -321,3 +321,16 @@ Owner item **14-o3** (a-WR-06, b-WR-03): organization-unique key prefixes (contr
 | b-IN-04 | Info | accept as documented limit (recurring task near 2999-12-31 cannot complete) |  — |
 | b-IN-07 | Info | already deferred (14-03) |  — |
 | b-IN-08 | Info | reject: duplication, no defect |  — |
+
+## Codex diff critique
+
+### Round 1
+
+- Question `run-loop/codex/fase14-diff-tanya.md` (commit `4d4b84b`); answer `run-loop/codex/fase14-diff-jawab.md`; log `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Verdict: not ready (3 HIGH, 1 LOW).
+
+| ID | Severity | Finding (short) | Disposition |
+|---|---|---|---|
+| D1 | HIGH | `listTaskComments` and the attachment list check task access, then read content by organization and task id outside a transaction; a move into a private project in between can return private content (`comments.ts:113`, `service.ts:212`, `attachments.ts:100`) | accept: content queries join the current access predicate (or run in one transaction under the read locks of the contract), so content is returned only while the reader can read the task's current project; PID-bound race: read paused after the check, task moved into a private project, private comment added, nothing private returned; same for membership revocation and for attachments |
+| D2 | HIGH | The K71 rebalance updates `updatedAt` of every project, including hidden ones, so timestamps reveal hidden projects (`projects.ts:558`, `:298`); the K71 test replaces `updatedAt` with a constant and cannot see it | accept: position rebalancing never changes `updatedAt` (or any other observable field) of projects other than the moved one; the two-world test compares, per project, whether `updatedAt` changed |
+| D3 | HIGH | Prefixes and aliases remain historical oracles (owner item 14-o3) | run decision **K72** (charter rule 4): resolving an ALIAS also requires read access to the alias's origin project, else NOT_FOUND identical to a missing key (an alias whose origin project was deleted no longer resolves); two-world test. The prefix probe stays owner item 14-o3 |
+| D4 | LOW | The sweep test clears the global outbox and depends on serial files | reject: the dependency on `fileParallelism: false` is documented in the test (c-IN-01) |
