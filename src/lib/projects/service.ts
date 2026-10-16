@@ -226,3 +226,22 @@ export async function runProjectRead<T extends object>(
     return asResult<T>(err);
   }
 }
+
+/**
+ * Runs a content read on one connection inside a read transaction (Codex diff D1): the membership
+ * is read first (no row: MEMBERSHIP_ENDED), then fn runs. The observer's onTransactionStart is
+ * awaited first, as for every service transaction, so a race test can bind the read's PID. The
+ * transaction alone does not close the check-then-read gap under READ COMMITTED; every content
+ * query of fn also carries the current read predicate.
+ */
+export async function runProjectReadInTransaction<T extends object>(
+  actor: ProjectActor,
+  operation: string,
+  fn: (tx: ProjectDb) => Promise<T>,
+): Promise<ProjectResult<T>> {
+  return runProjectTransaction(actor, operation, async (tx) => {
+    const membership = await findConservativeMembership(tx, actor.userId, actor.orgId);
+    if (!membership) refuse("MEMBERSHIP_ENDED");
+    return fn(tx);
+  });
+}

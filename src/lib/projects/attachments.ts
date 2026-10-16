@@ -23,7 +23,7 @@ import {
   type ValidatedUpload,
   validateUpload,
 } from "../attachments/validate-upload";
-import { requireMembership, requireProject, requireTask } from "./access";
+import { readableProjectWhere, requireMembership, requireProject, requireTask } from "./access";
 import { recordProjectActivity } from "./activity";
 import { cursorDate, decodeCursor, encodeCursor, type PageOpts, pageLimit } from "./comments";
 import {
@@ -41,6 +41,7 @@ import {
   refusalResult,
   refuse,
   runProjectRead,
+  runProjectReadInTransaction,
   runProjectTransaction,
 } from "./service";
 
@@ -97,12 +98,18 @@ export async function listTaskAttachments(
 ): Promise<
   ProjectResult<{ attachments: TaskAttachmentView[]; hasMore: boolean; nextCursor: string | null }>
 > {
-  return runProjectRead(actor, "listTaskAttachments", async (db) => {
+  return runProjectReadInTransaction(actor, "listTaskAttachments", async (db) => {
     const limit = pageLimit(opts.limit);
     const cursor = decodeCursor(opts.cursor);
     await requireTask(db, actor, taskId, { lock: "none", level: "READ" });
     const rows = await db.taskAttachment.findMany({
-      where: { organizationId: actor.orgId, taskId, ...keysetWhere(cursor) },
+      // Codex diff D1: the current read predicate in the content query itself.
+      where: {
+        organizationId: actor.orgId,
+        taskId,
+        task: { organizationId: actor.orgId, project: readableProjectWhere(actor) },
+        ...keysetWhere(cursor),
+      },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       take: limit + 1,
       select: VIEW_SELECT,
@@ -124,14 +131,14 @@ export async function listProjectAttachments(
     nextCursor: string | null;
   }>
 > {
-  return runProjectRead(actor, "listProjectAttachments", async (db) => {
+  return runProjectReadInTransaction(actor, "listProjectAttachments", async (db) => {
     const limit = pageLimit(opts.limit);
     const cursor = decodeCursor(opts.cursor);
     await requireProject(db, actor, projectId, { lock: "none", level: "READ" });
     const rows = await db.taskAttachment.findMany({
       where: {
         organizationId: actor.orgId,
-        task: { organizationId: actor.orgId, projectId },
+        task: { organizationId: actor.orgId, projectId, project: readableProjectWhere(actor) },
         ...keysetWhere(cursor),
       },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -166,10 +173,14 @@ export async function getTaskAttachmentForDownload(
     };
   }>
 > {
-  return runProjectRead(actor, "getTaskAttachmentForDownload", async (db) => {
+  return runProjectReadInTransaction(actor, "getTaskAttachmentForDownload", async (db) => {
     if (!isPlausibleId(attachmentId)) refuse("NOT_FOUND");
     const row = await db.taskAttachment.findFirst({
-      where: { id: attachmentId, organizationId: actor.orgId },
+      where: {
+        id: attachmentId,
+        organizationId: actor.orgId,
+        task: { organizationId: actor.orgId, project: readableProjectWhere(actor) },
+      },
       select: {
         id: true,
         taskId: true,

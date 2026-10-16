@@ -9,7 +9,7 @@
 // an explicit organization term after the membership read; an unknown or unreadable comment is
 // NOT_FOUND, identical to a missing id.
 import { renderTaskMarkdown } from "../markdown/render";
-import { requireMembership, requireTask } from "./access";
+import { readableProjectWhere, requireMembership, requireTask } from "./access";
 import { recordProjectActivity } from "./activity";
 import {
   COMMENT_BODY_MAX,
@@ -25,7 +25,7 @@ import {
   newBatchId,
   type ProjectDb,
   refuse,
-  runProjectRead,
+  runProjectReadInTransaction,
   runProjectTransaction,
 } from "./service";
 
@@ -110,15 +110,18 @@ export async function listTaskComments(
 ): Promise<
   ProjectResult<{ comments: TaskCommentView[]; hasMore: boolean; nextCursor: string | null }>
 > {
-  return runProjectRead(actor, "listTaskComments", async (db) => {
+  return runProjectReadInTransaction(actor, "listTaskComments", async (db) => {
     const limit = pageLimit(opts.limit);
     const cursor = decodeCursor(opts.cursor);
     await requireTask(db, actor, taskId, { lock: "none", level: "READ" });
     const after = cursor ? cursorDate(cursor.sortValue) : null;
+    // Codex diff D1: the content query carries the current read predicate, so a move into a
+    // private project or a revoked membership after the check above returns nothing.
     const rows = await db.taskComment.findMany({
       where: {
         organizationId: actor.orgId,
         taskId,
+        task: { organizationId: actor.orgId, project: readableProjectWhere(actor) },
         ...(after && cursor
           ? {
               OR: [{ createdAt: { gt: after } }, { createdAt: after, id: { gt: cursor.id } }],

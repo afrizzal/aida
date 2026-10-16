@@ -454,6 +454,8 @@ export const PROJECT_OPERATIONS = Object.freeze({
   updateMilestone: op("milestones", "MANAGE", "PROJECT_UPDATE", ["MILESTONE_UPDATED"], "TARGET"),
   deleteMilestone: op("milestones", "MANAGE", "PROJECT_UPDATE", ["MILESTONE_DELETED"], "TARGET"),
   setTaskMilestone: op("milestones", "CONTENT", "PROJECT_SHARE", ["TASK_UPDATED"], "TARGET"),
+  // Codex diff D1: the content reads (comments, attachment lists, download) carry the current read
+  // predicate in their content query, inside one read transaction.
   listTaskComments: op("comments", "READ", "NONE", [], "TARGET"),
   addTaskComment: op("comments", "CONTENT", "PROJECT_SHARE", ["COMMENT_ADDED"], "TARGET"),
   editTaskComment: op("comments", "AUTHOR", "PROJECT_SHARE", ["COMMENT_EDITED"], "TARGET"),
