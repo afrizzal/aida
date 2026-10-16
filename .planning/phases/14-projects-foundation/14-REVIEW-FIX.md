@@ -62,3 +62,40 @@ The changes are in sections 2, 3, 5, 6, 7, 8, 12, 14, 15 and 16, as named per ro
 - `pnpm lint`: exit 0 (548 files, no fixes).
 - `tests/unit/project-operation-inventory.test.ts`: green, as part of `pnpm test`.
 - Affected integration files, run one by one per fix before each commit: all green at the time of the commit. Red runs are listed per row above.
+
+## F2
+
+Fixer: Claude (gsd-code-fixer), 2026-11-09. Branch `v2/run-loop`, main checkout (`workflow.use_worktrees` is false), so every test ran in the main checkout. Fix scope: the 9 rows of the disposition table whose batch is F2. All 9 are fixed.
+
+Each strengthened test was run against a deliberately broken copy of the code. The copy was then restored, and `git diff` was checked: no change was left in `src/`. No assertion was weakened, and no fixed sleep was added. No file holds a literal invisible character. Unit strings are built with `String.fromCodePoint`, and a Unicode category scan of the two edited files found none.
+
+### Rows
+
+| Row | Commit | Failing-first evidence (broken copy, red run, cause) | Fix |
+|---|---|---|---|
+| b-WR-04 | 06d850f | The old `cleanDisplayName` (C0 and DEL only), restored from HEAD, failed 25 of 42 tests in `validate-upload.test.ts`: every bidi mark, embedding, override and isolate (U+061C, U+200E, U+200F, U+202A-U+202E, U+2066-U+2069), C1 (U+0080, U+0085, U+009F), zero-width (U+200B-U+200D, U+2060, U+FEFF), U+2028 and U+2029, the all-invisible fallback, and the `validateUpload` path. | `cleanDisplayName` removes Unicode categories Cc, Cf, Zl and Zp (`/^[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]$/u`). Visible non-ASCII letters and emoji are kept, and there is a test for that. |
+| c-WR-01 | 7b5db90, 17474c3 (import order) | `filesOnDisk` was pointed at a wrong root, a regular file, so `readdir` gives ENOTDIR. With the new helper, 6 of 13 tests failed with ENOTDIR. With the old swallowing helper on the same wrong root, only 2 failed (the cases that assert a file exists), and the "no file on disk" assertions passed without checking anything. | Shared fixture `filesUnder(dir)` in `tests/support/project-fixtures.ts`. It lists files recursively and sorted. Only ENOENT counts as empty, and every other error is rethrown. `filesOnDisk` uses it. |
+| c-WR-02 | 0ae76cb | `uploadTaskAttachments` was changed to save a blob in `actor.orgId` before its access check. The isolation case failed at the new disk assertion: `expected [[…(7)], […(2)]] to deeply equal [[], []]`, which means orphans in both A and B. The database snapshot and the activity count did not see them. | Before the refused calls, the case lists `UPLOADS_DIR/<orgA>` and `UPLOADS_DIR/<orgB>` with `filesUnder`. After them, it asserts that both lists are unchanged. |
+| c-WR-03 | 4eb500c | The 8 new negative cases, run against the old resolver (HEAD helpers with the new cases appended), all failed: MEMBERSHIP_ENDED only in an it title, only in a trailing comment, or only in a non-`code:` string literal; `getTask(` and `missingId(` only in a string and an inline block comment; activity reached only through `seedActivity(`; activity only as `projectActivity.create` or as the type `ProjectActivity`; "hidden private link" outside every title; a verb only in the it title or a comment. With the fix, all 29 inventory tests pass, including the three gates on the real repository. | Markers are matched on `markerText`: a scanner removes string literals, trailing `//` comments and inline block comments, and so test titles too. Module definitions get the same treatment. `code: "X"` is kept as the bare word X, because it asserts a code. The hidden-link marker reads only the describe, it and test titles. `seed*` helpers are not expanded. The activity marker must be a read: `projectActivity.(count\|findMany\|findFirst\|aggregate\|groupBy)(`. In `activityGaps`, a call or verb named only in a title or comment no longer counts. |
+| c-WR-04 | 3fc1e89 | `addTaskComment` was changed so that, when the task lies in another organization, it creates a Team row in `actor.orgId` before access. The HEAD test (org A only) passed against it: 1 passed. The strengthened test failed at the snapshot comparison (content-isolation.test.ts:117, `[{…(18)}, …(1)]` not equal). | Shared fixtures `projectTableSnapshotAll(prisma, orgIds)` and `projectActivityCounts(prisma, orgIds)`. Six files snapshot `[orgA, orgB]` before and after every refused call: archive-delete, content, core, members, recurrence and tasks. move-duplicate and ops already did. Their now-unused local `activityCount` helpers were removed. The inventory accepts `projectTableSnapshotAll(` as the snapshot marker and does not expand it. |
+| c-IN-01 | 074d435 | Comment only, no behaviour to fail. | The comment at the `beforeEach` wipe names its dependency on `fileParallelism: false` and on one test process at a time, and names the two files whose outbox rows a parallel run would delete. |
+| c-IN-02 | 7b5db90, 0ae76cb | No behaviour to fail. Both files run green with the restore. | `project-comments-attachments.test.ts` and `project-content-isolation.test.ts` save the previous `UPLOADS_DIR` and restore it in `afterAll` (delete it when it was unset). The temporary directories stay, because the charter allows no recursive delete. |
+| c-IN-03 | 074d435 | `FOR UPDATE SKIP LOCKED` in the sweep was changed to `FOR UPDATE`. The case failed in 128 ms with `sweep 2 blocked behind sweep 1: PID(s) 249 wait on 239`. Before the fix, the same regression could only hang until the 60 s test timeout. | The vacuous `pg_blocking_pids` read inside `onLocked` is removed. While sweep 2 runs, an observer watchdog queries without pause for any backend blocked by sweep 1's PID. A query in a loop, not a sleep. On a hit it releases sweep 1 and fails with the PIDs. The case also asserts that the watchdog checked at least once. |
+| c-IN-04 | 861f8ba | Comment only. | The T7 comment now says retryLimit 2 with exponential backoff capped by retryDelayMax, points at `src/lib/worker/index.ts`, and says the 60 s poll timeout must cover the backoff total. |
+
+### Notes
+
+- c-WR-01 and c-IN-02 share a commit for the attachments file, and c-WR-02 and c-IN-02 share one for the content-isolation file. c-IN-01 and c-IN-03 share one commit in `project-file-cleanup.test.ts`. Hunk-level staging is not available here.
+- Lint caught that commit 7b5db90 did not sort a fixture import. 17474c3 fixes the order only.
+- c-IN-01: only the comment was added. The optional org-filtered sweep for tests was not built, because the disposition names the comment.
+- c-WR-03: the resolver is still lexical (one line at a time). A template literal that spans lines is not stripped across lines. No current test relies on one.
+
+### Gates (one process at a time, main checkout)
+
+- `pnpm test`: exit 0. 50 files, 838 tests passed.
+- `pnpm test:integration --exclude tests/integration/egress-isolation.test.ts` (Testcontainers, Colima socket env): exit 0. 90 files, 1216 tests passed.
+- `pnpm exec next typegen`: exit 0.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0 (548 files, no fixes).
+- Affected files run green before each commit: `validate-upload.test.ts` (42), `project-comments-attachments.test.ts` (13), `project-content-isolation.test.ts` (20), `project-operation-inventory.test.ts` (29), the six isolation files together (76) and `project-file-cleanup.test.ts` (11).
+- `git grep -i -n gr8r -- src docs website README.md public prisma tests`: empty.
