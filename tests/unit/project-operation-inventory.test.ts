@@ -78,6 +78,73 @@ function parenBalance(line: string): number {
 }
 
 const OPENER = /^(\s*)(describe|it|test)(?:\.each\(.*\))?\(/;
+const TITLE = /(["'`])((?:\\.|(?!\1)[\s\S])*)\1/;
+
+/**
+ * Review c-WR-03: one line without its comments (a trailing // comment and any inline block
+ * comment), scanned outside string literals. With keepStrings false every string literal, and so
+ * every test title, becomes "".
+ */
+function codeOfLine(line: string, keepStrings: boolean): string {
+  let out = "";
+  let i = 0;
+  while (i < line.length) {
+    const ch = line[i];
+    if (ch === '"' || ch === "'" || ch === "`") {
+      let j = i + 1;
+      while (j < line.length && line[j] !== ch) j += line[j] === "\\" ? 2 : 1;
+      out += keepStrings ? line.slice(i, j + 1) : '""';
+      i = j + 1;
+    } else if (line.startsWith("//", i)) {
+      break;
+    } else if (line.startsWith("/*", i)) {
+      const end = line.indexOf("*/", i + 2);
+      if (end === -1) break;
+      i = end + 2;
+    } else {
+      out += ch;
+      i++;
+    }
+  }
+  return out;
+}
+
+// A refusal code written as `code: "X"` is an assertion of that code, so it is kept as the bare
+// word X before the string literals are removed.
+const CODE_LITERAL = /\bcode:\s*(["'])([A-Z][A-Z0-9_]*)\1/g;
+
+/** What an isolation marker may match: code only, no string literal, test title or comment. */
+function markerText(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .map((line) => codeOfLine(line.replace(CODE_LITERAL, "code: $2"), false))
+    .join("\n");
+}
+
+/** The text with comments removed and every describe, it or test title replaced by "". */
+function withoutTitlesAndComments(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .map((line) => {
+      const opener = OPENER.exec(line);
+      if (!opener) return codeOfLine(line, true);
+      const rest = line.slice(opener[0].length).replace(TITLE, '""');
+      return codeOfLine(opener[0] + rest, true);
+    })
+    .join("\n");
+}
+
+/** The titles of the describe, it and test blocks inside the text, one per line. */
+function titlesOf(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .flatMap((line) => {
+      const opener = OPENER.exec(line);
+      if (!opener || isCommentLine(line)) return [];
+      return [TITLE.exec(line.slice(opener[0].length))?.[2] ?? ""];
+    })
+    .join("\n");
+}
 
 /** The closing line of a block opened at `start` with indentation `indent`, or -1. */
 function closingLine(lines: string[], start: number, indent: string): number {
@@ -99,7 +166,7 @@ function parseBlocks(file: string, source: string): Block[] {
     const last = end === -1 ? lines.length - 1 : end;
     const raw = lines.slice(start, last + 1);
     const fromCall = [raw[0].slice(match[0].length), ...raw.slice(1)].join("\n");
-    const title = /(["'`])((?:\\.|(?!\1)[\s\S])*)\1/.exec(fromCall)?.[2] ?? "";
+    const title = TITLE.exec(fromCall)?.[2] ?? "";
     blocks.push({
       file,
       kind: match[2] as BlockKind,
@@ -139,9 +206,12 @@ function blocksOf(sources: Sources, pattern: RegExp): Block[] {
 // text still never counts, and a helper that the block does not reference never counts. The
 // marker functions themselves (projectTableSnapshot, missingId) are not expanded: what they read
 // is checked by their own rule (snapshotGaps), so calling projectTableSnapshot( never stands in
-// for the separate ProjectActivity check.
+// for the separate ProjectActivity check. Review c-WR-03: seeding helpers (seedActivity,
+// seedPrivacyWorld and every other seed* name) are not expanded either: a helper that writes rows
+// never stands in for an assertion that a refused call wrote none.
 const SUPPORT_FILE = /^tests\/support\/[^/]*\.ts$/;
 const NOT_EXPANDED = new Set(["projectTableSnapshot", "missingId"]);
+const SEEDING_HELPER = /^seed[A-Z]/;
 const DEFINITION =
   /^(?:export\s+)?(?:(?:async\s+)?function\s*\*?\s*|(?:const|let|var)\s+)([A-Za-z_$][\w$]*)/;
 
@@ -158,7 +228,7 @@ function moduleDefinitions(source: string): Map<string, string> {
       .slice(start, end)
       .filter((l) => !isCommentLine(l))
       .join("\n");
-    defs.set(match[1], text);
+    defs.set(match[1], markerText(text));
   });
   return defs;
 }
@@ -181,7 +251,7 @@ function resolvedText(sources: Sources, file: string, text: string): string {
   while (queue.length > 0) {
     const current = queue.shift() ?? "";
     for (const [name] of current.matchAll(/[A-Za-z_$][\w$]*/g)) {
-      if (seen.has(name) || NOT_EXPANDED.has(name)) continue;
+      if (seen.has(name) || NOT_EXPANDED.has(name) || SEEDING_HELPER.test(name)) continue;
       const def = own.get(name) ?? support.get(name);
       if (def === undefined) continue;
       seen.add(name);
@@ -196,12 +266,15 @@ function isWriteOperation(op: string, spec: ProjectOperationSpec): boolean {
   return spec.verbs.length > 0 || (WRITES_WITHOUT_VERB as readonly string[]).includes(op);
 }
 
+/**
+ * A marker: its name, its test, and what it is tested on: the resolved code (default) or the
+ * block's own describe, it and test titles (review c-WR-03).
+ */
+type Marker = [string, (t: string) => boolean, ("code" | "titles")?];
+
 /** The markers the isolation block of `op` must contain (contract section 17). */
-function isolationMarkers(
-  op: string,
-  spec: ProjectOperationSpec,
-): [string, (t: string) => boolean][] {
-  const markers: [string, (t: string) => boolean][] = [
+function isolationMarkers(op: string, spec: ProjectOperationSpec): Marker[] {
+  const markers: Marker[] = [
     [`${op}(`, (t) => callsOperation(t, op)],
     ["MEMBERSHIP_ENDED", (t) => t.includes("MEMBERSHIP_ENDED")],
   ];
@@ -209,14 +282,18 @@ function isolationMarkers(
     markers.push(["missingId(", (t) => /(?<![A-Za-z0-9_$])missingId\(/.test(t)]);
   }
   if (spec.isolation === "TEAM" && op !== TEAM_WITHOUT_HIDDEN_LINK) {
-    markers.push([`"${HIDDEN_LINK_MARKER}"`, (t) => t.includes(HIDDEN_LINK_MARKER)]);
+    markers.push([`"${HIDDEN_LINK_MARKER}"`, (t) => t.includes(HIDDEN_LINK_MARKER), "titles"]);
   }
   if (isWriteOperation(op, spec)) {
     markers.push([
       "projectTableSnapshot(",
       (t) => /(?<![A-Za-z0-9_$])projectTableSnapshot\(/.test(t),
     ]);
-    markers.push(["projectActivity or ProjectActivity", (t) => /[pP]rojectActivity/.test(t)]);
+    // Review c-WR-03: the activity marker is a read of ProjectActivity, never a write or a type.
+    markers.push([
+      "projectActivity or ProjectActivity",
+      (t) => /\bprojectActivity\.(?:count|findMany|findFirst|aggregate|groupBy)\(/.test(t),
+    ]);
   }
   return markers;
 }
@@ -238,12 +315,18 @@ function isolationGaps(sources: Sources, ops: Ops): string[] {
     const missingPerBlock = titled.map((block) => {
       // The operation call must be in the block's own text; the other markers may also sit in a
       // helper or constant the block references (K70).
-      const resolved = resolvedText(sources, block.file, block.text);
+      // Review c-WR-03: markers are matched on code only; titles are read only by the
+      // hidden-link marker, which the contract places in an it title.
+      const code = markerText(block.text);
+      const resolved = resolvedText(sources, block.file, code);
+      const titles = titlesOf(block.text);
       return {
         block,
         missing: [
-          ...(callMarker[1](block.text) ? [] : [callMarker[0]]),
-          ...otherMarkers.filter(([, test]) => !test(resolved)).map(([name]) => name),
+          ...(callMarker[1](code) ? [] : [callMarker[0]]),
+          ...otherMarkers
+            .filter(([, test, on]) => !test(on === "titles" ? titles : resolved))
+            .map(([name]) => name),
         ],
       };
     });
@@ -262,7 +345,11 @@ function activityGaps(sources: Sources, ops: Ops): string[] {
   const gaps: string[] = [];
   for (const [op, spec] of Object.entries(ops)) {
     for (const verb of spec.verbs) {
-      const found = cases.some((b) => callsOperation(b.text, op) && hasWord(b.text, verb));
+      // Review c-WR-03: a call or a verb named only in a title or a comment does not count.
+      const found = cases.some((b) => {
+        const text = withoutTitlesAndComments(b.text);
+        return callsOperation(markerText(b.text), op) && hasWord(text, verb);
+      });
       if (!found) gaps.push(`${op} / ${verb}: no it or test block calls ${op}( and names ${verb}`);
     }
   }
@@ -692,5 +779,123 @@ describe("updateTask (TARGET)", () => {
   it("negative: a describe.only( case", () => {
     const source = `describe.only("a", () => {\n  it("b", () => {});\n});\n`;
     expect(skipFocusGaps({ [ACT]: source })).toHaveLength(1);
+  });
+
+  // Review c-WR-03: markers are matched on code only, and seeding helpers are not expanded.
+  it("negative (c-WR-03): MEMBERSHIP_ENDED only in the it title", () => {
+    const source = `
+describe("getTask (TARGET)", () => {
+  it("the outsider in A gets MEMBERSHIP_ENDED", async () => {
+    expect(await getTask(actor, missingId())).toEqual(refused);
+  });
+});
+`;
+    expect(isolationGaps({ [ISO]: source }, pick("getTask"))[0]).toMatch(/lacks MEMBERSHIP_ENDED$/);
+  });
+
+  it("negative (c-WR-03): MEMBERSHIP_ENDED only in a trailing comment", () => {
+    const source = `
+describe("getTask (TARGET)", () => {
+  it("x", async () => {
+    expect(await getTask(actor, missingId())).toEqual(refused); // MEMBERSHIP_ENDED
+  });
+});
+`;
+    expect(isolationGaps({ [ISO]: source }, pick("getTask"))[0]).toMatch(/lacks MEMBERSHIP_ENDED$/);
+  });
+
+  it("negative (c-WR-03): MEMBERSHIP_ENDED only in a string literal that is not a code value", () => {
+    const source = `
+describe("getTask (TARGET)", () => {
+  it("x", async () => {
+    const note = "MEMBERSHIP_ENDED";
+    expect(await getTask(actor, missingId())).toEqual({ refused, note });
+  });
+});
+`;
+    expect(isolationGaps({ [ISO]: source }, pick("getTask"))[0]).toMatch(/lacks MEMBERSHIP_ENDED$/);
+  });
+
+  it("negative (c-WR-03): missingId( and the call only in strings and an inline block comment", () => {
+    const source = `
+describe("getTask (TARGET)", () => {
+  it("x", async () => {
+    expect(await run("getTask(actor, missingId())")).toEqual({ ok: false, code: "MEMBERSHIP_ENDED" }); /* getTask( */
+  });
+});
+`;
+    expect(isolationGaps({ [ISO]: source }, pick("getTask"))[0]).toMatch(
+      /lacks getTask\(, missingId\($/,
+    );
+    const called = source.replace('run("getTask(actor, missingId())")', "getTask(actor, id)");
+    expect(isolationGaps({ [ISO]: called }, pick("getTask"))[0]).toMatch(/lacks missingId\($/);
+  });
+
+  it("negative (c-WR-03): the activity marker reached only through seedActivity(", () => {
+    const support = `
+export async function seedActivity(prisma: PrismaClient, row: SeedActivityRow) {
+  return prisma.projectActivity.create({ data: row });
+}
+`;
+    const source = `
+describe("updateTask (TARGET)", () => {
+  it("x", async () => {
+    await seedActivity(prisma, row);
+    const before = await projectTableSnapshot(prisma, orgA);
+    expect(await updateTask(actor, missingId(), 0, {})).toEqual({ ok: false, code: "MEMBERSHIP_ENDED" });
+    expect(await projectTableSnapshot(prisma, orgA)).toEqual(before);
+  });
+});
+`;
+    const sources = { [ISO]: source, [FIXTURES_FILE]: support };
+    expect(isolationGaps(sources, pick("updateTask"))[0]).toMatch(
+      /lacks projectActivity or ProjectActivity$/,
+    );
+  });
+
+  it("negative (c-WR-03): the activity marker as a write or a type, not a read", () => {
+    const source = `
+describe("updateTask (TARGET)", () => {
+  it("x", async () => {
+    const rows: ProjectActivity[] = [];
+    await prisma.projectActivity.create({ data: row });
+    const before = await projectTableSnapshot(prisma, orgA);
+    expect(await updateTask(actor, missingId(), 0, {})).toEqual({ ok: false, code: "MEMBERSHIP_ENDED" });
+    expect(await projectTableSnapshot(prisma, orgA)).toEqual(before);
+  });
+});
+`;
+    expect(isolationGaps({ [ISO]: source }, pick("updateTask"))[0]).toMatch(
+      /lacks projectActivity or ProjectActivity$/,
+    );
+  });
+
+  it("negative (c-WR-03): the hidden private link phrase outside every title", () => {
+    const source = `
+describe("getTeam (TEAM)", () => {
+  it("x", async () => {
+    // hidden private link
+    const label = "hidden private link";
+    expect(await getTeam(actor, missingId())).toEqual({ ok: false, code: "MEMBERSHIP_ENDED", label });
+  });
+});
+`;
+    expect(isolationGaps({ [ISO]: source }, pick("getTeam"))[0]).toMatch(
+      /lacks "hidden private link"$/,
+    );
+  });
+
+  it("negative (c-WR-03): a verb named only in the it title or a comment", () => {
+    const source = `
+describe("tasks", () => {
+  it("updateTask writes TASK_UPDATED", async () => {
+    await updateTask(actor, id, 0, { title: "t" }); // TASK_UPDATED
+    expect(rows.map((r) => r.verb)).toEqual([verb]);
+  });
+});
+`;
+    expect(activityGaps({ [ACT]: source }, pick("updateTask"))).toEqual([
+      "updateTask / TASK_UPDATED: no it or test block calls updateTask( and names TASK_UPDATED",
+    ]);
   });
 });
