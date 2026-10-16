@@ -99,3 +99,32 @@ Each strengthened test was run against a deliberately broken copy of the code. T
 - `pnpm lint`: exit 0 (548 files, no fixes).
 - Affected files run green before each commit: `validate-upload.test.ts` (42), `project-comments-attachments.test.ts` (13), `project-content-isolation.test.ts` (20), `project-operation-inventory.test.ts` (29), the six isolation files together (76) and `project-file-cleanup.test.ts` (11).
 - `git grep -i -n gr8r -- src docs website README.md public prisma tests`: empty.
+
+## F3 (Codex diff round 1)
+
+Fixer: Claude (gsd-code-fixer), 2026-11-09. Branch `v2/run-loop`, main checkout (`workflow.use_worktrees` is false), so every test ran in the main checkout. Fix scope: the "Codex diff critique / Round 1" rows of `14-REVIEW.md`. D1, D2 and D3 (run decision K72) are fixed. D4 is rejected by the disposition and was not touched. Each fix has a test that was run red before the fix and green after it. No assertion was weakened, no existing expectation changed, and no fixed sleep was added.
+
+### Rows
+
+| Row | Commit | Failing-first evidence (red run, cause) | Fix |
+|---|---|---|---|
+| D3 (K72) | e83453b | `project-review-fixes.test.ts`, describe "Codex diff D3, K72", 2 of 2 failed: `resolveTaskKey(reader, "HP-1")` for a task moved out of a private project the reader cannot read returned `{ ok: true, ... isAlias: true }` instead of the missing-key NOT_FOUND of the world where HP never existed. After the origin project was archived and deleted, the old key still resolved (`{ ok: true, ... }`). | `resolveTaskKey` reads the TaskKey row's `projectId` and, for an ALIAS, requires the origin project through `readableProjectWhere` with the organization term. Unreadable or deleted origin: NOT_FOUND, identical to a missing key. A reader of the origin still resolves the alias (positive case). The prefix probe stays owner item 14-o3. Contract section 6 and a `contract.ts` comment on `resolveTaskKey`. |
+| D2 | 4e3d8ff | New case in the K71 describe of `project-review-fixes.test.ts`: per move, which other projects changed `updatedAt`, compared between the two worlds. Red: `expected [ Array(16) ] to deeply equal [ Array(16) ]`, the hidden world listed `HIDDEN` projects (and visible ones at other steps) whose `updatedAt` the rebalance had changed. The case also asserts that both worlds rebalanced (another project's stored position changed at least once), so it exercises the renumbering. | The rebalance `UPDATE` sets `"updatedAt" = CASE WHEN id = moved THEN now() ELSE "updatedAt" END`, so only the moved project's timestamp changes. The case asserts the per-project change lists are equal in both worlds and empty. Contract section 8 and the K71 comment in `contract.ts`. |
+| D1 | 49e4eea | New `tests/integration/project-content-read-race.test.ts`, 3 PID-bound races: a holder takes `TaskComment` (or `TaskAttachment`) ACCESS EXCLUSIVE, the read's own PID (`nextStartPid`) is bound to it with `waitForBlockedBy`, then the access change commits (moveTask into a private project; removeProjectMember of the reader) and the holder inserts a private comment or file before it releases. The seam (read transaction) was committed in the same commit but run first without the predicate join: 3 of 3 failed, the results held `bodyMarkdown: "secret"` (both comment races) and `originalFilename: "secret.png"`. | `runProjectReadInTransaction` in `service.ts` (membership first, observer start like every service transaction). listTaskComments, listTaskAttachments, listProjectAttachments and getTaskAttachmentForDownload use it, and their content query carries `task: { organizationId, project: readableProjectWhere(actor) }`, so content is returned only while the task's current project is readable at that query. Contract section 2 and a `contract.ts` comment. |
+| D4 | none | Not applicable. | Rejected by the disposition (c-IN-01 already documents the `fileParallelism: false` dependency). |
+
+### Not done, with reason
+
+- D1: only the four reads the finding and disposition name (comments, task and project attachment lists, download metadata) were changed. Other multi-query reads (for example `listProjectTasks`, `listProjectMilestones`, `listLabels`) still check the project and then read by project id in a later statement. They were not audited here because the disposition names comments and attachments only. Recorded for the next review round.
+- D1: there is no race test for listProjectAttachments with a privacy change, or for the download path. The predicate join is the same code as the tested listTaskAttachments path, and the existing isolation files run green.
+- D3: the alias origin check and the task read are two statements outside a transaction. A move or deletion between them can still give the result of either moment. Neither result leaks a project the reader cannot read at the moment of that statement.
+
+### Gates (one process at a time, main checkout)
+
+- Affected files after each fix: `project-review-fixes.test.ts` (16), `project-task-keys.test.ts` (4), `project-move.test.ts` (13), `project-tasks-isolation.test.ts` (9), `project-delete.test.ts` (20), `project-core.test.ts` (11), `project-content-read-race.test.ts` (3), `project-comments-attachments.test.ts` (13), `project-content-isolation.test.ts` (20): all exit 0.
+- `pnpm test`: exit 0. 50 files, 838 tests passed. This includes `project-operation-inventory.test.ts`, which is green.
+- `pnpm test:integration --exclude tests/integration/egress-isolation.test.ts` (Testcontainers, Colima socket env): exit 0. 91 files, 1222 tests passed.
+- `pnpm exec next typegen`: exit 0.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0 (549 files, no fixes).
+- `git grep -i -n gr8r -- src docs website README.md public prisma tests`: empty.
