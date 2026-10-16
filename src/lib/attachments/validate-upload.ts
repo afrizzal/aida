@@ -5,8 +5,9 @@
 // Order matters: the declared size is checked against MAX_BYTES before a single byte is read, then
 // the bytes are sniffed by their magic number (file-type) against ALLOWED_MIME; the client's
 // declared type and the file name's extension are never trusted. The file name is untrusted
-// metadata (D-14): it is cleaned into a display name only (control characters removed, trimmed,
-// cut to FILE_NAME_MAX code points, "file" when nothing is left) and is never used for a path.
+// metadata (D-14): it is cleaned into a display name only (control, format and line or paragraph
+// separator characters removed, trimmed, cut to FILE_NAME_MAX code points, "file" when nothing is
+// left) and is never used for a path.
 // The storage key comes from buildStorageKey (local-file-storage.ts) only.
 import { fileTypeFromBuffer } from "file-type";
 import { FILE_NAME_MAX } from "../projects/contract";
@@ -31,15 +32,18 @@ export type UploadRefusal = { ok: false; code: "FILE_TOO_LARGE" | "UNSUPPORTED_F
 
 const FALLBACK_FILE_NAME = "file";
 
-function isControlCodePoint(codePoint: number): boolean {
-  return codePoint <= 0x1f || codePoint === 0x7f;
-}
+// Review b-WR-04: removed by Unicode category, not by a C0 range. Cc is C0, DEL and C1
+// (U+0000-U+001F, U+007F-U+009F). Cf holds the bidi marks, embeddings, overrides and isolates
+// (U+061C, U+200E, U+200F, U+202A-U+202E, U+2066-U+2069) and the zero-width characters
+// (U+200B-U+200D, U+2060, U+FEFF), so a right-to-left override cannot disguise an executable's
+// name. Zl and Zp are the line and paragraph separators U+2028 and U+2029.
+const UNSAFE_DISPLAY_CHAR = /^[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]$/u;
 
 /** The display name of an uploaded file: metadata only, never a path. */
 export function cleanDisplayName(raw: string): string {
   let kept = "";
   for (const char of raw) {
-    if (!isControlCodePoint(char.codePointAt(0) ?? 0)) kept += char;
+    if (!UNSAFE_DISPLAY_CHAR.test(char)) kept += char;
   }
   const trimmed = kept.trim();
   const cut = [...trimmed].slice(0, FILE_NAME_MAX).join("").trim();
