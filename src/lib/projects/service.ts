@@ -21,6 +21,8 @@ import { findConservativeMembership } from "../membership";
 import { scopedDb } from "../scoped-db";
 import {
   isWellFormedId,
+  LIST_DEFAULT,
+  LIST_MAX,
   type ProjectActor,
   type ProjectRefusalCode,
   type ProjectRefusal as ProjectRefusalResult,
@@ -77,6 +79,23 @@ export function setProjectServiceObserverForTests(observer: ProjectServiceObserv
 /** Called by every service right after its last lock and before its first write. */
 export async function afterLock(tx: ProjectDb, operation: string): Promise<void> {
   await serviceObserver?.afterLock?.(tx, operation);
+}
+
+/**
+ * The one limit rule of every paged list (contract section 15, review b-IN-09): absent is the
+ * default; a safe integer from 1 to max is used as it is; anything else, including a limit above
+ * the maximum, is INVALID_INPUT field limit (never silently clamped).
+ */
+export function listLimit(
+  raw: unknown,
+  max: number = LIST_MAX,
+  fallback: number = LIST_DEFAULT,
+): number {
+  if (raw === undefined || raw === null) return fallback;
+  if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < 1 || raw > max) {
+    refuse("INVALID_INPUT", "limit");
+  }
+  return raw;
 }
 
 /** One batch id per mutation call (contract section 5). */

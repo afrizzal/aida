@@ -522,7 +522,12 @@ describe("moveProjectPosition and listProjects", () => {
       code: "INVALID_INPUT",
       field: "limit",
     });
-    const capped = await listProjects(actorOf(reader, orgId), { limit: 5000 });
-    expect(capped.ok).toBe(true);
+    // One limit rule (review b-IN-09): above the maximum is refused, never clamped.
+    expect(await listProjects(actorOf(reader, orgId), { limit: 5000 })).toEqual({
+      ok: false,
+      code: "INVALID_INPUT",
+      field: "limit",
+    });
+    expect((await listProjects(actorOf(reader, orgId), { limit: 200 })).ok).toBe(true);
   });
 });

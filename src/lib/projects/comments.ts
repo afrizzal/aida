@@ -15,14 +15,13 @@ import {
   COMMENT_BODY_MAX,
   codePointLength,
   hasNul,
-  LIST_DEFAULT,
-  LIST_MAX,
   type ProjectActor,
   type ProjectResult,
 } from "./contract";
 import {
   afterLock,
   isPlausibleId,
+  listLimit,
   newBatchId,
   type ProjectDb,
   refuse,
@@ -42,11 +41,7 @@ export interface PageOpts {
 
 /** The validated limit (default LIST_DEFAULT) or INVALID_INPUT field limit. */
 export function pageLimit(raw: unknown): number {
-  if (raw === undefined || raw === null) return LIST_DEFAULT;
-  if (!Number.isSafeInteger(raw) || (raw as number) < 1 || (raw as number) > LIST_MAX) {
-    refuse("INVALID_INPUT", "limit");
-  }
-  return raw as number;
+  return listLimit(raw);
 }
 
 /** An opaque keyset cursor over (sort value, id). */

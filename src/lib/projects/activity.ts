@@ -38,7 +38,7 @@ import {
   REDACTED_ROW_NULLED_KEYS,
   REDACTED_SIDE,
 } from "./contract";
-import { isPlausibleId, type ProjectDb, refuse, runProjectRead } from "./service";
+import { isPlausibleId, listLimit, type ProjectDb, refuse, runProjectRead } from "./service";
 
 export interface ActivityEntry {
   orgId: string;
@@ -266,9 +266,7 @@ export interface ActivityPage {
 }
 
 function pageLimit(limit: number | undefined): number {
-  if (limit === undefined) return ACTIVITY_LIST_DEFAULT;
-  if (!Number.isInteger(limit) || limit < 1) refuse("INVALID_INPUT", "limit");
-  return Math.min(limit, ACTIVITY_LIST_MAX);
+  return listLimit(limit, ACTIVITY_LIST_MAX, ACTIVITY_LIST_DEFAULT);
 }
 
 function cursorWhere(cursor: string | null | undefined): Prisma.ProjectActivityWhereInput {

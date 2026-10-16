@@ -23,8 +23,6 @@ import {
   DEFAULT_PROJECT_STATUS,
   fromCalendarDate,
   hasNul,
-  LIST_DEFAULT,
-  LIST_MAX,
   normalizePrefix,
   PROJECT_COLORS,
   PROJECT_DESCRIPTION_MAX,
@@ -46,6 +44,7 @@ import { appendRank, rankBetween, rebalancedRanks } from "./rank";
 import {
   afterLock,
   isPlausibleId,
+  listLimit,
   newBatchId,
   type ProjectDb,
   refuse,
@@ -636,9 +635,7 @@ export async function listProjects(
   return runProjectRead(actor, "listProjects", async (db) => {
     const archived = opts.archived ?? "exclude";
     if (!["exclude", "only", "include"].includes(archived)) refuse("INVALID_INPUT", "archived");
-    const rawLimit = opts.limit ?? LIST_DEFAULT;
-    if (!Number.isInteger(rawLimit) || rawLimit < 1) refuse("INVALID_INPUT", "limit");
-    const limit = Math.min(rawLimit, LIST_MAX);
+    const limit = listLimit(opts.limit);
     const terms: Prisma.ProjectWhereInput[] = [readableProjectWhere(actor)];
     if (archived === "exclude") terms.push({ archivedAt: null });
     if (archived === "only") terms.push({ archivedAt: { not: null } });

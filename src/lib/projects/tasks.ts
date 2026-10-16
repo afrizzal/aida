@@ -28,8 +28,6 @@ import {
   ESTIMATE_MAX_MINUTES,
   fromCalendarDate,
   hasNul,
-  LIST_DEFAULT,
-  LIST_MAX,
   type ProjectActor,
   type ProjectRefusalCode,
   type ProjectResult,
@@ -50,6 +48,7 @@ import { spawnRecurrenceSuccessorInTx } from "./recurrence";
 import {
   afterLock,
   isPlausibleId,
+  listLimit,
   newBatchId,
   type ProjectDb,
   refuse,
@@ -1060,14 +1059,6 @@ function toListItem(row: Prisma.TaskGetPayload<{ select: typeof TASK_LIST_SELECT
     startDate: calendarOrNull(row.startDate),
     dueDate: calendarOrNull(row.dueDate),
   };
-}
-
-function listLimit(raw: unknown): number {
-  const limit = raw ?? LIST_DEFAULT;
-  if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1) {
-    refuse("INVALID_INPUT", "limit");
-  }
-  return Math.min(limit, LIST_MAX);
 }
 
 function encodeCursor(value: unknown[]): string {

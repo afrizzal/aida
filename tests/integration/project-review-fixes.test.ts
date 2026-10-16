@@ -2,8 +2,15 @@
 // Testcontainers. Each describe names the finding it proves. Every case seeds fresh organizations.
 import { describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
-import { listProjectActivity, recordProjectActivity } from "@/lib/projects/activity";
+import {
+  listProjectActivity,
+  listTaskActivity,
+  listTeamActivity,
+  recordProjectActivity,
+} from "@/lib/projects/activity";
 import { bulkUpdateTasks } from "@/lib/projects/bulk";
+import { listTaskComments } from "@/lib/projects/comments";
+import { listFavorites } from "@/lib/projects/favorites";
 import { setProjectMemberRole } from "@/lib/projects/members";
 import {
   createProject,
@@ -14,7 +21,13 @@ import {
   setProjectStatus,
   updateProject,
 } from "@/lib/projects/projects";
-import { createTask, getTask, updateTask } from "@/lib/projects/tasks";
+import {
+  createTask,
+  getTask,
+  listProjectTasks,
+  listWorkspaceTasks,
+  updateTask,
+} from "@/lib/projects/tasks";
 import {
   actorOf,
   addOrgMember,
@@ -24,6 +37,7 @@ import {
   seedOrgWithMembers,
   seedProject,
   seedTask,
+  seedTeam,
 } from "../support/project-fixtures";
 
 async function managerWorld() {
@@ -442,5 +456,32 @@ describe("a-IN-03: the activity writer measures size as the database does (jsonb
       SELECT octet_length("after"::text)::int AS size FROM "ProjectActivity"
       WHERE "id" = ${row.id} AND "organizationId" = ${w.orgId}`;
     expect(size[0]?.size).toBe(4096);
+  });
+});
+
+describe("b-IN-09: one rule for list limits, a limit above the maximum is refused", () => {
+  it("every paged list refuses a limit above its maximum with INVALID_INPUT field limit and accepts the maximum", async () => {
+    const w = await managerWorld();
+    const task = await seedTask(prisma, w.orgId, w.project.id, { title: "T" });
+    const team = await seedTeam(prisma, w.orgId, {});
+    const refused = { ok: false, code: "INVALID_INPUT", field: "limit" };
+    const lists: [string, (limit: number) => Promise<{ ok: boolean }>, number][] = [
+      ["listProjects", (limit) => listProjects(w.manager, { limit }), 200],
+      ["listProjectTasks", (limit) => listProjectTasks(w.manager, w.project.id, { limit }), 200],
+      ["listWorkspaceTasks", (limit) => listWorkspaceTasks(w.manager, { limit }), 200],
+      ["listFavorites", (limit) => listFavorites(w.manager, { limit }), 200],
+      ["listTaskComments", (limit) => listTaskComments(w.manager, task.id, { limit }), 200],
+      [
+        "listProjectActivity",
+        (limit) => listProjectActivity(w.manager, w.project.id, { limit }),
+        100,
+      ],
+      ["listTaskActivity", (limit) => listTaskActivity(w.manager, task.id, { limit }), 100],
+      ["listTeamActivity", (limit) => listTeamActivity(w.manager, team.id, { limit }), 100],
+    ];
+    for (const [name, call, max] of lists) {
+      expect({ name, result: await call(max + 1) }).toEqual({ name, result: refused });
+      expect({ name, ok: (await call(max)).ok }).toEqual({ name, ok: true });
+    }
   });
 });

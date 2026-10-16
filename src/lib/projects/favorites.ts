@@ -19,8 +19,8 @@
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "../../generated/prisma/client";
 import { readableProjectWhere, requireProject, requireTask } from "./access";
-import { LIST_DEFAULT, LIST_MAX, type ProjectActor, type ProjectResult } from "./contract";
-import { afterLock, refuse, runProjectRead, runProjectTransaction } from "./service";
+import type { ProjectActor, ProjectResult } from "./contract";
+import { afterLock, listLimit, refuse, runProjectRead, runProjectTransaction } from "./service";
 
 // ---------------------------------------------------------------------------------------------
 // Project favorites
@@ -153,11 +153,7 @@ export async function listFavorites(
   return runProjectRead(actor, "listFavorites", async (db) => {
     const includeArchived = opts?.includeArchived ?? false;
     if (typeof includeArchived !== "boolean") refuse("INVALID_INPUT", "includeArchived");
-    const rawLimit = opts?.limit ?? LIST_DEFAULT;
-    if (typeof rawLimit !== "number" || !Number.isInteger(rawLimit) || rawLimit < 1) {
-      refuse("INVALID_INPUT", "limit");
-    }
-    const limit = Math.min(rawLimit, LIST_MAX);
+    const limit = listLimit(opts?.limit);
     const orgId = actor.orgId;
 
     const projectWhere: Prisma.ProjectWhereInput = includeArchived
