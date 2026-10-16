@@ -561,9 +561,12 @@ export async function moveProjectPosition(
       const ranks = rebalancedRanks(target.length);
       const ids = target.map((row) => row.id);
       newPosition = ranks[index] as number;
+      // Codex diff D2: the renumbering is internal, so only the moved project's updatedAt
+      // changes; another project's timestamp would reveal hidden projects behind the rebalance.
       await tx.$executeRaw`
         UPDATE "Project" AS p
-        SET "position" = v.pos, "updatedAt" = now()
+        SET "position" = v.pos,
+          "updatedAt" = CASE WHEN p."id" = ${projectId} THEN now() ELSE p."updatedAt" END
         FROM unnest(${ids}::text[], ${ranks}::int[]) AS v(id, pos)
         WHERE p."id" = v.id AND p."organizationId" = ${actor.orgId}`;
     } else {

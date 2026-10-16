@@ -327,6 +327,51 @@ describe("a-CR-01, K71: hidden private projects change no visible order value, c
     // The raw organization-wide value is never returned or recorded.
     expect(JSON.stringify(actual)).not.toMatch(/"position"/);
   });
+
+  it("Codex diff D2: a move changes no other project's updatedAt, so the two worlds agree per project", async () => {
+    /** Per move: the placeholders of the other projects whose updatedAt changed, and whether any
+     *  other project's stored position changed (a rebalance). */
+    async function changes(w: OrderWorld) {
+      const stamps = async () =>
+        new Map(
+          (
+            await prisma.project.findMany({
+              where: { organizationId: w.orgId },
+              select: { id: true, updatedAt: true, position: true },
+            })
+          ).map((row) => [row.id, { at: row.updatedAt.getTime(), position: row.position }]),
+        );
+      const moves: [string, string | null][] = [];
+      for (let i = 0; i < 14; i++) {
+        moves.push([(i % 2 === 0 ? w.ids.V3 : w.ids.V2) as string, w.ids.V1 as string]);
+      }
+      moves.push([w.ids.V1 as string, null], [w.ids.V3 as string, null]);
+      const touched: string[][] = [];
+      let rebalances = 0;
+      for (const [moved, after] of moves) {
+        const before = await stamps();
+        expect(
+          await moveProjectPosition(w.reader, moved, { placeAfterProjectId: after }),
+        ).toMatchObject({ ok: true });
+        const now = await stamps();
+        const others = [...before.keys()].filter((id) => id !== moved);
+        if (others.some((id) => now.get(id)?.position !== before.get(id)?.position)) rebalances++;
+        touched.push(
+          others
+            .filter((id) => now.get(id)?.at !== before.get(id)?.at)
+            .map((id) => w.placeholders.get(id) ?? "HIDDEN"),
+        );
+      }
+      return { touched, rebalances };
+    }
+    const plain = await changes(await orderWorld(false));
+    const withHidden = await changes(await orderWorld(true));
+    // Both worlds did renumber other projects, so the case exercises the rebalance.
+    expect(plain.rebalances).toBeGreaterThan(0);
+    expect(withHidden.rebalances).toBeGreaterThan(0);
+    expect(withHidden.touched).toEqual(plain.touched);
+    expect(plain.touched.flat()).toEqual([]);
+  });
 });
 
 describe("b-WR-01: a bulk completion creates the recurrence successor from the patched task", () => {
@@ -720,8 +765,12 @@ describe("Codex diff D3, K72: an alias resolves only while its origin project is
       if (origin === "deleted") {
         const project = await getProject(other, source);
         if (!project.ok) throw new Error(project.code);
-        expect(await archiveProject(other, source, project.project.version)).toMatchObject({ ok: true });
-        expect(await deleteProject(other, source, { confirmName: "HP" })).toMatchObject({ ok: true });
+        expect(await archiveProject(other, source, project.project.version)).toMatchObject({
+          ok: true,
+        });
+        expect(await deleteProject(other, source, { confirmName: "HP" })).toMatchObject({
+          ok: true,
+        });
       }
     }
     return { reader, other, taskId };

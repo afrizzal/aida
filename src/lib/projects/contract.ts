@@ -414,7 +414,8 @@ export const PROJECT_OPERATIONS = Object.freeze({
   changeProjectKeyPrefix: op("projects", "MANAGE", "PROJECT_UPDATE", ["PROJECT_UPDATED"], "TARGET"),
   // K71 (review a-CR-01): the stored organization-wide position is internal. moveProjectPosition
   // decides its no-op from the caller's readable order, and its PROJECT_REORDERED row has before
-  // and after null; no read returns the position or a cursor that holds it.
+  // and after null; no read returns the position or a cursor that holds it. A rebalance changes
+  // only the other projects' stored position, never their updatedAt (Codex diff D2).
   moveProjectPosition: op(
     "projects",
     "MANAGE",
