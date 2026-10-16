@@ -425,6 +425,8 @@ export const PROJECT_OPERATIONS = Object.freeze({
   listProjectActivity: op("activity", "READ", "NONE", [], "TARGET"),
   listTaskActivity: op("activity", "READ", "NONE", [], "TARGET"),
   listTeamActivity: op("activity", "MEMBER", "NONE", [], "TEAM"),
+  // K72 (Codex diff D3): an ALIAS resolves only while its origin project is readable; otherwise,
+  // and when that project was deleted, NOT_FOUND identical to a missing key.
   resolveTaskKey: op("keys", "READ", "NONE", [], "KEY"),
   createTask: op("tasks", "CONTENT", "PROJECT_SHARE", ["TASK_CREATED"], "TARGET"),
   getTask: op("tasks", "READ", "NONE", [], "TARGET"),

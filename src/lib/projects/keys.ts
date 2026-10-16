@@ -92,9 +92,10 @@ export interface ResolvedTaskKey {
 
 /**
  * Resolves a task key (READ, isolation KEY): parse after trim and uppercase; a malformed key, a
- * missing key or a TOMBSTONE is NOT_FOUND; otherwise the task is read through the read predicate
- * with the organization term, and no access is NOT_FOUND, identical to a key that exists nowhere.
- * Returns the task's current key and whether the given key is an alias.
+ * missing key or a TOMBSTONE is NOT_FOUND; an ALIAS whose origin project the reader cannot read now,
+ * or whose origin project was deleted, is NOT_FOUND too (K72); otherwise the task is read through
+ * the read predicate with the organization term, and no access is NOT_FOUND, identical to a key
+ * that exists nowhere. Returns the task's current key and whether the given key is an alias.
  */
 export async function resolveTaskKey(
   actor: ProjectActor,
@@ -105,9 +106,20 @@ export async function resolveTaskKey(
     if (normalized === null) refuse("NOT_FOUND");
     const row = await db.taskKey.findFirst({
       where: { organizationId: actor.orgId, normalizedKey: normalized },
-      select: { taskId: true, kind: true },
+      select: { taskId: true, projectId: true, kind: true },
     });
     if (!row || row.kind === "TOMBSTONE") refuse("NOT_FOUND");
+    // K72 (Codex diff D3, charter rule 4): an ALIAS also needs read access to the project the key
+    // was issued in, so an old key reveals nothing about a project the reader cannot read now.
+    if (row.kind === "ALIAS") {
+      const origin = await db.project.findFirst({
+        where: {
+          AND: [{ id: row.projectId, organizationId: actor.orgId }, readableProjectWhere(actor)],
+        },
+        select: { id: true },
+      });
+      if (!origin) refuse("NOT_FOUND");
+    }
     const task = await db.task.findFirst({
       where: { id: row.taskId, organizationId: actor.orgId, project: readableProjectWhere(actor) },
       select: { id: true, key: true, projectId: true },

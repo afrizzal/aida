@@ -8,15 +8,19 @@ import {
   listTeamActivity,
   recordProjectActivity,
 } from "@/lib/projects/activity";
+import { archiveProject } from "@/lib/projects/archive";
 import { bulkUpdateTasks } from "@/lib/projects/bulk";
 import { listTaskComments } from "@/lib/projects/comments";
+import { deleteProject } from "@/lib/projects/delete";
 import { favoriteProject, favoriteTask, listFavorites } from "@/lib/projects/favorites";
+import { resolveTaskKey } from "@/lib/projects/keys";
 import {
   listEligibleAssignees,
   listProjectMembers,
   setProjectMemberRole,
 } from "@/lib/projects/members";
 import { listProjectMilestones, listWorkspaceMilestones } from "@/lib/projects/milestones";
+import { moveTask } from "@/lib/projects/move";
 import {
   createProject,
   getProject,
@@ -685,5 +689,68 @@ describe("a-WR-07, b-WR-05: people, team, milestone and favorite lists are keyse
     const ids = [...first.assignees, ...second.assignees].map((a) => a.userId);
     expect(new Set(ids)).toEqual(seeded);
     expect(ids).toHaveLength(seeded.size);
+  });
+});
+
+describe("Codex diff D3, K72: an alias resolves only while its origin project is readable", () => {
+  /** A task keyed in an origin project of another user, then moved into a public project. */
+  async function aliasWorld(origin: "none" | "private" | "deleted") {
+    const org = await seedOrgWithMembers(prisma, ["owner", "member", "member"]);
+    const reader = actorOf(org.users[1]?.id as string, org.orgId);
+    const other = actorOf(org.users[2]?.id as string, org.orgId);
+    const make = async (name: string, isPrivate: boolean) => {
+      const r = await createProject(other, { name, keyPrefix: name, isPrivate });
+      if (!r.ok) throw new Error(`createProject ${name}: ${r.code}`);
+      return r.projectId;
+    };
+    const target = await make("QQ", false);
+    let taskId: string;
+    if (origin === "none") {
+      const t = await createTask(other, target, { title: "Keyed" });
+      if (!t.ok) throw new Error(t.code);
+      taskId = t.taskId;
+    } else {
+      const source = await make("HP", origin === "private");
+      const t = await createTask(other, source, { title: "Keyed" });
+      if (!t.ok) throw new Error(t.code);
+      expect(t.key).toBe("HP-1");
+      taskId = t.taskId;
+      const moved = await moveTask(other, taskId, target, 0);
+      expect(moved.ok).toBe(true);
+      if (origin === "deleted") {
+        const project = await getProject(other, source);
+        if (!project.ok) throw new Error(project.code);
+        expect(await archiveProject(other, source, project.project.version)).toMatchObject({ ok: true });
+        expect(await deleteProject(other, source, { confirmName: "HP" })).toMatchObject({ ok: true });
+      }
+    }
+    return { reader, other, taskId };
+  }
+
+  it("an alias of a private origin the reader cannot read is NOT_FOUND, identical to a missing key", async () => {
+    const plain = await aliasWorld("none");
+    const hidden = await aliasWorld("private");
+    const missing = await resolveTaskKey(plain.reader, "HP-1");
+    expect(missing).toEqual({ ok: false, code: "NOT_FOUND" });
+    expect(await resolveTaskKey(hidden.reader, "HP-1")).toEqual(missing);
+    // The current key resolves the same way in both worlds.
+    const current = await resolveTaskKey(hidden.reader, "QQ-1");
+    expect(current).toMatchObject({ ok: true, taskId: hidden.taskId, isAlias: false });
+    expect(await resolveTaskKey(plain.reader, "QQ-1")).toMatchObject({ ok: true, isAlias: false });
+    // A reader of the origin still resolves the alias.
+    expect(await resolveTaskKey(hidden.other, "HP-1")).toMatchObject({
+      ok: true,
+      taskId: hidden.taskId,
+      key: "QQ-1",
+      isAlias: true,
+    });
+  });
+
+  it("an alias whose origin project was deleted no longer resolves, for anyone", async () => {
+    const w = await aliasWorld("deleted");
+    for (const actor of [w.reader, w.other]) {
+      expect(await resolveTaskKey(actor, "HP-1")).toEqual({ ok: false, code: "NOT_FOUND" });
+      expect(await resolveTaskKey(actor, "QQ-1")).toMatchObject({ ok: true, taskId: w.taskId });
+    }
   });
 });
