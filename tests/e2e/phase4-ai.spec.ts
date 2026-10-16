@@ -413,11 +413,13 @@ test("T7 re-run triage: failure shows Triage failed + Re-run; retry succeeds", a
     )
     .toBe("FAILED");
 
-  // pg-boss retries the failed job at once (ai-triage: retryLimit 2, no retry delay). A retry
-  // that ran after the switch to "ok" below could complete the triage just before the Re-run
-  // click writes PENDING: the poll would see that COMPLETED, and the page would then show
-  // "Triaging…" for the Re-run's own job. Wait until the retries are used up, so the Re-run
-  // under test is the only job that can complete the triage.
+  // pg-boss retries the failed job (ai-triage: retryLimit 2 with exponential backoff, capped by
+  // retryDelayMax; see the createQueue call in src/lib/worker/index.ts). The 60 s timeout of the
+  // poll below must cover the backoff total of both retries: raise it whenever the retry settings
+  // grow (review c-IN-04). A retry that ran after the switch to "ok" below could complete the
+  // triage just before the Re-run click writes PENDING: the poll would see that COMPLETED, and
+  // the page would then show "Triaging…" for the Re-run's own job. Wait until the retries are
+  // used up, so the Re-run under test is the only job that can complete the triage.
   await expect.poll(() => pendingTriageJobs(triagedTicketId), { timeout: 60_000 }).toBe(0);
 
   await page.goto(`/tickets/${triagedTicketId}`);
