@@ -9,7 +9,7 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import {
   addTaskComment,
@@ -34,6 +34,7 @@ import {
 } from "@/lib/projects/milestones";
 import {
   actorOf,
+  filesUnder,
   missingId,
   type PrivacyWorld,
   projectTableSnapshot,
@@ -45,10 +46,20 @@ import {
 // localFileStorage reads UPLOADS_DIR when its module loads: attachments are imported after the
 // variable points at a fresh temporary directory.
 let att: typeof import("@/lib/projects/attachments");
+let uploadsDir = "";
+// Review c-IN-02: the previous value is restored after the file. The temporary directory stays:
+// the charter allows no recursive delete.
+const previousUploadsDir = process.env.UPLOADS_DIR;
 
 beforeAll(async () => {
-  process.env.UPLOADS_DIR = await mkdtemp(path.join(tmpdir(), "aida-content-isolation-"));
+  uploadsDir = await mkdtemp(path.join(tmpdir(), "aida-content-isolation-"));
+  process.env.UPLOADS_DIR = uploadsDir;
   att = await import("@/lib/projects/attachments");
+});
+
+afterAll(() => {
+  if (previousUploadsDir === undefined) delete process.env.UPLOADS_DIR;
+  else process.env.UPLOADS_DIR = previousUploadsDir;
 });
 
 const MEMBERSHIP_ENDED = { ok: false, code: "MEMBERSHIP_ENDED" };
@@ -221,6 +232,10 @@ describe("uploadTaskAttachments isolation", () => {
     const pw = await seedPrivacyWorld(prisma);
     const snapshot = await projectTableSnapshot(prisma, pw.orgA);
     const count = await activityCount(pw.orgA);
+    // Review c-WR-02: a refused upload writes no file, in either organization's directory.
+    const diskOf = () =>
+      Promise.all([pw.orgA, pw.orgB].map((orgId) => filesUnder(path.join(uploadsDir, orgId))));
+    const disk = await diskOf();
     for (const actor of refused(pw)) {
       expect(await att.uploadTaskAttachments(actor, pw.task.id, png())).toEqual(
         await att.uploadTaskAttachments(actor, missingId(), png()),
@@ -231,6 +246,7 @@ describe("uploadTaskAttachments isolation", () => {
     );
     expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
     expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await diskOf()).toEqual(disk);
     for (const actor of [pw.actors.manager, pw.actors.member]) {
       expect(await att.uploadTaskAttachments(actor, pw.task.id, png())).toMatchObject({ ok: true });
     }
