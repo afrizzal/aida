@@ -4,6 +4,8 @@
 // own CHECKs, triggers and foreign keys apply. Later plans import this file and keep any extra
 // helper inside their own test file; it is not edited again in Phase 14.
 import { randomUUID } from "node:crypto";
+import { readdir } from "node:fs/promises";
+import path from "node:path";
 import type {
   Prisma,
   PrismaClient,
@@ -509,4 +511,30 @@ export async function seedPrivacyWorld(
     comment,
     attachment,
   };
+}
+
+/**
+ * Every file under `dir`, recursively, as paths relative to `dir`, sorted (reviews c-WR-01 and
+ * c-WR-02). Only a missing directory (ENOENT) counts as empty: any other error is thrown, so a
+ * "no file on disk" assertion can never pass because the directory could not be read.
+ */
+export async function filesUnder(dir: string): Promise<string[]> {
+  let entries: import("node:fs").Dirent[];
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw err;
+  }
+  const files: string[] = [];
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      for (const inner of await filesUnder(path.join(dir, entry.name))) {
+        files.push(path.join(entry.name, inner));
+      }
+    } else {
+      files.push(entry.name);
+    }
+  }
+  return files.sort();
 }

@@ -3,10 +3,10 @@
 // renderTaskMarkdown and recorded with ids only. Attachments are validated before anything is
 // stored, staged before the transaction and discarded on any refusal or error; every download
 // read checks project access; a delete writes its storage key to ProjectFileCleanup.
-import { mkdtemp, readdir } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FileStorage } from "@/lib/attachments/file-storage";
 import { prisma } from "@/lib/db";
 import {
@@ -22,6 +22,7 @@ import {
   seedOrgWithMembers,
   seedPrivacyWorld,
   seedProject,
+  filesUnder,
   seedTask,
 } from "../support/project-fixtures";
 
@@ -31,6 +32,9 @@ let uploadsDir = "";
 let att: typeof import("@/lib/projects/attachments");
 let storageMod: typeof import("@/lib/attachments/local-file-storage");
 let cleanupMod: typeof import("@/lib/projects/file-cleanup");
+// Review c-IN-02: the previous value is restored after the file. The temporary directory stays:
+// the charter allows no recursive delete.
+const previousUploadsDir = process.env.UPLOADS_DIR;
 
 beforeAll(async () => {
   uploadsDir = await mkdtemp(path.join(tmpdir(), "aida-project-attachments-"));
@@ -38,6 +42,11 @@ beforeAll(async () => {
   att = await import("@/lib/projects/attachments");
   storageMod = await import("@/lib/attachments/local-file-storage");
   cleanupMod = await import("@/lib/projects/file-cleanup");
+});
+
+afterAll(() => {
+  if (previousUploadsDir === undefined) delete process.env.UPLOADS_DIR;
+  else process.env.UPLOADS_DIR = previousUploadsDir;
 });
 
 const PNG = Buffer.from(
@@ -53,12 +62,9 @@ function fileOf(name: string, data: Buffer, size = data.length) {
   };
 }
 
-async function filesOnDisk(orgId: string): Promise<string[]> {
-  try {
-    return await readdir(path.join(uploadsDir, orgId));
-  } catch {
-    return [];
-  }
+// Review c-WR-01: only a missing directory is empty; any other read error fails the test.
+function filesOnDisk(orgId: string): Promise<string[]> {
+  return filesUnder(path.join(uploadsDir, orgId));
 }
 
 async function world(opts: { isPrivate?: boolean } = {}) {
