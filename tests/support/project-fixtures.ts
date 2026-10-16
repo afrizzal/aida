@@ -399,6 +399,32 @@ export async function projectTableSnapshot(
   return snapshot;
 }
 
+/**
+ * Review c-WR-04: projectTableSnapshot of every given organization, in order. Isolation cases pass
+ * both organizations of the privacy world, so a refused cross-organization write that lands in
+ * the outsider's organization (B) is seen too.
+ */
+export async function projectTableSnapshotAll(
+  prisma: PrismaClient,
+  orgIds: readonly string[],
+): Promise<ProjectTableSnapshot[]> {
+  const snapshots: ProjectTableSnapshot[] = [];
+  for (const orgId of orgIds) snapshots.push(await projectTableSnapshot(prisma, orgId));
+  return snapshots;
+}
+
+/** Review c-WR-04: the ProjectActivity row count of every given organization, in order. */
+export async function projectActivityCounts(
+  prisma: PrismaClient,
+  orgIds: readonly string[],
+): Promise<number[]> {
+  const counts: number[] = [];
+  for (const orgId of orgIds) {
+    counts.push(await prisma.projectActivity.count({ where: { organizationId: orgId } }));
+  }
+  return counts;
+}
+
 export interface PrivacyWorld {
   orgA: string;
   orgB: string;

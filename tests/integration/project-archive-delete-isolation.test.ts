@@ -24,12 +24,13 @@ import {
   missingId,
   type PrivacyWorld,
   type ProjectTableSnapshot,
-  projectTableSnapshot,
+  projectActivityCounts,
+  projectTableSnapshotAll,
   seedPrivacyWorld,
 } from "../support/project-fixtures";
 
 type Call = (actor: ProjectActor, id: string) => Promise<unknown>;
-type Snapshot = () => Promise<ProjectTableSnapshot>;
+type Snapshot = () => Promise<ProjectTableSnapshot[]>;
 
 const refusedActors = (w: PrivacyWorld) => [
   w.actors.teamMember,
@@ -39,10 +40,6 @@ const refusedActors = (w: PrivacyWorld) => [
 ];
 const outsiderInA = (w: PrivacyWorld) => actorOf(w.users.outsider, w.orgA);
 
-async function activityCount(orgId: string): Promise<number> {
-  return prisma.projectActivity.count({ where: { organizationId: orgId } });
-}
-
 /** Runs one refused write and checks that organization A changed nowhere. */
 async function refusedWrite(
   w: PrivacyWorld,
@@ -50,10 +47,10 @@ async function refusedWrite(
   run: () => Promise<unknown>,
 ): Promise<unknown> {
   const before = await snapshot();
-  const count = await activityCount(w.orgA);
+  const count = await projectActivityCounts(prisma, [w.orgA, w.orgB]);
   const result = await run();
   expect(await snapshot()).toEqual(before);
-  expect(await activityCount(w.orgA)).toBe(count);
+  expect(await projectActivityCounts(prisma, [w.orgA, w.orgB])).toEqual(count);
   return result;
 }
 
@@ -103,7 +100,7 @@ async function markArchived(w: PrivacyWorld, what: "project" | "task"): Promise<
 describe("archiveProject (TARGET)", () => {
   it("member NOT_ALLOWED, refused actors equal a missing id, nothing changes; the manager archives", async () => {
     const w = await seedPrivacyWorld(prisma);
-    const snapshot = () => projectTableSnapshot(prisma, w.orgA);
+    const snapshot = () => projectTableSnapshotAll(prisma, [w.orgA, w.orgB]);
     const call: Call = (actor, id) => archiveProject(actor, id, 0);
     await expectRefusedWrites(w, snapshot, call, w.project.id, "NOT_ALLOWED");
     expect(await refusedWrite(w, snapshot, () => call(outsiderInA(w), missingId()))).toEqual({
@@ -122,7 +119,7 @@ describe("restoreProject (TARGET)", () => {
   it("member NOT_ALLOWED, refused actors equal a missing id, nothing changes; the manager restores", async () => {
     const w = await seedPrivacyWorld(prisma);
     await markArchived(w, "project");
-    const snapshot = () => projectTableSnapshot(prisma, w.orgA);
+    const snapshot = () => projectTableSnapshotAll(prisma, [w.orgA, w.orgB]);
     const call: Call = (actor, id) => restoreProject(actor, id);
     await expectRefusedWrites(w, snapshot, call, w.project.id, "NOT_ALLOWED");
     expect(await refusedWrite(w, snapshot, () => call(outsiderInA(w), missingId()))).toEqual({
@@ -136,7 +133,7 @@ describe("restoreProject (TARGET)", () => {
 describe("archiveTask (TARGET)", () => {
   it("refused actors equal a missing id and change nothing; manager and member archive", async () => {
     const w = await seedPrivacyWorld(prisma);
-    const snapshot = () => projectTableSnapshot(prisma, w.orgA);
+    const snapshot = () => projectTableSnapshotAll(prisma, [w.orgA, w.orgB]);
     const call: Call = (actor, id) => archiveTask(actor, id, 0);
     await expectRefusedWrites(w, snapshot, call, w.task.id, null);
     expect(await refusedWrite(w, snapshot, () => call(outsiderInA(w), missingId()))).toEqual({
@@ -156,7 +153,7 @@ describe("restoreTask (TARGET)", () => {
   it("refused actors equal a missing id and change nothing; member and manager restore", async () => {
     const w = await seedPrivacyWorld(prisma);
     await markArchived(w, "task");
-    const snapshot = () => projectTableSnapshot(prisma, w.orgA);
+    const snapshot = () => projectTableSnapshotAll(prisma, [w.orgA, w.orgB]);
     const call: Call = (actor, id) => restoreTask(actor, id);
     await expectRefusedWrites(w, snapshot, call, w.task.id, null);
     expect(await refusedWrite(w, snapshot, () => call(outsiderInA(w), missingId()))).toEqual({
@@ -171,7 +168,7 @@ describe("restoreTask (TARGET)", () => {
 describe("favoriteProject (TARGET)", () => {
   it("refused actors equal a missing id and change nothing; manager and member favorite", async () => {
     const w = await seedPrivacyWorld(prisma);
-    const snapshot = () => projectTableSnapshot(prisma, w.orgA);
+    const snapshot = () => projectTableSnapshotAll(prisma, [w.orgA, w.orgB]);
     const call: Call = (actor, id) => favoriteProject(actor, id);
     await expectRefusedWrites(w, snapshot, call, w.project.id, null);
     expect(await refusedWrite(w, snapshot, () => call(outsiderInA(w), missingId()))).toEqual({
@@ -191,7 +188,7 @@ describe("unfavoriteProject (TARGET)", () => {
         data: { organizationId: w.orgA, userId, projectId: w.project.id },
       });
     }
-    const snapshot = () => projectTableSnapshot(prisma, w.orgA);
+    const snapshot = () => projectTableSnapshotAll(prisma, [w.orgA, w.orgB]);
     const call: Call = (actor, id) => unfavoriteProject(actor, id);
     await expectRefusedWrites(w, snapshot, call, w.project.id, null);
     expect(await refusedWrite(w, snapshot, () => call(outsiderInA(w), missingId()))).toEqual({
@@ -206,7 +203,7 @@ describe("unfavoriteProject (TARGET)", () => {
 describe("favoriteTask (TARGET)", () => {
   it("refused actors equal a missing id and change nothing; manager and member favorite", async () => {
     const w = await seedPrivacyWorld(prisma);
-    const snapshot = () => projectTableSnapshot(prisma, w.orgA);
+    const snapshot = () => projectTableSnapshotAll(prisma, [w.orgA, w.orgB]);
     const call: Call = (actor, id) => favoriteTask(actor, id);
     await expectRefusedWrites(w, snapshot, call, w.task.id, null);
     expect(await refusedWrite(w, snapshot, () => call(outsiderInA(w), missingId()))).toEqual({
@@ -226,7 +223,7 @@ describe("unfavoriteTask (TARGET)", () => {
         data: { organizationId: w.orgA, userId, taskId: w.task.id },
       });
     }
-    const snapshot = () => projectTableSnapshot(prisma, w.orgA);
+    const snapshot = () => projectTableSnapshotAll(prisma, [w.orgA, w.orgB]);
     const call: Call = (actor, id) => unfavoriteTask(actor, id);
     await expectRefusedWrites(w, snapshot, call, w.task.id, null);
     expect(await refusedWrite(w, snapshot, () => call(outsiderInA(w), missingId()))).toEqual({
@@ -296,7 +293,7 @@ describe("listFavorites (LIST)", () => {
 describe("deleteTask (TARGET)", () => {
   it("member (not the creator) NOT_ALLOWED, refused actors equal a missing id, nothing changes; the manager deletes", async () => {
     const w = await seedPrivacyWorld(prisma);
-    const snapshot = () => projectTableSnapshot(prisma, w.orgA);
+    const snapshot = () => projectTableSnapshotAll(prisma, [w.orgA, w.orgB]);
     const call: Call = (actor, id) => deleteTask(actor, id, { confirm: true, expectedVersion: 0 });
     await expectRefusedWrites(w, snapshot, call, w.task.id, "NOT_ALLOWED");
     expect(await refusedWrite(w, snapshot, () => call(outsiderInA(w), missingId()))).toEqual({
@@ -315,7 +312,7 @@ describe("deleteProject (TARGET)", () => {
   it("member NOT_ALLOWED, refused actors equal a missing id, nothing changes; the manager deletes", async () => {
     const w = await seedPrivacyWorld(prisma);
     const name = `Project ${w.project.keyPrefix}`;
-    const snapshot = () => projectTableSnapshot(prisma, w.orgA);
+    const snapshot = () => projectTableSnapshotAll(prisma, [w.orgA, w.orgB]);
     const call: Call = (actor, id) => deleteProject(actor, id, { confirmName: name });
     await expectRefusedWrites(w, snapshot, call, w.project.id, "NOT_ALLOWED");
     expect(await refusedWrite(w, snapshot, () => call(outsiderInA(w), missingId()))).toEqual({

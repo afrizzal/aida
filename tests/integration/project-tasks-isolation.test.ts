@@ -22,7 +22,8 @@ import {
   actorOf,
   missingId,
   type PrivacyWorld,
-  projectTableSnapshot,
+  projectActivityCounts,
+  projectTableSnapshotAll,
   seedPrivacyWorld,
 } from "../support/project-fixtures";
 
@@ -36,23 +37,19 @@ function endedOutsider(pw: PrivacyWorld) {
   return actorOf(pw.users.outsider, pw.orgA);
 }
 
-function activityCount(orgId: string): Promise<number> {
-  return prisma.projectActivity.count({ where: { organizationId: orgId } });
-}
-
 describe("createTask isolation", () => {
   it("only project members create; the rest get the missing-id result and nothing is written", async () => {
     const pw = await seedPrivacyWorld(prisma);
-    const snapshot = await projectTableSnapshot(prisma, pw.orgA);
-    const count = await activityCount(pw.orgA);
+    const snapshot = await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB]);
+    const count = await projectActivityCounts(prisma, [pw.orgA, pw.orgB]);
     for (const actor of refused(pw)) {
       expect(await createTask(actor, pw.project.id, { title: "x" })).toEqual(
         await createTask(actor, missingId(), { title: "x" }),
       );
     }
     expect(await createTask(endedOutsider(pw), pw.project.id, { title: "x" })).toEqual(ENDED);
-    expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-    expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+    expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     for (const actor of [pw.actors.manager, pw.actors.member]) {
       expect(await createTask(actor, pw.project.id, { title: "ok" })).toMatchObject({ ok: true });
     }
@@ -115,16 +112,16 @@ describe("listWorkspaceTasks isolation", () => {
 describe("updateTask isolation", () => {
   it("only project members edit; refused calls change no row and add no activity", async () => {
     const pw = await seedPrivacyWorld(prisma);
-    const snapshot = await projectTableSnapshot(prisma, pw.orgA);
-    const count = await activityCount(pw.orgA);
+    const snapshot = await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB]);
+    const count = await projectActivityCounts(prisma, [pw.orgA, pw.orgB]);
     for (const actor of refused(pw)) {
       expect(await updateTask(actor, pw.task.id, 0, { title: "x" })).toEqual(
         await updateTask(actor, missingId(), 0, { title: "x" }),
       );
     }
     expect(await updateTask(endedOutsider(pw), pw.task.id, 0, { title: "x" })).toEqual(ENDED);
-    expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-    expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+    expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     expect(await updateTask(pw.actors.member, pw.task.id, 0, { title: "m" })).toEqual({
       ok: true,
       changed: true,
@@ -142,16 +139,16 @@ describe("setTaskDates isolation", () => {
   it("only project members set dates; refused calls change no row and add no activity", async () => {
     const pw = await seedPrivacyWorld(prisma);
     const dates = { startDate: "2026-02-01", dueDate: "2026-02-10" };
-    const snapshot = await projectTableSnapshot(prisma, pw.orgA);
-    const count = await activityCount(pw.orgA);
+    const snapshot = await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB]);
+    const count = await projectActivityCounts(prisma, [pw.orgA, pw.orgB]);
     for (const actor of refused(pw)) {
       expect(await setTaskDates(actor, pw.task.id, 0, dates)).toEqual(
         await setTaskDates(actor, missingId(), 0, dates),
       );
     }
     expect(await setTaskDates(endedOutsider(pw), pw.task.id, 0, dates)).toEqual(ENDED);
-    expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-    expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+    expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     expect(await setTaskDates(pw.actors.member, pw.task.id, 0, dates)).toMatchObject({
       ok: true,
       changed: true,
@@ -165,16 +162,16 @@ describe("setTaskDates isolation", () => {
 describe("setTaskStatus isolation", () => {
   it("only project members move the status; refused calls change no row and add no activity", async () => {
     const pw = await seedPrivacyWorld(prisma);
-    const snapshot = await projectTableSnapshot(prisma, pw.orgA);
-    const count = await activityCount(pw.orgA);
+    const snapshot = await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB]);
+    const count = await projectActivityCounts(prisma, [pw.orgA, pw.orgB]);
     for (const actor of refused(pw)) {
       expect(await setTaskStatus(actor, pw.task.id, 0, "DONE")).toEqual(
         await setTaskStatus(actor, missingId(), 0, "DONE"),
       );
     }
     expect(await setTaskStatus(endedOutsider(pw), pw.task.id, 0, "DONE")).toEqual(ENDED);
-    expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-    expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+    expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     expect(await setTaskStatus(pw.actors.member, pw.task.id, 0, "IN_PROGRESS")).toMatchObject({
       ok: true,
       changed: true,
@@ -189,16 +186,16 @@ describe("setTaskStatus isolation", () => {
 describe("setTaskParent isolation", () => {
   it("only project members reparent; refused calls change no row and add no activity", async () => {
     const pw = await seedPrivacyWorld(prisma);
-    const snapshot = await projectTableSnapshot(prisma, pw.orgA);
-    const count = await activityCount(pw.orgA);
+    const snapshot = await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB]);
+    const count = await projectActivityCounts(prisma, [pw.orgA, pw.orgB]);
     for (const actor of refused(pw)) {
       expect(await setTaskParent(actor, pw.subtask.id, 0, null)).toEqual(
         await setTaskParent(actor, missingId(), 0, null),
       );
     }
     expect(await setTaskParent(endedOutsider(pw), pw.subtask.id, 0, null)).toEqual(ENDED);
-    expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-    expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+    expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     expect(await setTaskParent(pw.actors.member, pw.subtask.id, 0, null)).toEqual({
       ok: true,
       changed: true,

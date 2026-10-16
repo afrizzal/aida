@@ -37,7 +37,8 @@ import {
   filesUnder,
   missingId,
   type PrivacyWorld,
-  projectTableSnapshot,
+  projectActivityCounts,
+  projectTableSnapshotAll,
   seedAttachment,
   seedComment,
   seedPrivacyWorld,
@@ -84,10 +85,6 @@ function endedOutsider(pw: PrivacyWorld) {
   return actorOf(pw.users.outsider, pw.orgA);
 }
 
-function activityCount(orgId: string): Promise<number> {
-  return prisma.projectActivity.count({ where: { organizationId: orgId } });
-}
-
 describe("listTaskComments isolation", () => {
   it("refused actors get the missing-id result; members read", async () => {
     const pw = await seedPrivacyWorld(prisma);
@@ -107,8 +104,8 @@ describe("listTaskComments isolation", () => {
 describe("addTaskComment isolation", () => {
   it("refused actors get the missing-id result and change nothing; members get their level's result", async () => {
     const pw = await seedPrivacyWorld(prisma);
-    const snapshot = await projectTableSnapshot(prisma, pw.orgA);
-    const count = await activityCount(pw.orgA);
+    const snapshot = await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB]);
+    const count = await projectActivityCounts(prisma, [pw.orgA, pw.orgB]);
     for (const actor of refused(pw)) {
       expect(await addTaskComment(actor, pw.task.id, { body: "hi" })).toEqual(
         await addTaskComment(actor, missingId(), { body: "hi" }),
@@ -117,8 +114,8 @@ describe("addTaskComment isolation", () => {
     expect(await addTaskComment(endedOutsider(pw), pw.task.id, { body: "hi" })).toEqual(
       MEMBERSHIP_ENDED,
     );
-    expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-    expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+    expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     for (const actor of [pw.actors.manager, pw.actors.member]) {
       expect(await addTaskComment(actor, pw.task.id, { body: "hi" })).toMatchObject({ ok: true });
     }
@@ -128,8 +125,8 @@ describe("addTaskComment isolation", () => {
 describe("editTaskComment isolation", () => {
   it("refused actors get the missing-id result and change nothing; members get their level's result", async () => {
     const pw = await seedPrivacyWorld(prisma);
-    const snapshot = await projectTableSnapshot(prisma, pw.orgA);
-    const count = await activityCount(pw.orgA);
+    const snapshot = await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB]);
+    const count = await projectActivityCounts(prisma, [pw.orgA, pw.orgB]);
     for (const actor of refused(pw)) {
       expect(await editTaskComment(actor, pw.comment.id, 0, { body: "edited" })).toEqual(
         await editTaskComment(actor, missingId(), 0, { body: "edited" }),
@@ -138,8 +135,8 @@ describe("editTaskComment isolation", () => {
     expect(await editTaskComment(endedOutsider(pw), pw.comment.id, 0, { body: "edited" })).toEqual(
       MEMBERSHIP_ENDED,
     );
-    expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-    expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+    expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     expect(await editTaskComment(pw.actors.manager, pw.comment.id, 0, { body: "x" })).toEqual(
       NOT_ALLOWED,
     );
@@ -154,16 +151,16 @@ describe("editTaskComment isolation", () => {
 describe("deleteTaskComment isolation", () => {
   it("refused actors get the missing-id result and change nothing; members get their level's result", async () => {
     const pw = await seedPrivacyWorld(prisma);
-    const snapshot = await projectTableSnapshot(prisma, pw.orgA);
-    const count = await activityCount(pw.orgA);
+    const snapshot = await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB]);
+    const count = await projectActivityCounts(prisma, [pw.orgA, pw.orgB]);
     for (const actor of refused(pw)) {
       expect(await deleteTaskComment(actor, pw.comment.id)).toEqual(
         await deleteTaskComment(actor, missingId()),
       );
     }
     expect(await deleteTaskComment(endedOutsider(pw), pw.comment.id)).toEqual(MEMBERSHIP_ENDED);
-    expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-    expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+    expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     const managers = await seedComment(prisma, pw.orgA, pw.task.id, {
       authorUserId: pw.users.manager,
     });
@@ -230,8 +227,8 @@ describe("getTaskAttachmentForDownload isolation", () => {
 describe("uploadTaskAttachments isolation", () => {
   it("refused actors get the missing-id result and change nothing; members get their level's result", async () => {
     const pw = await seedPrivacyWorld(prisma);
-    const snapshot = await projectTableSnapshot(prisma, pw.orgA);
-    const count = await activityCount(pw.orgA);
+    const snapshot = await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB]);
+    const count = await projectActivityCounts(prisma, [pw.orgA, pw.orgB]);
     // Review c-WR-02: a refused upload writes no file, in either organization's directory.
     const diskOf = () =>
       Promise.all([pw.orgA, pw.orgB].map((orgId) => filesUnder(path.join(uploadsDir, orgId))));
@@ -244,8 +241,8 @@ describe("uploadTaskAttachments isolation", () => {
     expect(await att.uploadTaskAttachments(endedOutsider(pw), pw.task.id, png())).toEqual(
       MEMBERSHIP_ENDED,
     );
-    expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-    expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+    expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     expect(await diskOf()).toEqual(disk);
     for (const actor of [pw.actors.manager, pw.actors.member]) {
       expect(await att.uploadTaskAttachments(actor, pw.task.id, png())).toMatchObject({ ok: true });
@@ -256,8 +253,8 @@ describe("uploadTaskAttachments isolation", () => {
 describe("deleteTaskAttachment isolation", () => {
   it("refused actors get the missing-id result and change nothing; members get their level's result", async () => {
     const pw = await seedPrivacyWorld(prisma);
-    const snapshot = await projectTableSnapshot(prisma, pw.orgA);
-    const count = await activityCount(pw.orgA);
+    const snapshot = await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB]);
+    const count = await projectActivityCounts(prisma, [pw.orgA, pw.orgB]);
     for (const actor of refused(pw)) {
       expect(await att.deleteTaskAttachment(actor, pw.attachment.id)).toEqual(
         await att.deleteTaskAttachment(actor, missingId()),
@@ -266,8 +263,8 @@ describe("deleteTaskAttachment isolation", () => {
     expect(await att.deleteTaskAttachment(endedOutsider(pw), pw.attachment.id)).toEqual(
       MEMBERSHIP_ENDED,
     );
-    expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-    expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+    expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     const managers = await seedAttachment(prisma, pw.orgA, pw.task.id, {
       uploadedByUserId: pw.users.manager,
     });
@@ -295,8 +292,8 @@ describe("listLabels isolation", () => {
 describe("createLabel isolation", () => {
   it("refused actors get the missing-id result and change nothing; members get their level's result", async () => {
     const pw = await seedPrivacyWorld(prisma);
-    const snapshot = await projectTableSnapshot(prisma, pw.orgA);
-    const count = await activityCount(pw.orgA);
+    const snapshot = await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB]);
+    const count = await projectActivityCounts(prisma, [pw.orgA, pw.orgB]);
     for (const actor of refused(pw)) {
       expect(await createLabel(actor, pw.project.id, { name: "New" })).toEqual(
         await createLabel(actor, missingId(), { name: "New" }),
@@ -305,8 +302,8 @@ describe("createLabel isolation", () => {
     expect(await createLabel(endedOutsider(pw), pw.project.id, { name: "New" })).toEqual(
       MEMBERSHIP_ENDED,
     );
-    expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-    expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+    expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     expect(await createLabel(pw.actors.member, pw.project.id, { name: "New" })).toEqual(
       NOT_ALLOWED,
     );
@@ -319,8 +316,8 @@ describe("createLabel isolation", () => {
 describe("updateLabel isolation", () => {
   it("refused actors get the missing-id result and change nothing; members get their level's result", async () => {
     const pw = await seedPrivacyWorld(prisma);
-    const snapshot = await projectTableSnapshot(prisma, pw.orgA);
-    const count = await activityCount(pw.orgA);
+    const snapshot = await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB]);
+    const count = await projectActivityCounts(prisma, [pw.orgA, pw.orgB]);
     for (const actor of refused(pw)) {
       expect(await updateLabel(actor, pw.label.id, { name: "Renamed" })).toEqual(
         await updateLabel(actor, missingId(), { name: "Renamed" }),
@@ -329,8 +326,8 @@ describe("updateLabel isolation", () => {
     expect(await updateLabel(endedOutsider(pw), pw.label.id, { name: "Renamed" })).toEqual(
       MEMBERSHIP_ENDED,
     );
-    expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-    expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+    expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     expect(await updateLabel(pw.actors.member, pw.label.id, { name: "R" })).toEqual(NOT_ALLOWED);
     expect(await updateLabel(pw.actors.manager, pw.label.id, { name: "R" })).toMatchObject({
       ok: true,
@@ -342,14 +339,14 @@ describe("updateLabel isolation", () => {
 describe("deleteLabel isolation", () => {
   it("refused actors get the missing-id result and change nothing; members get their level's result", async () => {
     const pw = await seedPrivacyWorld(prisma);
-    const snapshot = await projectTableSnapshot(prisma, pw.orgA);
-    const count = await activityCount(pw.orgA);
+    const snapshot = await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB]);
+    const count = await projectActivityCounts(prisma, [pw.orgA, pw.orgB]);
     for (const actor of refused(pw)) {
       expect(await deleteLabel(actor, pw.label.id)).toEqual(await deleteLabel(actor, missingId()));
     }
     expect(await deleteLabel(endedOutsider(pw), pw.label.id)).toEqual(MEMBERSHIP_ENDED);
-    expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-    expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+    expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     expect(await deleteLabel(pw.actors.member, pw.label.id)).toEqual(NOT_ALLOWED);
     expect(await deleteLabel(pw.actors.manager, pw.label.id)).toEqual({
       ok: true,
@@ -361,16 +358,16 @@ describe("deleteLabel isolation", () => {
 describe("setTaskLabels isolation", () => {
   it("refused actors get the missing-id result and change nothing; members get their level's result", async () => {
     const pw = await seedPrivacyWorld(prisma);
-    const snapshot = await projectTableSnapshot(prisma, pw.orgA);
-    const count = await activityCount(pw.orgA);
+    const snapshot = await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB]);
+    const count = await projectActivityCounts(prisma, [pw.orgA, pw.orgB]);
     for (const actor of refused(pw)) {
       expect(await setTaskLabels(actor, pw.task.id, 0, [])).toEqual(
         await setTaskLabels(actor, missingId(), 0, []),
       );
     }
     expect(await setTaskLabels(endedOutsider(pw), pw.task.id, 0, [])).toEqual(MEMBERSHIP_ENDED);
-    expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-    expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+    expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     expect(await setTaskLabels(pw.actors.member, pw.task.id, 0, [])).toMatchObject({ ok: true });
     expect(await setTaskLabels(pw.actors.manager, pw.task.id, 1, [pw.label.id])).toMatchObject({
       ok: true,
@@ -398,8 +395,8 @@ describe("listProjectMilestones isolation", () => {
 describe("createMilestone isolation", () => {
   it("refused actors get the missing-id result and change nothing; members get their level's result", async () => {
     const pw = await seedPrivacyWorld(prisma);
-    const snapshot = await projectTableSnapshot(prisma, pw.orgA);
-    const count = await activityCount(pw.orgA);
+    const snapshot = await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB]);
+    const count = await projectActivityCounts(prisma, [pw.orgA, pw.orgB]);
     for (const actor of refused(pw)) {
       expect(
         await createMilestone(actor, pw.project.id, { name: "M", date: "2026-08-01" }),
@@ -408,8 +405,8 @@ describe("createMilestone isolation", () => {
     expect(
       await createMilestone(endedOutsider(pw), pw.project.id, { name: "M", date: "2026-08-01" }),
     ).toEqual(MEMBERSHIP_ENDED);
-    expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-    expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+    expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     const input = { name: "M", date: "2026-08-01" };
     expect(await createMilestone(pw.actors.member, pw.project.id, input)).toEqual(NOT_ALLOWED);
     expect(await createMilestone(pw.actors.manager, pw.project.id, input)).toMatchObject({
@@ -421,8 +418,8 @@ describe("createMilestone isolation", () => {
 describe("updateMilestone isolation", () => {
   it("refused actors get the missing-id result and change nothing; members get their level's result", async () => {
     const pw = await seedPrivacyWorld(prisma);
-    const snapshot = await projectTableSnapshot(prisma, pw.orgA);
-    const count = await activityCount(pw.orgA);
+    const snapshot = await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB]);
+    const count = await projectActivityCounts(prisma, [pw.orgA, pw.orgB]);
     for (const actor of refused(pw)) {
       expect(await updateMilestone(actor, pw.milestone.id, 0, { name: "Renamed" })).toEqual(
         await updateMilestone(actor, missingId(), 0, { name: "Renamed" }),
@@ -431,8 +428,8 @@ describe("updateMilestone isolation", () => {
     expect(
       await updateMilestone(endedOutsider(pw), pw.milestone.id, 0, { name: "Renamed" }),
     ).toEqual(MEMBERSHIP_ENDED);
-    expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-    expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+    expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     expect(await updateMilestone(pw.actors.member, pw.milestone.id, 0, { name: "R" })).toEqual(
       NOT_ALLOWED,
     );
@@ -447,16 +444,16 @@ describe("updateMilestone isolation", () => {
 describe("deleteMilestone isolation", () => {
   it("refused actors get the missing-id result and change nothing; members get their level's result", async () => {
     const pw = await seedPrivacyWorld(prisma);
-    const snapshot = await projectTableSnapshot(prisma, pw.orgA);
-    const count = await activityCount(pw.orgA);
+    const snapshot = await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB]);
+    const count = await projectActivityCounts(prisma, [pw.orgA, pw.orgB]);
     for (const actor of refused(pw)) {
       expect(await deleteMilestone(actor, pw.milestone.id)).toEqual(
         await deleteMilestone(actor, missingId()),
       );
     }
     expect(await deleteMilestone(endedOutsider(pw), pw.milestone.id)).toEqual(MEMBERSHIP_ENDED);
-    expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-    expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+    expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     expect(await deleteMilestone(pw.actors.member, pw.milestone.id)).toEqual(NOT_ALLOWED);
     expect(await deleteMilestone(pw.actors.manager, pw.milestone.id)).toEqual({
       ok: true,
@@ -468,8 +465,8 @@ describe("deleteMilestone isolation", () => {
 describe("setTaskMilestone isolation", () => {
   it("refused actors get the missing-id result and change nothing; members get their level's result", async () => {
     const pw = await seedPrivacyWorld(prisma);
-    const snapshot = await projectTableSnapshot(prisma, pw.orgA);
-    const count = await activityCount(pw.orgA);
+    const snapshot = await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB]);
+    const count = await projectActivityCounts(prisma, [pw.orgA, pw.orgB]);
     for (const actor of refused(pw)) {
       expect(await setTaskMilestone(actor, pw.task.id, 0, null)).toEqual(
         await setTaskMilestone(actor, missingId(), 0, null),
@@ -478,8 +475,8 @@ describe("setTaskMilestone isolation", () => {
     expect(await setTaskMilestone(endedOutsider(pw), pw.task.id, 0, null)).toEqual(
       MEMBERSHIP_ENDED,
     );
-    expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-    expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+    expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     expect(await setTaskMilestone(pw.actors.member, pw.task.id, 0, null)).toMatchObject({
       ok: true,
       version: 1,

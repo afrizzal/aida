@@ -36,7 +36,8 @@ import {
   addOrgMember,
   missingId,
   type PrivacyWorld,
-  projectTableSnapshot,
+  projectActivityCounts,
+  projectTableSnapshotAll,
   seedPrivacyWorld,
   seedTeam,
 } from "../support/project-fixtures";
@@ -58,17 +59,13 @@ const plainMembersOfA = (w: PrivacyWorld) => [
 const activeMembersOfA = (w: PrivacyWorld) => [...plainMembersOfA(w), w.actors.orgAdmin];
 const outsiderInA = (w: PrivacyWorld) => actorOf(w.users.outsider, w.orgA);
 
-async function activityCount(orgId: string): Promise<number> {
-  return prisma.projectActivity.count({ where: { organizationId: orgId } });
-}
-
 /** Calls a refused write and checks that organization A changed nowhere. */
 async function refusedWrite(w: PrivacyWorld, run: () => Promise<unknown>): Promise<unknown> {
-  const before = await projectTableSnapshot(prisma, w.orgA);
-  const count = await activityCount(w.orgA);
+  const before = await projectTableSnapshotAll(prisma, [w.orgA, w.orgB]);
+  const count = await projectActivityCounts(prisma, [w.orgA, w.orgB]);
   const result = await run();
-  expect(await projectTableSnapshot(prisma, w.orgA)).toEqual(before);
-  expect(await activityCount(w.orgA)).toBe(count);
+  expect(await projectTableSnapshotAll(prisma, [w.orgA, w.orgB])).toEqual(before);
+  expect(await projectActivityCounts(prisma, [w.orgA, w.orgB])).toEqual(count);
   return result;
 }
 

@@ -210,7 +210,7 @@ function blocksOf(sources: Sources, pattern: RegExp): Block[] {
 // seedPrivacyWorld and every other seed* name) are not expanded either: a helper that writes rows
 // never stands in for an assertion that a refused call wrote none.
 const SUPPORT_FILE = /^tests\/support\/[^/]*\.ts$/;
-const NOT_EXPANDED = new Set(["projectTableSnapshot", "missingId"]);
+const NOT_EXPANDED = new Set(["projectTableSnapshot", "projectTableSnapshotAll", "missingId"]);
 const SEEDING_HELPER = /^seed[A-Z]/;
 const DEFINITION =
   /^(?:export\s+)?(?:(?:async\s+)?function\s*\*?\s*|(?:const|let|var)\s+)([A-Za-z_$][\w$]*)/;
@@ -287,7 +287,8 @@ function isolationMarkers(op: string, spec: ProjectOperationSpec): Marker[] {
   if (isWriteOperation(op, spec)) {
     markers.push([
       "projectTableSnapshot(",
-      (t) => /(?<![A-Za-z0-9_$])projectTableSnapshot\(/.test(t),
+      // projectTableSnapshotAll( is the same snapshot for several organizations (review c-WR-04).
+      (t) => /(?<![A-Za-z0-9_$])projectTableSnapshot(?:All)?\(/.test(t),
     ]);
     // Review c-WR-03: the activity marker is a read of ProjectActivity, never a write or a type.
     markers.push([

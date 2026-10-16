@@ -14,7 +14,8 @@ import {
   actorOf,
   missingId,
   type PrivacyWorld,
-  projectTableSnapshot,
+  projectActivityCounts,
+  projectTableSnapshotAll,
   seedPrivacyWorld,
   seedTask,
 } from "../support/project-fixtures";
@@ -28,10 +29,6 @@ function refused(pw: PrivacyWorld) {
 
 function endedOutsider(pw: PrivacyWorld) {
   return actorOf(pw.users.outsider, pw.orgA);
-}
-
-function activityCount(orgId: string): Promise<number> {
-  return prisma.projectActivity.count({ where: { organizationId: orgId } });
 }
 
 /** The privacy world with pw.task and a second top-level task both recurring DAILY. */
@@ -62,20 +59,20 @@ describe("setTaskRecurrence isolation", () => {
   it("only project members set a rule; refused calls change no row and add no activity", async () => {
     const pw = await seedPrivacyWorld(prisma);
     const input = { rule: "DAILY" as const, anchorDate: "2026-03-01" };
-    const snapshot = await projectTableSnapshot(prisma, pw.orgA);
-    const count = await activityCount(pw.orgA);
+    const snapshot = await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB]);
+    const count = await projectActivityCounts(prisma, [pw.orgA, pw.orgB]);
     for (const actor of refused(pw)) {
       expect(await setTaskRecurrence(actor, pw.task.id, 0, input, { now: NOW })).toEqual(
         await setTaskRecurrence(actor, missingId(), 0, input, { now: NOW }),
       );
-      expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-      expect(await activityCount(pw.orgA)).toBe(count);
+      expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+      expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     }
     expect(await setTaskRecurrence(endedOutsider(pw), pw.task.id, 0, input, { now: NOW })).toEqual(
       ENDED,
     );
-    expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-    expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+    expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     expect(await setTaskRecurrence(pw.actors.member, pw.task.id, 0, input, { now: NOW })).toEqual({
       ok: true,
       changed: true,
@@ -95,18 +92,18 @@ describe("setTaskRecurrence isolation", () => {
 describe("clearTaskRecurrence isolation", () => {
   it("only project members clear a rule; refused calls change no row and add no activity", async () => {
     const { pw, second } = await recurringWorld();
-    const snapshot = await projectTableSnapshot(prisma, pw.orgA);
-    const count = await activityCount(pw.orgA);
+    const snapshot = await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB]);
+    const count = await projectActivityCounts(prisma, [pw.orgA, pw.orgB]);
     for (const actor of refused(pw)) {
       expect(await clearTaskRecurrence(actor, pw.task.id, 0)).toEqual(
         await clearTaskRecurrence(actor, missingId(), 0),
       );
-      expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-      expect(await activityCount(pw.orgA)).toBe(count);
+      expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+      expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     }
     expect(await clearTaskRecurrence(endedOutsider(pw), pw.task.id, 0)).toEqual(ENDED);
-    expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-    expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+    expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     expect(await clearTaskRecurrence(pw.actors.member, pw.task.id, 0)).toEqual({
       ok: true,
       changed: true,
@@ -128,20 +125,20 @@ describe("clearTaskRecurrence isolation", () => {
 describe("setTaskStatus completing a recurring task isolation", () => {
   it("only project members complete it; refused calls create no successor, change no row and add no activity", async () => {
     const { pw, second } = await recurringWorld();
-    const snapshot = await projectTableSnapshot(prisma, pw.orgA);
-    const count = await activityCount(pw.orgA);
+    const snapshot = await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB]);
+    const count = await projectActivityCounts(prisma, [pw.orgA, pw.orgB]);
     for (const actor of refused(pw)) {
       expect(await setTaskStatus(actor, pw.task.id, 0, "DONE", { now: NOW })).toEqual(
         await setTaskStatus(actor, missingId(), 0, "DONE", { now: NOW }),
       );
-      expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-      expect(await activityCount(pw.orgA)).toBe(count);
+      expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+      expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     }
     expect(await setTaskStatus(endedOutsider(pw), pw.task.id, 0, "DONE", { now: NOW })).toEqual(
       ENDED,
     );
-    expect(await projectTableSnapshot(prisma, pw.orgA)).toEqual(snapshot);
-    expect(await activityCount(pw.orgA)).toBe(count);
+    expect(await projectTableSnapshotAll(prisma, [pw.orgA, pw.orgB])).toEqual(snapshot);
+    expect(await projectActivityCounts(prisma, [pw.orgA, pw.orgB])).toEqual(count);
     expect(await successorCount(pw.orgA)).toBe(0);
 
     expect(await setTaskStatus(pw.actors.member, pw.task.id, 0, "DONE", { now: NOW })).toEqual({
