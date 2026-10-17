@@ -188,3 +188,23 @@ The red E2E step above (3 failed, 15 not run on `4d6a498`) was diagnosed by a de
 2. `tests/e2e/ticket-statuses.spec.ts` set-default refusal: the 5-minute session cookie cache expired mid-suite, and the renewed cookie made Next.js re-render the page inside the refused action's response. Fix `059b3e9`: renew the session cookie cache before each test in that spec. Failing-first: deleting the session-data cookie reproduced the gate failure.
 
 Full `pnpm test:e2e` after both fixes: exit 0, 209 passed, 1 skipped, 0 failed. Open notes (not fixed here): other specs could hit the same cookie expiry (a shared fixture would cover them); while pg-boss still retries, the UI offers Re-run (pre-existing, may cause a second LLM call); the other queues' zero retry delay is the item deferred in Phase 12.2 (a2-WR-03, K55). This gate result is superseded by the final gate after code review.
+
+---
+
+## Final gate after code review and Codex fixes (run-loop orchestrator)
+
+Tested commit `41b1597` (after fix batches F1 to F5), one sequential script, one log per step, exit codes without a pipe, `pgrep -f 'artisan test'` before each step (never found), disk 18 GiB (rule H). No step rerun.
+
+| Step | Exit | Result |
+|---|---|---|
+| `pnpm lint` | 0 | |
+| `pnpm exec next typegen`, `pnpm typecheck` | 0, 0 | |
+| `pnpm test` | 0 | 50 files, 838 passed |
+| integration without egress | 0 | 94 files, 1297 passed |
+| `pnpm test:e2e` (full) | 1 | red: 208 passed, 1 failed, 1 skipped; `tests/e2e/snooze.spec.ts:101` (the wake job returned `woken: 0`, expected at least 1); cause under diagnosis (hypothesis: a worker left running by `phase4-ai.spec.ts`, whose `taskkill` stop does not exist on macOS, woke the ticket first) |
+| `pnpm build` | 0 | |
+| `pnpm audit --prod` | 1 | 141 findings, baseline unchanged; not a pass |
+| clean-room grep | 1 | empty |
+| full integration with egress, `pnpm test:egress`, compose stack | not run | blocked (O-1) |
+
+Rule H: no Testcontainers container left after the gate.
