@@ -128,3 +128,43 @@ Fixer: Claude (gsd-code-fixer), 2026-11-09. Branch `v2/run-loop`, main checkout 
 - `pnpm typecheck`: exit 0.
 - `pnpm lint`: exit 0 (549 files, no fixes).
 - `git grep -i -n gr8r -- src docs website README.md public prisma tests`: empty.
+
+## F4 (Codex diff round 2)
+
+Fixer: Claude (gsd-code-fixer), 2026-11-09. Branch `v2/run-loop`, main checkout (`workflow.use_worktrees` is false), so every test ran in the main checkout. Fix scope: the "Codex diff critique / Round 2" rows of `14-REVIEW.md` under run decision K73: R2D-1, R2D-2 and R2D-3. All three are fixed. No assertion was weakened, no existing expectation changed, and no fixed sleep was added. The operation inventory stays green.
+
+### Rows
+
+| Row | Commit | Failing-first evidence (red run, cause) | Fix |
+|---|---|---|---|
+| R2D-1 | bbf3d5c | `project-read-access-race.test.ts`, run against the unfixed code with only the test seam added: every "organization member row is removed" case failed, 23 of them. Each read returned content after the reader's `member` row was deleted while it waited, for example `listTaskComments` and `listTaskAttachments` returned their row (`expected { ok: true, …(3) } to deeply equal { ok: true, comments: [], …(2) }`), and `listProjects`, `listWorkspaceTasks`, `listWorkspaceMilestones` and `listFavorites` returned rows of a public project. One case was not red: `getTaskAttachmentForDownload` already answered MEMBERSHIP_ENDED, because its trailing `requireTask` re-reads the membership. | `readableProjectWhere` includes `actorOrganizationWhere(actor)`, an EXISTS on the actor's `member` row in the organization, so every query that uses the shared predicate carries it. New helpers in `access.ts`: `actorOrganizationWhere` (team rows), `readableProjectExistsWhere` (rows without a project relation: TaskKey, ProjectActivity), `stillReadableWhere` (a page over a readable set read earlier), `refuseUnreadable` (MEMBERSHIP_ENDED when the member row is gone, else NOT_FOUND) and `readableProjectSql` (the SQL form for raw statements). `runProjectRead` is now the same as `runProjectReadInTransaction`: one read transaction, membership first. |
+| R2D-2 | bbf3d5c | Same red run: 58 of 70 failed. Apart from the R2D-1 cases, every project-member-removal, privacy and move case of `getTask`, `listProjectTasks`, `getProject`, `listLabels`, `listProjectMilestones`, `listProjectMembers`, `listEligibleAssignees`, `listProjectTeams`, `getProjectProgress`, `getProjectsProgress`, `getTaskProgress`, `listProjectActivity`, `listTaskActivity`, `listTeamActivity` and `getTeam` returned content after the change, for example `expected { ok: true, task: { …(28) } } to deeply equal { ok: false, code: 'NOT_FOUND' }`, `expected { ok: true, labels: [ { …(3) } ] } to deeply equal { ok: true, labels: [] }`, `expected { ok: true, rows: [ { …(14) } ], …(2) } to deeply equal { ok: true, rows: [], …(2) }` (10 activity cases), `getProjectsProgress` returned the project from its stale id list, and the `getTaskProgress` move case returned `{ ok: true, done: 0, total: 0 }`. Not red (correct already, single statement with the predicate): the project-member and privacy cases of `listWorkspaceTasks`, `listFavorites`, `listProjects` and `listWorkspaceMilestones`, and the `getTask` move case (the row read by the old project id finds nothing). | Every query that returns content, rows, counts, cursors or `hasMore` carries the predicate: getTask (row, labels, milestone, subtasks and predecessor through the predicate, then the task is re-read under it last); listProjectTasks (paged statement); listLabels; listProjectMilestones and its task counts; listProjectMembers (one statement, the C14 active-member filter included); listEligibleAssignees (the privacy branch is decided inside each statement, not taken from the check); listProjectTeams; listTeams and its member counts (actor membership); getTeam (members, projects through the predicate, team row last); getProject (anchor re-read after the check); getProjectProgress and getTaskProgress (both counts under the predicate, anchor last); getProjectsProgress (counts under the predicate, projects returned only if still readable at the last statement); listProjectActivity (the feed's project bound inside the paged statement); listTaskActivity (the task's current project bound inside the paged statement, plus a guard that no project of the earlier readable set became unreadable); listTeamActivity (membership and the same guard). Test seam `afterReadCheck` in `service.ts` (observer only); `createServiceRace.holdAt` parks reads at it and resolves with the read's backend PID. Shared harness `tests/support/project-read-race.ts`. |
+| R2D-3 | 16dbf26 | `project-key-resolve-race.test.ts`, run against the old resolver with the seam placed after its key-kind read (and with the R2D-1 predicate already in): 2 of 5 failed. The alias race (key read as ACTIVE, then the task moves into a readable project, the key becomes an alias of its origin, and the reader is removed from that origin) returned `{ ok: true, …(4) }` instead of NOT_FOUND. The organization-member case returned NOT_FOUND instead of MEMBERSHIP_ENDED; before the R2D-1 predicate (first red run) it returned `{ ok: true, … }`. | One raw statement joins TaskKey, the task and its current project, and decides the key kind (ACTIVE or ALIAS), the K72 origin access and the current project's access through `readableProjectSql`. No row: `refuseUnreadable`. The prefix probe stays owner item 14-o3. |
+
+Contract: `14-CONTRACT.md` (the list predicate, a new "Every read" paragraph, the download refusal, the resolver) and the `contract.ts` comments on `resolveTaskKey` and the content reads, in commit 16dbf26. No operation or refusal code was renamed.
+
+### Tests
+
+- `tests/integration/project-read-access-race.test.ts`, 65 cases in 6 families: task reads, lists, progress, activity feeds, team reads, and the F3 content reads under organization-member removal. Each case first runs the read without a change and asserts the content is there, then parks the read after its access check, applies the change and asserts the exact result: an empty page for lists, and MEMBERSHIP_ENDED or NOT_FOUND for single-object reads.
+- `tests/integration/project-key-resolve-race.test.ts`, 5 cases: the key-resolution family (4 changes) and the alias race.
+- The red runs were taken with the seam in the old code, before the fix.
+
+### Not done, with reason
+
+- The single-query proof for `resolveTaskKey` is an interleaving at the only gap that is left (between the membership check and the statement), plus the code. The number of statements is not measured in the test.
+- The parks are JS gates bound to the read's own PID (`holdAt`). They are not lock waits through `waitForBlockedBy`: a read takes no lock that a change could block on, and the changes touch the tables the reads use.
+- Deletion is not a separate race case. A deleted project or task drops out of every predicate in the same way, and the existing delete tests stay green.
+- A response built from several statements is consistent per statement, not as one snapshot. Every statement carries the predicate, and single-object reads re-read their anchor last. Access that is lost and restored between two statements of one read is not detected.
+- When a project of the earlier readable set becomes unreadable, the `listTaskActivity` and `listTeamActivity` guards return an empty page for that call, not a recomputed page.
+- 14-o3 (prefix oracle) remains an owner item, as the disposition says.
+
+### Gates (one process at a time, main checkout)
+
+- Affected files after each fix: `project-read-access-race.test.ts` (65, on the commit-A state with the old resolver), `project-key-resolve-race.test.ts` + `project-task-keys.test.ts` + `project-review-fixes.test.ts` (25), and all `tests/integration/project*` files together (34 files, 466 tests): all exit 0.
+- `pnpm test`: exit 0. 50 files, 838 tests passed, including `project-operation-inventory.test.ts`.
+- `pnpm test:integration --exclude tests/integration/egress-isolation.test.ts` (Testcontainers, Colima socket env): exit 0. 93 files, 1292 tests passed.
+- `pnpm exec next typegen`: exit 0.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0 (552 files, no fixes).
+- `git grep -i -n gr8r -- src docs website README.md public prisma tests`: empty.
+- Testcontainers cleanup (rule H): before the batch, no container had the label `org.testcontainers=true`. After the last run, only the batch's ryuk container remained, and it had exited by itself before the removal step. At the end no container with the label remains. No other container, image or volume was touched. `aida-dev-db` is still running.
