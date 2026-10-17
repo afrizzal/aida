@@ -334,3 +334,15 @@ Owner item **14-o3** (a-WR-06, b-WR-03): organization-unique key prefixes (contr
 | D2 | HIGH | The K71 rebalance updates `updatedAt` of every project, including hidden ones, so timestamps reveal hidden projects (`projects.ts:558`, `:298`); the K71 test replaces `updatedAt` with a constant and cannot see it | accept: position rebalancing never changes `updatedAt` (or any other observable field) of projects other than the moved one; the two-world test compares, per project, whether `updatedAt` changed |
 | D3 | HIGH | Prefixes and aliases remain historical oracles (owner item 14-o3) | run decision **K72** (charter rule 4): resolving an ALIAS also requires read access to the alias's origin project, else NOT_FOUND identical to a missing key (an alias whose origin project was deleted no longer resolves); two-world test. The prefix probe stays owner item 14-o3 |
 | D4 | LOW | The sweep test clears the global outbox and depends on serial files | reject: the dependency on `fileParallelism: false` is documented in the test (c-IN-01) |
+
+### Round 2
+
+- Question `run-loop/codex/fase14-diff-r2-tanya.md` (commit `f81ec37`); answer `run-loop/codex/fase14-diff-r2-jawab.md`; log `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Verdict: not ready (3 HIGH). D2 closed; D1 closed for project-level changes only.
+
+Run decision **K73** (charter rule 4): every read in `src/lib/projects/` carries the full current access predicate in every query that returns content, rows, counts, cursors or `hasMore` (organization membership of the actor plus project readability, through one shared predicate that `readableProjectWhere` itself includes), including follow-up queries of a multi-query response; `resolveTaskKey` decides key kind, alias origin access and the task's current project in one query. Test helper: a PID-bound interleaving per read family (task reads, lists, progress, activity feeds, team reads, key resolution) for organization-member removal, project-member removal, privacy change and move.
+
+| ID | Severity | Finding (short) | Disposition |
+|---|---|---|---|
+| R2D-1 | HIGH | `readableProjectWhere` does not check organization membership; an organization member removed after the initial check can still read public-project content in the D1 reads and every `runProjectRead` read (`access.ts:372`, `service.ts:213`) | accept (K73) |
+| R2D-2 | HIGH | Many reads check access once and then query by id: `getTask`, `listProjectTasks`, `listLabels`, `listProjectMilestones` (task counts), `listProjectMembers`, `listEligibleAssignees`, `listProjectTeams`, `getTeam`, the three progress functions, and the three activity feeds | accept (K73); each listed function fixed and covered |
+| R2D-3 | HIGH | `resolveTaskKey` reads kind, origin access and task in separate statements; the prefix oracle stays owner item 14-o3 | accept (K73, single query); prefix stays 14-o3 |
