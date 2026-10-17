@@ -15,7 +15,13 @@
 // after value of a project the reader cannot read becomes REDACTED_SIDE, and the row becomes the
 // redacted projection of contract section 5.
 import type { Prisma } from "../../generated/prisma/client";
-import { readableProjectIds, requireProject, requireTask } from "./access";
+import {
+  readableProjectExistsWhere,
+  readableProjectIds,
+  requireProject,
+  requireTask,
+  stillReadableWhere,
+} from "./access";
 import {
   ACTIVITY_ARRAY_MAX_ITEMS,
   ACTIVITY_ARRAY_TEXT_MAX,
@@ -38,7 +44,14 @@ import {
   REDACTED_ROW_NULLED_KEYS,
   REDACTED_SIDE,
 } from "./contract";
-import { isPlausibleId, listLimit, type ProjectDb, refuse, runProjectRead } from "./service";
+import {
+  afterReadCheck,
+  isPlausibleId,
+  listLimit,
+  type ProjectDb,
+  refuse,
+  runProjectRead,
+} from "./service";
 
 export interface ActivityEntry {
   orgId: string;
@@ -359,8 +372,11 @@ export async function listProjectActivity(
 ): Promise<ProjectResult<ActivityPage>> {
   return runProjectRead(actor, "listProjectActivity", async (db) => {
     await requireProject(db, actor, projectId, { lock: "none", level: "READ" });
+    await afterReadCheck(db, "listProjectActivity");
+    // K73: the paged statement holds only while the feed's project is readable now.
     const terms: Prisma.ProjectActivityWhereInput[] = [
       { OR: [{ projectId }, { relatedProjectId: projectId }] },
+      { organization: readableProjectExistsWhere(actor, { id: projectId }) },
     ];
     if (opts.verbs !== undefined) {
       if (!Array.isArray(opts.verbs) || opts.verbs.some((v) => !VERB_SET.has(v))) {
@@ -388,7 +404,26 @@ export async function listTaskActivity(
   return runProjectRead(actor, "listTaskActivity", async (db) => {
     await requireTask(db, actor, taskId, { lock: "none", level: "READ" });
     const readable = await readableNamedProjects(db, actor, { taskId });
-    return readPage(db, actor, [{ taskId }, { projectId: { in: readable } }], opts);
+    await afterReadCheck(db, "listTaskActivity");
+    // K73: the paged statement holds only while the task's current project is readable and no
+    // project of the readable set has become unreadable since it was read.
+    return readPage(
+      db,
+      actor,
+      [
+        { taskId },
+        { projectId: { in: readable } },
+        {
+          organization: {
+            AND: [
+              readableProjectExistsWhere(actor, { tasks: { some: { id: taskId } } }),
+              stillReadableWhere(actor, readable),
+            ],
+          },
+        },
+      ],
+      opts,
+    );
   });
 }
 
@@ -410,10 +445,17 @@ export async function listTeamActivity(
     });
     if (!team) refuse("NOT_FOUND");
     const readable = await readableNamedProjects(db, actor, { teamId });
+    await afterReadCheck(db, "listTeamActivity");
     return readPage(
       db,
       actor,
-      [{ teamId }, { OR: [{ projectId: null }, { projectId: { in: readable } }] }],
+      [
+        { teamId },
+        { OR: [{ projectId: null }, { projectId: { in: readable } }] },
+        // K73: the actor's current membership, and no project of the readable set has become
+        // unreadable since it was read.
+        { organization: stillReadableWhere(actor, readable) },
+      ],
       opts,
     );
   });

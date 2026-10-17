@@ -67,6 +67,8 @@ export interface ProjectServiceObserver {
   onTransactionStart?(tx: ProjectDb, operation: string): Promise<void> | void;
   /** Awaited right after the operation's last lock, before its first write. */
   afterLock?(tx: ProjectDb, operation: string): Promise<void> | void;
+  /** Awaited by a read right after its access check, before its content queries (K73). */
+  afterReadCheck?(tx: ProjectDb, operation: string): Promise<void> | void;
 }
 
 let serviceObserver: ProjectServiceObserver | null = null;
@@ -79,6 +81,14 @@ export function setProjectServiceObserverForTests(observer: ProjectServiceObserv
 /** Called by every service right after its last lock and before its first write. */
 export async function afterLock(tx: ProjectDb, operation: string): Promise<void> {
   await serviceObserver?.afterLock?.(tx, operation);
+}
+
+/**
+ * Called by a read right after its access check and before its content queries (run decision
+ * K73): a race proof parks the read here, changes access, then lets the content queries run.
+ */
+export async function afterReadCheck(tx: ProjectDb, operation: string): Promise<void> {
+  await serviceObserver?.afterReadCheck?.(tx, operation);
 }
 
 /**
@@ -206,25 +216,19 @@ export async function runProjectTransaction<T extends object>(
 }
 
 /**
- * Runs a read (no transaction unless fn opens one): the actor's organization membership is read
- * conservatively first (no row: MEMBERSHIP_ENDED), then fn runs on the scoped client. Refusals
- * are returned, other errors rethrown.
+ * Runs a read (run decision K73): one read transaction on one connection, the actor's
+ * organization membership read conservatively first (no row: MEMBERSHIP_ENDED), then fn.
+ * Same as runProjectReadInTransaction. The transaction alone does not close the check-then-read
+ * gap under READ COMMITTED; every query of fn that returns content, rows, counts, cursors or
+ * hasMore carries the current read predicate (readableProjectWhere, which includes the actor's
+ * organization membership).
  */
 export async function runProjectRead<T extends object>(
   actor: ProjectActor,
-  _operation: string,
+  operation: string,
   fn: (db: ProjectDb) => Promise<T>,
 ): Promise<ProjectResult<T>> {
-  if (!hasActor(actor)) return refusalResult("MEMBERSHIP_ENDED");
-  try {
-    const db = scopedDb(actor.orgId) as unknown as ProjectDb;
-    const membership = await findConservativeMembership(db, actor.userId, actor.orgId);
-    if (!membership) return refusalResult("MEMBERSHIP_ENDED");
-    const value = await fn(db);
-    return { ok: true, ...value } as ProjectResult<T>;
-  } catch (err) {
-    return asResult<T>(err);
-  }
+  return runProjectReadInTransaction(actor, operation, fn);
 }
 
 /**

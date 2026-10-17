@@ -22,6 +22,7 @@ import { readableProjectWhere, requireProject, requireTask } from "./access";
 import type { ProjectActor, ProjectResult } from "./contract";
 import {
   afterLock,
+  afterReadCheck,
   decodeKeyset,
   encodeKeyset,
   listLimit,
@@ -185,6 +186,7 @@ export async function listFavorites(
   }>
 > {
   return runProjectRead(actor, "listFavorites", async (db) => {
+    await afterReadCheck(db, "listFavorites");
     const includeArchived = opts?.includeArchived ?? false;
     if (typeof includeArchived !== "boolean") refuse("INVALID_INPUT", "includeArchived");
     const limit = listLimit(opts?.limit);

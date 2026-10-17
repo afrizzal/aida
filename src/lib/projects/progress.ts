@@ -5,9 +5,9 @@
 // tasks; task progress is DONE subtasks over non-archived subtasks; percent is
 // floor(done * 100 / total), 0 when total is 0. A DONE parent with open subtasks keeps its subtask
 // progress as it is: nothing completes automatically.
-import { readableProjectIds, requireProject, requireTask } from "./access";
+import { readableProjectWhere, refuseUnreadable, requireProject, requireTask } from "./access";
 import { LIST_MAX, type ProjectActor, type ProjectResult } from "./contract";
-import { type ProjectDb, refuse, runProjectRead } from "./service";
+import { afterReadCheck, isPlausibleId, type ProjectDb, refuse, runProjectRead } from "./service";
 
 export interface Progress {
   done: number;
@@ -23,14 +23,32 @@ function progressOf(done: number, total: number): Progress {
   return { done, total, percent: total > 0 ? Math.floor((done * 100) / total) : 0 };
 }
 
+/**
+ * K73: both counts carry the current read predicate, and the last statement re-reads the anchor
+ * (the project, or the task in its project) under it, so a count is returned only while the
+ * reader can still read it.
+ */
 async function countProgress(
   db: ProjectDb,
-  orgId: string,
+  actor: ProjectActor,
   where: { projectId: string; parentId: string | null },
 ): Promise<Progress> {
-  const base = { organizationId: orgId, ...where, archivedAt: null };
+  const readable = readableProjectWhere(actor);
+  const base = { organizationId: actor.orgId, ...where, archivedAt: null, project: readable };
   const total = await db.task.count({ where: base });
   const done = await db.task.count({ where: { ...base, status: "DONE" } });
+  const anchor =
+    where.parentId === null
+      ? await db.project.count({ where: { AND: [readable, { id: where.projectId }] } })
+      : await db.task.count({
+          where: {
+            id: where.parentId,
+            organizationId: actor.orgId,
+            projectId: where.projectId,
+            project: readable,
+          },
+        });
+  if (anchor === 0) return refuseUnreadable(db, actor);
   return progressOf(done, total);
 }
 
@@ -41,13 +59,16 @@ export async function getProjectProgress(
 ): Promise<ProjectResult<Progress>> {
   return runProjectRead(actor, "getProjectProgress", async (db) => {
     await requireProject(db, actor, projectId, { lock: "none", level: "READ" });
-    return countProgress(db, actor.orgId, { projectId, parentId: null });
+    await afterReadCheck(db, "getProjectProgress");
+    return countProgress(db, actor, { projectId, parentId: null });
   });
 }
 
 /**
  * READ per project (Isolation class LIST): the progress of every readable project among the
- * given ids, in the given order (deduplicated); unreadable and missing ids are left out.
+ * given ids, in the given order (deduplicated); unreadable and missing ids are left out. K73: the
+ * counts carry the current read predicate, and the projects returned are those still readable
+ * at the last statement.
  */
 export async function getProjectsProgress(
   actor: ProjectActor,
@@ -57,14 +78,16 @@ export async function getProjectsProgress(
     if (!Array.isArray(projectIds)) refuse("INVALID_INPUT", "projectIds");
     const wanted = [...new Set(projectIds as unknown[])];
     if (wanted.length > LIST_MAX) refuse("TOO_MANY");
-    const readable = await readableProjectIds(db, actor, wanted as string[]);
-    const ids = (wanted as string[]).filter((id) => readable.has(id));
+    const ids = (wanted as string[]).filter((id) => isPlausibleId(id));
+    await afterReadCheck(db, "getProjectsProgress");
     if (ids.length === 0) return { projects: [] };
+    const readable = readableProjectWhere(actor);
     const groups = await db.task.groupBy({
       by: ["projectId", "status"],
       where: {
         organizationId: actor.orgId,
         projectId: { in: ids },
+        project: readable,
         parentId: null,
         archivedAt: null,
       },
@@ -77,11 +100,18 @@ export async function getProjectsProgress(
       if (group.status === "DONE") entry.done += group._count._all;
       totals.set(group.projectId, entry);
     }
+    const still = await db.project.findMany({
+      where: { AND: [readable, { id: { in: ids } }] },
+      select: { id: true },
+    });
+    const present = new Set(still.map((row) => row.id));
     return {
-      projects: ids.map((projectId) => {
-        const entry = totals.get(projectId) ?? { done: 0, total: 0 };
-        return { projectId, ...progressOf(entry.done, entry.total) };
-      }),
+      projects: ids
+        .filter((projectId) => present.has(projectId))
+        .map((projectId) => {
+          const entry = totals.get(projectId) ?? { done: 0, total: 0 };
+          return { projectId, ...progressOf(entry.done, entry.total) };
+        }),
     };
   });
 }
@@ -93,6 +123,7 @@ export async function getTaskProgress(
 ): Promise<ProjectResult<Progress>> {
   return runProjectRead(actor, "getTaskProgress", async (db) => {
     const access = await requireTask(db, actor, taskId, { lock: "none", level: "READ" });
-    return countProgress(db, actor.orgId, { projectId: access.task.projectId, parentId: taskId });
+    await afterReadCheck(db, "getTaskProgress");
+    return countProgress(db, actor, { projectId: access.task.projectId, parentId: taskId });
   });
 }

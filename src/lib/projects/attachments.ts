@@ -23,7 +23,13 @@ import {
   type ValidatedUpload,
   validateUpload,
 } from "../attachments/validate-upload";
-import { readableProjectWhere, requireMembership, requireProject, requireTask } from "./access";
+import {
+  readableProjectWhere,
+  refuseUnreadable,
+  requireMembership,
+  requireProject,
+  requireTask,
+} from "./access";
 import { recordProjectActivity } from "./activity";
 import { cursorDate, decodeCursor, encodeCursor, type PageOpts, pageLimit } from "./comments";
 import {
@@ -35,6 +41,7 @@ import {
 import { enqueueFileCleanupInTx } from "./file-cleanup";
 import {
   afterLock,
+  afterReadCheck,
   isPlausibleId,
   newBatchId,
   type ProjectDb,
@@ -102,6 +109,7 @@ export async function listTaskAttachments(
     const limit = pageLimit(opts.limit);
     const cursor = decodeCursor(opts.cursor);
     await requireTask(db, actor, taskId, { lock: "none", level: "READ" });
+    await afterReadCheck(db, "listTaskAttachments");
     const rows = await db.taskAttachment.findMany({
       // Codex diff D1: the current read predicate in the content query itself.
       where: {
@@ -135,6 +143,7 @@ export async function listProjectAttachments(
     const limit = pageLimit(opts.limit);
     const cursor = decodeCursor(opts.cursor);
     await requireProject(db, actor, projectId, { lock: "none", level: "READ" });
+    await afterReadCheck(db, "listProjectAttachments");
     const rows = await db.taskAttachment.findMany({
       where: {
         organizationId: actor.orgId,
@@ -175,6 +184,7 @@ export async function getTaskAttachmentForDownload(
 > {
   return runProjectReadInTransaction(actor, "getTaskAttachmentForDownload", async (db) => {
     if (!isPlausibleId(attachmentId)) refuse("NOT_FOUND");
+    await afterReadCheck(db, "getTaskAttachmentForDownload");
     const row = await db.taskAttachment.findFirst({
       where: {
         id: attachmentId,
@@ -190,7 +200,8 @@ export async function getTaskAttachmentForDownload(
         sizeBytes: true,
       },
     });
-    if (!row) refuse("NOT_FOUND");
+    // K73: no row under the predicate is MEMBERSHIP_ENDED once the member row is gone.
+    if (!row) return refuseUnreadable(db, actor);
     await requireTask(db, actor, row.taskId, { lock: "none", level: "READ" });
     return { attachment: row };
   });

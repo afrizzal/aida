@@ -10,6 +10,7 @@ import {
   type AccessProject,
   readableProjectIds,
   readableProjectWhere,
+  refuseUnreadable,
   requireMembership,
   requireProject,
 } from "./access";
@@ -43,6 +44,7 @@ import { activeOrgUserIds } from "./members";
 import { appendRank, rankBetween, rebalancedRanks } from "./rank";
 import {
   afterLock,
+  afterReadCheck,
   isPlausibleId,
   listLimit,
   newBatchId,
@@ -278,6 +280,12 @@ export async function getProject(
 > {
   return runProjectRead(actor, "getProject", async (db) => {
     const access = await requireProject(db, actor, projectId, { lock: "none", level: "READ" });
+    await afterReadCheck(db, "getProject");
+    // K73: the project row was read by the check; it is returned only if still readable now.
+    const still = await db.project.count({
+      where: { AND: [readableProjectWhere(actor), { id: projectId }] },
+    });
+    if (still === 0) return refuseUnreadable(db, actor);
     const p = access.project;
     return {
       project: {
@@ -636,6 +644,7 @@ export async function listProjects(
   ProjectResult<{ projects: ProjectListItem[]; hasMore: boolean; nextCursor: string | null }>
 > {
   return runProjectRead(actor, "listProjects", async (db) => {
+    await afterReadCheck(db, "listProjects");
     const archived = opts.archived ?? "exclude";
     if (!["exclude", "only", "include"].includes(archived)) refuse("INVALID_INPUT", "archived");
     const limit = listLimit(opts.limit);

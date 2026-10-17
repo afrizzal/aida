@@ -20,6 +20,7 @@ import {
 } from "./contract";
 import {
   afterLock,
+  afterReadCheck,
   isPlausibleId,
   listLimit,
   newBatchId,
@@ -114,6 +115,7 @@ export async function listTaskComments(
     const limit = pageLimit(opts.limit);
     const cursor = decodeCursor(opts.cursor);
     await requireTask(db, actor, taskId, { lock: "none", level: "READ" });
+    await afterReadCheck(db, "listTaskComments");
     const after = cursor ? cursorDate(cursor.sortValue) : null;
     // Codex diff D1: the content query carries the current read predicate, so a move into a
     // private project or a revoked membership after the check above returns nothing.

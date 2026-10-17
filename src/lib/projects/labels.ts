@@ -25,6 +25,7 @@ import {
 } from "./contract";
 import {
   afterLock,
+  afterReadCheck,
   isPlausibleId,
   newBatchId,
   type ProjectDb,
@@ -125,8 +126,10 @@ export async function listLabels(
 ): Promise<ProjectResult<{ labels: LabelView[] }>> {
   return runProjectRead(actor, "listLabels", async (db) => {
     await requireProject(db, actor, projectId, { lock: "none", level: "READ" });
+    await afterReadCheck(db, "listLabels");
     const labels = await db.projectLabel.findMany({
-      where: { organizationId: actor.orgId, projectId },
+      // K73: the current read predicate in the content query.
+      where: { organizationId: actor.orgId, projectId, project: readableProjectWhere(actor) },
       orderBy: [{ name: "asc" }, { id: "asc" }],
       select: LABEL_SELECT,
     });

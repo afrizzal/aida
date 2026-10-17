@@ -18,7 +18,7 @@
 //
 // scopedDb does not scope raw SQL, findUnique, aggregate or nested filters (C1): every statement
 // here writes the organization term itself.
-import type { Prisma } from "../../generated/prisma/client";
+import { Prisma } from "../../generated/prisma/client";
 import { type ActiveMembership, findConservativeMembership, isAdminRole } from "../membership";
 import type { AccessLevel, ProjectActor, ProjectMemberRole, ProjectStatus } from "./contract";
 import { isPlausibleId, type ProjectDb, refuse } from "./service";
@@ -366,17 +366,86 @@ export async function requireTask(
 }
 
 /**
- * The typed list predicate (reads): a non-private project or one with a ProjectMember row of the
- * actor, always with the organization term (K69: no other branch).
+ * The actor's current organization membership as an organization filter (run decision K73): an
+ * EXISTS on the actor's member row in the organization. Every read query carries it, directly
+ * (teams, activity rows) or through readableProjectWhere, so a member removed after the read's
+ * first check gets nothing from any later query.
+ */
+export function actorOrganizationWhere(actor: ProjectActor): Prisma.organizationWhereInput {
+  return {
+    id: actor.orgId,
+    members: { some: { organizationId: actor.orgId, userId: actor.userId } },
+  };
+}
+
+/**
+ * The shared read predicate (K69, K73): the organization term, the actor's current organization
+ * membership, and a non-private project or one with a ProjectMember row of the actor. No other
+ * branch.
  */
 export function readableProjectWhere(actor: ProjectActor): Prisma.ProjectWhereInput {
   return {
     organizationId: actor.orgId,
+    organization: actorOrganizationWhere(actor),
     OR: [
       { isPrivate: false },
       { members: { some: { organizationId: actor.orgId, userId: actor.userId } } },
     ],
   };
+}
+
+/**
+ * An organization filter that holds while the project matching `project` is readable by the actor
+ * now (K73). For rows without a project relation (TaskKey, ProjectActivity): the predicate of a
+ * project named by the request, inside the row's own statement.
+ */
+export function readableProjectExistsWhere(
+  actor: ProjectActor,
+  project: Prisma.ProjectWhereInput,
+): Prisma.organizationWhereInput {
+  return { id: actor.orgId, projects: { some: { AND: [readableProjectWhere(actor), project] } } };
+}
+
+/**
+ * An organization filter that holds while every project of `ids` is still readable (K73): none
+ * of them has become unreadable since `ids` was read. A query that pages on a readable set read
+ * earlier carries it, so a stale set returns nothing rather than rows of a project gone private.
+ */
+export function stillReadableWhere(
+  actor: ProjectActor,
+  ids: readonly string[],
+): Prisma.organizationWhereInput {
+  return {
+    AND: [
+      actorOrganizationWhere(actor),
+      { projects: { none: { id: { in: [...ids] }, NOT: readableProjectWhere(actor) } } },
+    ],
+  };
+}
+
+/**
+ * The refusal of a single-object read whose final query found nothing under the read predicate
+ * (K73): MEMBERSHIP_ENDED when the actor's organization member row is gone, else NOT_FOUND
+ * (identical to a missing id).
+ */
+export async function refuseUnreadable(client: ProjectDb, actor: ProjectActor): Promise<never> {
+  const membership = await findConservativeMembership(client, actor.userId, actor.orgId);
+  if (!membership) refuse("MEMBERSHIP_ENDED");
+  return refuse("NOT_FOUND");
+}
+
+/**
+ * The SQL form of readableProjectWhere for the raw statements of a read (K73), on the Project
+ * row aliased `alias`.
+ */
+export function readableProjectSql(alias: string, actor: ProjectActor): Prisma.Sql {
+  const p = Prisma.raw(`"${alias.replace(/[^A-Za-z0-9_]/g, "")}"`);
+  return Prisma.sql`(${p}."organizationId" = ${actor.orgId}
+    AND EXISTS (SELECT 1 FROM "member" m
+      WHERE m."organizationId" = ${actor.orgId} AND m."userId" = ${actor.userId})
+    AND (${p}."isPrivate" = false OR EXISTS (SELECT 1 FROM "ProjectMember" pm
+      WHERE pm."organizationId" = ${actor.orgId} AND pm."projectId" = ${p}.id
+        AND pm."userId" = ${actor.userId})))`;
 }
 
 /** The subset of projectIds the actor can read now (missing and deleted projects never are). */

@@ -9,7 +9,7 @@
 // table is never locked here (contract section 3).
 import { randomUUID } from "node:crypto";
 import { findConservativeMembership } from "../membership";
-import { requireProject } from "./access";
+import { readableProjectExistsWhere, readableProjectWhere, requireProject } from "./access";
 import { recordProjectActivity } from "./activity";
 import {
   PROJECT_MEMBER_ROLES,
@@ -19,6 +19,7 @@ import {
 } from "./contract";
 import {
   afterLock,
+  afterReadCheck,
   isPlausibleId,
   type ListPageOpts,
   newBatchId,
@@ -153,17 +154,19 @@ export async function listProjectMembers(
 > {
   return runProjectRead(actor, "listProjectMembers", async (db) => {
     await requireProject(db, actor, projectId, { lock: "none", level: "READ" });
+    await afterReadCheck(db, "listProjectMembers");
+    // K73: one statement with the current read predicate; the C14 filter (an active organization
+    // member) is in the same statement.
     const rows = await db.projectMember.findMany({
-      where: { organizationId: actor.orgId, projectId },
+      where: {
+        organizationId: actor.orgId,
+        projectId,
+        project: readableProjectWhere(actor),
+        user: { members: { some: { organizationId: actor.orgId } } },
+      },
       select: { userId: true, role: true, user: { select: { name: true } } },
     });
-    const active = await activeOrgUserIds(
-      db,
-      actor.orgId,
-      rows.map((row) => row.userId),
-    );
     const members = rows
-      .filter((row) => active.has(row.userId))
       .map((row) => ({
         userId: row.userId,
         name: row.user.name,
@@ -195,27 +198,32 @@ export async function listEligibleAssignees(
   ProjectResult<{ assignees: PersonView[]; hasMore: boolean; nextCursor: string | null }>
 > {
   return runProjectRead(actor, "listEligibleAssignees", async (db) => {
-    const access = await requireProject(db, actor, projectId, { lock: "none", level: "READ" });
+    await requireProject(db, actor, projectId, { lock: "none", level: "READ" });
+    await afterReadCheck(db, "listEligibleAssignees");
+    // K73: the privacy decision is made inside each statement, with the current read predicate,
+    // not taken from the check above. A private project: its direct members that are active
+    // organization members (isEligibleAssignee's rule). A non-private project: every active
+    // organization member.
+    const readable = readableProjectWhere(actor);
     const people = new Map<string, string>();
-    if (access.project.isPrivate) {
-      const rows = await db.projectMember.findMany({
-        where: { organizationId: actor.orgId, projectId },
-        select: { userId: true, user: { select: { name: true } } },
-      });
-      // isEligibleAssignee's rule for a private project, for all rows in one read.
-      const active = await activeOrgUserIds(
-        db,
-        actor.orgId,
-        rows.map((row) => row.userId),
-      );
-      for (const row of rows) if (active.has(row.userId)) people.set(row.userId, row.user.name);
-    } else {
-      const rows = await db.member.findMany({
-        where: { organizationId: actor.orgId },
-        select: { userId: true, user: { select: { name: true } } },
-      });
-      for (const row of rows) people.set(row.userId, row.user.name);
-    }
+    const direct = await db.projectMember.findMany({
+      where: {
+        organizationId: actor.orgId,
+        projectId,
+        project: { AND: [readable, { isPrivate: true }] },
+        user: { members: { some: { organizationId: actor.orgId } } },
+      },
+      select: { userId: true, user: { select: { name: true } } },
+    });
+    for (const row of direct) people.set(row.userId, row.user.name);
+    const everyone = await db.member.findMany({
+      where: {
+        organizationId: actor.orgId,
+        organization: readableProjectExistsWhere(actor, { id: projectId, isPrivate: false }),
+      },
+      select: { userId: true, user: { select: { name: true } } },
+    });
+    for (const row of everyone) people.set(row.userId, row.user.name);
     const assignees = [...people].map(([userId, name]) => ({ userId, name })).sort(byNameThenId);
     // Keyset (name, userId), review a-WR-07.
     const page = pageInMemory(assignees, opts ?? {}, (p) => [p.name, p.userId], compareStringKeys, [

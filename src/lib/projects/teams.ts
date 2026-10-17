@@ -18,7 +18,14 @@
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "../../generated/prisma/client";
 import { isAdminRole } from "../membership";
-import { lockTeam, readableProjectIds, requireMembership, requireProject } from "./access";
+import {
+  actorOrganizationWhere,
+  lockTeam,
+  readableProjectWhere,
+  refuseUnreadable,
+  requireMembership,
+  requireProject,
+} from "./access";
 import { recordProjectActivity } from "./activity";
 import {
   codePointLength,
@@ -30,6 +37,7 @@ import {
 import { activeOrgUserIds, type PersonView } from "./members";
 import {
   afterLock,
+  afterReadCheck,
   decodeKeyset,
   encodeKeyset,
   isPlausibleId,
@@ -97,20 +105,20 @@ async function requireTeamLock(
 /** The active members of a team (C14): TeamMember rows whose user still has a member row. */
 async function activeTeamMembers(
   db: ProjectDb,
-  orgId: string,
+  actor: ProjectActor,
   teamId: string,
 ): Promise<PersonView[]> {
+  // K73: one statement, with the actor's current organization membership.
   const rows = await db.teamMember.findMany({
-    where: { organizationId: orgId, teamId },
+    where: {
+      organizationId: actor.orgId,
+      teamId,
+      organization: actorOrganizationWhere(actor),
+      user: { members: { some: { organizationId: actor.orgId } } },
+    },
     select: { userId: true, user: { select: { name: true } } },
   });
-  const active = await activeOrgUserIds(
-    db,
-    orgId,
-    rows.map((row) => row.userId),
-  );
   return rows
-    .filter((row) => active.has(row.userId))
     .map((row) => ({ userId: row.userId, name: row.user.name }))
     .sort((a, b) => codeUnitCompare(a.name, b.name) || codeUnitCompare(a.userId, b.userId));
 }
@@ -130,8 +138,16 @@ export async function listTeams(
   return runProjectRead(actor, "listTeams", async (db) => {
     const limit = listLimit(opts?.limit);
     const cursor = decodeKeyset(opts?.cursor, ["string", "string"]);
+    await afterReadCheck(db, "listTeams");
+    // K73: the paged statement and the member counts carry the actor's current organization
+    // membership.
     const found = await db.team.findMany({
-      where: { AND: [{ organizationId: actor.orgId }, nameKeysetWhere(cursor)] },
+      where: {
+        AND: [
+          { organizationId: actor.orgId, organization: actorOrganizationWhere(actor) },
+          nameKeysetWhere(cursor),
+        ],
+      },
       orderBy: [{ name: "asc" }, { id: "asc" }],
       take: limit + 1,
       select: { id: true, name: true },
@@ -139,18 +155,16 @@ export async function listTeams(
     const hasMore = found.length > limit;
     const teams = found.slice(0, limit);
     const rows = await db.teamMember.findMany({
-      where: { organizationId: actor.orgId, teamId: { in: teams.map((team) => team.id) } },
-      select: { teamId: true, userId: true },
+      where: {
+        organizationId: actor.orgId,
+        teamId: { in: teams.map((team) => team.id) },
+        organization: actorOrganizationWhere(actor),
+        user: { members: { some: { organizationId: actor.orgId } } },
+      },
+      select: { teamId: true },
     });
-    const active = await activeOrgUserIds(
-      db,
-      actor.orgId,
-      rows.map((row) => row.userId),
-    );
     const counts = new Map<string, number>();
-    for (const row of rows) {
-      if (active.has(row.userId)) counts.set(row.teamId, (counts.get(row.teamId) ?? 0) + 1);
-    }
+    for (const row of rows) counts.set(row.teamId, (counts.get(row.teamId) ?? 0) + 1);
     const last = teams[teams.length - 1];
     return {
       teams: teams.map((team) => ({
@@ -175,29 +189,29 @@ export async function getTeam(
 ): Promise<ProjectResult<{ team: TeamDetail }>> {
   return runProjectRead(actor, "getTeam", async (db) => {
     if (!isPlausibleId(teamId)) refuse("NOT_FOUND");
-    const team = await db.team.findFirst({
-      where: { id: teamId, organizationId: actor.orgId },
+    await afterReadCheck(db, "getTeam");
+    // K73: every statement carries the actor's current organization membership, the projects
+    // statement the full read predicate, and the team row is read last.
+    const members = await activeTeamMembers(db, actor, teamId);
+    const projects = await db.project.findMany({
+      where: {
+        AND: [
+          readableProjectWhere(actor),
+          { teams: { some: { organizationId: actor.orgId, teamId } } },
+        ],
+      },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
       select: { id: true, name: true },
     });
-    if (!team) refuse("NOT_FOUND");
-    const members = await activeTeamMembers(db, actor.orgId, teamId);
-    const links = await db.projectTeam.findMany({
-      where: { organizationId: actor.orgId, teamId },
-      select: { projectId: true },
+    const team = await db.team.findFirst({
+      where: {
+        id: teamId,
+        organizationId: actor.orgId,
+        organization: actorOrganizationWhere(actor),
+      },
+      select: { id: true, name: true },
     });
-    const readable = await readableProjectIds(
-      db,
-      actor,
-      links.map((link) => link.projectId),
-    );
-    const projects =
-      readable.size === 0
-        ? []
-        : await db.project.findMany({
-            where: { organizationId: actor.orgId, id: { in: [...readable] } },
-            orderBy: [{ name: "asc" }, { id: "asc" }],
-            select: { id: true, name: true },
-          });
+    if (!team) return refuseUnreadable(db, actor);
     return { team: { id: team.id, name: team.name, members, projects } };
   });
 }
@@ -438,6 +452,7 @@ export async function listProjectTeams(
 > {
   return runProjectRead(actor, "listProjectTeams", async (db) => {
     await requireProject(db, actor, projectId, { lock: "none", level: "READ" });
+    await afterReadCheck(db, "listProjectTeams");
     const limit = listLimit(opts?.limit);
     const cursor = decodeKeyset(opts?.cursor, ["string", "string"]);
     const found = await db.team.findMany({
@@ -445,7 +460,14 @@ export async function listProjectTeams(
         AND: [
           {
             organizationId: actor.orgId,
-            projects: { some: { organizationId: actor.orgId, projectId } },
+            // K73: the current read predicate on the project, inside the paged statement.
+            projects: {
+              some: {
+                organizationId: actor.orgId,
+                projectId,
+                project: readableProjectWhere(actor),
+              },
+            },
           },
           nameKeysetWhere(cursor),
         ],

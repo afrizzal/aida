@@ -13,8 +13,8 @@ import {
   isEligibleAssignee,
   type ProjectAccess,
   type RowLockMode,
-  readableProjectIds,
   readableProjectWhere,
+  refuseUnreadable,
   requireProject,
   requireTask,
 } from "./access";
@@ -47,6 +47,7 @@ import { appendRank, rebalancedRanks } from "./rank";
 import { spawnRecurrenceSuccessorInTx } from "./recurrence";
 import {
   afterLock,
+  afterReadCheck,
   isPlausibleId,
   listLimit,
   newBatchId,
@@ -426,10 +427,15 @@ export async function getTask(
 ): Promise<ProjectResult<{ task: TaskView }>> {
   return runProjectRead(actor, "getTask", async (db) => {
     const access = await requireTask(db, actor, taskId, { lock: "none", level: "READ" });
+    await afterReadCheck(db, "getTask");
     const orgId = actor.orgId;
     const projectId = access.task.projectId;
+    // K73: every query below carries the current read predicate, and the last one re-reads the
+    // task under it, so the response exists only if the task's project is still readable then.
+    const readable = readableProjectWhere(actor);
+    const inProject = { organizationId: orgId, projectId, project: readable };
     const row = await db.task.findFirst({
-      where: { id: taskId, organizationId: orgId, projectId },
+      where: { id: taskId, ...inProject },
       select: {
         id: true,
         projectId: true,
@@ -457,9 +463,9 @@ export async function getTask(
         updatedAt: true,
       },
     });
-    if (!row) refuse("NOT_FOUND");
+    if (!row) return refuseUnreadable(db, actor);
     const links = await db.taskLabel.findMany({
-      where: { organizationId: orgId, projectId, taskId },
+      where: { organizationId: orgId, projectId, taskId, task: inProject },
       select: { label: { select: { id: true, name: true, color: true } } },
     });
     const labels = links
@@ -467,12 +473,12 @@ export async function getTask(
       .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.id < b.id ? -1 : 1));
     const milestone = row.milestoneId
       ? await db.projectMilestone.findFirst({
-          where: { id: row.milestoneId, organizationId: orgId, projectId },
+          where: { id: row.milestoneId, ...inProject },
           select: { id: true, name: true },
         })
       : null;
     const subtasks = await db.task.findMany({
-      where: { organizationId: orgId, projectId, parentId: taskId },
+      where: { ...inProject, parentId: taskId },
       orderBy: [{ rank: "asc" }, { id: "asc" }],
       select: { id: true, key: true, title: true, status: true, rank: true, archivedAt: true },
     });
@@ -480,16 +486,13 @@ export async function getTask(
     let recurrencePredecessorId: string | null = null;
     if (row.recurrencePredecessorId) {
       const predecessor = await db.task.findFirst({
-        where: { id: row.recurrencePredecessorId, organizationId: orgId },
-        select: { projectId: true },
+        where: { id: row.recurrencePredecessorId, organizationId: orgId, project: readable },
+        select: { id: true },
       });
-      if (
-        predecessor &&
-        (await readableProjectIds(db, actor, [predecessor.projectId])).has(predecessor.projectId)
-      ) {
-        recurrencePredecessorId = row.recurrencePredecessorId;
-      }
+      if (predecessor) recurrencePredecessorId = row.recurrencePredecessorId;
     }
+    const still = await db.task.count({ where: { id: taskId, ...inProject } });
+    if (still === 0) return refuseUnreadable(db, actor);
     const { milestoneId: _milestoneId, ...rest } = row;
     return {
       task: {
@@ -1134,12 +1137,16 @@ export async function listProjectTasks(
 ): Promise<ProjectResult<{ tasks: TaskListItem[]; hasMore: boolean; nextCursor: string | null }>> {
   return runProjectRead(actor, "listProjectTasks", async (db) => {
     await requireProject(db, actor, projectId, { lock: "none", level: "READ" });
+    await afterReadCheck(db, "listProjectTasks");
     const f = filters ?? {};
     const orgId = actor.orgId;
     const limit = listLimit(f.limit);
     const parentId = f.parentId ?? null;
     if (parentId !== null && !isPlausibleId(parentId)) refuse("INVALID_INPUT", "parentId");
-    const terms: Prisma.TaskWhereInput[] = [{ organizationId: orgId, projectId, parentId }];
+    // K73: the paged statement carries the current read predicate.
+    const terms: Prisma.TaskWhereInput[] = [
+      { organizationId: orgId, projectId, parentId, project: readableProjectWhere(actor) },
+    ];
     const status = validStatusFilter(f.status);
     if (status) terms.push({ status });
     const assignee = validAssigneeFilter(f);
@@ -1190,6 +1197,7 @@ export async function listWorkspaceTasks(
   filters: ListWorkspaceTasksFilters = {},
 ): Promise<ProjectResult<{ tasks: TaskListItem[]; hasMore: boolean; nextCursor: string | null }>> {
   return runProjectRead(actor, "listWorkspaceTasks", async (db) => {
+    await afterReadCheck(db, "listWorkspaceTasks");
     const f = filters ?? {};
     const orgId = actor.orgId;
     const limit = listLimit(f.limit);

@@ -30,6 +30,7 @@ import {
 import { classifyTaskMissInTx } from "./labels";
 import {
   afterLock,
+  afterReadCheck,
   decodeKeyset,
   encodeKeyset,
   isPlausibleId,
@@ -123,10 +124,17 @@ export async function listProjectMilestones(
 > {
   return runProjectRead(actor, "listProjectMilestones", async (db) => {
     await requireProject(db, actor, projectId, { lock: "none", level: "READ" });
+    await afterReadCheck(db, "listProjectMilestones");
     const limit = listLimit(opts?.limit);
     const cursor = decodeKeyset(opts?.cursor, ["string", "string"]);
     const found = await db.projectMilestone.findMany({
-      where: { AND: [{ organizationId: actor.orgId, projectId }, dateKeysetWhere(cursor)] },
+      // K73: the current read predicate in the paged statement and in the task counts.
+      where: {
+        AND: [
+          { organizationId: actor.orgId, projectId, project: readableProjectWhere(actor) },
+          dateKeysetWhere(cursor),
+        ],
+      },
       orderBy: [{ date: "asc" }, { id: "asc" }],
       take: limit + 1,
       select: MILESTONE_SELECT,
@@ -140,6 +148,7 @@ export async function listProjectMilestones(
         where: {
           organizationId: actor.orgId,
           projectId,
+          project: readableProjectWhere(actor),
           archivedAt: null,
           milestoneId: { in: rows.map((row) => row.id) },
         },
@@ -179,6 +188,7 @@ export async function listWorkspaceMilestones(
   }>
 > {
   return runProjectRead(actor, "listWorkspaceMilestones", async (db) => {
+    await afterReadCheck(db, "listWorkspaceMilestones");
     const from = opts.from === undefined ? null : validDate(opts.from, "from");
     const to = opts.to === undefined ? null : validDate(opts.to, "to");
     if (from && to && from > to) refuse("INVALID_INPUT", "to");

@@ -24,7 +24,7 @@ export function createObserverClient(): { client: PrismaClient; close: () => Pro
 }
 
 export interface ServiceRace {
-  /** Resolves with the PID of the first transaction of `operation` to reach afterLock, parked there. */
+  /** Resolves with the PID of the first transaction of `operation` to reach afterLock or afterReadCheck, parked there. */
   holdAt(operation: string): Promise<number>;
   /** Resolves with the PID of the next transaction of `operation` to start. */
   nextStartPid(operation: string): Promise<number>;
@@ -41,21 +41,25 @@ export function createServiceRace(): ServiceRace {
   const parked: Deferred<void>[] = [];
   let released = false;
 
+  async function park(tx: ProjectDb, operation: string) {
+    const hold = holds.get(operation);
+    if (!hold || released) return;
+    holds.delete(operation);
+    const gate = deferred<void>();
+    parked.push(gate);
+    hold.resolve(await backendPid(tx));
+    await gate.promise;
+  }
+
   setProjectServiceObserverForTests({
     async onTransactionStart(tx: ProjectDb, operation: string) {
       const waiting = starts.get(operation);
       const next = waiting?.shift();
       if (next) next.resolve(await backendPid(tx));
     },
-    async afterLock(tx: ProjectDb, operation: string) {
-      const hold = holds.get(operation);
-      if (!hold || released) return;
-      holds.delete(operation);
-      const gate = deferred<void>();
-      parked.push(gate);
-      hold.resolve(await backendPid(tx));
-      await gate.promise;
-    },
+    afterLock: park,
+    // Reads park at the same gate, after their access check (K73).
+    afterReadCheck: park,
   });
 
   const release = () => {
