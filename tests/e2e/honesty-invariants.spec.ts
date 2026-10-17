@@ -36,7 +36,7 @@
  * "before a provider is configured", and phase5-rag.spec.ts's first test asserts the KB empty
  * state at zero articles; both would break if this file left its scratch state lying around.
  */
-import { type ChildProcess, execSync, spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,6 +45,7 @@ import { EMBEDDING_DIMENSIONS } from "../../src/lib/rag/types";
 import { createTicket, orgId, prisma } from "./support/db";
 import { createLlmStub } from "./support/llm-stub";
 import { databaseUrl } from "./support/test-env";
+import { stopWorker } from "./support/worker";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "../..");
@@ -156,13 +157,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  if (worker?.pid) {
-    try {
-      execSync(`taskkill /pid ${worker.pid} /t /f`);
-    } catch {
-      // already gone
-    }
-  }
+  await stopWorker(worker);
   stub.stop();
 
   await prisma.setting.deleteMany({
