@@ -4,11 +4,11 @@ milestone: v2.0
 milestone_name: Helpdesk & Projects
 current_phase: 14
 current_phase_name: projects-foundation
-status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11, 12, 12.1 and 12.2 verified human_needed; Phase 14 (Projects foundation) executed, plans 14-01 to 14-13 complete, gate recorded with E2E red; verification next
-stopped_at: "Completed 14-13-PLAN.md: inventory passes after K70 (21/21); gate on 4d6a498 in 14-GATE.md (E2E red 3 failed, audit baseline 141, egress and compose blocked O-1)"
-last_updated: "2026-11-09T17:50:00.000Z"
+status: Phases 8, 9 and 10 parked (owner decision); 13, 16 and 17 parked by dependency on 10; Phases 11, 12, 12.1, 12.2 and 14 verified human_needed; Phase 15 (work views) next
+stopped_at: Phase 14 verified human_needed (7 of 7, 14-VERIFICATION.md); final gate on 41b1597 green except audit --prod baseline, E2E fixed by a60d339, O-1 suites blocked; Phase 15 next
+last_updated: "2026-11-09T17:30:00.000Z"
 last_activity: 2026-11-09
-last_activity_desc: Plan 14-13 complete. Inventory revised under K70 (4d6a498) passes 21 of 21. Gate on 4d6a498 - lint, typecheck, unit 795, integration 1198 without egress, build green; E2E red (3 failed, 15 did not run - phase4-ai T7 and T8, ticket-statuses set-default focus); audit 141 unchanged; clean-room grep empty; egress, full integration and compose blocked (O-1). 14-GATE.md (0e4df7c) maps requirements, SC1 to SC7, decisions, findings and review items; owner items open.
+last_activity_desc: Phase 14 closed to human_needed. 13 plans, code review in three parts with fix batches F1 and F2, three Codex diff rounds with fixes F3 to F5 (run decisions K69 to K73), final gate on 41b1597 (lint, typecheck, unit 838, integration without egress 1297, build exit 0; E2E one failure fixed in tests by a60d339, full E2E 209 passed; audit --prod exit 1 baseline; test:egress blocked O-1), verifier 7 of 7 with no code gap. Open for the owner: 14-o1, 14-o2, 14-o3
 state_head: 0e4df7c
 progress:
   total_phases: 12
@@ -65,6 +65,7 @@ Items deferred during v2.0 (run loop):
 | verification_gap | Phase 12 — `12-VERIFICATION.md` (2026-11-09) | `human_needed` — no code gap; AIDA-52, 54 and 55 verified; AIDA-53 verified except the "full `AuditEvent`" clause (owner item 12-o1). Open for a human: visual pass and dark mode of the Phase 12 screens (UI-SPEC E1 to E11), layout widths, screen-reader check, the Asia/Jakarta time-zone check, the deferred copy decisions (IN-06, R2-3), and the two judgment-tier privacy rules in plans 12-01 and 12-04. Full integration and `test:egress` blocked (O-1). |
 | verification_gap | Phase 12.1 — `12.1-VERIFICATION.md` (2026-11-09) | `human_needed` — no code gap; AIDA-56, 97, 57 verified (8/8). Open for a human: visual and dark-mode approval, contrast by eye, screen reader, 360px layout checks, UAT. K47 (stale flag after resume when a priority change extended deadlines during a pause) deferred. Full integration and `test:egress` blocked (O-1). |
 | verification_gap | Phase 12.2 — `12.2-VERIFICATION.md` (2026-11-09) | `human_needed` — no code gap; AIDA-18 verified (11/11). Open for a human: visual and dark-mode approval of every 12.2 surface including the darker light `--destructive` token, screen reader, the UI-SPEC amendments A1 to A8 and the F3 copy and focus gaps no UI checker reviewed, the backstop rows E2 to E5, reading a real provider's article, the three server-side send-failure outcomes (A1, A3, A5) proven only statically and by server tests, UAT. Owner items 12.2-o1 to 12.2-o4. Full integration and `test:egress` blocked (O-1). |
+| verification_gap | Phase 14 — `14-VERIFICATION.md` (2026-11-09) | `human_needed` — no code gap; AIDA-64 to 71 and 100 to 105 verified (7/7), the audit clause of AIDA-103 and AIDA-104 pending owner item 14-o2. Open: owner items 14-o1, 14-o2, 14-o3 (prefix oracle), stated limitations (Better Auth member delete not serialized, multi-statement reads not one snapshot), full integration, `test:egress` and the compose stack (O-1), the 14-05 manual item (file cleanup and inbound email attachments with the stack). |
 
 Items acknowledged and deferred at milestone close on 2026-09-13 (override closeout; 23 items reported by `gsd-tools query audit-open`, plus AIDA-18):
 
@@ -110,7 +111,7 @@ Also open (not audit items): `milestones/v1.0.0-phases/07-launch-readiness/defer
 ## Session Continuity
 
 **Last session:** 2026-11-09T13:45:00.000Z
-**Stopped at:** Completed 14-09-PLAN.md; Phase 14 executing, 14-10 next (2026-11-09)
+**Stopped at:** Phase 14 verified human_needed; Phase 15 next (2026-11-09)
 **Resume file:** .planning/run-loop/ANTREAN.md
 
 **Last action (2026-11-08):** Phase 10 parked after the third Codex plan review (2 HIGH findings accepted, not yet incorporated). No tag, nothing pushed.

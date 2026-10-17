@@ -1,6 +1,6 @@
 # Laporan run loop AIDA
 
-Keadaan per 2026-11-09 16.55 WIB, sesudah Fase 12.2.
+Keadaan per 2026-11-10 00.30 WIB, sesudah Fase 14.
 
 ## 1. Ringkasan
 
@@ -22,7 +22,7 @@ Milestone v2.0 sudah dibuka (0b) dan daftar fitur Projects sudah dicek ke demo p
 | 12.1 | Siklus tiket: status kustom, jeda SLA (AIDA-56, 97, 57) | selesai, menunggu manusia | 17/17 plan; review plan Codex dua siklus, code review empat bagian, tiga putaran Codex atas diff (HIGH di putaran 1 diperbaiki: triage mengabaikan jeda SLA); gerbang final di `f0ccffa`: lint, typecheck, unit 383, integration tanpa egress 519, E2E penuh 192 lolos, build exit 0, audit baseline, egress blocked (O-1); verifikasi `human_needed` 8/8. Catatan operator di README: migrasi `20261110100000_ticket_states` yang gagal butuh `prisma migrate resolve --rolled-back` sebelum deploy ulang (diamati di Prisma 7.8.0; perintah compose-nya tidak dijalankan). K47 ditunda | `25c9214`..`3d26506` |
 | 12.2 | Siklus tiket: usulan KB (AIDA-18) | selesai, menunggu manusia | 12/12 plan; review plan Codex tiga siklus; code review empat bagian (2 critical yang sama, diperbaiki: gambar remote di draf AI bisa membocorkan teks tiket saat review dibuka); tiga putaran Codex atas diff (HIGH di tiap putaran diperbaiki: baris member duplikat, tautan pratinjau aktif, path bearer yang di-encode atau dibawa di path); keputusan run K48 sampai K60; gerbang final di `1a2f425`: lint, typecheck, unit 665, integration tanpa egress 826, E2E penuh 209 lolos, build exit 0, audit baseline, egress blocked (O-1); verifikasi `human_needed` 11/11. Token terang `--destructive` digelapkan (aturan kontras DESIGN-SYSTEM) dan perlu visual pass manusia. Butir owner baru 12.2-o1 sampai 12.2-o4 | `0698d4e`..`7f0817d` |
 | 13 | Integrasi (AIDA-58 sampai 63) | diparkir (bergantung pada Fase 10) | | |
-| 14 | Fondasi Projects (AIDA-64 sampai 71, 100 sampai 105) | belum disentuh | | |
+| 14 | Fondasi Projects (AIDA-64 sampai 71, 100 sampai 105) | selesai, menunggu manusia | 13/13 plan; tiga siklus review plan Codex; code review tiga bagian dan tiga putaran Codex atas diff (kebocoran proyek privat lewat posisi, `updatedAt`, alias, dan bacaan tanpa predikat diperbaiki: K69 sampai K73); gerbang final di `41b1597`: lint, typecheck, unit 838, integration tanpa egress 1297, build exit 0, E2E 209 lolos sesudah perbaikan test `a60d339`, audit baseline, egress blocked (O-1); verifikasi `human_needed` 7/7. Cacat lama ditemukan dan diperbaiki: worker tidak memasang volume uploads (K68, belum dibuktikan dengan stack). Butir owner 14-o1 sampai 14-o3 | `d88de64`..`45272ed` |
 | 15 | Tampilan kerja (AIDA-72 sampai 80, 106) | belum disentuh | | |
 | 16 | Ruang kerja (AIDA-81 sampai 90, 98, 99, 107 sampai 114) | diparkir (bergantung pada Fase 10) | | |
 | 17 | Penyatuan (AIDA-91 sampai 96) | diparkir (bergantung pada Fase 13 sampai 16) | | |

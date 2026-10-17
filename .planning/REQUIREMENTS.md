@@ -70,20 +70,20 @@ IDs continue at AIDA-25. AIDA-18 keeps its v1 ID.
 
 Clean-room rule for this and every later section: `PIAGAM.md` → Clean-room. Sources are `run-loop/FITUR-PROJECTS.md` and the public demo's visible behavior only.
 
-- [ ] **AIDA-64** `v2` — A workspace can hold projects with name, color, order, overview and member list. [Charter, FITUR] Accept: the model is scoped through `scopedDb`, with an unmocked isolation test.
-- [ ] **AIDA-65** `v2` — A project holds tasks with status (`backlog`, `todo`, `in_progress`, `review`, `done`), assignee, due date, priority and labels. [Charter, FITUR] Accept: logic tests cover create, update, reorder and status change, plus unmocked isolation.
-- [ ] **AIDA-66** `v2` — A task can have subtasks. [Charter, FITUR] Accept: parent progress is derived from subtasks; a subtask cannot cross project or organization.
-- [ ] **AIDA-67** `v2` — A task can carry comments and attachments. [Charter, FITUR] Accept: comments use the sanitized markdown path; attachments use the existing pipeline; task content is treated as untrusted.
-- [ ] **AIDA-68** `v2` — Every project and task change writes one activity record, the single source for the project feed and task history. [Charter, FITUR] Accept: a test proves each mutation records actor, verb and old and new values.
-- [ ] **AIDA-69** `v2` — A workspace can define teams, add and remove their members, and assign teams to projects. [Charter, FITUR] Accept: an org-scoped `Team` model with unmocked isolation; tests cover membership changes and project assignment.
-- [ ] **AIDA-70** `v2` — Projects can be archived and restored, and a user can favorite a project. [Charter, FITUR] Accept: archived projects leave default lists and can be restored; favorites are per user.
-- [ ] **AIDA-71** `v2` — A private project is hidden from non-members, who can neither read nor change it. [Charter, FITUR] Accept: unmocked tests as a member, a non-member of the same organization, and a user of another organization cover every read and write path of the project and its tasks, subtasks, comments, attachments and activity; no relation can point to a task in another project or organization. `scopedDb` alone only scopes by organization, so this needs its own server-side check. Search and notifications inherit the rule in Phase 16, ticket links and AI suggestions in Phase 17.
-- [ ] **AIDA-100** `v2` — A project has an icon, a description, a status from a fixed set, a due date, and progress derived from its tasks. [FITUR] Accept: progress is computed from tasks, never typed in, and tested, including an empty project; status changes write activity; the status set is decided in the Phase 14 CONTEXT.
-- [ ] **AIDA-101** `v2` — Each task has a key made of its project prefix and a number, plus a start date, an estimate, and a rich-text description. [FITUR] Accept: keys stay unique under concurrent creation, tested the way `TicketCounter` is; the description renders through the sanitized markdown path; a start date after the due date is rejected.
-- [ ] **AIDA-102** `v2` — A task can repeat daily, weekly or monthly, and completing it creates the next occurrence. [FITUR] Accept: tests cover each rule, month ends and time zones; the next occurrence is created exactly once, even when completion is retried.
-- [ ] **AIDA-103** `v2` — A task can be duplicated, moved to another project, favorited, archived and restored, and deleted. [FITUR] Accept: a moved task gets a new key while its old link still resolves; archive keeps history; delete needs confirmation and writes an audit event; private-project rules hold across a move.
-- [ ] **AIDA-104** `v2` — A project can be edited, duplicated with or without its tasks, and deleted. [FITUR] Accept: both duplicate options are tested; delete needs confirmation, writes an audit event, and never removes `AuditEvent` rows.
-- [ ] **AIDA-105** `v2` — A project can have dated milestones, and a task can belong to one. [FITUR] Accept: org-scoped with an unmocked isolation test; milestones show in the Timeline (AIDA-78) and the workspace overview (AIDA-107).
+- [x] **AIDA-64** `v2` — A workspace can hold projects with name, color, order, overview and member list. [Charter, FITUR] Accept: the model is scoped through `scopedDb`, with an unmocked isolation test.
+- [x] **AIDA-65** `v2` — A project holds tasks with status (`backlog`, `todo`, `in_progress`, `review`, `done`), assignee, due date, priority and labels. [Charter, FITUR] Accept: logic tests cover create, update, reorder and status change, plus unmocked isolation.
+- [x] **AIDA-66** `v2` — A task can have subtasks. [Charter, FITUR] Accept: parent progress is derived from subtasks; a subtask cannot cross project or organization.
+- [x] **AIDA-67** `v2` — A task can carry comments and attachments. [Charter, FITUR] Accept: comments use the sanitized markdown path; attachments use the existing pipeline; task content is treated as untrusted.
+- [x] **AIDA-68** `v2` — Every project and task change writes one activity record, the single source for the project feed and task history. [Charter, FITUR] Accept: a test proves each mutation records actor, verb and old and new values.
+- [x] **AIDA-69** `v2` — A workspace can define teams, add and remove their members, and assign teams to projects. [Charter, FITUR] Accept: an org-scoped `Team` model with unmocked isolation; tests cover membership changes and project assignment.
+- [x] **AIDA-70** `v2` — Projects can be archived and restored, and a user can favorite a project. [Charter, FITUR] Accept: archived projects leave default lists and can be restored; favorites are per user.
+- [x] **AIDA-71** `v2` — A private project is hidden from non-members, who can neither read nor change it. [Charter, FITUR] Accept: unmocked tests as a member, a non-member of the same organization, and a user of another organization cover every read and write path of the project and its tasks, subtasks, comments, attachments and activity; no relation can point to a task in another project or organization. `scopedDb` alone only scopes by organization, so this needs its own server-side check. Search and notifications inherit the rule in Phase 16, ticket links and AI suggestions in Phase 17.
+- [x] **AIDA-100** `v2` — A project has an icon, a description, a status from a fixed set, a due date, and progress derived from its tasks. [FITUR] Accept: progress is computed from tasks, never typed in, and tested, including an empty project; status changes write activity; the status set is decided in the Phase 14 CONTEXT.
+- [x] **AIDA-101** `v2` — Each task has a key made of its project prefix and a number, plus a start date, an estimate, and a rich-text description. [FITUR] Accept: keys stay unique under concurrent creation, tested the way `TicketCounter` is; the description renders through the sanitized markdown path; a start date after the due date is rejected.
+- [x] **AIDA-102** `v2` — A task can repeat daily, weekly or monthly, and completing it creates the next occurrence. [FITUR] Accept: tests cover each rule, month ends and time zones; the next occurrence is created exactly once, even when completion is retried.
+- [x] **AIDA-103** `v2` — A task can be duplicated, moved to another project, favorited, archived and restored, and deleted. [FITUR] Accept: a moved task gets a new key while its old link still resolves; archive keeps history; delete needs confirmation and writes an audit event; private-project rules hold across a move.
+- [x] **AIDA-104** `v2` — A project can be edited, duplicated with or without its tasks, and deleted. [FITUR] Accept: both duplicate options are tested; delete needs confirmation, writes an audit event, and never removes `AuditEvent` rows.
+- [x] **AIDA-105** `v2` — A project can have dated milestones, and a task can belong to one. [FITUR] Accept: org-scoped with an unmocked isolation test; milestones show in the Timeline (AIDA-78) and the workspace overview (AIDA-107).
 
 ## Work views
 
@@ -184,14 +184,14 @@ Clean-room rule for this and every later section: `PIAGAM.md` → Clean-room. So
 | AIDA-61 | Phase 13 | Pending |
 | AIDA-62 | Phase 13 | Pending |
 | AIDA-63 | Phase 13 | Pending |
-| AIDA-64 | Phase 14 | Pending |
-| AIDA-65 | Phase 14 | Pending |
-| AIDA-66 | Phase 14 | Pending |
-| AIDA-67 | Phase 14 | Pending |
-| AIDA-68 | Phase 14 | Pending |
-| AIDA-69 | Phase 14 | Pending |
-| AIDA-70 | Phase 14 | Pending |
-| AIDA-71 | Phase 14 | Pending |
+| AIDA-64 | Phase 14 | Complete (acceptance verified, `14-VERIFICATION.md`) |
+| AIDA-65 | Phase 14 | Complete (acceptance verified, `14-VERIFICATION.md`) |
+| AIDA-66 | Phase 14 | Complete (acceptance verified, `14-VERIFICATION.md`) |
+| AIDA-67 | Phase 14 | Complete (acceptance verified, `14-VERIFICATION.md`) |
+| AIDA-68 | Phase 14 | Complete (acceptance verified, `14-VERIFICATION.md`) |
+| AIDA-69 | Phase 14 | Complete (acceptance verified, `14-VERIFICATION.md`) |
+| AIDA-70 | Phase 14 | Complete (acceptance verified, `14-VERIFICATION.md`) |
+| AIDA-71 | Phase 14 | Complete (acceptance verified, `14-VERIFICATION.md`) |
 | AIDA-72 | Phase 15 | Pending |
 | AIDA-73 | Phase 15 | Pending |
 | AIDA-74 | Phase 15 | Pending |
@@ -219,12 +219,12 @@ Clean-room rule for this and every later section: `PIAGAM.md` → Clean-room. So
 | AIDA-94 | Phase 17 | Pending |
 | AIDA-95 | Phase 17 | Pending |
 | AIDA-96 | Phase 17 | Pending |
-| AIDA-100 | Phase 14 | Pending |
-| AIDA-101 | Phase 14 | Pending |
-| AIDA-102 | Phase 14 | Pending |
-| AIDA-103 | Phase 14 | Pending |
-| AIDA-104 | Phase 14 | Pending |
-| AIDA-105 | Phase 14 | Pending |
+| AIDA-100 | Phase 14 | Complete (acceptance verified, `14-VERIFICATION.md`) |
+| AIDA-101 | Phase 14 | Complete (acceptance verified, `14-VERIFICATION.md`) |
+| AIDA-102 | Phase 14 | Complete (acceptance verified, `14-VERIFICATION.md`) |
+| AIDA-103 | Phase 14 | Complete (acceptance verified, `14-VERIFICATION.md`; audit clause pending owner item 14-o2) |
+| AIDA-104 | Phase 14 | Complete (acceptance verified, `14-VERIFICATION.md`; audit clause pending owner item 14-o2) |
+| AIDA-105 | Phase 14 | Complete (acceptance verified, `14-VERIFICATION.md`) |
 | AIDA-106 | Phase 15 | Pending |
 | AIDA-107 | Phase 16 | Pending |
 | AIDA-108 | Phase 16 | Pending |
