@@ -346,3 +346,14 @@ Run decision **K73** (charter rule 4): every read in `src/lib/projects/` carries
 | R2D-1 | HIGH | `readableProjectWhere` does not check organization membership; an organization member removed after the initial check can still read public-project content in the D1 reads and every `runProjectRead` read (`access.ts:372`, `service.ts:213`) | accept (K73) |
 | R2D-2 | HIGH | Many reads check access once and then query by id: `getTask`, `listProjectTasks`, `listLabels`, `listProjectMilestones` (task counts), `listProjectMembers`, `listEligibleAssignees`, `listProjectTeams`, `getTeam`, the three progress functions, and the three activity feeds | accept (K73); each listed function fixed and covered |
 | R2D-3 | HIGH | `resolveTaskKey` reads kind, origin access and task in separate statements; the prefix oracle stays owner item 14-o3 | accept (K73, single query); prefix stays 14-o3 |
+
+### Round 3 (last)
+
+- Question `run-loop/codex/fase14-diff-r3-tanya.md` (commit `6614d78`); answer `run-loop/codex/fase14-diff-r3-jawab.md`; log `model: gpt-6.1-terra`, `reasoning effort: xhigh`. Verdict: not ready (2 HIGH). R2D-1 closed for queries using the shared predicate (EXISTS matches the conservative membership rule); R2D-3 closed (one statement with organization terms).
+
+| ID | Severity | Finding (short) | Disposition |
+|---|---|---|---|
+| R3D-1 | HIGH | `stillReadableWhere` passes projects deleted after the first check, so `listTeamActivity` and task history can still return rows, verbs, actors, `hasMore` and cursors of activity whose project became private and was then deleted (`access.ts:414`, `activity.ts:435`) | accept: every feed page query requires the activity's project (and, for two-project rows, each project the row is filtered by) to exist now and be readable now; a deleted project's activity is never returned (14-o2 default); a guard never blanks rows that are still readable; PID-bound interleavings: privacy change then private activity then project delete during a paused feed read, for team feed and task history |
+| R3D-2 | HIGH | Prefix reservation oracle | owner item 14-o3 (unchanged); listed open for the owner, not claimed closed |
+
+Codex review is closed at the charter maximum of three rounds. The R3D-1 fix (batch F5) is proven by its tests, the final gate and the verifier. Owner item 14-o3 remains an open HIGH-rated decision for the owner.
