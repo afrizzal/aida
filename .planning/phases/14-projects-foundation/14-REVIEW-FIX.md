@@ -168,3 +168,38 @@ Contract: `14-CONTRACT.md` (the list predicate, a new "Every read" paragraph, th
 - `pnpm lint`: exit 0 (552 files, no fixes).
 - `git grep -i -n gr8r -- src docs website README.md public prisma tests`: empty.
 - Testcontainers cleanup (rule H): before the batch, no container had the label `org.testcontainers=true`. After the last run, only the batch's ryuk container remained, and it had exited by itself before the removal step. At the end no container with the label remains. No other container, image or volume was touched. `aida-dev-db` is still running.
+
+## F5 (Codex diff round 3)
+
+Fixer: Claude (gsd-code-fixer), 2026-11-09. Branch `v2/run-loop`, main checkout (`workflow.use_worktrees` is false), so every test ran in the main checkout. Fix scope: row R3D-1 of "Codex diff critique / Round 3 (last)" in `14-REVIEW.md`. Fixed. R3D-2 (prefix oracle) stays owner item 14-o3, as its disposition says. No assertion was weakened, no existing expectation changed, and no fixed sleep was added.
+
+### Rows
+
+| Row | Commit | Failing-first evidence (red run, cause) | Fix |
+|---|---|---|---|
+| R3D-1 | ea44612 | New file `tests/integration/project-feed-delete-race.test.ts`, run against the unfixed code: 5 of 5 failed (exit 1). Team feed, B made private, a private MEMBER_ADDED row written for the team in B, B archived and deleted while the feed waited: 4 rows came back instead of 2 (B's TEAM_ASSIGNED row and the private row, through the stale readable set that `stillReadableWhere` let pass because B no longer existed). Same with limit 1: the page held the private row instead of A's row. Task history (task moved from B to A; B made private, a private TASK_UPDATED row in B for the task, B deleted): the old and the private B rows came back next to TASK_MOVED. Mixed pages: team feed and task history with only B made private returned `rows: []` instead of A's and the project-less rows (the guard blanked rows that were still readable). | The three feeds decide rows, `hasMore` and the cursor in one raw paged statement (`readPage`) that carries the organization term, the actor's `member` row, the cursor and a per-row EXISTS on the Project row under `readableProjectSql`: the feed's project P for `listProjectActivity` (every row is filtered by P), the task's current project and the row's own `projectId` for `listTaskActivity`, the row's `projectId` when not null for `listTeamActivity`. No set of readable project ids is read before the page any more (`readableNamedProjects` removed; `stillReadableWhere` removed from `access.ts`, it had no other caller). Redaction still runs after the page and only replaces values inside returned rows. |
+
+Contract: `14-CONTRACT.md` section 2 ("Every read": the feeds carry the predicate per row, no readable-set guard) and section 5 (Feed pages: existence and readability per row in the same statement, deleted project's rows never returned, no guard blanks readable rows), in commit ea44612. No operation or refusal code was renamed.
+
+Reading of "each project the row is filtered by": in a project feed the rows are selected by P, so P must exist and be readable; a two-project row whose other side was deleted stays in P's feed redacted, as section 5 (Redacted projection, review R3-4) already requires. Task history and team feeds select by the row's `projectId`, so that project must exist and be readable.
+
+### Tests
+
+- `tests/integration/project-feed-delete-race.test.ts`, 5 cases, each parked after the access check with `afterReadCheck` (`createServiceRace.holdAt`, the read's own PID), no sleeps, each first run without a change: team feed delete race (default limit and limit 1, asserting `hasMore` and the row), task history delete race on a moved task, and the two mixed-page cases (one unreadable and one readable project: the readable rows come back).
+- The F4 activity cases in `project-read-access-race.test.ts` are unchanged and green.
+
+### Not done, with reason
+
+- The project-feed delete race is not a separate case: the feed's project is checked per statement as before, and a deleted P already returns an empty page (F4 cases plus the R3-4 delete test).
+- The redaction lookup (`readableProjectIds`) is still a second statement. It can only hide more (a side that became unreadable after the page statement is redacted); it never adds a row, `hasMore` or a cursor.
+- 14-o3 (prefix oracle, R3D-2) remains an owner item.
+
+### Gates (one process at a time, main checkout)
+
+- Red run: `project-feed-delete-race.test.ts` on the unfixed code: exit 1, 5 failed of 5.
+- After the fix: `project-feed-delete-race.test.ts`: exit 0, 5 passed. Affected files (every integration file calling a feed: `project-activity`, `project-feed-delete-race`, `project-core-isolation`, `project-delete`, `project-duplicate`, `project-move`, `project-read-access-race`, `project-review-fixes`): exit 0, 8 files, 163 tests.
+- All `tests/integration/project*` files together: exit 0, 36 files, 471 tests.
+- `pnpm test`: exit 0, 50 files, 838 tests.
+- `pnpm exec next typegen`: exit 0. `pnpm typecheck`: exit 0. `pnpm lint`: exit 0 (553 files, no fixes).
+- `git grep -i -n gr8r -- src docs website README.md public prisma tests`: empty.
+- Testcontainers cleanup (rule H): before the batch no container had the label `org.testcontainers=true`; after the last run none remained, so nothing was removed. No other container, image or volume was touched. `aida-dev-db` is still running.
