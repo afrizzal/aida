@@ -208,3 +208,7 @@ Tested commit `41b1597` (after fix batches F1 to F5), one sequential script, one
 | full integration with egress, `pnpm test:egress`, compose stack | not run | blocked (O-1) |
 
 Rule H: no Testcontainers container left after the gate.
+
+### E2E red on `41b1597` diagnosed and fixed
+
+Root cause (session `.planning/debug/e2e-14-gate-snooze-wake.md`): `honesty-invariants.spec.ts`, `phase4-ai.spec.ts` and `phase5-rag.spec.ts` stopped their spawned worker with `taskkill` only, which does not exist on macOS (`taskkill: command not found` three times in the gate log); the surviving workers' minute-by-minute `snooze-wake` job woke the snooze test's ticket before the test's own call. Proven with a diagnostic before and after the fix (diagnostic not committed). Fix `a60d339` (tests only): a shared `stopWorker` stops spawned workers portably and waits for exit. Full `pnpm test:e2e` after the fix: exit 0, 209 passed, 1 skipped (`uat-gaps.spec.ts:17`), 0 failed; no worker, dev-server or Testcontainers container left. No product file changed after `41b1597`, so the other gate steps stand.
