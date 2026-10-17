@@ -407,23 +407,6 @@ export function readableProjectExistsWhere(
 }
 
 /**
- * An organization filter that holds while every project of `ids` is still readable (K73): none
- * of them has become unreadable since `ids` was read. A query that pages on a readable set read
- * earlier carries it, so a stale set returns nothing rather than rows of a project gone private.
- */
-export function stillReadableWhere(
-  actor: ProjectActor,
-  ids: readonly string[],
-): Prisma.organizationWhereInput {
-  return {
-    AND: [
-      actorOrganizationWhere(actor),
-      { projects: { none: { id: { in: [...ids] }, NOT: readableProjectWhere(actor) } } },
-    ],
-  };
-}
-
-/**
  * The refusal of a single-object read whose final query found nothing under the read predicate
  * (K73): MEMBERSHIP_ENDED when the actor's organization member row is gone, else NOT_FOUND
  * (identical to a missing id).

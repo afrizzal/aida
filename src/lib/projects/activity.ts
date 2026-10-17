@@ -14,14 +14,8 @@
 // R3-3). Every returned row passes through redactActivityRow (review C1 and R2-1): a before or
 // after value of a project the reader cannot read becomes REDACTED_SIDE, and the row becomes the
 // redacted projection of contract section 5.
-import type { Prisma } from "../../generated/prisma/client";
-import {
-  readableProjectExistsWhere,
-  readableProjectIds,
-  requireProject,
-  requireTask,
-  stillReadableWhere,
-} from "./access";
+import { Prisma } from "../../generated/prisma/client";
+import { readableProjectIds, readableProjectSql, requireProject, requireTask } from "./access";
 import {
   ACTIVITY_ARRAY_MAX_ITEMS,
   ACTIVITY_ARRAY_TEXT_MAX,
@@ -282,48 +276,66 @@ function pageLimit(limit: number | undefined): number {
   return listLimit(limit, ACTIVITY_LIST_MAX, ACTIVITY_LIST_DEFAULT);
 }
 
-function cursorWhere(cursor: string | null | undefined): Prisma.ProjectActivityWhereInput {
-  if (cursor === undefined || cursor === null) return {};
+function cursorSql(cursor: string | null | undefined): Prisma.Sql[] {
+  if (cursor === undefined || cursor === null) return [];
   const decoded = typeof cursor === "string" ? decodeActivityCursor(cursor) : null;
   if (!decoded) refuse("INVALID_INPUT", "cursor");
-  return {
-    OR: [
-      { createdAt: { lt: decoded.createdAt } },
-      { createdAt: decoded.createdAt, id: { lt: decoded.id } },
-    ],
-  };
+  return [
+    Prisma.sql`(a."createdAt" < ${decoded.createdAt}
+      OR (a."createdAt" = ${decoded.createdAt} AND a.id < ${decoded.id}))`,
+  ];
 }
 
-const FEED_SELECT = {
-  id: true,
-  projectId: true,
-  relatedProjectId: true,
-  taskId: true,
-  teamId: true,
-  actorUserId: true,
-  verb: true,
-  entityType: true,
-  entityId: true,
-  before: true,
-  after: true,
-  batchId: true,
-  createdAt: true,
-} as const;
+/** SQL: the actor's organization member row exists now (K73). */
+function actorMemberSql(actor: ProjectActor): Prisma.Sql {
+  return Prisma.sql`EXISTS (SELECT 1 FROM "member" m
+    WHERE m."organizationId" = ${actor.orgId} AND m."userId" = ${actor.userId})`;
+}
 
-/** One paged statement: the given terms, the cursor, (createdAt, id) descending, limit + 1. */
+/**
+ * SQL: the project with id `projectId` (a parameter or a column of the activity row `a`) exists
+ * now and the actor can read it now (R3D-1). Evaluated per row inside the paged statement, so a
+ * deleted project or one that became unreadable drops only its own rows.
+ */
+function projectReadableSql(projectId: Prisma.Sql, actor: ProjectActor): Prisma.Sql {
+  return Prisma.sql`EXISTS (SELECT 1 FROM "Project" rp
+    WHERE rp.id = ${projectId} AND ${readableProjectSql("rp", actor)})`;
+}
+
+const ROW_PROJECT = Prisma.sql`a."projectId"`;
+
+type RawFeedRow = Omit<ActivityFeedRow, "redacted">;
+
+/**
+ * One paged statement (review R3-3, K73, R3D-1): the organization term, the actor's membership,
+ * the given terms (each feed's access terms among them) and the cursor, (createdAt, id)
+ * descending, limit + 1. Which rows, hasMore and the cursor are decided here alone; the
+ * redaction afterwards only replaces values inside the returned rows.
+ */
 async function readPage(
   db: ProjectDb,
   actor: ProjectActor,
-  terms: Prisma.ProjectActivityWhereInput[],
+  terms: Prisma.Sql[],
   opts: ActivityPageOpts,
 ): Promise<ActivityPage> {
   const limit = pageLimit(opts.limit);
-  const found = await db.projectActivity.findMany({
-    where: { AND: [{ organizationId: actor.orgId }, ...terms, cursorWhere(opts.cursor)] },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    take: limit + 1,
-    select: FEED_SELECT,
-  });
+  const where = Prisma.join(
+    [
+      Prisma.sql`a."organizationId" = ${actor.orgId}`,
+      actorMemberSql(actor),
+      ...terms,
+      ...cursorSql(opts.cursor),
+    ],
+    " AND ",
+  );
+  const found = await db.$queryRaw<RawFeedRow[]>`
+    SELECT a.id, a."projectId", a."relatedProjectId", a."taskId", a."teamId", a."actorUserId",
+      a.verb::text AS verb, a."entityType"::text AS "entityType", a."entityId", a.before, a.after,
+      a."batchId", a."createdAt"
+    FROM "ProjectActivity" a
+    WHERE ${where}
+    ORDER BY a."createdAt" DESC, a.id DESC
+    LIMIT ${limit + 1}`;
   const hasMore = found.length > limit;
   const page = found.slice(0, limit);
   const named: (string | null)[] = [];
@@ -332,31 +344,9 @@ async function readPage(
     named.push(valueProjectId(row.after));
   }
   const readable = await readableProjectIds(db, actor, named);
-  const rows = page.map((row) =>
-    redactActivityRow({ ...row, verb: row.verb as ActivityVerb }, readable),
-  );
+  const rows = page.map((row) => redactActivityRow(row, readable));
   const last = page[page.length - 1];
   return { rows, hasMore, nextCursor: hasMore && last ? encodeActivityCursor(last) : null };
-}
-
-/** The readable subset of the projectIds named by rows matching `where` (the access term). */
-async function readableNamedProjects(
-  db: ProjectDb,
-  actor: ProjectActor,
-  where: Prisma.ProjectActivityWhereInput,
-): Promise<string[]> {
-  const named = await db.projectActivity.findMany({
-    where: { AND: [{ organizationId: actor.orgId }, where, { projectId: { not: null } }] },
-    distinct: ["projectId"],
-    select: { projectId: true },
-  });
-  return [
-    ...(await readableProjectIds(
-      db,
-      actor,
-      named.map((row) => row.projectId),
-    )),
-  ];
 }
 
 const VERB_SET = new Set<string>(ACTIVITY_VERBS);
@@ -373,20 +363,24 @@ export async function listProjectActivity(
   return runProjectRead(actor, "listProjectActivity", async (db) => {
     await requireProject(db, actor, projectId, { lock: "none", level: "READ" });
     await afterReadCheck(db, "listProjectActivity");
-    // K73: the paged statement holds only while the feed's project is readable now.
-    const terms: Prisma.ProjectActivityWhereInput[] = [
-      { OR: [{ projectId }, { relatedProjectId: projectId }] },
-      { organization: readableProjectExistsWhere(actor, { id: projectId }) },
+    // K73, R3D-1: the paged statement holds only while the feed's project exists and is readable.
+    const terms: Prisma.Sql[] = [
+      Prisma.sql`(a."projectId" = ${projectId} OR a."relatedProjectId" = ${projectId})`,
+      projectReadableSql(Prisma.sql`${projectId}`, actor),
     ];
     if (opts.verbs !== undefined) {
       if (!Array.isArray(opts.verbs) || opts.verbs.some((v) => !VERB_SET.has(v))) {
         refuse("INVALID_INPUT", "verbs");
       }
-      terms.push({ verb: { in: [...opts.verbs] } });
+      terms.push(
+        opts.verbs.length === 0
+          ? Prisma.sql`FALSE`
+          : Prisma.sql`a.verb::text IN (${Prisma.join([...opts.verbs])})`,
+      );
     }
     if (opts.actorUserId !== undefined) {
       if (!isPlausibleId(opts.actorUserId)) refuse("INVALID_INPUT", "actorUserId");
-      terms.push({ actorUserId: opts.actorUserId });
+      terms.push(Prisma.sql`a."actorUserId" = ${opts.actorUserId}`);
     }
     return readPage(db, actor, terms, opts);
   });
@@ -394,7 +388,8 @@ export async function listProjectActivity(
 
 /**
  * A task's history (READ on the task's current project): rows with taskId = the task whose
- * projectId the reader can read now; the access term sits inside the paged statement.
+ * projectId names a project that exists and the reader can read now; the access terms sit inside
+ * the paged statement, per row.
  */
 export async function listTaskActivity(
   actor: ProjectActor,
@@ -403,24 +398,18 @@ export async function listTaskActivity(
 ): Promise<ProjectResult<ActivityPage>> {
   return runProjectRead(actor, "listTaskActivity", async (db) => {
     await requireTask(db, actor, taskId, { lock: "none", level: "READ" });
-    const readable = await readableNamedProjects(db, actor, { taskId });
     await afterReadCheck(db, "listTaskActivity");
-    // K73: the paged statement holds only while the task's current project is readable and no
-    // project of the readable set has become unreadable since it was read.
+    // K73, R3D-1: the task's current project is readable now, and each row's own project exists
+    // and is readable now (a deleted or unreadable project drops only its own rows).
     return readPage(
       db,
       actor,
       [
-        { taskId },
-        { projectId: { in: readable } },
-        {
-          organization: {
-            AND: [
-              readableProjectExistsWhere(actor, { tasks: { some: { id: taskId } } }),
-              stillReadableWhere(actor, readable),
-            ],
-          },
-        },
+        Prisma.sql`a."taskId" = ${taskId}`,
+        Prisma.sql`EXISTS (SELECT 1 FROM "Task" t JOIN "Project" tp ON tp.id = t."projectId"
+          WHERE t.id = ${taskId} AND t."organizationId" = ${actor.orgId}
+            AND ${readableProjectSql("tp", actor)})`,
+        projectReadableSql(ROW_PROJECT, actor),
       ],
       opts,
     );
@@ -429,8 +418,8 @@ export async function listTaskActivity(
 
 /**
  * A team's feed (MEMBER and the team in the organization, review C2 and C5): rows with teamId =
- * the team whose projectId is null or names a project the reader can read now; the access term
- * sits inside the paged statement.
+ * the team whose projectId is null or names a project that exists and the reader can read now;
+ * the access terms sit inside the paged statement, per row.
  */
 export async function listTeamActivity(
   actor: ProjectActor,
@@ -444,17 +433,16 @@ export async function listTeamActivity(
       select: { id: true },
     });
     if (!team) refuse("NOT_FOUND");
-    const readable = await readableNamedProjects(db, actor, { teamId });
     await afterReadCheck(db, "listTeamActivity");
+    // K73, R3D-1: the actor's current membership (readPage), and each row with a project needs
+    // that project to exist and be readable now (a deleted or unreadable project drops only its
+    // own rows).
     return readPage(
       db,
       actor,
       [
-        { teamId },
-        { OR: [{ projectId: null }, { projectId: { in: readable } }] },
-        // K73: the actor's current membership, and no project of the readable set has become
-        // unreadable since it was read.
-        { organization: stillReadableWhere(actor, readable) },
+        Prisma.sql`a."teamId" = ${teamId}`,
+        Prisma.sql`(a."projectId" IS NULL OR ${projectReadableSql(ROW_PROJECT, actor)})`,
       ],
       opts,
     );
