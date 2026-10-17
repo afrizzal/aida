@@ -427,7 +427,8 @@ export const PROJECT_OPERATIONS = Object.freeze({
   listTaskActivity: op("activity", "READ", "NONE", [], "TARGET"),
   listTeamActivity: op("activity", "MEMBER", "NONE", [], "TEAM"),
   // K72 (Codex diff D3): an ALIAS resolves only while its origin project is readable; otherwise,
-  // and when that project was deleted, NOT_FOUND identical to a missing key.
+  // and when that project was deleted, NOT_FOUND identical to a missing key. K73: kind, origin
+  // access and the task's current project are decided in one statement.
   resolveTaskKey: op("keys", "READ", "NONE", [], "KEY"),
   createTask: op("tasks", "CONTENT", "PROJECT_SHARE", ["TASK_CREATED"], "TARGET"),
   getTask: op("tasks", "READ", "NONE", [], "TARGET"),
@@ -455,7 +456,8 @@ export const PROJECT_OPERATIONS = Object.freeze({
   deleteMilestone: op("milestones", "MANAGE", "PROJECT_UPDATE", ["MILESTONE_DELETED"], "TARGET"),
   setTaskMilestone: op("milestones", "CONTENT", "PROJECT_SHARE", ["TASK_UPDATED"], "TARGET"),
   // Codex diff D1: the content reads (comments, attachment lists, download) carry the current read
-  // predicate in their content query, inside one read transaction.
+  // predicate in their content query, inside one read transaction. K73: so does every query of
+  // every read, and the predicate includes the actor's current organization membership.
   listTaskComments: op("comments", "READ", "NONE", [], "TARGET"),
   addTaskComment: op("comments", "CONTENT", "PROJECT_SHARE", ["COMMENT_ADDED"], "TARGET"),
   editTaskComment: op("comments", "AUTHOR", "PROJECT_SHARE", ["COMMENT_EDITED"], "TARGET"),

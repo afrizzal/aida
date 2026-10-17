@@ -6,7 +6,7 @@
 // (TaskKey) keeps every key a task ever had: ACTIVE for the current key, ALIAS for a key a move
 // replaced, TOMBSTONE for the keys of a deleted task (class 5). TaskKey has no foreign key to Task
 // or Project (C5), so the resolver re-reads the task with the read predicate before it answers.
-import { readableProjectWhere } from "./access";
+import { readableProjectSql, refuseUnreadable } from "./access";
 import {
   formatTaskKey,
   normalizeTaskKey,
@@ -14,7 +14,7 @@ import {
   type ProjectResult,
   TASK_NUMBER_MAX,
 } from "./contract";
-import { isPlausibleId, type ProjectDb, refuse, runProjectRead } from "./service";
+import { afterReadCheck, isPlausibleId, type ProjectDb, refuse, runProjectRead } from "./service";
 
 /**
  * The next task number of the project: `UPDATE ... SET "lastNumber" = "lastNumber" + 1 ... AND
@@ -95,7 +95,7 @@ export interface ResolvedTaskKey {
  * missing key or a TOMBSTONE is NOT_FOUND; an ALIAS whose origin project the reader cannot read now,
  * or whose origin project was deleted, is NOT_FOUND too (K72); otherwise the task is read through
  * the read predicate with the organization term, and no access is NOT_FOUND, identical to a key
- * that exists nowhere. Returns the task's current key and whether the given key is an alias.
+ * that exists nowhere. One statement decides all of it (K73). Returns the task's current key and whether the given key is an alias.
  */
 export async function resolveTaskKey(
   actor: ProjectActor,
@@ -104,32 +104,34 @@ export async function resolveTaskKey(
   return runProjectRead(actor, "resolveTaskKey", async (db) => {
     const normalized = typeof key === "string" ? normalizeTaskKey(key) : null;
     if (normalized === null) refuse("NOT_FOUND");
-    const row = await db.taskKey.findFirst({
-      where: { organizationId: actor.orgId, normalizedKey: normalized },
-      select: { taskId: true, projectId: true, kind: true },
-    });
-    if (!row || row.kind === "TOMBSTONE") refuse("NOT_FOUND");
-    // K72 (Codex diff D3, charter rule 4): an ALIAS also needs read access to the project the key
-    // was issued in, so an old key reveals nothing about a project the reader cannot read now.
-    if (row.kind === "ALIAS") {
-      const origin = await db.project.findFirst({
-        where: {
-          AND: [{ id: row.projectId, organizationId: actor.orgId }, readableProjectWhere(actor)],
-        },
-        select: { id: true },
-      });
-      if (!origin) refuse("NOT_FOUND");
-    }
-    const task = await db.task.findFirst({
-      where: { id: row.taskId, organizationId: actor.orgId, project: readableProjectWhere(actor) },
-      select: { id: true, key: true, projectId: true },
-    });
-    if (!task) refuse("NOT_FOUND");
+    await afterReadCheck(db, "resolveTaskKey");
+    // K73 (Codex diff round 2, R2D-3): one statement decides the key's kind, the alias origin's
+    // read access (K72: an ALIAS needs read access to the project the key was issued in, and a
+    // deleted origin no longer resolves) and the read access to the task's current project, so
+    // no move, privacy change or membership removal can fall between those decisions.
+    const found = await db.$queryRaw<
+      { id: string; key: string; projectId: string; kind: string }[]
+    >`
+      SELECT t.id, t.key, t."projectId", k.kind::text AS kind
+      FROM "TaskKey" k
+      JOIN "Task" t ON t.id = k."taskId" AND t."organizationId" = k."organizationId"
+      JOIN "Project" p ON p.id = t."projectId" AND p."organizationId" = t."organizationId"
+      WHERE k."organizationId" = ${actor.orgId}
+        AND k."normalizedKey" = ${normalized}
+        AND k.kind::text IN ('ACTIVE', 'ALIAS')
+        AND ${readableProjectSql("p", actor)}
+        AND (k.kind::text = 'ACTIVE' OR EXISTS (
+          SELECT 1 FROM "Project" o
+          WHERE o.id = k."projectId" AND o."organizationId" = k."organizationId"
+            AND ${readableProjectSql("o", actor)}))
+    `;
+    const task = found[0];
+    if (!task) return refuseUnreadable(db, actor);
     return {
       taskId: task.id,
       key: task.key,
       projectId: task.projectId,
-      isAlias: row.kind === "ALIAS",
+      isAlias: task.kind === "ALIAS",
     };
   });
 }
