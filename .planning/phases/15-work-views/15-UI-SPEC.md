@@ -1,7 +1,7 @@
 ---
 phase: "15"
 slug: "work-views"
-status: draft
+status: approved
 shadcn_initialized: true
 preset: "radix-nova (base radix, baseColor neutral, icon lucide; components.json, registries {})"
 created: "2026-11-10"
@@ -1036,3 +1036,5 @@ No third-party registry (`components.json` `registries: {}`). The drawer wrapper
 3. K85: Timeline menu and copy agree (no "Set date…" on the Timeline); added the "Set dates button" copy row and its focus target for Timeline Unscheduled rows; a cancelled Timeline drag returns focus to the label-cell Move button, with the new "Announce cancelled (Timeline)" row.
 4. Spacing: no 12px on new Phase 15 surfaces (Board cards `p-4`, column header `px-2`, table cells `px-2 py-2`, List and project list rows `px-6 py-2`); chip `py-0.5` is stated as the existing `Badge` component's own padding.
 5. Typography: the `EmptyState` body's 14px is stated as inherited, not a new size.
+
+**Approval (run-loop orchestrator, 2026-11-10):** gsd-ui-checker reviewed the spec in three split passes (the first single run ran out of context without a verdict): pass 3 Registry Safety, Inventory Provenance, no new package (K78), clean-room and no claimed pass: PASS; pass 2 Visuals, Color, Typography: PASS, Spacing: BLOCK; pass 1 Copywriting: BLOCK, K85 FLAG, P1 to P4 stated: PASS. Revision 1 fixed both blocks and the flags; a recheck of Dimensions 1 and 5 passed. Dimensions 2, 3, 4, 6 and 7 were not rechecked after revision 1. No human visual, dark-mode, contrast or screen-reader pass is recorded.
