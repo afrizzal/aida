@@ -92,8 +92,8 @@ Installed: avatar, badge, button, card, checkbox, command, dialog, dropdown-menu
 | 2xl / 3xl | 48 / 64px | Not used |
 
 Exceptions (multiples of 4, all inherited or fixed sizes, none invented):
-- 12px (`px-3`, `p-3`, `py-3`): Board card padding, table cell horizontal padding, List row padding `px-6 py-3` (the existing `/kb` and inbox row padding [code]).
-- Chips keep `h-5 px-2 py-0.5` (2px inside a fixed 20px height) [P12].
+- No 12px on new Phase 15 surfaces: Board cards `p-4`, Board column header `px-2`, table cells `px-2 py-2`, List rows and project list rows `px-6 py-2` (all on the 4/8/16/24/32 scale).
+- Chips keep `h-5 px-2 py-0.5` (2px inside a fixed 20px height) [P12]: `py-0.5` is the existing `Badge` component's own internal padding (component-owned), not a phase spacing choice; no Phase 15 markup sets 2px.
 - Icon-only buttons are `size-8` (32px). Inside dense rows (List row Move, Board card Move) they stay `size-8`; the Calendar day "Add task" button is `icon-sm` (28px) inside a 112px-high cell [RL]. 44px touch targets are not claimed; touch feel is a human item.
 
 Sizes, not spacing (binding values):
@@ -116,7 +116,7 @@ Sizes, not spacing (binding values):
 | Title | 15px (`text-[15px]`) | 600 | 1.2 | `DialogTitle`, card headings, group headers, drawer task title, calendar range heading (`tracking-tight`) |
 | Page title | 18px (`text-[18px]`) | 600 | 1.2 | `<h1>` of `/projects`, project name, task page title, workspace pages (`tracking-tight`) |
 
-- Explicit `text-[Npx]` only [DS §3, §8 rule 6]. `text-[14px]` appears only inside the existing `EmptyState` body and sidebar nav items [code], never in new text.
+- Explicit `text-[Npx]` only [DS §3, §8 rule 6]. `text-[14px]` appears only inside the existing `EmptyState` body and sidebar nav items [code], never in new text. The existing `EmptyState` body renders 14px (inherited from the component, DESIGN-SYSTEM line ~87), not a new size.
 - Overrides as [P12]: `DropdownMenuItem`, `SelectTrigger`, `SelectItem`, `Input`, `Textarea`, `Button size="sm"` and `Button` → `text-[13px]`; `DialogTitle` → `text-[15px] font-semibold tracking-tight`; `DialogDescription` → `text-[13px]`.
 - Two weights for new text: 400 and 600. Existing 500 in the sidebar is untouched.
 - Task keys and file sizes use `tabular-nums`; keys use `font-mono text-[12px] text-muted-foreground` [RL]. Counts use `tabular-nums`.
@@ -213,7 +213,7 @@ Layout `flex flex-col gap-6 px-6 py-6`:
    - Form switch, right-aligned: segmented control with icon buttons `LayoutGrid` "Grid", `List` "List", `Table2` "Table" (`aria-label` and Tooltip). The chosen form is stored in view state `PROJECT_LIST` [CTX D-18]; not in the URL.
 3. Results (one server page, the same data for all three forms):
    - **Grid**: `Card border-border/70 shadow-sm p-4 space-y-4` per project, the whole card a link to `/projects/{id}` except its buttons. Row 1: project icon box (`size-8 rounded-lg`, colour map `iconBox`, icon `size-4`), name (15px 600, `line-clamp-2`), favorite toggle (icon button) at the end. Row 2: key prefix (mono 12px muted), project status chip, "Private" chip when private. Row 3: progress bar and 12px muted "Progress line"; due date 12px ("Due {date}", overdue rule of Color).
-   - **List**: `divide-y divide-border` rows `flex items-center gap-4 px-6 py-3 hover:bg-muted/50`: icon box `size-6`, name (13px 600, truncate), key, status chip, Private chip, progress bar `w-[120px]` with percent, due, favorite toggle.
+   - **List**: `divide-y divide-border` rows `flex items-center gap-4 px-6 py-2 hover:bg-muted/50`: icon box `size-6`, name (13px 600, truncate), key, status chip, Private chip, progress bar `w-[120px]` with percent, due, favorite toggle.
    - **Table**: native `<table>` (`w-full text-[13px]`, header `text-[12px] text-muted-foreground font-semibold`, rows `border-b border-border/70`): Name (with icon), Key, Status, Progress, Due date, Privacy, Favorite. Not editable here [RL].
    - Each favorite toggle: `Button variant="ghost" size="icon"` with `aria-pressed`, `aria-label` "Favorite project label" / "Unfavorite project label"; calls `favoriteProject`/`unfavoriteProject`; optimistic only after success (no optimistic flip) [RL].
    - In "Archived" scope every card or row also shows the "Archived" chip and a "Restore" outline `size="sm"` button (`ArchiveRestore`).
@@ -227,21 +227,21 @@ States: empty (no project at all, Current scope) EmptyState `FolderKanban` "Proj
 
 All are `Dialog` `sm:max-w-[520px]`, body `space-y-4`, footer secondary first, primary last; pending label on the primary, all controls disabled, Esc and outside click do not close while pending [P12]. Refusals render in an `outcome-callout` above the footer (`role="alert"`, `tabIndex={-1}`).
 
-**3a. Create project** (from "New project"): Name (`Input`, required, 1 to 80, help "Name help"); Key prefix (`Input`, uppercase on input, 2 to 10, help "Key prefix help"; suggested from the name's first letters until the user edits it [RL]); Colour (`role="radiogroup"` of ten `size-8` swatch buttons, each a `dot` circle `size-4` with a visible ring when checked and `aria-label` the colour name; default gray); Icon (a `Popover` grid of the 25 icons, each `aria-label` the icon name in sentence case; default "folder"); Private (`Switch`, label "Private project", help "Private help"). Footer "Cancel" / "Create project". Success: navigates to `/projects/{id}` (Overview), `toast.success` "Project created toast".
+**3a. Create project** (from "New project"): Name (`Input`, required, 1 to 80, help "Name help"); Key prefix (`Input`, uppercase on input, 2 to 10, help "Key prefix help"; suggested from the name's first letters until the user edits it [RL]); Colour (`role="radiogroup"` of ten `size-8` swatch buttons, each a `dot` circle `size-4` with a visible ring when checked and `aria-label` the colour name; default gray); Icon (a `Popover` grid of the 25 icons, each `aria-label` the icon name in sentence case; default "folder"); Private (`Switch`, label "Private project", help "Private help"). Footer "Close without creating" / "Create project". Success: navigates to `/projects/{id}` (Overview), `toast.success` "Project created toast".
 
-**3b. Edit project** (header "Edit project", or menu): same fields plus Description (`Textarea` Markdown, up to 5000, help "Description help"), Status (`Select`), Due date (`Input type="date"`, optional, "Clear date" link). Saves with `updateProject`, `setProjectStatus`, `setProjectPrivacy` and `changeProjectKeyPrefix` only for fields that changed, in that order, stopping at the first refusal [RL]. When the prefix changed, a warning notice under the field: "Prefix change notice". When Private flips on, a warning notice: "Private on notice"; when it flips off: "Private off notice". Footer "Cancel" / "Save changes". Success toast "Project saved toast". A refusal after an earlier call succeeded says so: callout "Partial save" with the refusal row [RL].
+**3b. Edit project** (header "Edit project", or menu): same fields plus Description (`Textarea` Markdown, up to 5000, help "Description help"), Status (`Select`), Due date (`Input type="date"`, optional, "Clear date" link). Saves with `updateProject`, `setProjectStatus`, `setProjectPrivacy` and `changeProjectKeyPrefix` only for fields that changed, in that order, stopping at the first refusal [RL]. When the prefix changed, a warning notice under the field: "Prefix change notice". When Private flips on, a warning notice: "Private on notice"; when it flips off: "Private off notice". Footer "Close without saving" / "Save changes". Success toast "Project saved toast". A refusal after an earlier call succeeded says so: callout "Partial save" with the refusal row [RL].
 
-**3c. Duplicate project**: radio group "With tasks" / "Without tasks" (default without [RL]); Name prefilled "{name} (copy)"; Key prefix empty, required. Footer "Cancel" / "Duplicate project". Success navigates to the copy and toasts "Project duplicated toast".
+**3c. Duplicate project**: radio group "With tasks" / "Without tasks" (default without [RL]); Name prefilled "{name} (copy)"; Key prefix empty, required. Footer "Close without duplicating" / "Duplicate project". Success navigates to the copy and toasts "Project duplicated toast".
 
 **3d. Delete project**: title "Delete project title"; description "Delete project description"; warning notice "Delete project warning"; `Input` labelled "Type project name label" (`autocomplete="off"`); destructive "Delete project" disabled until the typed text equals the name exactly (the server re-checks `confirmName`). Footer "Keep project" (outline, initial focus) / "Delete project". Success: navigates to `/projects`, toast "Project deleted toast".
 
 **3e. Archive and restore**: no dialog [RL]; archive is reversible. "Archive project" in the menu calls `archiveProject`, toast "Project archived toast" with no undo button; "Restore project" calls `restoreProject`, toast "Project restored toast".
 
-**3f. Members dialog** (`sm:max-w-[640px]`, from Overview "Manage members" or the menu): list of direct members `divide-y`, each row Avatar, name, 12px muted email, role `Select` (Manager, Member), icon button "Remove member label" (`X`). Add row at top: `Select` "Add member placeholder" of eligible workspace members [see Planner point P1], role `Select` (default Member), outline "Add". Each change saves on its own; LAST_MANAGER and NOT_ELIGIBLE render their rows inline under the affected row (`role="alert"`). Removing yourself shows a confirm dialog "Remove yourself title/description" [RL]. Footer "Done". Non-managers see the list read-only with the 12px line "Members read-only".
+**3f. Members dialog** (`sm:max-w-[640px]`, from Overview "Manage members" or the menu): list of direct members `divide-y`, each row Avatar, name, 12px muted email, role `Select` (Manager, Member), icon button "Remove member label" (`X`). Add row at top: `Select` "Add member placeholder" of eligible workspace members [see Planner point P1], role `Select` (default Member), outline "Add member". Each change saves on its own; LAST_MANAGER and NOT_ELIGIBLE render their rows inline under the affected row (`role="alert"`). Removing yourself shows a confirm dialog "Remove yourself title/description" [RL]. Footer "Close members". Non-managers see the list read-only with the 12px line "Members read-only".
 
-**3g. Labels dialog** (`sm:max-w-[640px]`): rows with the label chip, name `Input` (1 to 40), colour swatches (as 3a, compact `size-7`), "Delete label" icon button (opens a confirm: "Delete label title/description", destructive "Delete label"). Add row "New label name" + colour + "Add label". NAME_TAKEN inline. Footer "Done".
+**3g. Labels dialog** (`sm:max-w-[640px]`): rows with the label chip, name `Input` (1 to 40), colour swatches (as 3a, compact `size-7`), "Delete label" icon button (opens a confirm: "Delete label title/description", destructive "Delete label"). Add row "New label name" + colour + "Add label". NAME_TAKEN inline. Footer "Close labels".
 
-**3h. Milestones dialog** (`sm:max-w-[640px]`): rows name, due date, 12px muted task count when the service returns one; "Edit" opens an inline form (Name 1 to 80, Due date, Description up to 2000) with "Save changes" / "Cancel"; "Delete milestone" confirm "Delete milestone title/description". Add form at the top "Add milestone". Footer "Done".
+**3h. Milestones dialog** (`sm:max-w-[640px]`): rows name, due date, 12px muted task count when the service returns one; "Edit" opens an inline form (Name 1 to 80, Due date, Description up to 2000) with "Save changes" / "Discard changes"; "Delete milestone" confirm "Delete milestone title/description". Add form at the top "Add milestone". Footer "Close milestones".
 
 **3i. Project actions menu** (`Ellipsis`, `aria-label` "Project actions label"), in this order: Edit project…, Members…, Labels…, Milestones…, separator, Copy link, Favorite/Unfavorite, Duplicate project…, separator, Archive project / Restore project, Delete project… (destructive item text `text-destructive`). In an archived project every edit item is disabled with the 12px reason "Archived reason"; Restore, Delete, Copy link and Favorite stay enabled [CTX specifics, contract §10]. Items the actor may not use (not a manager) are disabled with "Manager only reason" [RL: disabled with reason, never hidden, as P12].
 
@@ -293,7 +293,7 @@ One `TaskView` component renders both; one loader feeds it.
 - **Milestone**: `Select` with "No milestone"; `setTaskMilestone`.
 - **Repeats**: `Select` Does not repeat / Daily / Weekly / Monthly; `setTaskRecurrence`. On a subtask it is disabled with "Recurrence subtask reason".
 - Every save shows `Loader2 size-3` next to the field while pending, `aria-busy` on the field. Success needs no toast; the field shows the saved value.
-- **Description**: rendered Markdown (sanitized path) with outline `size="sm"` "Edit description". Editing: `Textarea min-h-[240px] font-mono text-[13px]` (up to 20,000, help "Description help"), segmented "Write" / "Preview" (`aria-pressed`; preview rendered on the server through `renderTaskMarkdown`), buttons "Cancel" and primary "Save description". Empty: muted "No description".
+- **Description**: rendered Markdown (sanitized path) with outline `size="sm"` "Edit description". Editing: `Textarea min-h-[240px] font-mono text-[13px]` (up to 20,000, help "Description help"), segmented "Write" / "Preview" (`aria-pressed`; preview rendered on the server through `renderTaskMarkdown`), buttons "Discard changes" and primary "Save description". Empty: muted "No description".
 - **Subtasks** (top-level tasks only): heading "Subtasks heading" with count; rows `flex items-center gap-2 py-2`: status `Select` (compact, chip trigger), key, title link (opens that subtask in the same drawer route), a Move menu with "Move up", "Move down", "Move to top" (no drag [RL]). Composer "Add subtask" (Surface 9c pattern). On a subtask: no Subtasks section; instead "Parent line" with a link.
 - **Attachments**: heading with count; outline "Upload files" (`Upload`, hidden `<input type="file" multiple>`; accept list from `ALLOWED_MIME`), 12px muted "Upload help". Rows: type icon (`FileImage` for images, `FileText` for PDF and text, `File` else), name (truncate), size, uploader, `LocalDateTime`, icon buttons "Download {name}" (`Download`, plain link to the download route) and "Delete {name}" (`Trash2`, confirm dialog "Delete file title/description"). Upload pending: "Uploading {n} files…" line with `Loader2`; success line `role="status"` "Upload success"; refusal callout. No preview or thumbnail [K83].
 - **Comments**: list oldest first, each Avatar, author, `LocalDateTime`, "(edited)" marker, body rendered through the sanitized path; own comments have "Edit" and authors or managers have "Delete" (confirm "Delete comment title/description"). Composer `Textarea` (placeholder "Comment placeholder", up to 10,000) and primary "Add comment". Empty: muted "No comments".
@@ -325,10 +325,10 @@ One `TaskView` component renders both; one loader feeds it.
 
 ## Surface 9 — List view `/projects/[id]/list` [REQ AIDA-74, CTX D-10, K86]
 
-- Rows under group headers, `role="list"` per group; each row `group flex items-center gap-2 px-6 py-3 border-b border-border/70 text-[13px] hover:bg-muted/50`, `bg-primary/5` when selected: `Checkbox` "Select {key}"; status chip; key; title link (opens the drawer); label chips (max 2 + "+{n}"); milestone (12px muted); due date; priority chip; assignee Avatar (`title` and sr-only name, or `User` icon "Unassigned"); Move menu is not offered in List (List has no drag) [RL].
+- Rows under group headers, `role="list"` per group; each row `group flex items-center gap-2 px-6 py-2 border-b border-border/70 text-[13px] hover:bg-muted/50`, `bg-primary/5` when selected: `Checkbox` "Select {key}"; status chip; key; title link (opens the drawer); label chips (max 2 + "+{n}"); milestone (12px muted); due date; priority chip; assignee Avatar (`title` and sr-only name, or `User` icon "Unassigned"); Move menu is not offered in List (List has no drag) [RL].
 - Per-group "Load more" (keyset) in the group footer; "Load more" never selects anything.
 - **Selection**: click toggles; Shift+click selects the range between the last clicked and this row among loaded rows only. Toolbar checkbox "Select all loaded" selects the loaded, visible rows of expanded groups and the label reads "Select all loaded label". Nothing hidden or unloaded is selected; collapsing a group removes its rows from the selection [RL].
-- **Bulk bar** (`sticky bottom-0 z-10 border-t border-border/70 bg-background/95 px-4 py-2 backdrop-blur-sm space-y-2`, the ticket bulk bar shape [code]) appears with one or more selected: `aria-live="polite"` 13px 600 "Selected count"; outline "Clear selection"; 12px muted "Bulk all or none"; pickers as outline `size="sm"` dropdowns: Status, Assignee, Priority, Start date (popover with date input + "Apply" / "Clear date"), Due date (same), Milestone, Add labels, Remove labels (checkbox list + "Apply"). Above 100 selected every picker is `aria-disabled` with "Bulk too many reason". Pending: pickers disabled, line "Bulk applying". Success: toast "Bulk success toast", selection cleared, list reloads. Refusal: callout (`role="alert"`) with "Nothing was changed." + the code row; selection kept. UNKNOWN: outcome-unknown row, pickers disabled until the reload finishes, selection kept.
+- **Bulk bar** (`sticky bottom-0 z-10 border-t border-border/70 bg-background/95 px-4 py-2 backdrop-blur-sm space-y-2`, the ticket bulk bar shape [code]) appears with one or more selected: `aria-live="polite"` 13px 600 "Selected count"; outline "Clear selection"; 12px muted "Bulk all or none"; pickers as outline `size="sm"` dropdowns: Status, Assignee, Priority, Start date (popover with date input + "Apply to selected" / "Clear date"), Due date (same), Milestone, Add labels, Remove labels (checkbox list + "Apply to selected"). Above 100 selected every picker is `aria-disabled` with "Bulk too many reason". Pending: pickers disabled, line "Bulk applying". Success: toast "Bulk success toast", selection cleared, list reloads. Refusal: callout (`role="alert"`) with "Nothing was changed." + the code row; selection kept. UNKNOWN: outcome-unknown row, pickers disabled until the reload finishes, selection kept.
 - No bulk archive or bulk delete [CTX D-10]. A move into Done may create repeat successors; the reload shows them and the copy says nothing about them.
 - Empty project: EmptyState `List` "Tasks empty heading/body" plus the quick add of the default group shown above it [RL]. No match: EmptyState `SearchX` "No match heading" with "Tasks no match body" and "Clear filters".
 
@@ -337,9 +337,9 @@ One `TaskView` component renders both; one loader feeds it.
 ## Surface 10 — Board `/projects/[id]/board` and workspace Board [REQ AIDA-75, CTX D-11, D-06, K77]
 
 - Scroll region `role="region" aria-label="Board" tabIndex={0} overflow-x-auto` containing `flex gap-4 items-start pb-4`; the page never scrolls sideways [CTX D-21].
-- Column `w-[280px] rounded-lg bg-muted/50 border border-border/70 flex flex-col max-h-[calc(100vh-220px)]`: header `flex h-10 items-center gap-2 px-3` with status chip, count (12px muted), icon button "Collapse column {status}" (`ChevronsLeft`); body `overflow-y-auto p-2 space-y-2` with cards; footer quick add (project only) and "Load more" for that column.
+- Column `w-[280px] rounded-lg bg-muted/50 border border-border/70 flex flex-col max-h-[calc(100vh-220px)]`: header `flex h-10 items-center gap-2 px-2` with status chip, count (12px muted), icon button "Collapse column {status}" (`ChevronsLeft`); body `overflow-y-auto p-2 space-y-2` with cards; footer quick add (project only) and "Load more" for that column.
 - Collapsed column `w-12` with a vertical label (`[writing-mode:vertical-rl]`, 13px 600) "{status} · {count}" and icon button "Expand column {status}" (`ChevronsRight`); cards are not loaded; drops onto a collapsed column are allowed and place the task at the top [RL]. Collapse state persists [CTX D-11].
-- Card `Card group relative p-3 space-y-2 text-[13px] border-border/70 shadow-sm cursor-grab`: row 1 key (mono 12px) + spacer + Move button (`Move` icon, `variant="ghost" size="icon"`, `aria-label` "Move {key}", always visible); title (13px 600, `line-clamp-2`, a link that opens the drawer); meta row `flex flex-wrap gap-1`: priority chip (if not None), label chips (max 2), due date, assignee Avatar `size-5`. Workspace cards add the project chip (dot + key prefix).
+- Card `Card group relative p-4 space-y-2 text-[13px] border-border/70 shadow-sm cursor-grab`: row 1 key (mono 12px) + spacer + Move button (`Move` icon, `variant="ghost" size="icon"`, `aria-label` "Move {key}", always visible); title (13px 600, `line-clamp-2`, a link that opens the drawer); meta row `flex flex-wrap gap-1`: priority chip (if not None), label chips (max 2), due date, assignee Avatar `size-5`. Workspace cards add the project chip (dot + key prefix).
 - **Pointer drag** (Pointer Events, starts after 4px movement so a click still opens the task): the card becomes `opacity-50`; a ghost follows the pointer; the drop indicator line shows between cards; dropping calls `reorderTask` with target status and `placeAfterTaskId` (the loaded card above, or null at the top). Escape during a drag cancels it: the card returns, live region "Move cancelled". `prefers-reduced-motion`: no ghost transition, no settle animation.
 - **Move menu** (keyboard alternative, Surface 16): project Board items "Move to {status}" (each other status; places at the top), "Move up", "Move down", "Move to top". "Move down" on the last loaded card when the column has more is disabled with "Move down needs load reason"; "Move up" and "Move to top" on the first card are disabled with "Already first reason".
 - **Workspace Board**: columns by status, cards ordered by due date (nulls last), key, id; no collapse persistence other than view state; drag across columns calls `setTaskStatus` with `expectedVersion`; dropping within a column does nothing and the indicator is not shown; Move menu offers only "Move to {status}" [K77]. 12px muted line under the toolbar: "Workspace board note".
@@ -350,7 +350,7 @@ One `TaskView` component renders both; one loader feeds it.
 
 ## Surface 11 — Table `/projects/[id]/table` and workspace Table [REQ AIDA-76, CTX D-12, K88]
 
-- Scroll region `overflow-x-auto` around `<table role="grid" aria-label="Tasks table">`; header row sticky (`sticky top-0 bg-background`), 12px 600 muted; cells `px-3 py-2 text-[13px] border-b border-border/70`; group header rows use 8b inside a full-width cell.
+- Scroll region `overflow-x-auto` around `<table role="grid" aria-label="Tasks table">`; header row sticky (`sticky top-0 bg-background`), 12px 600 muted; cells `px-2 py-2 text-[13px] border-b border-border/70`; group header rows use 8b inside a full-width cell.
 - Columns: Key, Title, Status, Priority, Assignee, Start date, Due date, Estimate, Labels, Milestone; workspace adds Project (read-only) and drops Milestone and Labels editing to read-only [RL: their pickers are per project]. Default visible: Key, Title, Status, Priority, Assignee, Due date.
 - **Keyboard (ARIA grid) [RL, resolves D-12]**: the grid is one Tab stop (roving `tabIndex`); arrow keys move the active cell; Enter or F2 starts editing; in editing, Enter commits, Escape cancels and restores the stored value, Tab commits and moves to the next editable cell in the row (Shift+Tab to the previous) and stays in the grid; Tab outside editing leaves the grid. Key and Project cells are not editable.
 - Editors: Title `Input`; Status, Priority, Assignee, Milestone `Select` (opens on Enter); Start and Due `Input type="date"`; Estimate `Input type="number"`; Labels a `Popover` checkbox list (max 20). Client checks: title 1 to 200, start ≤ due, estimate 0 to 1,000,000 whole minutes.
@@ -384,8 +384,8 @@ One `TaskView` component renders both; one loader feeds it.
 - Group headers 8b (collapsible) when grouped.
 - Today line per Color 5.
 - **Pointer drag** on a bar shifts both ends by whole days (snaps to the zoom's day width), one `setTaskDates` call with `expectedVersion` [K80]; Escape cancels. Pointer resize handles: **not built in this phase** [RL, CTX discretion]; one end changes through "Set dates…".
-- **Move menu** on each label cell (`Move` button): the four Calendar moves plus "Set dates…" (Dialog "Set dates title" with Start and Due inputs, primary "Set dates", "Date order error" client check).
-- Unscheduled: a collapsible section under the grid "Unscheduled heading" with "Set dates" per row.
+- **Move menu** on each label cell (`Move` button): the four Calendar moves plus "Set dates…" (Dialog "Set dates title" with Start and Due inputs, primary "Set dates", dismiss "Keep current dates", "Date order error" client check). The Timeline menu has no "Set date…" item.
+- Unscheduled: a collapsible section under the grid "Unscheduled heading" with outline `size="sm"` "Set dates button" per row (opens the "Set dates" Dialog; after success or close, focus returns to that row's "Set dates" button, or to the section heading if the task left the section).
 - Window bound 1000 as Calendar ("Too many tasks").
 
 ---
@@ -428,7 +428,7 @@ One `TaskView` component renders both; one loader feeds it.
   - Separator; "Save current view…" (`BookmarkPlus`).
   - When one is open: "Update "{name}"", "Rename…", "Delete…", "Close saved view".
 - Opening a view navigates to its view's tab with `?saved={id}` and applies its payload (filters, grouping, sort, columns, collapsed, zoom). The toolbar shows the active chip (Color 10) "Saved view chip" with an `X` button "Close saved view". While a saved view is open, changes are kept in the page and not written to view state; the chip adds 12px "Modified" when they differ from the saved payload [RL].
-- "Save current view" Dialog: Name (1 to 80), help "Save view help"; "Cancel" / "Save view". NAME_TAKEN inline field error. Rename Dialog: same field, "Save changes". Delete Dialog: "Delete view title/description", "Keep view" / destructive "Delete view".
+- "Save current view" Dialog: Name (1 to 80), help "Save view help"; "Close without saving" / "Save view". NAME_TAKEN inline field error. Rename Dialog: same field, "Keep current name" / "Save changes". Delete Dialog: "Delete view title/description", "Keep view" / destructive "Delete view".
 - Fail-closed states: unknown payload version: the chip reads the name, nothing is applied, and a warning notice "View unreadable notice" with destructive-outline "Delete view"; a stale label, milestone or assignee reference: warning notice "View stale notice" (filters still apply and match nothing) [CTX D-17]. `?saved=` for a missing view or another user's view: neutral notice "View not available notice", the stored view state applies; identical in both cases.
 - Allowed on archived projects [CTX D-17].
 
@@ -483,7 +483,8 @@ One `TaskView` component renders both; one loader feeds it.
 | Move menu opens | First enabled item |
 | Move menu item done (any view) | The moved item's Move button after reload; if it left the view, the column header or day cell |
 | Move refused / stale anchor | The same item's Move button after the column reload |
-| Pointer drag cancelled (Escape) | The dragged item's Move button |
+| Pointer drag cancelled (Escape) | The dragged item's Move button (Board card, Calendar item); a cancelled Timeline bar drag returns focus to that row's label-cell Move button; announced "Announce cancelled (Timeline)" |
+| Set dates from a Timeline Unscheduled row (success or close) | That row's "Set dates" button; the "Unscheduled" section heading (`tabIndex={-1}`) if the task left the section |
 | Column collapsed / expanded | The column's expand / collapse button |
 | Table cell commit (Enter) | The same cell, not editing |
 | Table cell commit (Tab) | The next editable cell, not editing |
@@ -516,8 +517,9 @@ English, final, used verbatim; each string lives in `src/lib/projects/ui-copy.ts
 | Primary CTA (view) | Save view |
 | Sidebar entries | Projects / Tasks |
 | Top bar titles | Projects / Tasks |
-| Cancel | Cancel |
-| Done (dialogs) | Done |
+| Form dialog dismiss | Create project: Close without creating / Edit project: Close without saving / Duplicate project: Close without duplicating / Save view: Close without saving / Rename view: Keep current name / Move task: Keep in this project / Set date: Keep current date / Set dates: Keep current dates / Add task on day: Close without adding |
+| Inline editor dismiss (milestone edit, task description) | Discard changes |
+| Management dialog close | Members: Close members / Labels: Close labels / Milestones: Close milestones |
 | Pending labels | Saving… / Creating… / Deleting… / Moving… / Loading… / Applying… |
 | Load more | Load more |
 | Reload | Reload |
@@ -589,7 +591,7 @@ English, final, used verbatim; each string lives in `src/lib/projects/ui-copy.ts
 | Archived reason | Restore the project to change this. |
 | Manager only reason | Only project managers can do this. |
 | Members title / description | Members / People who are direct members of this project. Managers can change settings and members. |
-| Add member placeholder / Add | Choose a person / Add |
+| Add member placeholder / Add member | Choose a person / Add member |
 | Role values | Manager / Member |
 | Remove member label | Remove {name} from the project |
 | Remove yourself title / description | Remove yourself? / You will lose access to this project if it is private. Someone else must add you back. |
@@ -712,7 +714,7 @@ English, final, used verbatim; each string lives in `src/lib/projects/ui-copy.ts
 | Clear selection | Clear selection |
 | Bulk all or none | Changes apply to every selected task, or to none if one can't be changed. |
 | Bulk pickers | Status / Assignee / Priority / Start date / Due date / Milestone / Add labels / Remove labels |
-| Bulk apply | Apply |
+| Bulk apply | Apply to selected |
 | Bulk too many reason | Select at most 100 tasks to change them together. |
 | Bulk applying | Applying to {n} tasks… |
 | Bulk success toast | {n} tasks updated. |
@@ -729,7 +731,7 @@ English, final, used verbatim; each string lives in `src/lib/projects/ui-copy.ts
 | Move button label | Move {key} |
 | Board moves | Move to {status} / Move up / Move down / Move to top |
 | Calendar moves | Earlier by a day / Later by a day / Earlier by a week / Later by a week / Set date… |
-| Timeline moves | Earlier by a day / Later by a day / Earlier by a week / Later by a week / Set date… / Set dates… |
+| Timeline moves | Earlier by a day / Later by a day / Earlier by a week / Later by a week / Set dates… |
 | Subtask moves | Move up / Move down / Move to top |
 | Move down needs load reason | Load more tasks in this column to move it further down. |
 | Already first reason | Already at the top. |
@@ -740,6 +742,7 @@ English, final, used verbatim; each string lives in `src/lib/projects/ui-copy.ts
 | Announce moved (order) | {key} moved up. / {key} moved down. / {key} moved to the top. |
 | Announce moved (dates) | {key} now runs {start} to {due}. / {key} is now on {date}. |
 | Announce cancelled | Move cancelled. |
+| Announce cancelled (Timeline) | {key} was not moved. Dates are unchanged. |
 | Board move refused | {key} was not moved. The column changed or the move was refused. The column was reloaded. |
 | Announce added | Task added. |
 | Announce refused | {key} was not changed. {reason} |
@@ -767,6 +770,7 @@ English, final, used verbatim; each string lives in `src/lib/projects/ui-copy.ts
 | More tasks | +{n} more |
 | Unscheduled heading / empty | Unscheduled / Every task has a date. |
 | Set date button | Set date |
+| Set dates button (Timeline Unscheduled rows) | Set dates |
 | Too many tasks | This range has more than 1,000 tasks, so it isn't drawn. Narrow the filter or pick a shorter range. |
 | Calendar zone note | Dates are calendar days and don't shift with your time zone. |
 | Zoom | Day / Week / Month |
@@ -1023,3 +1027,12 @@ No third-party registry (`components.json` `registries: {}`). The drawer wrapper
 - [ ] Dimension 7 Inventory Provenance: PENDING
 
 **Approval:** pending (left for gsd-ui-checker). No human visual pass is recorded.
+
+---
+
+**Revised (revision 1, after the UI checker):**
+1. Copywriting: removed the generic "Cancel" and "Done" rows; every form dialog has a specific dismiss label (Close without creating / saving / duplicating / adding, Keep current name / date / dates, Keep in this project), inline editors use "Discard changes", management dialogs close with "Close members" / "Close labels" / "Close milestones".
+2. "Add" became "Add member"; bulk "Apply" became "Apply to selected".
+3. K85: Timeline menu and copy agree (no "Set date…" on the Timeline); added the "Set dates button" copy row and its focus target for Timeline Unscheduled rows; a cancelled Timeline drag returns focus to the label-cell Move button, with the new "Announce cancelled (Timeline)" row.
+4. Spacing: no 12px on new Phase 15 surfaces (Board cards `p-4`, column header `px-2`, table cells `px-2 py-2`, List and project list rows `px-6 py-2`); chip `py-0.5` is stated as the existing `Badge` component's own padding.
+5. Typography: the `EmptyState` body's 14px is stated as inherited, not a new size.
