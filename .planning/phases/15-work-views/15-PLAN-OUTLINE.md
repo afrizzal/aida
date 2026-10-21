@@ -194,7 +194,7 @@ Additional planner decisions (gaps found while outlining, settled conservatively
   - Missing, unreadable, moved-away and revoked attachments, and a stored file that is gone, all get 404 `text/plain` "This file is not available.", byte-identical.
   - No member row gets 403 `text/plain` "You don't have access to this workspace.".
 - Upload `POST /api/projects/tasks/[taskId]/attachments`:
-  - A Content-Length above MAX_UPLOAD_FILES times MAX_BYTES plus 1 MiB gets 413 with `{ ok: false, code: "FILE_TOO_LARGE" }` before parsing.
+  - A Content-Length above MAX_UPLOAD_FILES times MAX_BYTES plus 1 MiB gets 413 with `{ ok: false, code: "FILE_TOO_LARGE" }` before parsing. **Superseded by K91 (plan check): one file per request, bound `UPLOAD_REQUEST_MAX_BYTES` = MAX_BYTES + 1 MiB; see 15-01 section 18.1.**
   - Otherwise the response is JSON: 200 `{ ok: true, ... }`, 404 NOT_FOUND, 403 MEMBERSHIP_ENDED, 422 for any other refusal code, and 500 `{ ok: false, code: "UNKNOWN" }` with no error text.
 - `src/proxy.ts` is unchanged, so both routes stay private.
 - The D-04 path list (convention 8).
@@ -350,5 +350,8 @@ A plan registers an operation in PROJECT_OPERATIONS (one line per operation) in 
 
 
 **Orchestrator amendment (2026-11-10, after plan 15-18):** 15-18 Task 3 proves the 768px layout on the Board, Table, Calendar and Timeline tabs and re-runs the 15-11 and 15-13 specs, so 15-18 depends on 15-11, 15-13, 15-14, 15-15, 15-16 and 15-17 and moves to wave 6. Plans that wait for it move one wave later: 15-21 to wave 7, 15-23 to wave 8, 15-24 to wave 9, 15-25 to wave 10. 15-19, 15-20 and 15-22 keep their waves (6, 6, 7). Plans run one at a time, so the extra waves cost no time.
+
+
+**Orchestrator amendment (2026-11-10, after the plan check):** run decisions K91 to K98 in `15-PLAN-CHECK.md` supersede this outline where they differ (upload one file per request; task-change signal module owned by 15-12; saved-view project check and the project filter round trip owned by 15-12; 53-week month windows; UNKNOWN proven in E2E; technical manual items decided). Plan files are authoritative after revision 1.
 
 ## OUTLINE COMPLETE
