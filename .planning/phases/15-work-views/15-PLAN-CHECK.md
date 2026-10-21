@@ -137,3 +137,16 @@ Every BLOCKER and WARNING is accepted unless stated. INFO items are adopted wher
 - **Owner items unchanged:** non-manager leaving a project (S4-I2) joins 15-o1's notes; 15-o1, 14-o1 to 14-o3 and O-1 stay open.
 
 Revision order: round A (name providers) 15-01, 15-05, 15-06, 15-12; round B the other affected plans in parallel batches; round C 15-24's manifest last. Each revised plan gets a `## Revision 1 (plan check)` changelog and re-runs both validators.
+
+## Revision 1 round A results and cascade into round B
+
+- **15-06** (`5948498`): month-zoom window is 53 weeks (371 days), Monday start to `endOfWeek` of the day before start plus 12 months; previous and next move by exactly one window (28, 112, 371 days). From 2026-11-09: window to 2027-11-14, next 2027-11-15, previous 2025-11-03 (its window ends 2026-11-08); heading "9 Nov 2026 – 14 Nov 2027". From the default start 2026-11-02 the previous window does not contain 2026-11-05, so an E2E that pages back to see 2026-11-05 opens with `?from=2026-11-09`. Day and week values unchanged.
+- **15-01** (`16eed34`): `UPLOAD_REQUEST_MAX_BYTES` (11,534,336) exported from `contract.ts`; upload form field `files`; 413 FILE_TOO_LARGE; 422 TOO_MANY field `files`; download 200 headers include `Content-Security-Policy: sandbox`; 18.2 combination order window, then unscheduled, then parentId, cursor last; 18.1 rows updated; 18.6 month window 53 weeks; `bulk.ts` unchanged.
+- **15-05** (this commit): gap rows G1 to G11 now exist in 15-05 (G3 `INVALID_INPUT_GENERAL`; G4 to G11 singular count rows `progressLineOne`, `RESULTS_COUNT_ANNOUNCED_PROJECTS_ONE`, `RESULTS_COUNT_ANNOUNCED_TASKS_ONE` "1 task shown", `UPLOADING_LINE_ONE`, `UPLOAD_SUCCESS_ONE` "1 file uploaded.", `SELECT_ALL_LOADED_LABEL_ONE`, `BULK_APPLYING_ONE`, `BULK_SUCCESS_TOAST_ONE`). Callers always call the count function. Later plans append gap rows from the next free number at execution time and never assume a fixed number or total. `bulkUpdateTasks` TOO_MANY: field `taskIds` gives `TOO_MANY_BULK`, otherwise `TOO_MANY_LABELS`.
+- **Cascade (round B must apply):**
+  - 15-09 hard-codes gap rows G3 to G5 and a `grep -c 'Gap row G'` count of 5 (lines 49, 185, 370, 410, 497, 533): switch to "next free G number at execution time" and a relative check (per-name `grep -q`). (15-09 was listed as no-change; it now needs this revision.)
+  - 15-21 must not define `UPLOAD_SUCCESS_ONE` or `UPLOADING_ONE` (duplicate exports would not compile): call `uploadSuccess(n)` and `uploadingLine(n)`.
+  - Literal "1 tasks shown" assertions in 15-14 (line 398), 15-16 (429), 15-17 (443), 15-22 (298) become the output of `resultsCountAnnouncedTasks(1)` ("1 task shown").
+  - Move-surface INVALID_INPUT text expected in 15-16 (line 236) and 15-17 (246) becomes the G3 text, except where the plan's own field-specific row takes precedence.
+  - 15-13 removes the manual items at lines 403 and 433 and passes field `taskIds` on its local over-100 refusal.
+  - Every plan that numbers gap rows uses the next free number at execution time.
