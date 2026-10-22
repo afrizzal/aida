@@ -354,4 +354,7 @@ A plan registers an operation in PROJECT_OPERATIONS (one line per operation) in 
 
 **Orchestrator amendment (2026-11-10, after the plan check):** run decisions K91 to K98 in `15-PLAN-CHECK.md` supersede this outline where they differ (upload one file per request; task-change signal module owned by 15-12; saved-view project check and the project filter round trip owned by 15-12; 53-week month windows; UNKNOWN proven in E2E; technical manual items decided). Plan files are authoritative after revision 1.
 
+
+**Orchestrator amendment (2026-11-10, revision 1):** 15-22 depends on 15-21 (ordered append-only copy edits) and moves to wave 8 beside 15-23; 15-24 stays wave 9, 15-25 wave 10.
+
 ## OUTLINE COMPLETE
