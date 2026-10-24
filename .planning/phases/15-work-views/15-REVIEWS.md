@@ -23,3 +23,9 @@ Answer: `.planning/run-loop/codex/fase15-plan-jawab.md`. Verdict: plans not yet 
 - **K103 Upload body bounded by actual bytes.** 15-01 amends 18.1: the upload route reads the request body with a running byte count and refuses 413 FILE_TOO_LARGE as soon as the bytes read exceed `UPLOAD_REQUEST_MAX_BYTES`, before multipart parsing, whatever Content-Length says; then parses the buffered body. 15-21 implements it and tests a small valid file plus a large extra field (413, nothing written) and a header lower than the body (413, nothing written).
 
 Revision order: 15-12 and 15-01 first (providers), then 15-21, 15-22, and the views for K102 (15-14, 15-15, 15-16, 15-17, 15-20), then 15-08's stated limitation note. Cycle 2 of the Codex review follows the revision.
+
+### Revision 2 notes
+
+- Providers committed: 15-01 (`71cf9d7`), 15-22 K101 (`a12cf4e`), 15-21 (`dbc7791`), 15-12 (`8cf9408`), 15-15 K102 (`a844216`).
+- Defect found during the K102 follow-ups (15-15 reviser): 15-12's generation advanced only in `notifyTasksChanged`, but every K102 E2E dispatches the plain `aida:tasks-changed` window event, so the counter would not move and the tests would fail. Fix (revision 2b of 15-12): one module-level window listener counts every event; `notifyTasksChanged` only dispatches. The 15-15 test 18 carries a stop-and-report precondition for this.
+- 15-15 hand-off: `useTableData` owns the adoption watch and exposes `TableDataApi.beginNavigation(nextQueryKey)`; the workspace Table only calls it before navigations.
