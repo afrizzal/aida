@@ -31,3 +31,23 @@ Revision order: 15-12 and 15-01 first (providers), then 15-21, 15-22, and the vi
 - 15-15 hand-off: `useTableData` owns the adoption watch and exposes `TableDataApi.beginNavigation(nextQueryKey)`; the workspace Table only calls it before navigations.
 - 15-12 revision 2b committed (`f6f3a7f`): the generation counts every plain window event, which the K102 tests of 15-12, 15-14, 15-15, 15-16, 15-17, 15-20 and 15-22 rely on. K102 follow-ups committed: 15-15 (`a844216`), 15-16 (`117e428`), 15-17 (`eba0341`), 15-14 (`8ef76d0`), 15-22 (this commit).
 - Open item for the cycle-2 review (found by the 15-22 reviser, not yet decided): the 15-16 and 15-17 Set date and Set dates dialogs switch to the fresh task version after any reload (signal or K102 follow-up), which may conflict with the open-editor version rule (an open editor keeps the version it opened on); 15-22 reuses the dialogs unchanged.
+
+### Cycle 2 (2026-11-10, export of `fa3efd5`, model gpt-6.1-terra, effort xhigh)
+
+Answer: `.planning/run-loop/codex/fase15-plan-r2-jawab.md`. Verdict: not yet ready; 3 HIGH, 1 MEDIUM. CX1-1, CX1-3 and CX1-5 judged closed in design; CX1-2 and CX1-4 closed for the tested orders with the gaps below. No private-project oracle or other deadlock found on the paths read (targeted reading).
+
+| ID | Sev | Finding | Disposition |
+|----|-----|---------|-------------|
+| CX2-1 | HIGH | 15-16 (line 370) and 15-17 (line 248) date dialogs keep the input but switch to the newest task version after a reload, so a stale submit can overwrite a change the user never saw (also the Calendar's paired-date math). Answers the open item from revision 2. | Accepted, **K104**. |
+| CX2-2 | HIGH | The 15-12 saver registry key is (scope, projectId, viewKind) only and its queue survives until a document load; sign-out and sign-in use client navigation (verified in code: `src/components/user-menu.tsx:37`, `src/app/(auth)/login/login-form.tsx:75`), so user A's queued state could be sent under user B's session and overwrite B's preference, across accounts or organizations. | Accepted, **K105**. |
+| CX2-3 | HIGH | A view mounting while the saver is busy initialises its controls from props only (15-12 line 284), so a new choice built on the stale base overwrites the queued one (A stored, B held, return, C built from A: B's change lost); the K100 test (line 299) even expects that outcome. | Accepted, **K106**. |
+| CX2-4 | MEDIUM | The frame Reload is limited to one extra refresh (15-12 line 476); a signal arriving after the second refresh's read but before adoption can still mount stale data. | Accepted, **K107**. |
+
+### Run decisions from cycle 2
+
+- **K104 Date dialogs keep their opening snapshot.** In 15-16 and 15-17 (reused by 15-22) Set date and Set dates keep the task snapshot and `expectedVersion` taken when the dialog opened; background reloads never replace them; a stale submit gets CONFLICT with the input kept; only the user's explicit Reload on the conflict shows the newest dates, keeps the input and takes a new snapshot for the next try. E2E per dialog: open, type, change the task as another actor, signal and wait for the reload, submit: CONFLICT and the other actor's change intact; then Reload and resubmit succeeds.
+- **K105 Saver bound to identity.** The registry key adds organizationId and userId; when the session identity a view mounts with differs from a saver's identity, that saver is stopped and its queue dropped without sending; every save carries the expected organizationId and userId, and the save action refuses without writing (a typed refusal resolved by Reload) when the session actor differs. Test: A with one save held and one queued, sign out, sign in as B in the same tab, release: A's row holds A's held state only, B's row is untouched.
+- **K106 Busy saver supplies the control base.** A view mounting while its key's saver has a requested state in flight or queued takes that latest requested state as the base for its controls (not the props), and the K100 test expects both choices kept (both groups collapsed); also covered: returning without a change, and the next reload.
+- **K107 Generation change carried across the frame Reload.** The bounded refresh stays (no endless loop), but when the generation advanced during the last refresh, the remounted view requests one reload through its runner after mount. Test: two held refresh responses with a signal during each; the final view shows both changes.
+
+Revision 3 order: 15-12 (K105, K106, K107) and 15-16, 15-17 (K104) in parallel; 15-22 inherits K104 through the reused dialogs (note only); 15-25 evidence rows after. Codex cycle 3 (the last) follows.
