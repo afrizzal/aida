@@ -51,3 +51,15 @@ Answer: `.planning/run-loop/codex/fase15-plan-r2-jawab.md`. Verdict: not yet rea
 - **K107 Generation change carried across the frame Reload.** The bounded refresh stays (no endless loop), but when the generation advanced during the last refresh, the remounted view requests one reload through its runner after mount. Test: two held refresh responses with a signal during each; the final view shows both changes.
 
 Revision 3 order: 15-12 (K105, K106, K107) and 15-16, 15-17 (K104) in parallel; 15-22 inherits K104 through the reused dialogs (note only); 15-25 evidence rows after. Codex cycle 3 (the last) follows.
+
+### Cycle 3, the last (2026-11-10, export of `2d7508b`, model gpt-6.1-terra, effort xhigh)
+
+Answer: `.planning/run-loop/codex/fase15-plan-r3-jawab.md`. Verdict: not ready; 2 HIGH, 1 MEDIUM. CX2-1 judged closed for real version conflicts and truly missing tasks; CX2-2 adds a server identity check with no project-existence oracle found (the identity refusal reads no project); CX2-3 closed for ordinary remounts; CX2-4 has a bounded follow-up with no endless loop.
+
+| ID | Sev | Finding | Status |
+|----|-----|---------|--------|
+| CX3-1 | HIGH | Account switch A to B to A while A's already-sent save X is still in flight: B's mount stops A's saver, so when A returns before X completes, `pendingViewState` is null and A's controls are built from props possibly read before X stored; a new choice can then overwrite part of X (the CX2-3 class again). 15-12 decisions 21, 23, 24; the identity E2E returns to A only after X completes (line 276). | Open: phase parked. |
+| CX3-2 | HIGH | 15-12 lines 275 to 276 still require `viewStateSaverKey("workspace", null, "LIST")` to yield `"workspace|~workspace|LIST"` while decision 23 requires the identity argument and an organization and user in the key: the executor would have to guess or hit a failing test and typecheck. | Open: phase parked. |
+| CX3-3 | MEDIUM | The date dialogs (15-16 decision 23, 15-17 decision 26) close when the task prop is null after `onReload()` resolves, but the runner's promise also resolves when the read fails; a failed explicit Reload after a background reload already made the prop null can discard the input without a successful read proving the task is gone. | Open: phase parked. |
+
+**Outcome:** three plan-review cycles are exhausted with HIGH findings left, so by the charter's decision table ("3 siklus review plan habis dengan temuan HIGH tersisa: Parkir fase") Phase 15 is parked. Nothing was revised after cycle 3. Suggested fixes for the owner, from Codex: CX3-1, on returning to an identity whose earlier save is still in flight, hold the controls until it completes and re-read (or keep that save as the base and serialize the new choice after it), with an A to B to A E2E while X is pending; CX3-2, update the K100 example to pass the identity and expect the full key; CX3-3, give `onReload()` a success or failure result and keep the dialog, input and retry on failure, tested for both dialogs and the workspace pages.
