@@ -18,6 +18,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:egress": "vitest run --config vitest.egress.config.ts",
     "test:e2e": "playwright test",
+    "test:docker-cleanup": "tsx scripts/test-docker-cleanup.ts",
     "test:all": "pnpm test && pnpm test:integration",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",

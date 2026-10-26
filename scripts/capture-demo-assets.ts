@@ -50,9 +50,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { type Browser, chromium, type Page } from "@playwright/test";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import pg from "pg";
 import { PrismaClient } from "../src/generated/prisma/client";
+import { startLabeledPostgres } from "../tests/support/docker-test-resources";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -772,11 +773,12 @@ async function main(): Promise<void> {
     log(
       `Starting disposable pgvector/pgvector:pg16 container (mode: ${RECORD ? "record" : "screenshots"})...`,
     );
-    container = await new PostgreSqlContainer("pgvector/pgvector:pg16")
-      .withDatabase("aida_capture")
-      .withUsername("capture")
-      .withPassword("capture")
-      .start();
+    container = await startLabeledPostgres({
+      kind: "capture",
+      database: "aida_capture",
+      username: "capture",
+      password: "capture",
+    });
     const databaseUrl = container.getConnectionUri();
     // Overrides this SCRIPT PROCESS's own env for any later direct-import of app modules
     // (e.g. kbEmbedArticleHandler in --record mode) — spawned children below always get their

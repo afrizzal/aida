@@ -14,8 +14,9 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import pg from "pg";
+import { startLabeledPostgres } from "./docker-test-resources";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -25,11 +26,12 @@ export const MIGRATIONS_DIR = path.join(PROJECT_ROOT, "prisma", "migrations");
 
 /** Starts the harness container (test values, as global-setup.ts uses). */
 export async function startMigrationContainer(): Promise<StartedPostgreSqlContainer> {
-  return new PostgreSqlContainer("pgvector/pgvector:pg16")
-    .withDatabase("aida_migration")
-    .withUsername("migration")
-    .withPassword("migration")
-    .start();
+  return startLabeledPostgres({
+    kind: "migration",
+    database: "aida_migration",
+    username: "migration",
+    password: "migration",
+  });
 }
 
 /** Connection URL of one database of the harness container. */

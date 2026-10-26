@@ -2,7 +2,8 @@ import { execSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { startLabeledPostgres } from "../support/docker-test-resources";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,11 +14,12 @@ const PROJECT_ROOT = path.resolve(__dirname, "../..");
 let container: StartedPostgreSqlContainer;
 
 export async function setup() {
-  container = await new PostgreSqlContainer("pgvector/pgvector:pg16")
-    .withDatabase("aida_test")
-    .withUsername("test")
-    .withPassword("test")
-    .start();
+  container = await startLabeledPostgres({
+    kind: "integration",
+    database: "aida_test",
+    username: "test",
+    password: "test",
+  });
 
   const url = container.getConnectionUri();
   process.env.DATABASE_URL = url;

@@ -6,9 +6,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type FullConfig } from "@playwright/test";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import pg from "pg";
 import { PrismaClient } from "../../src/generated/prisma/client";
+import { startLabeledPostgres } from "../support/docker-test-resources";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -64,18 +64,26 @@ export default async function globalSetup(_config: FullConfig) {
   fs.rmSync(AUTH_DIR, { recursive: true, force: true });
   fs.mkdirSync(AUTH_DIR, { recursive: true });
 
-  const container = await new PostgreSqlContainer("pgvector/pgvector:pg16")
-    .withDatabase("aida_e2e")
-    .withUsername("e2e")
-    .withPassword("e2e")
-    .start();
+  const container = await startLabeledPostgres({
+    kind: "e2e",
+    database: "aida_e2e",
+    username: "e2e",
+    password: "e2e",
+  });
   const databaseUrl = container.getConnectionUri();
 
-  execSync("pnpm prisma migrate deploy && pnpm prisma generate", {
-    env: { ...process.env, DATABASE_URL: databaseUrl },
-    stdio: "inherit",
-    cwd: PROJECT_ROOT,
-  });
+  // A failed migration must not leak the container: teardown is only registered further down
+  // (run decision K110).
+  try {
+    execSync("pnpm prisma migrate deploy && pnpm prisma generate", {
+      env: { ...process.env, DATABASE_URL: databaseUrl },
+      stdio: "inherit",
+      cwd: PROJECT_ROOT,
+    });
+  } catch (err) {
+    await container.stop();
+    throw err;
+  }
 
   const uploadsDir = fs.mkdtempSync(path.join(os.tmpdir(), "aida-e2e-uploads-"));
 
