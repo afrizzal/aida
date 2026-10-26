@@ -1,0 +1,1731 @@
+diff --git a/docker-compose.egress-test.yml b/docker-compose.egress-test.yml
+index 8d7825d..3c98044 100644
+--- a/docker-compose.egress-test.yml
++++ b/docker-compose.egress-test.yml
+@@ -15,9 +15,21 @@
+ #
+ # This suite is intentionally excluded from the default `pnpm test:integration` / PR path (it
+ # builds and boots a full multi-container stack) — run it explicitly via `pnpm test:egress`.
++#
++# Run charter rule J (decisions K108 to K113, .planning/run-loop/J1-RENCANA.md): the project is
++# `aida-test-egress`; every service, build, network and volume carries `aida.test=1` and the
++# run's `aida.test.run`; every built image is tagged `aida-test-egress-<service>:<run id>`;
++# Postgres data sits on tmpfs (the image's VOLUME would otherwise create an unlabeled
++# anonymous volume). The suite checks all of this with `docker compose config` before it
++# builds, and removes the run's resources with scripts/test-docker-cleanup.ts, never `down -v`.
++x-test-labels: &test-labels
++  aida.test: "1"
++  aida.test.run: ${AIDA_TEST_RUN_ID:?set AIDA_TEST_RUN_ID}
++
+ networks:
+   egress_internal:
+     internal: true
++    labels: *test-labels
+     ipam:
+       config:
+         - subnet: 10.90.0.0/24
+@@ -26,16 +38,24 @@ services:
+   # Logging DNS resolver — every other service's `dns:` points here. Fixed IP required: compose
+   # services' `dns:` entries must be literal IP addresses (resolv.conf syntax), not hostnames.
+   dns-logger:
+-    build: ./tests/integration/egress-fixtures/dns-logger
++    build:
++      context: ./tests/integration/egress-fixtures/dns-logger
++      labels: *test-labels
++    image: aida-test-egress-dns-logger:${AIDA_TEST_RUN_ID:?set AIDA_TEST_RUN_ID}
++    labels: *test-labels
+     networks:
+       egress_internal:
+         ipv4_address: 10.90.0.2
+     volumes:
+-      - ./tests/integration/egress-fixtures/.dns-log:/var/log
++      # One directory per run (K113), created by the suite under the gitignored `.dns-log/`.
++      - ${AIDA_TEST_DNS_LOG_DIR:?set AIDA_TEST_DNS_LOG_DIR}:/var/log
+     restart: unless-stopped
+ 
+   db:
+     image: pgvector/pgvector:pg16
++    labels: *test-labels
++    tmpfs:
++      - /var/lib/postgresql/data
+     environment:
+       POSTGRES_USER: aida
+       POSTGRES_PASSWORD: egress-test-password
+@@ -51,7 +71,11 @@ services:
+       retries: 15
+ 
+   stub-llm:
+-    build: ./tests/integration/egress-fixtures/stub-llm
++    build:
++      context: ./tests/integration/egress-fixtures/stub-llm
++      labels: *test-labels
++    image: aida-test-egress-stub-llm:${AIDA_TEST_RUN_ID:?set AIDA_TEST_RUN_ID}
++    labels: *test-labels
+     dns: [10.90.0.2]
+     networks:
+       egress_internal:
+@@ -62,6 +86,7 @@ services:
+   # (outbound send is the flow under test; inbound IMAP polling is not).
+   stub-smtp:
+     image: greenmail/standalone:latest
++    labels: *test-labels
+     environment:
+       GREENMAIL_OPTS: "-Dgreenmail.setup.test.smtp -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.auth.disabled -Dgreenmail.verbose"
+     dns: [10.90.0.2]
+@@ -73,6 +98,9 @@ services:
+     build:
+       context: .
+       target: builder
++      labels: *test-labels
++    image: aida-test-egress-migrate:${AIDA_TEST_RUN_ID:?set AIDA_TEST_RUN_ID}
++    labels: *test-labels
+     command: ["pnpm", "prisma", "migrate", "deploy"]
+     depends_on:
+       db:
+@@ -97,7 +125,11 @@ services:
+   # underlying calls to stub-llm/stub-smtp are identical either way, and `runner` is exactly as
+   # cut off from the internet as this container is).
+   app:
+-    build: .
++    build:
++      context: .
++      labels: *test-labels
++    image: aida-test-egress-app:${AIDA_TEST_RUN_ID:?set AIDA_TEST_RUN_ID}
++    labels: *test-labels
+     command: ["node", "server.js"]
+     depends_on:
+       db:
+@@ -127,7 +159,11 @@ services:
+       start_period: 30s
+ 
+   worker:
+-    build: .
++    build:
++      context: .
++      labels: *test-labels
++    image: aida-test-egress-worker:${AIDA_TEST_RUN_ID:?set AIDA_TEST_RUN_ID}
++    labels: *test-labels
+     command: ["node", "dist/worker.mjs"]
+     depends_on:
+       db:
+@@ -155,6 +191,9 @@ services:
+     build:
+       context: .
+       target: builder
++      labels: *test-labels
++    image: aida-test-egress-runner:${AIDA_TEST_RUN_ID:?set AIDA_TEST_RUN_ID}
++    labels: *test-labels
+     command: ["sleep", "infinity"]
+     depends_on:
+       db:
+@@ -183,6 +222,7 @@ services:
+   # `runner`) keeps the control's own network identity easy to grep out of dns-logger's log.
+   negative-control:
+     image: node:22-alpine
++    labels: *test-labels
+     entrypoint: ["node", "-e"]
+     command:
+       - "require('dns').promises.lookup('canary.aida-egress-negative-control.invalid').then(()=>process.exit(0)).catch(()=>process.exit(0))"
+@@ -195,3 +235,4 @@ services:
+ volumes:
+   # Shared by app and worker, as in docker-compose.yml (K68).
+   uploads_data:
++    labels: *test-labels
+diff --git a/package.json b/package.json
+index 8d5e3c5..c39aaee 100644
+--- a/package.json
++++ b/package.json
+@@ -18,6 +18,7 @@
+     "test:integration": "vitest run --config vitest.integration.config.ts",
+     "test:egress": "vitest run --config vitest.egress.config.ts",
+     "test:e2e": "playwright test",
++    "test:docker-cleanup": "tsx scripts/test-docker-cleanup.ts",
+     "test:all": "pnpm test && pnpm test:integration",
+     "db:migrate": "prisma migrate dev",
+     "db:deploy": "prisma migrate deploy",
+diff --git a/scripts/capture-demo-assets.ts b/scripts/capture-demo-assets.ts
+index fe0b3ff..733d867 100644
+--- a/scripts/capture-demo-assets.ts
++++ b/scripts/capture-demo-assets.ts
+@@ -50,9 +50,10 @@ import path from "node:path";
+ import { fileURLToPath } from "node:url";
+ import { type Browser, chromium, type Page } from "@playwright/test";
+ import { PrismaPg } from "@prisma/adapter-pg";
+-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
++import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+ import pg from "pg";
+ import { PrismaClient } from "../src/generated/prisma/client";
++import { startLabeledPostgres } from "../tests/support/docker-test-resources";
+ 
+ const __filename = fileURLToPath(import.meta.url);
+ const __dirname = path.dirname(__filename);
+@@ -772,11 +773,12 @@ async function main(): Promise<void> {
+     log(
+       `Starting disposable pgvector/pgvector:pg16 container (mode: ${RECORD ? "record" : "screenshots"})...`,
+     );
+-    container = await new PostgreSqlContainer("pgvector/pgvector:pg16")
+-      .withDatabase("aida_capture")
+-      .withUsername("capture")
+-      .withPassword("capture")
+-      .start();
++    container = await startLabeledPostgres({
++      kind: "capture",
++      database: "aida_capture",
++      username: "capture",
++      password: "capture",
++    });
+     const databaseUrl = container.getConnectionUri();
+     // Overrides this SCRIPT PROCESS's own env for any later direct-import of app modules
+     // (e.g. kbEmbedArticleHandler in --record mode) — spawned children below always get their
+diff --git a/scripts/test-docker-cleanup.ts b/scripts/test-docker-cleanup.ts
+new file mode 100644
+index 0000000..d071957
+--- /dev/null
++++ b/scripts/test-docker-cleanup.ts
+@@ -0,0 +1,232 @@
++// ---------------------------------------------------------------------------
++// scripts/test-docker-cleanup.ts: removes the Docker resources of ONE test run (run charter
++// rules H and J, run decision K108 in .planning/run-loop/J1-RENCANA.md).
++//
++// A resource is removed only when it carries `aida.test=1`, `aida.test.run=<run id>` and a name
++// that starts with `aida-test-` (for an image: the repository). Each one is re-inspected right
++// before removal. Order: containers, networks, volumes, then image tags. Image tags are removed
++// by `repo:tag`, never by image id, so an image that also has another tag keeps it. Nothing is
++// pruned and no anonymous volume is removed. Resources of other runs are only listed.
++//
++//   pnpm test:docker-cleanup --run <runId>           dry run: prints what would be removed
++//   pnpm test:docker-cleanup --run <runId> --apply   removes it
++//   pnpm test:docker-cleanup --others [--run <id>]   lists aida.test=1 resources of other runs
++// ---------------------------------------------------------------------------
++import { execFileSync } from "node:child_process";
++import { pathToFileURL } from "node:url";
++import {
++  isRunId,
++  type ResourceType,
++  RUN_LABEL,
++  TEST_LABEL,
++  TEST_NAME_PREFIX,
++} from "../tests/support/docker-test-labels";
++
++export type DockerRunner = (args: string[]) => string;
++
++export interface DockerResource {
++  type: ResourceType;
++  /** What the remove command takes: container or network id, volume name, image `repo:tag`. */
++  ref: string;
++  name: string;
++  labels: Record<string, string>;
++}
++
++export const REMOVAL_ORDER: readonly ResourceType[] = ["container", "network", "volume", "image"];
++
++function listArgs(type: ResourceType, filters: string[]): string[] {
++  switch (type) {
++    case "container":
++      return ["ps", "-a", ...filters, "--format", "{{.ID}}"];
++    case "network":
++      return ["network", "ls", ...filters, "--format", "{{.ID}}"];
++    case "volume":
++      return ["volume", "ls", ...filters, "--format", "{{.Name}}"];
++    case "image":
++      return ["image", "ls", ...filters, "--format", "{{.Repository}}:{{.Tag}}"];
++  }
++}
++
++function inspectArgs(type: ResourceType, ref: string): string[] {
++  switch (type) {
++    case "container":
++      return [
++        "container",
++        "inspect",
++        "--format",
++        '{"name":{{json .Name}},"labels":{{json .Config.Labels}}}',
++        ref,
++      ];
++    case "network":
++      return [
++        "network",
++        "inspect",
++        "--format",
++        '{"name":{{json .Name}},"labels":{{json .Labels}}}',
++        ref,
++      ];
++    case "volume":
++      return [
++        "volume",
++        "inspect",
++        "--format",
++        '{"name":{{json .Name}},"labels":{{json .Labels}}}',
++        ref,
++      ];
++    case "image":
++      return ["image", "inspect", "--format", '{"labels":{{json .Config.Labels}}}', ref];
++  }
++}
++
++function removeArgs(type: ResourceType, ref: string): string[] {
++  switch (type) {
++    // `-f` stops a container a crashed run left running. No `-v`: anonymous volumes carry no
++    // label, so rule J does not allow removing them.
++    case "container":
++      return ["rm", "-f", ref];
++    case "network":
++      return ["network", "rm", ref];
++    case "volume":
++      return ["volume", "rm", ref];
++    case "image":
++      return ["image", "rm", ref];
++  }
++}
++
++function lines(output: string): string[] {
++  return output
++    .split("\n")
++    .map((line) => line.trim())
++    .filter((line) => line !== "");
++}
++
++/** Reads the current name and labels of one resource from Docker. */
++export function inspectResource(
++  docker: DockerRunner,
++  type: ResourceType,
++  ref: string,
++): DockerResource {
++  const parsed = JSON.parse(docker(inspectArgs(type, ref))) as {
++    name?: string;
++    labels?: Record<string, string> | null;
++  };
++  const name = type === "image" ? ref : String(parsed.name ?? "").replace(/^\//, "");
++  return { type, ref, name, labels: parsed.labels ?? {} };
++}
++
++/** True only when the resource carries the test label, this run's label, and the name prefix. */
++export function belongsToRun(resource: DockerResource, runId: string): boolean {
++  if (resource.labels[TEST_LABEL] !== "1") return false;
++  if (resource.labels[RUN_LABEL] !== runId) return false;
++  const name = resource.type === "image" ? resource.name.split(":")[0] : resource.name;
++  return name.startsWith(TEST_NAME_PREFIX);
++}
++
++function listByFilters(
++  docker: DockerRunner,
++  type: ResourceType,
++  filters: string[],
++): DockerResource[] {
++  return lines(docker(listArgs(type, filters)))
++    .filter((ref) => type !== "image" || !ref.startsWith("<none>"))
++    .map((ref) => inspectResource(docker, type, ref));
++}
++
++/** The resources of one run, in removal order. Lists by label, then checks each one itself. */
++export function planCleanup(docker: DockerRunner, runId: string): DockerResource[] {
++  if (!isRunId(runId)) throw new Error(`Not a valid test run id: ${JSON.stringify(runId)}`);
++  const filters = ["--filter", `label=${TEST_LABEL}=1`, "--filter", `label=${RUN_LABEL}=${runId}`];
++  return REMOVAL_ORDER.flatMap((type) =>
++    listByFilters(docker, type, filters).filter((resource) => belongsToRun(resource, runId)),
++  );
++}
++
++export interface CleanupResult {
++  removed: DockerResource[];
++  skipped: { resource: DockerResource; reason: string }[];
++  failed: { resource: DockerResource; error: string }[];
++}
++
++/** Removes the planned resources, re-checking each one right before its removal. */
++export function applyCleanup(
++  docker: DockerRunner,
++  runId: string,
++  plan: DockerResource[],
++): CleanupResult {
++  const result: CleanupResult = { removed: [], skipped: [], failed: [] };
++  for (const planned of plan) {
++    let current: DockerResource;
++    try {
++      current = inspectResource(docker, planned.type, planned.ref);
++    } catch (err) {
++      result.skipped.push({ resource: planned, reason: `no longer inspectable: ${String(err)}` });
++      continue;
++    }
++    if (!belongsToRun(current, runId)) {
++      result.skipped.push({ resource: planned, reason: "labels or name no longer match this run" });
++      continue;
++    }
++    try {
++      docker(removeArgs(planned.type, planned.ref));
++      result.removed.push(current);
++    } catch (err) {
++      result.failed.push({ resource: current, error: String(err) });
++    }
++  }
++  return result;
++}
++
++/** aida.test=1 resources that do NOT belong to `runId` (or all of them without a run id). */
++export function listOtherRuns(docker: DockerRunner, runId?: string): DockerResource[] {
++  const filters = ["--filter", `label=${TEST_LABEL}=1`];
++  return REMOVAL_ORDER.flatMap((type) =>
++    listByFilters(docker, type, filters).filter((resource) => resource.labels[RUN_LABEL] !== runId),
++  );
++}
++
++function describe(resource: DockerResource): string {
++  return `${resource.type} ${resource.name} (${resource.labels[RUN_LABEL] ?? "no run label"})`;
++}
++
++function main(argv: string[]): number {
++  const runIndex = argv.indexOf("--run");
++  const runId = runIndex >= 0 ? argv[runIndex + 1] : undefined;
++  const docker: DockerRunner = (args) =>
++    execFileSync("docker", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
++
++  if (argv.includes("--others")) {
++    if (runId !== undefined && !isRunId(runId))
++      throw new Error(`Not a valid test run id: ${runId}`);
++    const others = listOtherRuns(docker, runId);
++    for (const resource of others) console.log(`other run: ${describe(resource)}`);
++    console.log(`${others.length} resource(s) of other runs listed, none removed.`);
++    return 0;
++  }
++
++  if (runId === undefined || !isRunId(runId)) {
++    console.error("Usage: test-docker-cleanup --run <runId> [--apply] | --others [--run <runId>]");
++    return 2;
++  }
++
++  const plan = planCleanup(docker, runId);
++  if (!argv.includes("--apply")) {
++    for (const resource of plan) console.log(`would remove: ${describe(resource)}`);
++    console.log(`${plan.length} resource(s) of run ${runId}; dry run, nothing removed.`);
++    return 0;
++  }
++
++  const result = applyCleanup(docker, runId, plan);
++  for (const resource of result.removed) console.log(`removed: ${describe(resource)}`);
++  for (const { resource, reason } of result.skipped)
++    console.log(`skipped: ${describe(resource)}: ${reason}`);
++  for (const { resource, error } of result.failed)
++    console.error(`FAILED: ${describe(resource)}: ${error}`);
++  console.log(
++    `run ${runId}: ${result.removed.length} removed, ${result.skipped.length} skipped, ${result.failed.length} failed.`,
++  );
++  return result.failed.length === 0 ? 0 : 1;
++}
++
++if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
++  process.exitCode = main(process.argv.slice(2));
++}
+diff --git a/tests/e2e/global-setup.ts b/tests/e2e/global-setup.ts
+index a965abf..9d7a1ce 100644
+--- a/tests/e2e/global-setup.ts
++++ b/tests/e2e/global-setup.ts
+@@ -6,9 +6,9 @@ import path from "node:path";
+ import { fileURLToPath } from "node:url";
+ import { chromium, type FullConfig } from "@playwright/test";
+ import { PrismaPg } from "@prisma/adapter-pg";
+-import { PostgreSqlContainer } from "@testcontainers/postgresql";
+ import pg from "pg";
+ import { PrismaClient } from "../../src/generated/prisma/client";
++import { startLabeledPostgres } from "../support/docker-test-resources";
+ 
+ const __filename = fileURLToPath(import.meta.url);
+ const __dirname = path.dirname(__filename);
+@@ -64,18 +64,26 @@ export default async function globalSetup(_config: FullConfig) {
+   fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+   fs.mkdirSync(AUTH_DIR, { recursive: true });
+ 
+-  const container = await new PostgreSqlContainer("pgvector/pgvector:pg16")
+-    .withDatabase("aida_e2e")
+-    .withUsername("e2e")
+-    .withPassword("e2e")
+-    .start();
++  const container = await startLabeledPostgres({
++    kind: "e2e",
++    database: "aida_e2e",
++    username: "e2e",
++    password: "e2e",
++  });
+   const databaseUrl = container.getConnectionUri();
+ 
+-  execSync("pnpm prisma migrate deploy && pnpm prisma generate", {
+-    env: { ...process.env, DATABASE_URL: databaseUrl },
+-    stdio: "inherit",
+-    cwd: PROJECT_ROOT,
+-  });
++  // A failed migration must not leak the container: teardown is only registered further down
++  // (run decision K110).
++  try {
++    execSync("pnpm prisma migrate deploy && pnpm prisma generate", {
++      env: { ...process.env, DATABASE_URL: databaseUrl },
++      stdio: "inherit",
++      cwd: PROJECT_ROOT,
++    });
++  } catch (err) {
++    await container.stop();
++    throw err;
++  }
+ 
+   const uploadsDir = fs.mkdtempSync(path.join(os.tmpdir(), "aida-e2e-uploads-"));
+ 
+diff --git a/tests/integration/egress-isolation.test.ts b/tests/integration/egress-isolation.test.ts
+index 521327a..84cfd5a 100644
+--- a/tests/integration/egress-isolation.test.ts
++++ b/tests/integration/egress-isolation.test.ts
+@@ -11,19 +11,47 @@
+ // Runs via `pnpm test:egress` (NOT part of the default `pnpm test:integration` / PR path — see
+ // package.json and vitest.egress.config.ts: this suite builds a multi-container stack and is
+ // intentionally slow).
++//
++// Run charter rule J (decisions K108 to K113, .planning/run-loop/J1-RENCANA.md): project
++// `aida-test-egress`, run-labelled resources, run-tagged images, an exclusive lock, and the
++// preflight checks (project absent, tags free, subnet free, 20 GiB free on the host and in the
++// Docker VM) before anything is built. Teardown removes only this run's resources through
++// scripts/test-docker-cleanup.ts; there is no `down -v`.
+ import { execFileSync } from "node:child_process";
+ import fs from "node:fs";
++import os from "node:os";
+ import path from "node:path";
+ import { fileURLToPath } from "node:url";
+ import { afterAll, beforeAll, describe, expect, test } from "vitest";
++import { applyCleanup, type DockerRunner, planCleanup } from "../../scripts/test-docker-cleanup";
++import { recordResource, testRunId } from "../support/docker-test-labels";
++import {
++  acquireLock,
++  assertComposeFollowsRuleJ,
++  type ComposeConfig,
++  runBuildPreflight,
++  runDocker,
++} from "../support/docker-test-preflight";
+ 
+ const __dirname = path.dirname(fileURLToPath(import.meta.url));
+ const PROJECT_ROOT = path.resolve(__dirname, "../..");
+ const COMPOSE_FILE = path.join(PROJECT_ROOT, "docker-compose.egress-test.yml");
+-const COMPOSE_PROJECT = "aida-egress-test"; // explicit — never share the default "aida" project
+-// name with the main docker-compose.yml, whose services (app/worker/migrate) would collide.
+-const DNS_LOG_DIR = path.join(PROJECT_ROOT, "tests", "integration", "egress-fixtures", ".dns-log");
+-const DNS_LOG_PATH = path.join(DNS_LOG_DIR, "dns-queries.log");
++// Rule J: test projects start with aida-test-; this one is named exactly aida-test-egress. Never
++// the default "aida" project of docker-compose.yml, whose services (app/worker/migrate) collide.
++const COMPOSE_PROJECT = "aida-test-egress";
++const EGRESS_SUBNET = "10.90.0.0/24"; // must match docker-compose.egress-test.yml
++const RUN_ID = testRunId();
++// One DNS log directory per run (K113). It lives under the repo, not os.tmpdir(): Colima mounts
++// only the home directory into its VM, so a bind mount from /var/folders would never reach the
++// host. The parent `.dns-log/` is gitignored.
++const DNS_LOG_ROOT = path.join(PROJECT_ROOT, "tests", "integration", "egress-fixtures", ".dns-log");
++let dnsLogDir = "";
++const dnsLogPath = () => path.join(dnsLogDir, "dns-queries.log");
++let releaseLock: (() => void) | undefined;
++
++function composeEnv(): NodeJS.ProcessEnv {
++  return { ...process.env, AIDA_TEST_RUN_ID: RUN_ID, AIDA_TEST_DNS_LOG_DIR: dnsLogDir };
++}
+ 
+ function dc(
+   args: string[],
+@@ -35,6 +63,7 @@ function dc(
+       ["compose", "-p", COMPOSE_PROJECT, "-f", COMPOSE_FILE, ...args],
+       {
+         cwd: PROJECT_ROOT,
++        env: composeEnv(),
+         encoding: "utf-8",
+         timeout: opts.timeout ?? 300_000,
+         maxBuffer: 32 * 1024 * 1024,
+@@ -76,9 +105,9 @@ async function waitForHealthy(service: string, timeoutMs = 120_000): Promise<voi
+ }
+ 
+ function readDnsLogLines(): string[] {
+-  if (!fs.existsSync(DNS_LOG_PATH)) return [];
++  if (!dnsLogDir || !fs.existsSync(dnsLogPath())) return [];
+   return fs
+-    .readFileSync(DNS_LOG_PATH, "utf-8")
++    .readFileSync(dnsLogPath(), "utf-8")
+     .split("\n")
+     .map((l) => l.trim())
+     .filter((l) => l.length > 0);
+@@ -120,19 +149,60 @@ function runProbe(): { code: number; probe: ProbeOutput | null; stdout: string;
+ 
+ describe("egress isolation: no flow requires a route to the public internet", () => {
+   beforeAll(async () => {
+-    fs.rmSync(DNS_LOG_DIR, { recursive: true, force: true });
+-    fs.mkdirSync(DNS_LOG_DIR, { recursive: true });
++    releaseLock = acquireLock(RUN_ID);
++    fs.mkdirSync(DNS_LOG_ROOT, { recursive: true });
++    dnsLogDir = fs.mkdtempSync(path.join(DNS_LOG_ROOT, "run-"));
++
++    // Resolve the compose file (with the `control` profile, so negative-control is checked too)
++    // and refuse it unless every resource follows rule J. Then the preflight checks, before any
++    // build: nothing has been created on Docker until this point.
++    const config = dc(["--profile", "control", "config", "--format", "json"], { timeout: 60_000 });
++    if (config.code !== 0) throw new Error(`docker compose config failed:\n${config.stderr}`);
++    const tags = assertComposeFollowsRuleJ(
++      JSON.parse(config.stdout) as ComposeConfig,
++      COMPOSE_PROJECT,
++      RUN_ID,
++    );
++    runBuildPreflight(runDocker, {
++      runId: RUN_ID,
++      project: COMPOSE_PROJECT,
++      tags,
++      subnet: EGRESS_SUBNET,
++      hostDirs: [os.homedir(), PROJECT_ROOT],
++    });
+ 
+-    const up = dc(["up", "-d", "--build"], { timeout: 480_000 });
++    // Build once, after the checks; `up` must never rebuild or retag (K111).
++    const build = dc(["build"], { timeout: 480_000 });
++    for (const tag of tags) recordResource(RUN_ID, { type: "image", name: tag, state: "created" });
++    if (build.code !== 0) {
++      throw new Error(
++        `docker compose build failed (code ${build.code}):\n${build.stderr}\n${build.stdout}`,
++      );
++    }
++    const up = dc(["up", "-d", "--no-build"], { timeout: 300_000 });
+     if (up.code !== 0) {
+       throw new Error(`docker compose up failed (code ${up.code}):\n${up.stderr}\n${up.stdout}`);
+     }
+ 
+     await waitForHealthy("app", 120_000);
+-  }, 600_000);
++  }, 900_000);
+ 
+   afterAll(() => {
+-    dc(["down", "-v", "--remove-orphans"], { timeout: 120_000 });
++    // Only this run's resources: run label, test label and the aida-test- prefix, re-checked
++    // one by one (K108). Containers first, then the network, the volume and the image tags.
++    const docker: DockerRunner = (args) =>
++      execFileSync("docker", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
++    let failures: string[] = [];
++    try {
++      const result = applyCleanup(docker, RUN_ID, planCleanup(docker, RUN_ID));
++      failures = result.failed.map((f) => `${f.resource.type} ${f.resource.name}: ${f.error}`);
++    } finally {
++      releaseLock?.();
++      if (dnsLogDir) fs.rmSync(dnsLogDir, { recursive: true, force: true });
++    }
++    if (failures.length > 0) {
++      throw new Error(`cleanup of run ${RUN_ID} left resources:\n${failures.join("\n")}`);
++    }
+   }, 180_000);
+ 
+   test("the production app container reaches a HEALTHY state with no route to the internet", () => {
+diff --git a/tests/integration/global-setup.ts b/tests/integration/global-setup.ts
+index 67a47b4..66b3b70 100644
+--- a/tests/integration/global-setup.ts
++++ b/tests/integration/global-setup.ts
+@@ -2,7 +2,8 @@ import { execSync } from "node:child_process";
+ import { randomBytes } from "node:crypto";
+ import path from "node:path";
+ import { fileURLToPath } from "node:url";
+-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
++import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
++import { startLabeledPostgres } from "../support/docker-test-resources";
+ 
+ const __filename = fileURLToPath(import.meta.url);
+ const __dirname = path.dirname(__filename);
+@@ -13,11 +14,12 @@ const PROJECT_ROOT = path.resolve(__dirname, "../..");
+ let container: StartedPostgreSqlContainer;
+ 
+ export async function setup() {
+-  container = await new PostgreSqlContainer("pgvector/pgvector:pg16")
+-    .withDatabase("aida_test")
+-    .withUsername("test")
+-    .withPassword("test")
+-    .start();
++  container = await startLabeledPostgres({
++    kind: "integration",
++    database: "aida_test",
++    username: "test",
++    password: "test",
++  });
+ 
+   const url = container.getConnectionUri();
+   process.env.DATABASE_URL = url;
+diff --git a/tests/support/docker-test-labels.ts b/tests/support/docker-test-labels.ts
+new file mode 100644
+index 0000000..6e8de57
+--- /dev/null
++++ b/tests/support/docker-test-labels.ts
+@@ -0,0 +1,95 @@
++// Names and labels for every Docker resource a test creates (run charter rule J, run decisions
++// K108 and K110 in .planning/run-loop/J1-RENCANA.md).
++//
++// Each resource carries `aida.test=1`, `aida.test.run=<run id>` and a name that starts with
++// `aida-test-`. scripts/test-docker-cleanup.ts removes a resource only when all three match one
++// run. This module has no Docker or Testcontainers import, so the cleanup script and unit tests
++// can use it without side effects.
++import { randomBytes } from "node:crypto";
++import fs from "node:fs";
++import os from "node:os";
++import path from "node:path";
++
++export const TEST_LABEL = "aida.test";
++export const RUN_LABEL = "aida.test.run";
++export const TEST_NAME_PREFIX = "aida-test-";
++export const RUN_ID_ENV = "AIDA_TEST_RUN_ID";
++
++const RUN_ID_PATTERN = /^[0-9a-z]{6,12}-[0-9a-f]{16}$/;
++const KIND_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
++
++export type ResourceType = "container" | "network" | "volume" | "image";
++
++/** `<time in base 36>-<16 hex chars from 8 random bytes>`. */
++export function newRunId(now: number = Date.now(), random: Buffer = randomBytes(8)): string {
++  if (random.length !== 8) throw new Error("A run id needs exactly 8 random bytes");
++  return `${now.toString(36)}-${random.toString("hex")}`;
++}
++
++export function isRunId(value: string): boolean {
++  return RUN_ID_PATTERN.test(value);
++}
++
++function assertRunId(runId: string): void {
++  if (!isRunId(runId)) throw new Error(`Not a valid test run id: ${JSON.stringify(runId)}`);
++}
++
++/**
++ * The run id of this process tree. A caller (the orchestrator, or a parent test process) that
++ * sets AIDA_TEST_RUN_ID decides it; otherwise the first call creates one and stores it in the
++ * environment so child processes inherit it.
++ */
++export function testRunId(env: Record<string, string | undefined> = process.env): string {
++  const inherited = env[RUN_ID_ENV];
++  if (inherited !== undefined && inherited !== "") {
++    assertRunId(inherited);
++    return inherited;
++  }
++  const created = newRunId();
++  env[RUN_ID_ENV] = created;
++  return created;
++}
++
++export function testLabels(runId: string): Record<string, string> {
++  assertRunId(runId);
++  return { [TEST_LABEL]: "1", [RUN_LABEL]: runId };
++}
++
++/** `aida-test-<kind>-<run id>-<6 hex>`: unique per call, so parallel test files never collide. */
++export function testResourceName(
++  kind: string,
++  runId: string,
++  random: Buffer = randomBytes(3),
++): string {
++  if (!KIND_PATTERN.test(kind))
++    throw new Error(`Not a valid resource kind: ${JSON.stringify(kind)}`);
++  assertRunId(runId);
++  return `${TEST_NAME_PREFIX}${kind}-${runId}-${random.toString("hex")}`;
++}
++
++export function ledgerPath(runId: string, tmpDir: string = os.tmpdir()): string {
++  assertRunId(runId);
++  return path.join(tmpDir, "aida-test-runs", `${runId}.jsonl`);
++}
++
++export interface LedgerEntry {
++  type: ResourceType;
++  name: string;
++  id?: string;
++  state: "planned" | "created";
++}
++
++/**
++ * Appends one line to the run's ledger, so the resources of a run that crashed can still be
++ * named. The ledger is evidence only; cleanup always re-reads labels from Docker.
++ */
++export function recordResource(
++  runId: string,
++  entry: LedgerEntry,
++  tmpDir: string = os.tmpdir(),
++): void {
++  const file = ledgerPath(runId, tmpDir);
++  fs.mkdirSync(path.dirname(file), { recursive: true });
++  const line = JSON.stringify({ ...entry, at: new Date().toISOString(), pid: process.pid });
++  fs.appendFileSync(file, `${line}\n`);
++}
+diff --git a/tests/support/docker-test-preflight.ts b/tests/support/docker-test-preflight.ts
+new file mode 100644
+index 0000000..f247acf
+--- /dev/null
++++ b/tests/support/docker-test-preflight.ts
+@@ -0,0 +1,337 @@
++// Checks a test suite runs before it builds images or starts a compose project (run charter
++// rule J, run decisions K108, K109, K111, K112 and K113 in .planning/run-loop/J1-RENCANA.md).
++// Every check throws DockerPreflightError instead of guessing: the suite stops and reports.
++import { execFileSync } from "node:child_process";
++import fs from "node:fs";
++import os from "node:os";
++import path from "node:path";
++import { RUN_LABEL, TEST_LABEL, TEST_NAME_PREFIX, testResourceName } from "./docker-test-labels";
++
++/** Rule J says "20 GB"; read strictly as 20 GiB (K112). */
++export const MIN_FREE_BYTES = 20 * 1024 ** 3;
++
++/** Image for the one-off container that measures free space inside the Docker VM. */
++export const SPACE_PROBE_IMAGE = "node:22-alpine";
++
++const POSTGRES_DATA_DIR = "/var/lib/postgresql/data";
++
++export class DockerPreflightError extends Error {
++  override name = "DockerPreflightError";
++}
++
++export interface DockerResult {
++  code: number;
++  stdout: string;
++  stderr: string;
++}
++export type Docker = (args: string[]) => DockerResult;
++
++export const runDocker: Docker = (args) => {
++  try {
++    const stdout = execFileSync("docker", args, {
++      encoding: "utf8",
++      stdio: ["ignore", "pipe", "pipe"],
++      maxBuffer: 32 * 1024 * 1024,
++    });
++    return { code: 0, stdout, stderr: "" };
++  } catch (err) {
++    const e = err as { status?: number | null; stdout?: string; stderr?: string; message?: string };
++    return { code: e.status ?? 1, stdout: e.stdout ?? "", stderr: e.stderr ?? e.message ?? "" };
++  }
++};
++
++function gib(bytes: number): string {
++  return `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
++}
++
++// --- Free space (K112) ------------------------------------------------------------------------
++
++/** Available bytes from `df -Pk <path>` output (POSIX format: 1024-byte blocks, column 4). */
++export function parseDfAvailableBytes(output: string): number {
++  const rows = output.trim().split("\n");
++  const fields = rows[rows.length - 1]?.trim().split(/\s+/) ?? [];
++  const availableKb = Number(fields[3]);
++  if (rows.length < 2 || !Number.isFinite(availableKb) || availableKb < 0) {
++    throw new DockerPreflightError(
++      `Cannot read free space from df output: ${JSON.stringify(output)}`,
++    );
++  }
++  return availableKb * 1024;
++}
++
++export function assertEnoughSpace(
++  where: string,
++  bytes: number,
++  min: number = MIN_FREE_BYTES,
++): void {
++  if (!(bytes >= min)) {
++    throw new DockerPreflightError(
++      `Free space on ${where} is ${gib(bytes)}, below the ${gib(min)} rule J requires before an image build. Stopped; report to the owner.`,
++    );
++  }
++}
++
++/**
++ * Smallest free space across the host directories. On macOS the Colima VM disk lives in the
++ * home directory's filesystem, so measuring the home directory covers it without reading
++ * `~/.colima` (rule J forbids touching it).
++ */
++export function hostFreeBytes(dirs: string[]): number {
++  return Math.min(
++    ...dirs.map((dir) => {
++      const stats = fs.statfsSync(dir);
++      return Number(stats.bavail) * Number(stats.bsize);
++    }),
++  );
++}
++
++/** Free space where Docker stores container layers, measured from inside a one-off container. */
++export function dockerFreeBytes(docker: Docker, runId: string): number {
++  const result = docker([
++    "run",
++    "--rm",
++    "--pull",
++    "never",
++    "--network",
++    "none",
++    "--name",
++    testResourceName("df", runId),
++    "--label",
++    `${TEST_LABEL}=1`,
++    "--label",
++    `${RUN_LABEL}=${runId}`,
++    "--entrypoint",
++    "df",
++    SPACE_PROBE_IMAGE,
++    "-Pk",
++    "/",
++  ]);
++  if (result.code !== 0) {
++    throw new DockerPreflightError(
++      `Could not measure free space in the Docker VM (${SPACE_PROBE_IMAGE} must already be present; nothing is pulled): ${result.stderr.trim()}`,
++    );
++  }
++  return parseDfAvailableBytes(result.stdout);
++}
++
++// --- Image tags (K111) ------------------------------------------------------------------------
++
++export function tagState(docker: Docker, ref: string): "free" | "taken" {
++  const result = docker(["image", "inspect", "--format", "{{.Id}}", ref]);
++  if (result.code === 0) return "taken";
++  if (/no such image/i.test(result.stderr)) return "free";
++  throw new DockerPreflightError(
++    `Cannot tell whether image tag ${ref} exists: ${result.stderr.trim()}`,
++  );
++}
++
++export function assertTagsFree(docker: Docker, refs: string[]): void {
++  const taken = refs.filter((ref) => tagState(docker, ref) === "taken");
++  if (taken.length > 0) {
++    throw new DockerPreflightError(
++      `Image tag(s) already exist and must not be overwritten (rule J): ${taken.join(", ")}`,
++    );
++  }
++}
++
++// --- Compose project (K108) -------------------------------------------------------------------
++
++export function assertProjectAbsent(docker: Docker, project: string): void {
++  const filter = `label=com.docker.compose.project=${project}`;
++  const listings: [string, string[]][] = [
++    ["container", ["ps", "-a", "-q", "--filter", filter]],
++    ["network", ["network", "ls", "-q", "--filter", filter]],
++    ["volume", ["volume", "ls", "-q", "--filter", filter]],
++  ];
++  for (const [type, args] of listings) {
++    const result = docker(args);
++    if (result.code !== 0) {
++      throw new DockerPreflightError(
++        `Cannot list ${type}s of project ${project}: ${result.stderr.trim()}`,
++      );
++    }
++    if (result.stdout.trim() !== "") {
++      throw new DockerPreflightError(
++        `Compose project ${project} already has a ${type}. Another run may be using it; stopped without touching it.`,
++      );
++    }
++  }
++}
++
++// --- Subnet (K113) ----------------------------------------------------------------------------
++
++function ipv4Range(cidr: string): [number, number] | null {
++  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/.exec(cidr.trim());
++  if (!match) return null;
++  const octets = match.slice(1, 5).map(Number);
++  const bits = Number(match[5]);
++  if (octets.some((o) => o > 255) || bits > 32) return null;
++  const address = octets.reduce((acc, o) => acc * 256 + o, 0);
++  const size = 2 ** (32 - bits);
++  const start = Math.floor(address / size) * size;
++  return [start, start + size - 1];
++}
++
++/** True when two IPv4 CIDR ranges share an address. Anything else (IPv6, malformed) is false. */
++export function cidrOverlaps(a: string, b: string): boolean {
++  const ra = ipv4Range(a);
++  const rb = ipv4Range(b);
++  if (!ra || !rb) return false;
++  return ra[0] <= rb[1] && rb[0] <= ra[1];
++}
++
++export function assertSubnetFree(docker: Docker, subnet: string): void {
++  const ids = docker(["network", "ls", "-q"]);
++  if (ids.code !== 0) throw new DockerPreflightError(`Cannot list networks: ${ids.stderr.trim()}`);
++  const list = ids.stdout.trim().split("\n").filter(Boolean);
++  if (list.length === 0) return;
++  const inspected = docker([
++    "network",
++    "inspect",
++    "--format",
++    "{{.Name}}|{{range .IPAM.Config}}{{.Subnet}},{{end}}",
++    ...list,
++  ]);
++  if (inspected.code !== 0) {
++    throw new DockerPreflightError(`Cannot inspect networks: ${inspected.stderr.trim()}`);
++  }
++  for (const line of inspected.stdout.trim().split("\n").filter(Boolean)) {
++    const [name, subnets = ""] = line.split("|");
++    for (const other of subnets.split(",").filter(Boolean)) {
++      if (cidrOverlaps(subnet, other)) {
++        throw new DockerPreflightError(
++          `Subnet ${subnet} overlaps network ${name} (${other}). Stopped without changing that network.`,
++        );
++      }
++    }
++  }
++}
++
++// --- Lock (K111) ------------------------------------------------------------------------------
++
++export function lockPath(tmpDir: string = os.tmpdir()): string {
++  return path.join(tmpDir, "aida-test-docker.lock");
++}
++
++/**
++ * Takes the exclusive lock that serializes image-building suites. Returns the release function.
++ * A lock left by a crashed run is reported, never removed automatically.
++ */
++export function acquireLock(runId: string, tmpDir: string = os.tmpdir()): () => void {
++  const file = lockPath(tmpDir);
++  try {
++    fs.writeFileSync(
++      file,
++      JSON.stringify({ runId, pid: process.pid, at: new Date().toISOString() }),
++      {
++        flag: "wx",
++      },
++    );
++  } catch (err) {
++    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
++    const holder = fs.readFileSync(file, "utf8");
++    throw new DockerPreflightError(
++      `Lock ${file} is held (${holder}). If that run is gone, the lock is stale; it is not removed automatically. Report to the owner.`,
++    );
++  }
++  return () => {
++    try {
++      const holder = JSON.parse(fs.readFileSync(file, "utf8")) as { runId?: string };
++      if (holder.runId === runId) fs.unlinkSync(file);
++    } catch {
++      // Already gone or unreadable: never remove a lock this run cannot prove is its own.
++    }
++  };
++}
++
++// --- Compose file (K108, K109, K111) ----------------------------------------------------------
++
++interface ComposeService {
++  image?: string;
++  labels?: Record<string, string>;
++  build?: { labels?: Record<string, string> };
++  tmpfs?: string[] | string;
++  volumes?: { type?: string; source?: string; target?: string }[];
++}
++export interface ComposeConfig {
++  services?: Record<string, ComposeService>;
++  networks?: Record<string, { labels?: Record<string, string>; external?: boolean }>;
++  volumes?: Record<string, { labels?: Record<string, string>; external?: boolean }>;
++}
++
++function hasRunLabels(labels: Record<string, string> | undefined, runId: string): boolean {
++  return labels?.[TEST_LABEL] === "1" && labels?.[RUN_LABEL] === runId;
++}
++
++/**
++ * Checks the resolved `docker compose config --format json` of a test project: every service,
++ * build, network and volume carries the run's labels; every built image has the tag
++ * `<project>-<service>:<runId>`; no anonymous volume; Postgres data on tmpfs. Returns the built
++ * image tags.
++ */
++export function assertComposeFollowsRuleJ(
++  config: ComposeConfig,
++  project: string,
++  runId: string,
++): string[] {
++  const problems: string[] = [];
++  if (!project.startsWith(TEST_NAME_PREFIX))
++    problems.push(`project ${project} lacks ${TEST_NAME_PREFIX}`);
++  const tags: string[] = [];
++  for (const [name, service] of Object.entries(config.services ?? {})) {
++    if (!hasRunLabels(service.labels, runId)) problems.push(`service ${name} lacks the run labels`);
++    if (service.build) {
++      if (!hasRunLabels(service.build.labels, runId))
++        problems.push(`build of ${name} lacks the run labels`);
++      const expected = `${project}-${name}:${runId}`;
++      if (service.image !== expected)
++        problems.push(`service ${name} image is ${service.image}, expected ${expected}`);
++      else tags.push(expected);
++    }
++    for (const mount of service.volumes ?? []) {
++      if (mount.type === "volume" && !mount.source) {
++        problems.push(`service ${name} has an anonymous volume at ${mount.target}`);
++      }
++    }
++    if (service.image?.startsWith("pgvector/pgvector")) {
++      const tmpfs = Array.isArray(service.tmpfs) ? service.tmpfs : [service.tmpfs ?? ""];
++      if (!tmpfs.some((entry) => entry.split(":")[0] === POSTGRES_DATA_DIR)) {
++        problems.push(`service ${name} keeps Postgres data in an anonymous volume, not tmpfs`);
++      }
++    }
++  }
++  for (const [kind, entries] of [
++    ["network", config.networks],
++    ["volume", config.volumes],
++  ] as const) {
++    for (const [name, entry] of Object.entries(entries ?? {})) {
++      if (entry.external) problems.push(`${kind} ${name} is external`);
++      else if (!hasRunLabels(entry.labels, runId))
++        problems.push(`${kind} ${name} lacks the run labels`);
++    }
++  }
++  if (problems.length > 0) {
++    throw new DockerPreflightError(
++      `Compose project ${project} breaks rule J:\n- ${problems.join("\n- ")}`,
++    );
++  }
++  return tags;
++}
++
++// --- All checks before a build ----------------------------------------------------------------
++
++export interface PreflightOptions {
++  runId: string;
++  project: string;
++  tags: string[];
++  subnet?: string;
++  hostDirs: string[];
++}
++
++export function runBuildPreflight(docker: Docker, options: PreflightOptions): void {
++  assertProjectAbsent(docker, options.project);
++  assertTagsFree(docker, options.tags);
++  if (options.subnet) assertSubnetFree(docker, options.subnet);
++  assertEnoughSpace("the host", hostFreeBytes(options.hostDirs));
++  assertEnoughSpace("the Docker VM", dockerFreeBytes(docker, options.runId));
++}
+diff --git a/tests/support/docker-test-resources.ts b/tests/support/docker-test-resources.ts
+new file mode 100644
+index 0000000..47414ea
+--- /dev/null
++++ b/tests/support/docker-test-resources.ts
+@@ -0,0 +1,52 @@
++// Postgres test containers that follow run charter rule J (run decisions K109 and K110 in
++// .planning/run-loop/J1-RENCANA.md). Every Testcontainers caller in this repo starts its
++// database through startLabeledPostgres().
++import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
++import { recordResource, testLabels, testResourceName, testRunId } from "./docker-test-labels";
++
++// Ryuk, the Testcontainers reaper, is itself a container without the rule J label and name, so
++// it is off in every process that imports this module (K110). Testcontainers reads the variable
++// when it first creates the reaper (testcontainers/build/reaper/reaper.js), so setting it here,
++// before any container starts, is enough. Each caller stops its container in teardown;
++// scripts/test-docker-cleanup.ts removes what a crashed run leaves behind.
++process.env.TESTCONTAINERS_RYUK_DISABLED = "true";
++
++export const POSTGRES_TEST_IMAGE = "pgvector/pgvector:pg16";
++
++// The image declares `VOLUME /var/lib/postgresql/data`. Without a mount there, Docker creates an
++// anonymous volume with no label for every container. A tmpfs mount takes its place (K109).
++const POSTGRES_DATA_DIR = "/var/lib/postgresql/data";
++
++export interface LabeledPostgresOptions {
++  /** Short lowercase word for the container name, e.g. "integration". */
++  kind: string;
++  database: string;
++  username: string;
++  password: string;
++}
++
++export function labeledPostgres(options: LabeledPostgresOptions): PostgreSqlContainer {
++  const runId = testRunId();
++  const name = testResourceName(options.kind, runId);
++  recordResource(runId, { type: "container", name, state: "planned" });
++  return new PostgreSqlContainer(POSTGRES_TEST_IMAGE)
++    .withName(name)
++    .withLabels(testLabels(runId))
++    .withTmpFs({ [POSTGRES_DATA_DIR]: "rw" })
++    .withDatabase(options.database)
++    .withUsername(options.username)
++    .withPassword(options.password);
++}
++
++export async function startLabeledPostgres(
++  options: LabeledPostgresOptions,
++): Promise<StartedPostgreSqlContainer> {
++  const started = await labeledPostgres(options).start();
++  recordResource(testRunId(), {
++    type: "container",
++    name: started.getName().replace(/^\//, ""),
++    id: started.getId(),
++    state: "created",
++  });
++  return started;
++}
+diff --git a/tests/support/migration-harness.ts b/tests/support/migration-harness.ts
+index 80eda2e..3d0931d 100644
+--- a/tests/support/migration-harness.ts
++++ b/tests/support/migration-harness.ts
+@@ -14,8 +14,9 @@
+ import { readdirSync, readFileSync, statSync } from "node:fs";
+ import path from "node:path";
+ import { fileURLToPath } from "node:url";
+-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
++import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+ import pg from "pg";
++import { startLabeledPostgres } from "./docker-test-resources";
+ 
+ const __dirname = path.dirname(fileURLToPath(import.meta.url));
+ 
+@@ -25,11 +26,12 @@ export const MIGRATIONS_DIR = path.join(PROJECT_ROOT, "prisma", "migrations");
+ 
+ /** Starts the harness container (test values, as global-setup.ts uses). */
+ export async function startMigrationContainer(): Promise<StartedPostgreSqlContainer> {
+-  return new PostgreSqlContainer("pgvector/pgvector:pg16")
+-    .withDatabase("aida_migration")
+-    .withUsername("migration")
+-    .withPassword("migration")
+-    .start();
++  return startLabeledPostgres({
++    kind: "migration",
++    database: "aida_migration",
++    username: "migration",
++    password: "migration",
++  });
+ }
+ 
+ /** Connection URL of one database of the harness container. */
+diff --git a/tests/unit/docker-test-labels.test.ts b/tests/unit/docker-test-labels.test.ts
+new file mode 100644
+index 0000000..e4f5ee5
+--- /dev/null
++++ b/tests/unit/docker-test-labels.test.ts
+@@ -0,0 +1,91 @@
++import fs from "node:fs";
++import os from "node:os";
++import path from "node:path";
++import { describe, expect, test } from "vitest";
++import {
++  isRunId,
++  ledgerPath,
++  newRunId,
++  RUN_ID_ENV,
++  recordResource,
++  testLabels,
++  testResourceName,
++  testRunId,
++} from "../support/docker-test-labels";
++
++const RUN = newRunId(1_700_000_000_000, Buffer.from("0123456789abcdef", "hex"));
++
++describe("run ids", () => {
++  test("a new run id is base-36 time plus 16 hex characters", () => {
++    expect(RUN).toBe(`${(1_700_000_000_000).toString(36)}-0123456789abcdef`);
++    expect(isRunId(RUN)).toBe(true);
++    expect(isRunId(newRunId())).toBe(true);
++  });
++
++  test("rejects malformed ids and the wrong amount of randomness", () => {
++    expect(isRunId("")).toBe(false);
++    expect(isRunId("abc-123")).toBe(false);
++    expect(isRunId(`${RUN} `)).toBe(false);
++    expect(isRunId("aida-test-x")).toBe(false);
++    expect(() => newRunId(Date.now(), Buffer.alloc(4))).toThrow();
++  });
++
++  test("an inherited run id wins and a missing one is created once and stored", () => {
++    const env: Record<string, string | undefined> = { [RUN_ID_ENV]: RUN };
++    expect(testRunId(env)).toBe(RUN);
++
++    const fresh: Record<string, string | undefined> = {};
++    const created = testRunId(fresh);
++    expect(isRunId(created)).toBe(true);
++    expect(fresh[RUN_ID_ENV]).toBe(created);
++    expect(testRunId(fresh)).toBe(created);
++  });
++
++  test("an invalid inherited run id is refused, not replaced", () => {
++    expect(() => testRunId({ [RUN_ID_ENV]: "not-a-run" })).toThrow(/run id/);
++  });
++});
++
++describe("labels and names", () => {
++  test("labels carry the test marker and the run", () => {
++    expect(testLabels(RUN)).toEqual({ "aida.test": "1", "aida.test.run": RUN });
++    expect(() => testLabels("bad")).toThrow();
++  });
++
++  test("names start with aida-test-, carry the run, and differ per call", () => {
++    const name = testResourceName("integration", RUN, Buffer.from("a1b2c3", "hex"));
++    expect(name).toBe(`aida-test-integration-${RUN}-a1b2c3`);
++    expect(testResourceName("e2e", RUN)).not.toBe(testResourceName("e2e", RUN));
++  });
++
++  test("a kind that could escape the prefix scheme is refused", () => {
++    for (const kind of ["", "Integration", "a_b", "-x", "x-", "a/b", "../x"]) {
++      expect(() => testResourceName(kind, RUN)).toThrow();
++    }
++  });
++});
++
++describe("ledger", () => {
++  test("appends one JSON line per resource under the run's file", () => {
++    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aida-ledger-test-"));
++    try {
++      recordResource(RUN, { type: "container", name: "aida-test-x", state: "planned" }, tmp);
++      recordResource(
++        RUN,
++        { type: "container", name: "aida-test-x", id: "c1", state: "created" },
++        tmp,
++      );
++      const file = ledgerPath(RUN, tmp);
++      expect(file).toBe(path.join(tmp, "aida-test-runs", `${RUN}.jsonl`));
++      const entries = fs
++        .readFileSync(file, "utf8")
++        .trim()
++        .split("\n")
++        .map((line) => JSON.parse(line));
++      expect(entries.map((entry) => entry.state)).toEqual(["planned", "created"]);
++      expect(entries[1]).toMatchObject({ type: "container", name: "aida-test-x", id: "c1" });
++    } finally {
++      fs.rmSync(tmp, { recursive: true, force: true });
++    }
++  });
++});
+diff --git a/tests/unit/docker-test-preflight.test.ts b/tests/unit/docker-test-preflight.test.ts
+new file mode 100644
+index 0000000..b914c5f
+--- /dev/null
++++ b/tests/unit/docker-test-preflight.test.ts
+@@ -0,0 +1,245 @@
++import fs from "node:fs";
++import os from "node:os";
++import path from "node:path";
++import { describe, expect, test } from "vitest";
++import { newRunId } from "../support/docker-test-labels";
++import {
++  acquireLock,
++  assertComposeFollowsRuleJ,
++  assertEnoughSpace,
++  assertProjectAbsent,
++  assertSubnetFree,
++  assertTagsFree,
++  type ComposeConfig,
++  cidrOverlaps,
++  type Docker,
++  DockerPreflightError,
++  dockerFreeBytes,
++  hostFreeBytes,
++  lockPath,
++  MIN_FREE_BYTES,
++  parseDfAvailableBytes,
++  tagState,
++} from "../support/docker-test-preflight";
++
++const RUN = newRunId(1_700_000_000_000, Buffer.from("0011223344556677", "hex"));
++const GIB = 1024 ** 3;
++
++function scripted(answers: (args: string[]) => { code: number; stdout?: string; stderr?: string }) {
++  const calls: string[][] = [];
++  const docker: Docker = (args) => {
++    calls.push(args);
++    const answer = answers(args);
++    return { code: answer.code, stdout: answer.stdout ?? "", stderr: answer.stderr ?? "" };
++  };
++  return { docker, calls };
++}
++
++describe("free space", () => {
++  const df =
++    "Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 41152736 12000000 27000000 31% /\n";
++
++  test("reads the available column of df -Pk in bytes", () => {
++    expect(parseDfAvailableBytes(df)).toBe(27_000_000 * 1024);
++  });
++
++  test("refuses df output it cannot read", () => {
++    expect(() => parseDfAvailableBytes("")).toThrow(DockerPreflightError);
++    expect(() => parseDfAvailableBytes("overlay 1 2 x 3% /")).toThrow(DockerPreflightError);
++  });
++
++  test("20 GiB passes; anything below, or unreadable, stops", () => {
++    expect(() => assertEnoughSpace("host", MIN_FREE_BYTES)).not.toThrow();
++    expect(MIN_FREE_BYTES).toBe(20 * GIB);
++    expect(() => assertEnoughSpace("host", MIN_FREE_BYTES - 1)).toThrow(/below the 20.0 GiB/);
++    expect(() => assertEnoughSpace("host", Number.NaN)).toThrow(DockerPreflightError);
++  });
++
++  test("measures the host with statfs, taking the smallest directory", () => {
++    expect(hostFreeBytes([os.tmpdir(), os.homedir()])).toBeGreaterThan(0);
++  });
++
++  test("measures the Docker VM with a labelled, named, never-pulling one-off container", () => {
++    const { docker, calls } = scripted(() => ({ code: 0, stdout: df }));
++    expect(dockerFreeBytes(docker, RUN)).toBe(27_000_000 * 1024);
++    const args = calls[0];
++    expect(args.slice(0, 4)).toEqual(["run", "--rm", "--pull", "never"]);
++    expect(args).toContain("--network");
++    expect(args[args.indexOf("--name") + 1]).toMatch(
++      new RegExp(`^aida-test-df-${RUN}-[0-9a-f]{6}$`),
++    );
++    expect(args).toContain("aida.test=1");
++    expect(args).toContain(`aida.test.run=${RUN}`);
++  });
++
++  test("a failed probe stops instead of assuming space", () => {
++    const { docker } = scripted(() => ({ code: 125, stderr: "Unable to find image" }));
++    expect(() => dockerFreeBytes(docker, RUN)).toThrow(/nothing is pulled/);
++  });
++});
++
++describe("image tags", () => {
++  test("distinguishes a free tag, a taken tag, and an unknown daemon error", () => {
++    const { docker } = scripted((args) => {
++      const ref = args[args.length - 1];
++      if (ref === "taken:1") return { code: 0, stdout: "sha256:abc" };
++      if (ref === "free:1") return { code: 1, stderr: "Error: No such image: free:1" };
++      return { code: 1, stderr: "Cannot connect to the Docker daemon" };
++    });
++    expect(tagState(docker, "taken:1")).toBe("taken");
++    expect(tagState(docker, "free:1")).toBe("free");
++    expect(() => tagState(docker, "broken:1")).toThrow(/Cannot tell/);
++    expect(() => assertTagsFree(docker, ["free:1", "taken:1"])).toThrow(/taken:1/);
++    expect(() => assertTagsFree(docker, ["free:1"])).not.toThrow();
++  });
++});
++
++describe("compose project", () => {
++  test("passes only when the project has no container, network or volume", () => {
++    expect(() =>
++      assertProjectAbsent(scripted(() => ({ code: 0 })).docker, "aida-test-egress"),
++    ).not.toThrow();
++    const busy = scripted((args) => ({ code: 0, stdout: args[0] === "network" ? "n1\n" : "" }));
++    expect(() => assertProjectAbsent(busy.docker, "aida-test-egress")).toThrow(
++      /already has a network/,
++    );
++    const broken = scripted(() => ({ code: 1, stderr: "daemon down" }));
++    expect(() => assertProjectAbsent(broken.docker, "aida-test-egress")).toThrow(/Cannot list/);
++  });
++});
++
++describe("subnet", () => {
++  test("IPv4 overlap", () => {
++    expect(cidrOverlaps("10.90.0.0/24", "10.90.0.128/25")).toBe(true);
++    expect(cidrOverlaps("10.90.0.0/24", "10.0.0.0/8")).toBe(true);
++    expect(cidrOverlaps("10.90.0.0/24", "10.90.1.0/24")).toBe(false);
++    expect(cidrOverlaps("10.90.0.0/24", "172.17.0.0/16")).toBe(false);
++    expect(cidrOverlaps("10.90.0.0/24", "fd00::/64")).toBe(false);
++  });
++
++  test("stops when an existing network overlaps, naming it", () => {
++    const { docker } = scripted((args) =>
++      args[1] === "ls"
++        ? { code: 0, stdout: "a\nb\n" }
++        : { code: 0, stdout: "bridge|172.17.0.0/16,\nother-project_default|10.90.0.0/16,\n" },
++    );
++    expect(() => assertSubnetFree(docker, "10.90.0.0/24")).toThrow(/other-project_default/);
++  });
++
++  test("passes when nothing overlaps", () => {
++    const { docker } = scripted((args) =>
++      args[1] === "ls"
++        ? { code: 0, stdout: "a\n" }
++        : { code: 0, stdout: "bridge|172.17.0.0/16,\nhost|\n" },
++    );
++    expect(() => assertSubnetFree(docker, "10.90.0.0/24")).not.toThrow();
++  });
++});
++
++describe("lock", () => {
++  test("is exclusive, released only by its own run, and never cleared when stale", () => {
++    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aida-lock-test-"));
++    try {
++      const release = acquireLock(RUN, tmp);
++      expect(() => acquireLock(RUN, tmp)).toThrow(/is held/);
++      release();
++      expect(fs.existsSync(lockPath(tmp))).toBe(false);
++
++      const releaseA = acquireLock(RUN, tmp);
++      fs.writeFileSync(lockPath(tmp), JSON.stringify({ runId: "someone-else" }));
++      releaseA();
++      expect(fs.existsSync(lockPath(tmp))).toBe(true);
++    } finally {
++      fs.rmSync(tmp, { recursive: true, force: true });
++    }
++  });
++});
++
++describe("compose rule J check", () => {
++  const labels = { "aida.test": "1", "aida.test.run": RUN };
++  const valid = (): ComposeConfig => ({
++    services: {
++      app: { image: `aida-test-egress-app:${RUN}`, labels, build: { labels } },
++      db: { image: "pgvector/pgvector:pg16", labels, tmpfs: ["/var/lib/postgresql/data"] },
++      smtp: {
++        image: "greenmail/standalone:latest",
++        labels,
++        volumes: [{ type: "bind", source: "/x", target: "/y" }],
++      },
++    },
++    networks: { egress_internal: { labels } },
++    volumes: { uploads_data: { labels } },
++  });
++
++  test("a compliant config returns the built image tags", () => {
++    expect(assertComposeFollowsRuleJ(valid(), "aida-test-egress", RUN)).toEqual([
++      `aida-test-egress-app:${RUN}`,
++    ]);
++  });
++
++  const breakages: [string, (c: ComposeConfig) => void, RegExp][] = [
++    [
++      "service without labels",
++      (c) => {
++        if (c.services) c.services.db.labels = {};
++      },
++      /service db lacks/,
++    ],
++    [
++      "build without labels",
++      (c) => {
++        if (c.services?.app.build) c.services.app.build.labels = undefined;
++      },
++      /build of app/,
++    ],
++    [
++      "built image with a shared tag",
++      (c) => {
++        if (c.services) c.services.app.image = "aida-test-egress-app:latest";
++      },
++      /expected aida-test-egress-app/,
++    ],
++    [
++      "anonymous volume",
++      (c) => {
++        if (c.services) c.services.smtp.volumes = [{ type: "volume", target: "/data" }];
++      },
++      /anonymous volume at \/data/,
++    ],
++    [
++      "Postgres without tmpfs",
++      (c) => {
++        if (c.services) c.services.db.tmpfs = undefined;
++      },
++      /Postgres data/,
++    ],
++    [
++      "network of another run",
++      (c) => {
++        if (c.networks)
++          c.networks.egress_internal.labels = { "aida.test": "1", "aida.test.run": "x" };
++      },
++      /network egress_internal/,
++    ],
++    [
++      "external volume",
++      (c) => {
++        if (c.volumes) c.volumes.uploads_data = { external: true };
++      },
++      /volume uploads_data is external/,
++    ],
++  ];
++  for (const [what, breakIt, message] of breakages) {
++    test(`refuses: ${what}`, () => {
++      const config = valid();
++      breakIt(config);
++      expect(() => assertComposeFollowsRuleJ(config, "aida-test-egress", RUN)).toThrow(message);
++    });
++  }
++
++  test("refuses a project name without the aida-test- prefix", () => {
++    expect(() => assertComposeFollowsRuleJ(valid(), "aida-egress-test", RUN)).toThrow(
++      /lacks aida-test-/,
++    );
++  });
++});
+diff --git a/tests/unit/test-docker-cleanup.test.ts b/tests/unit/test-docker-cleanup.test.ts
+new file mode 100644
+index 0000000..a6eaf82
+--- /dev/null
++++ b/tests/unit/test-docker-cleanup.test.ts
+@@ -0,0 +1,182 @@
++import { describe, expect, test } from "vitest";
++import {
++  applyCleanup,
++  belongsToRun,
++  type DockerRunner,
++  listOtherRuns,
++  planCleanup,
++} from "../../scripts/test-docker-cleanup";
++import { newRunId } from "../support/docker-test-labels";
++
++const RUN = newRunId(1_700_000_000_000, Buffer.from("00112233445566aa", "hex"));
++const OTHER = newRunId(1_700_000_000_001, Buffer.from("ffeeddccbbaa9988", "hex"));
++
++interface FakeResource {
++  type: "container" | "network" | "volume" | "image";
++  ref: string;
++  name: string;
++  labels: Record<string, string> | null;
++}
++
++/** A tiny in-memory Docker that answers the list, inspect and remove commands the script uses. */
++function fakeDocker(resources: FakeResource[], options: { failRemove?: string[] } = {}) {
++  const calls: string[][] = [];
++  // Deep copy: a test that edits labels must not leak into the next test.
++  const live = resources.map((r) => ({ ...r, labels: r.labels ? { ...r.labels } : null }));
++  const typeOf = (args: string[]): FakeResource["type"] => {
++    if (args[0] === "ps" || args[0] === "rm" || args[0] === "container") return "container";
++    return args[0] as FakeResource["type"];
++  };
++  const runner: DockerRunner = (args) => {
++    calls.push(args);
++    const type = typeOf(args);
++    const verb = args[0] === "ps" ? "ls" : args[0] === "rm" ? "rm" : args[1];
++    if (verb === "ls") {
++      const wanted = args
++        .filter((_, i) => args[i - 1] === "--filter")
++        .map((filter) => filter.replace(/^label=/, "").split("="));
++      return live
++        .filter((r) => r.type === type)
++        .filter((r) => wanted.every(([key, value]) => r.labels?.[key] === value))
++        .map((r) => r.ref)
++        .join("\n");
++    }
++    const ref = args[args.length - 1];
++    const found = live.find((r) => r.type === type && r.ref === ref);
++    if (verb === "inspect") {
++      if (!found) throw new Error(`No such ${type}: ${ref}`);
++      const name = type === "container" ? `/${found.name}` : found.name;
++      return JSON.stringify(
++        type === "image" ? { labels: found.labels } : { name, labels: found.labels },
++      );
++    }
++    if (verb === "rm") {
++      if (options.failRemove?.includes(ref)) throw new Error(`cannot remove ${ref}`);
++      if (!found) throw new Error(`No such ${type}: ${ref}`);
++      live.splice(live.indexOf(found), 1);
++      return "";
++    }
++    throw new Error(`unexpected docker call: ${args.join(" ")}`);
++  };
++  return { runner, calls, live };
++}
++
++const mine = { "aida.test": "1", "aida.test.run": RUN };
++const theirs = { "aida.test": "1", "aida.test.run": OTHER };
++
++const WORLD: FakeResource[] = [
++  { type: "container", ref: "c-mine", name: `aida-test-integration-${RUN}-aaaaaa`, labels: mine },
++  { type: "container", ref: "c-other-run", name: `aida-test-e2e-${OTHER}-bbbbbb`, labels: theirs },
++  // Right labels, wrong name: someone else's container that copied the labels.
++  { type: "container", ref: "c-wrong-name", name: "aida-dev-db", labels: mine },
++  { type: "container", ref: "c-unlabelled", name: "aida-test-loose", labels: null },
++  { type: "network", ref: "n-mine", name: "aida-test-egress_egress_internal", labels: mine },
++  { type: "network", ref: "n-project", name: "mis-demo_default", labels: null },
++  {
++    type: "volume",
++    ref: "aida-test-egress_uploads_data",
++    name: "aida-test-egress_uploads_data",
++    labels: mine,
++  },
++  { type: "volume", ref: "0123abcd", name: "0123abcd", labels: null },
++  { type: "image", ref: `aida-test-egress-app:${RUN}`, name: "", labels: mine },
++  { type: "image", ref: "node:22-alpine", name: "", labels: null },
++  // Labelled for this run but not under the aida-test- repository prefix.
++  { type: "image", ref: `aida:${RUN}`, name: "", labels: mine },
++];
++
++describe("planCleanup", () => {
++  test("selects only resources with the test label, this run, and the aida-test- prefix", () => {
++    const { runner } = fakeDocker(WORLD);
++    const plan = planCleanup(runner, RUN);
++    expect(plan.map((r) => `${r.type}:${r.ref}`)).toEqual([
++      "container:c-mine",
++      "network:n-mine",
++      "volume:aida-test-egress_uploads_data",
++      `image:aida-test-egress-app:${RUN}`,
++    ]);
++  });
++
++  test("a dry run only lists and inspects; it never removes", () => {
++    const { runner, calls } = fakeDocker(WORLD);
++    planCleanup(runner, RUN);
++    expect(calls.some((args) => args.includes("rm"))).toBe(false);
++    expect(calls.some((args) => args.some((a) => a.includes("prune")))).toBe(false);
++  });
++
++  test("an invalid run id is refused before any docker call", () => {
++    const { runner, calls } = fakeDocker(WORLD);
++    expect(() => planCleanup(runner, "aida-test-")).toThrow();
++    expect(calls).toEqual([]);
++  });
++});
++
++describe("applyCleanup", () => {
++  test("removes in order containers, networks, volumes, image tags, and leaves the rest", () => {
++    const { runner, calls, live } = fakeDocker(WORLD);
++    const result = applyCleanup(runner, RUN, planCleanup(runner, RUN));
++    const removals = calls.filter((args) => args[0] === "rm" || args[1] === "rm");
++    expect(removals).toEqual([
++      ["rm", "-f", "c-mine"],
++      ["network", "rm", "n-mine"],
++      ["volume", "rm", "aida-test-egress_uploads_data"],
++      ["image", "rm", `aida-test-egress-app:${RUN}`],
++    ]);
++    expect(result.failed).toEqual([]);
++    expect(live.map((r) => r.ref)).toEqual([
++      "c-other-run",
++      "c-wrong-name",
++      "c-unlabelled",
++      "n-project",
++      "0123abcd",
++      "node:22-alpine",
++      `aida:${RUN}`,
++    ]);
++  });
++
++  test("never removes a container's anonymous volumes and never prunes", () => {
++    const { runner, calls } = fakeDocker(WORLD);
++    applyCleanup(runner, RUN, planCleanup(runner, RUN));
++    expect(calls.some((args) => args[0] === "rm" && args.includes("-v"))).toBe(false);
++    expect(calls.some((args) => args.some((a) => a.includes("prune")))).toBe(false);
++  });
++
++  test("re-checks each resource right before removal and skips one whose labels changed", () => {
++    const { runner, calls, live } = fakeDocker(WORLD);
++    const plan = planCleanup(runner, RUN);
++    const container = live.find((r) => r.ref === "c-mine");
++    if (container) container.labels = theirs;
++    const result = applyCleanup(runner, RUN, plan);
++    expect(result.skipped.map((s) => s.resource.ref)).toEqual(["c-mine"]);
++    expect(calls).not.toContainEqual(["rm", "-f", "c-mine"]);
++  });
++
++  test("a failed removal is reported and the rest still runs", () => {
++    const { runner } = fakeDocker(WORLD, { failRemove: ["n-mine"] });
++    const result = applyCleanup(runner, RUN, planCleanup(runner, RUN));
++    expect(result.failed.map((f) => f.resource.ref)).toEqual(["n-mine"]);
++    expect(result.removed.map((r) => r.ref)).toEqual([
++      "c-mine",
++      "aida-test-egress_uploads_data",
++      `aida-test-egress-app:${RUN}`,
++    ]);
++  });
++});
++
++describe("belongsToRun and listOtherRuns", () => {
++  test("an image is matched on its repository, not its tag", () => {
++    expect(
++      belongsToRun(
++        { type: "image", ref: `x:aida-test-${RUN}`, name: `x:aida-test-${RUN}`, labels: mine },
++        RUN,
++      ),
++    ).toBe(false);
++  });
++
++  test("other runs are listed, never planned", () => {
++    const { runner, calls } = fakeDocker(WORLD);
++    const others = listOtherRuns(runner, RUN);
++    expect(others.map((r) => r.ref)).toEqual(["c-other-run"]);
++    expect(calls.some((args) => args[0] === "rm" || args[1] === "rm")).toBe(false);
++  });
++});
+diff --git a/vitest.integration.config.ts b/vitest.integration.config.ts
+index 2bf74de..1fb3820 100644
+--- a/vitest.integration.config.ts
++++ b/vitest.integration.config.ts
+@@ -1,9 +1,11 @@
+ import path from "node:path";
+-import { defineConfig } from "vitest/config";
++import { configDefaults, defineConfig } from "vitest/config";
+ 
+ export default defineConfig({
+   test: {
+     include: ["tests/integration/**/*.test.ts"],
++    // The egress suite builds images and runs only through `pnpm test:egress` (K113).
++    exclude: [...configDefaults.exclude, "tests/integration/egress-isolation.test.ts"],
+     globalSetup: "./tests/integration/global-setup.ts",
+     hookTimeout: 120_000,
+     testTimeout: 60_000,
