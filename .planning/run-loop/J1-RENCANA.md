@@ -22,6 +22,9 @@ Butir antrean J1, turunan keputusan owner 2026-11-11 butir 5 (aturan J di `PIAGA
 
 ## Tugas
 
+Status: tugas 1 sampai 3 selesai di `5071f65` (typecheck exit 0, `pnpm lint` exit 0, `pnpm test` 52 berkas dan 855 test lolos, termasuk 17 test baru). Orkestrator menjalankan test Docker dengan `AIDA_TEST_RUN_ID` miliknya, lalu `pnpm test:docker-cleanup --run <runId>` (dry run, lalu `--apply`) di akhir putaran.
+
+
 1. `tests/support/docker-test-resources.ts`: `runId`, label, nama, ledger, `labeledPostgres()` (nama, label, tmpfs), Ryuk mati. Test unit untuk nama, label, dan `runId`.
 2. Lima pemanggil `PostgreSqlContainer` memakai helper (integration global setup, E2E global setup dengan perbaikan K110, harness migrasi, `scripts/capture-demo-assets.ts`).
 3. `scripts/test-docker-cleanup.mjs`: default dry-run, `--run <runId>` wajib, `--apply` untuk menghapus, `--list-others` hanya melapor. Test unit untuk penyaring (label, run, awalan) dengan keluaran docker tiruan.
