@@ -4,9 +4,9 @@ milestone: v2.0
 milestone_name: Helpdesk & Projects
 current_phase: 14
 current_phase_name: projects-foundation
-status: Phases 8, 9, 10 and 15 parked (8 to 10 by owner decision, 15 after three plan-review cycles with 2 HIGH left); 13, 16 and 17 parked by dependency; Phases 11, 12, 12.1, 12.2 and 14 verified human_needed; run-loop queue exhausted
-stopped_at: Phase 15 parked at step 5 (plan-phase): 25 plans written and revised three times; Codex plan review cycle 3 left CX3-1 and CX3-2 (HIGH) and CX3-3 (MEDIUM) open; owner item 15-o2; no Phase 15 code executed
-last_updated: "2026-11-10T14:45:00.000Z"
+status: Owner decisions 2026-11-11 unpark Phases 8, 9, 10 and 15 (and 13, 16, 17 by dependency); Phases 11, 12, 12.1, 12.2 and 14 verified human_needed; run-loop resumes with queue item J1 (charter rule J for test Docker resources)
+stopped_at: Owner decisions recorded in run-loop/ANTREAN.md; charter rules I (no GitHub cost) and J (test Docker resources) added; next is queue item J1, then 0a2, 12-o1 and Phase 8 replan with one review cycle
+last_updated: "2026-11-11T00:00:00.000Z"
 last_activity: 2026-11-09
 last_activity_desc: Phase 14 closed to human_needed. 13 plans, code review in three parts with fix batches F1 and F2, three Codex diff rounds with fixes F3 to F5 (run decisions K69 to K73), final gate on 41b1597 (lint, typecheck, unit 838, integration without egress 1297, build exit 0; E2E one failure fixed in tests by a60d339, full E2E 209 passed; audit --prod exit 1 baseline; test:egress blocked O-1), verifier 7 of 7 with no code gap. Open for the owner: 14-o1, 14-o2, 14-o3
 state_head: 0e4df7c

@@ -1,6 +1,6 @@
 # Laporan run loop AIDA
 
-Keadaan per 2026-11-10 14.45 WIB, sesudah Fase 15 diparkir; antrean habis dan loop dihentikan.
+Keadaan per 2026-11-11, sesudah keputusan owner. Fase 08, 09, 10, 13, 15, 16, dan 17 dilepas dari parkir; keputusan owner dicatat kata per kata di `ANTREAN.md` (bagian Keputusan owner 2026-11-11), aturan I (biaya GitHub) dan J (resource Docker test) ada di `PIAGAM.md`. Bagian di bawah sebagian masih keadaan 2026-11-10 dan diperbarui per putaran.
 
 ## 1. Ringkasan
 
@@ -28,6 +28,8 @@ Milestone v2.0 sudah dibuka (0b) dan daftar fitur Projects sudah dicek ke demo p
 | 17 | Penyatuan (AIDA-91 sampai 96) | diparkir (bergantung pada Fase 13 sampai 16) | | |
 
 ## 3. Menunggu owner
+
+Keputusan owner 2026-11-11 menjawab butir 0, 1, 2, 3, 5, 6, 7, 8, dan 9 di bawah (rincian di `ANTREAN.md`). Yang masih terbuka: butir 4 (`.env`, cek A1 sampai A3 diblokir hook pembaca rahasia, perlu dijalankan owner), 12.2-o1 sampai 12.2-o4, 14-o1 sampai 14-o3, 15-o1, dan konfirmasi tafsiran ketat aturan J soal `aida-dev-db`.
 
 0. **Fase 15 diparkir (15-o2).** Tiga siklus review plan Codex habis dengan 2 HIGH tersisa (CX3-1: pergantian akun A ke B ke A saat simpan view state lama masih berjalan; CX3-2: contoh test K100 di 15-12 bertentangan dengan API K105) dan 1 MEDIUM (CX3-3: Reload dialog tanggal yang gagal). Saran perbaikan ada di `15-REVIEWS.md`. Keputusan owner: izinkan siklus ke-4, terapkan perbaikan tanpa review tambahan, atau sederhanakan K100. Ini menghalangi eksekusi Fase 15, 16, dan 17.
 
@@ -111,6 +113,10 @@ Dicek 2026-11-09 08.40 WIB:
 - `git ls-remote origin refs/heads/master`: `1ea4281ab7bc72955514847837b5efffa5bc837d`
 - `git remote get-url --push origin`: `no-push-run-loop`
 - `master` lokal: `1ea4281`
+
+## 10. Pemindahan `.next/` ke Trash
+
+Belum ada.
 
 ## 9. Yang belum terbukti
 

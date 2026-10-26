@@ -56,7 +56,21 @@ Ditambahkan oleh owner dan mengikat seperti Larangan. Seluruh isi bagian ini, te
 - Repo `afrizzal/aida` tetap PUBLIC.
 - Setiap job workflow hanya boleh `runs-on: ubuntu-latest`.
 - Dilarang: larger runner, Codespaces, Git LFS, workflow berjadwal baru, dan mengubah visibility repo.
-- Kalau ragu apakah sebuah langkah menimbulkan biaya GitHub, anggap terlarang dan catat sebagai keputusan owner (aturan F).
+- Kalau ragu apakah sebuah langkah menimbulkan biaya GitHub, anggap terlarang dan catat sebagai keputusan owner (aturan F). Baris ini disetujui owner 2026-11-11.
+- Pengecualian, keputusan owner 2026-11-11: Dependabot boleh, mingguan, dengan `open-pull-requests-limit: 3`. Workflow `audit` dipicu `pull_request`, push ke `master`, dan `workflow_dispatch`; job `egress` dipicu `pull_request` yang mengubah Dockerfile, compose, atau lockfile, dan `workflow_dispatch`.
+
+**J. Resource Docker untuk test.** Ditambahkan owner 2026-11-11 (keputusan O-1: ya) dan mengikat seperti Larangan. Isinya, kata per kata:
+
+- nama project test berawalan aida-test- BUKAN aida- (cocok dengan aida-dev-db)
+- ganti nama aida-egress-test menjadi aida-test-egress
+- semua resource test berlabel aida.test=1
+- pembersihan hanya yang cocok label DAN awalan aida-test-
+- dilarang menyentuh project aida, aida-dev-db, smartcv-*, atau project lain mana pun
+- dilarang docker system prune, docker volume prune, colima delete, dan apa pun di ~/.colima
+- tag image test unik, misalnya aida-test:<sha>; dilarang menimpa tag yang sudah ada
+- sebelum build image: cek ruang kosong di host dan VM Colima; jika di bawah 20 GB, berhenti dan lapor
+
+Tafsiran run, memakai bacaan paling ketat sampai owner berkata lain: container `aida-dev-db` yang sudah ada tidak disentuh lagi (tidak di-start, stop, hapus, atau dipakai migrasi). Migrasi dev memakai container sekali pakai baru berawalan `aida-test-` dengan label `aida.test=1` di port lain yang kosong. Gerbang compose akhir Fase 08, 13, dan 17 memakai project berawalan `aida-test-`, bukan `aida`. Pembersihan di aturan H juga hanya untuk resource yang cocok label dan awalan.
 
 ## Urutan fase
 
@@ -173,9 +187,9 @@ Ini repo rujukan yang sama dengan aturan E di bagian Aturan owner 2026-11-08 (`h
 
 - Setiap plan: jalankan test yang terkait.
 - Akhir fase: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm test:integration`, `pnpm test:egress`, `pnpm test:e2e`, `pnpm build`, `pnpm audit --prod`. Satu proses pada satu waktu. Perintah panjang ke log, dan exit code dibaca tanpa pipe.
-- Akhir Fase 08, 13, dan 17: `docker compose -p aida up -d --build`, lalu `curl -sk https://localhost/api/health`, lalu `docker compose -p aida down`. Kalau port 80 atau 443 terpakai, jangan menghentikan layanan lain. Catat dan parkir pengujian ini.
-- Migrasi dev memakai container sekali pakai `aida-dev-db` pada `127.0.0.1:55432`, dengan image yang sama dengan service `db`. `.env` tidak diubah, `DATABASE_URL` diberikan lewat variabel lingkungan perintah.
-- Kalau `tsc` atau build rusak sesudah E2E berulang, hapus `.next/` yang gitignored lalu ulangi.
+- Akhir Fase 08, 13, dan 17 (sejak aturan J: project berawalan `aida-test-`, bukan `aida`): `docker compose -p aida up -d --build`, lalu `curl -sk https://localhost/api/health`, lalu `docker compose -p aida down`. Kalau port 80 atau 443 terpakai, jangan menghentikan layanan lain. Catat dan parkir pengujian ini.
+- Migrasi dev memakai container sekali pakai (sejak aturan J: berawalan `aida-test-` dengan label `aida.test=1`, bukan `aida-dev-db`; semula `aida-dev-db` pada `127.0.0.1:55432`), dengan image yang sama dengan service `db`. `.env` tidak diubah, `DATABASE_URL` diberikan lewat variabel lingkungan perintah.
+- Kalau `tsc` atau build rusak sesudah E2E berulang, jangan `rm` dan jangan ubah izin. Pindahkan `.next/` ke Trash dengan `mv .next ~/.Trash/aida-next-$(date +%s)` lalu ulangi (keputusan owner 2026-11-11). Catat setiap pemindahan di `LAPORAN.md`.
 - 404 pada hit pertama route saat E2E biasanya router belum terkompilasi. Pakai `expect.poll`, jangan melonggarkan produk.
 - Requirement hanya ditutup berdasarkan acceptance dan bukti.
 
@@ -184,7 +198,7 @@ Ini repo rujukan yang sama dengan aturan E di bagian Aturan owner 2026-11-08 (`h
 - Dilarang `git push`, `gh pr`, `gh release`, `gh workflow run`, dan apa pun yang memindahkan commit ke remote. Jangan melepas kunci `pushurl`.
 - Dilarang commit ke `master`, `git merge`, `git rebase`, `git reset --hard`, `git clean`, `git stash`, `git tag`, dan `--no-verify`.
 - Dilarang menyentuh `~/Public/aff/recruitment` dan project lain.
-- Dilarang menghentikan, menghapus, atau mengubah container dan volume selain milik project `aida` dan `aida-dev-db`. Dilarang `docker system prune` dan `docker volume prune`.
+- Dilarang menghentikan, menghapus, atau mengubah container dan volume selain milik project `aida` dan `aida-dev-db`. Dilarang `docker system prune` dan `docker volume prune`. Aturan J mempersempit butir ini.
 - Dilarang memanggil API LLM berbayar sungguhan, mengirim email nyata, dan memakai kredensial asli. Test memakai fake dan server tiruan.
 - Dilarang menaruh API key di `.env` dan mengubah aturan izin Claude Code.
 - Dilarang `--auto` dan `--chain`, dan dilarang menyalakan `workflow.auto_advance`.
