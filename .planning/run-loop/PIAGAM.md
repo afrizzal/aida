@@ -51,6 +51,13 @@ Ditambahkan oleh owner dan mengikat seperti Larangan. Seluruh isi bagian ini, te
 
 **H. Batas disk dan sisa Testcontainers.** Di awal setiap putaran, jalankan `df -h /System/Volumes/Data`. Kalau Avail di bawah 12 GiB: jangan kerjakan putaran itu, jangan jadwalkan putaran berikutnya, dan laporkan angkanya. Di akhir putaran, hapus container Testcontainers yang tertinggal milik putaran itu saja. Jangan sentuh container, image, atau volume proyek lain.
 
+**I. Biaya GitHub.** Ditambahkan owner 2026-11-11 dan mengikat seperti Larangan. Keputusan owner, kata per kata: "saya menyetujui asalkan tidak menimbulkan biaya ke github saya".
+
+- Repo `afrizzal/aida` tetap PUBLIC.
+- Setiap job workflow hanya boleh `runs-on: ubuntu-latest`.
+- Dilarang: larger runner, Codespaces, Git LFS, workflow berjadwal baru, dan mengubah visibility repo.
+- Kalau ragu apakah sebuah langkah menimbulkan biaya GitHub, anggap terlarang dan catat sebagai keputusan owner (aturan F).
+
 ## Urutan fase
 
 Nomor melanjutkan v1. Kerjakan berurutan. Fase boleh dipecah, tetapi isinya tidak boleh dibuang.
