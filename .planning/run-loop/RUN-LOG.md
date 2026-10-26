@@ -1418,3 +1418,7 @@ Review plan Codex siklus 3 (terakhir) selesai (`fase15-plan-r3-jawab.md`; model 
 ## Keputusan owner 2026-11-11 (di luar putaran)
 
 Owner membaca laporan dan memutuskan 14 butir; dicatat kata per kata di `ANTREAN.md`. Piagam mendapat aturan I (biaya GitHub, commit `b5c597c`) dan J (resource Docker test), serta cara baru untuk `.next/` (pindah ke Trash). Antrean: butir baru J1 di depan (terapkan aturan J ke resource test), lalu 0a2, 12-o1, 08 (satu siklus review, khusus 4 HIGH), 09, 10, 11-o2, 13, 15 (opsi c), 16, 17. Tafsiran ketat aturan J: `aida-dev-db` tidak disentuh lagi; menunggu konfirmasi owner. Cek `.env` A1 sampai A3 diblokir hook pembaca rahasia; transkrip menunjukkan berkas itu sudah ada sebelum perintah pertama sesi Claude pertama (2026-11-07 15.38 WIB).
+
+## Putaran J1-1 (2026-11-11)
+
+Cek A (26 GiB), B (`colima status` dan `docker info` exit 0), H, dan Berhenti total lolos (`origin/master` dan `master` lokal `1ea4281`, pushurl `no-push-run-loop`, branch `v2/run-loop`, tanpa `BERHENTI`); regresi Rekriva tidak berjalan. Butir J1. Inventaris: lima pemanggilan `PostgreSqlContainer` tanpa nama dan label (integration, E2E, harness migrasi, skrip capture), Ryuk aktif tanpa label, suite egress `aida-egress-test` dengan enam service hasil build bernama bawaan dan `down -v`. Rancangan (helper berlabel, Ryuk mati, skrip pembersih label dan awalan, tag unik, cek ruang 20 GiB host dan VM) dikirim ke Codex: `codex/j1-tanya.md`. Belum ada kode diubah.
