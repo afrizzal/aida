@@ -114,10 +114,6 @@ Dicek 2026-11-09 08.40 WIB:
 - `git remote get-url --push origin`: `no-push-run-loop`
 - `master` lokal: `1ea4281`
 
-## 10. Pemindahan `.next/` ke Trash
-
-Belum ada.
-
 ## 9. Yang belum terbukti
 
 - Perbaikan AIDA-37 dari putaran 3 belum diperiksa Codex (batas 3 putaran). Review plan Fase 9 akan memeriksanya.
@@ -126,3 +122,7 @@ Belum ada.
 - `docker compose -p aida up -d --build` belum pernah dijalankan di Mac ini.
 - AIDA-100 sampai AIDA-114 (dari butir 0c) belum dikritik Codex. Codex akan memeriksanya saat CONTEXT dan review plan Fase 14 dan 16.
 - Penelusuran demo hanya mencakup yang bisa diklik dari halaman utama. Drag and drop, isi dialog Share, dan halaman detail proyek dari sidebar tidak dibuka.
+
+## 10. Pemindahan `.next/` ke Trash
+
+Belum ada.
