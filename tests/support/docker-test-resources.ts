@@ -42,11 +42,17 @@ export async function startLabeledPostgres(
   options: LabeledPostgresOptions,
 ): Promise<StartedPostgreSqlContainer> {
   const started = await labeledPostgres(options).start();
-  recordResource(testRunId(), {
-    type: "container",
-    name: started.getName().replace(/^\//, ""),
-    id: started.getId(),
-    state: "created",
-  });
+  try {
+    recordResource(testRunId(), {
+      type: "container",
+      name: started.getName().replace(/^\//, ""),
+      id: started.getId(),
+      state: "created",
+    });
+  } catch (err) {
+    // The caller never gets a handle if this throws, so stop the container here (K117).
+    await started.stop();
+    throw err;
+  }
   return started;
 }

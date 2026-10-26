@@ -32,11 +32,18 @@ export async function setup() {
     process.env.APP_ENCRYPTION_KEY = randomBytes(32).toString("base64");
   }
 
-  execSync("pnpm prisma migrate deploy && pnpm prisma generate", {
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "inherit",
-    cwd: PROJECT_ROOT,
-  });
+  // A failed migration must not leak the container: with Ryuk off nothing else removes it
+  // (run decision K117).
+  try {
+    execSync("pnpm prisma migrate deploy && pnpm prisma generate", {
+      env: { ...process.env, DATABASE_URL: url },
+      stdio: "inherit",
+      cwd: PROJECT_ROOT,
+    });
+  } catch (err) {
+    await container.stop();
+    throw err;
+  }
 }
 
 export async function teardown() {

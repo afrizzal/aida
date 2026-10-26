@@ -64,12 +64,21 @@ export default async function globalSetup(_config: FullConfig) {
   fs.rmSync(AUTH_DIR, { recursive: true, force: true });
   fs.mkdirSync(AUTH_DIR, { recursive: true });
 
-  const container = await startLabeledPostgres({
-    kind: "e2e",
-    database: "aida_e2e",
-    username: "e2e",
-    password: "e2e",
-  });
+  // Created before the container, so a failure here cannot leak it (K117).
+  const uploadsDir = fs.mkdtempSync(path.join(os.tmpdir(), "aida-e2e-uploads-"));
+
+  let container: Awaited<ReturnType<typeof startLabeledPostgres>>;
+  try {
+    container = await startLabeledPostgres({
+      kind: "e2e",
+      database: "aida_e2e",
+      username: "e2e",
+      password: "e2e",
+    });
+  } catch (err) {
+    fs.rmSync(uploadsDir, { recursive: true, force: true });
+    throw err;
+  }
   const databaseUrl = container.getConnectionUri();
 
   // A failed migration must not leak the container: teardown is only registered further down
@@ -82,10 +91,9 @@ export default async function globalSetup(_config: FullConfig) {
     });
   } catch (err) {
     await container.stop();
+    fs.rmSync(uploadsDir, { recursive: true, force: true });
     throw err;
   }
-
-  const uploadsDir = fs.mkdtempSync(path.join(os.tmpdir(), "aida-e2e-uploads-"));
 
   const serverEnv = {
     ...process.env,

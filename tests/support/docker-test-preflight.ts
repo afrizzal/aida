@@ -46,17 +46,32 @@ function gib(bytes: number): string {
 
 // --- Free space (K112) ------------------------------------------------------------------------
 
-/** Available bytes from `df -Pk <path>` output (POSIX format: 1024-byte blocks, column 4). */
-export function parseDfAvailableBytes(output: string): number {
-  const rows = output.trim().split("\n");
-  const fields = rows[rows.length - 1]?.trim().split(/\s+/) ?? [];
-  const availableKb = Number(fields[3]);
-  if (rows.length < 2 || !Number.isFinite(availableKb) || availableKb < 0) {
+/** Available bytes of every data row of `df -Pk <paths...>` (POSIX: 1024-byte blocks, column 4). */
+export function parseDfAvailable(output: string): number[] {
+  const rows = output.trim().split("\n").slice(1);
+  if (rows.length === 0) {
     throw new DockerPreflightError(
       `Cannot read free space from df output: ${JSON.stringify(output)}`,
     );
   }
-  return availableKb * 1024;
+  return rows.map((row) => {
+    const availableKb = Number(row.trim().split(/\s+/)[3]);
+    if (!Number.isFinite(availableKb) || availableKb < 0 || row.trim() === "") {
+      throw new DockerPreflightError(`Cannot read free space from df row: ${JSON.stringify(row)}`);
+    }
+    return availableKb * 1024;
+  });
+}
+
+/** Available bytes from single-path `df -Pk <path>` output. */
+export function parseDfAvailableBytes(output: string): number {
+  const values = parseDfAvailable(output);
+  if (values.length !== 1) {
+    throw new DockerPreflightError(
+      `Expected one df row, got ${values.length}: ${JSON.stringify(output)}`,
+    );
+  }
+  return values[0];
 }
 
 export function assertEnoughSpace(
@@ -76,17 +91,38 @@ export function assertEnoughSpace(
  * home directory's filesystem, so measuring the home directory covers it without reading
  * `~/.colima` (rule J forbids touching it).
  */
-export function hostFreeBytes(dirs: string[]): number {
+export function hostFreeBytes(
+  dirs: string[],
+  statfs: (dir: string) => { bavail: number | bigint; bsize: number | bigint } = fs.statfsSync,
+): number {
+  if (dirs.length === 0) throw new DockerPreflightError("No host directory to measure");
   return Math.min(
     ...dirs.map((dir) => {
-      const stats = fs.statfsSync(dir);
+      const stats = statfs(dir);
       return Number(stats.bavail) * Number(stats.bsize);
     }),
   );
 }
 
-/** Free space where Docker stores container layers, measured from inside a one-off container. */
+/** The daemon's DockerRootDir, from `docker info`. */
+export function dockerRootDir(docker: Docker): string {
+  const result = docker(["info", "--format", "{{.DockerRootDir}}"]);
+  const dir = result.stdout.trim();
+  if (result.code !== 0 || !dir.startsWith("/") || /[,\s]/.test(dir)) {
+    throw new DockerPreflightError(
+      `Cannot read the Docker root directory: ${JSON.stringify(dir)} ${result.stderr.trim()}`,
+    );
+  }
+  return dir;
+}
+
+/**
+ * Free space inside the Docker VM, measured from a one-off container in two places and taking
+ * the smaller (K118): the container's own root (where image snapshots and layers live) and the
+ * daemon's DockerRootDir, bind-mounted read-only. Both must be readable, or the check stops.
+ */
 export function dockerFreeBytes(docker: Docker, runId: string): number {
+  const root = dockerRootDir(docker);
   const result = docker([
     "run",
     "--rm",
@@ -100,18 +136,27 @@ export function dockerFreeBytes(docker: Docker, runId: string): number {
     `${TEST_LABEL}=1`,
     "--label",
     `${RUN_LABEL}=${runId}`,
+    "--mount",
+    `type=bind,source=${root},target=/aida-docker-root,readonly`,
     "--entrypoint",
     "df",
     SPACE_PROBE_IMAGE,
     "-Pk",
     "/",
+    "/aida-docker-root",
   ]);
   if (result.code !== 0) {
     throw new DockerPreflightError(
       `Could not measure free space in the Docker VM (${SPACE_PROBE_IMAGE} must already be present; nothing is pulled): ${result.stderr.trim()}`,
     );
   }
-  return parseDfAvailableBytes(result.stdout);
+  const values = parseDfAvailable(result.stdout);
+  if (values.length !== 2) {
+    throw new DockerPreflightError(
+      `Expected two df rows from the space probe, got ${values.length}`,
+    );
+  }
+  return Math.min(...values);
 }
 
 // --- Image tags (K111) ------------------------------------------------------------------------
@@ -153,6 +198,33 @@ export function assertProjectAbsent(docker: Docker, project: string): void {
     if (result.stdout.trim() !== "") {
       throw new DockerPreflightError(
         `Compose project ${project} already has a ${type}. Another run may be using it; stopped without touching it.`,
+      );
+    }
+  }
+}
+
+/**
+ * Stops when a network or volume with one of these exact names already exists, whatever its
+ * labels: the suite must not adopt or overwrite a resource it did not create (K115).
+ */
+export function assertNamesAbsent(
+  docker: Docker,
+  names: { networks?: string[]; volumes?: string[] },
+): void {
+  const checks: [string, string][] = [
+    ...(names.networks ?? []).map((name): [string, string] => ["network", name]),
+    ...(names.volumes ?? []).map((name): [string, string] => ["volume", name]),
+  ];
+  for (const [type, name] of checks) {
+    const result = docker([type, "inspect", "--format", "{{.Name}}", name]);
+    if (result.code === 0) {
+      throw new DockerPreflightError(
+        `A ${type} named ${name} already exists. Stopped without touching it.`,
+      );
+    }
+    if (!/no such|not found/i.test(result.stderr)) {
+      throw new DockerPreflightError(
+        `Cannot tell whether ${type} ${name} exists: ${result.stderr.trim()}`,
       );
     }
   }
@@ -255,8 +327,18 @@ interface ComposeService {
 }
 export interface ComposeConfig {
   services?: Record<string, ComposeService>;
-  networks?: Record<string, { labels?: Record<string, string>; external?: boolean }>;
-  volumes?: Record<string, { labels?: Record<string, string>; external?: boolean }>;
+  networks?: Record<string, { name?: string; labels?: Record<string, string>; external?: boolean }>;
+  volumes?: Record<string, { name?: string; labels?: Record<string, string>; external?: boolean }>;
+}
+
+/** The physical network and volume names Compose will create for this config. */
+export function composeResourceNames(config: ComposeConfig): {
+  networks: string[];
+  volumes: string[];
+} {
+  const names = (entries: Record<string, { name?: string }> | undefined): string[] =>
+    Object.entries(entries ?? {}).map(([key, entry]) => entry.name ?? key);
+  return { networks: names(config.networks), volumes: names(config.volumes) };
 }
 
 function hasRunLabels(labels: Record<string, string> | undefined, runId: string): boolean {
@@ -326,10 +408,14 @@ export interface PreflightOptions {
   tags: string[];
   subnet?: string;
   hostDirs: string[];
+  /** Physical names the project will create; any existing one stops the build (K115). */
+  networkNames?: string[];
+  volumeNames?: string[];
 }
 
 export function runBuildPreflight(docker: Docker, options: PreflightOptions): void {
   assertProjectAbsent(docker, options.project);
+  assertNamesAbsent(docker, { networks: options.networkNames, volumes: options.volumeNames });
   assertTagsFree(docker, options.tags);
   if (options.subnet) assertSubnetFree(docker, options.subnet);
   assertEnoughSpace("the host", hostFreeBytes(options.hostDirs));

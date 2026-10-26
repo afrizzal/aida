@@ -10,7 +10,11 @@
 //
 //   pnpm test:docker-cleanup --run <runId>           dry run: prints what would be removed
 //   pnpm test:docker-cleanup --run <runId> --apply   removes it
+//   ... --scope aida-test-egress                     only names under that prefix (K114)
 //   pnpm test:docker-cleanup --others [--run <id>]   lists aida.test=1 resources of other runs
+//
+// Exit 1 when a removal fails or a resource cannot be inspected for a reason other than
+// "no such ..." (already gone), so an uncertain leftover is never reported as clean (K117).
 // ---------------------------------------------------------------------------
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
@@ -114,12 +118,30 @@ export function inspectResource(
   return { type, ref, name, labels: parsed.labels ?? {} };
 }
 
-/** True only when the resource carries the test label, this run's label, and the name prefix. */
-export function belongsToRun(resource: DockerResource, runId: string): boolean {
+/** A cleanup scope is a name prefix that itself starts with `aida-test-`. */
+export function assertScope(scope: string): void {
+  if (!scope.startsWith(TEST_NAME_PREFIX)) {
+    throw new Error(
+      `A cleanup scope must start with ${TEST_NAME_PREFIX}: ${JSON.stringify(scope)}`,
+    );
+  }
+}
+
+/**
+ * True only when the resource carries the test label, this run's label, and a name under the
+ * scope (by default every `aida-test-` name). A suite passes its own scope so it never removes
+ * resources another suite created with the same run id (K114).
+ */
+export function belongsToRun(
+  resource: DockerResource,
+  runId: string,
+  scope: string = TEST_NAME_PREFIX,
+): boolean {
+  assertScope(scope);
   if (resource.labels[TEST_LABEL] !== "1") return false;
   if (resource.labels[RUN_LABEL] !== runId) return false;
   const name = resource.type === "image" ? resource.name.split(":")[0] : resource.name;
-  return name.startsWith(TEST_NAME_PREFIX);
+  return name.startsWith(scope);
 }
 
 function listByFilters(
@@ -133,17 +155,26 @@ function listByFilters(
 }
 
 /** The resources of one run, in removal order. Lists by label, then checks each one itself. */
-export function planCleanup(docker: DockerRunner, runId: string): DockerResource[] {
+export function planCleanup(
+  docker: DockerRunner,
+  runId: string,
+  scope: string = TEST_NAME_PREFIX,
+): DockerResource[] {
   if (!isRunId(runId)) throw new Error(`Not a valid test run id: ${JSON.stringify(runId)}`);
+  assertScope(scope);
   const filters = ["--filter", `label=${TEST_LABEL}=1`, "--filter", `label=${RUN_LABEL}=${runId}`];
   return REMOVAL_ORDER.flatMap((type) =>
-    listByFilters(docker, type, filters).filter((resource) => belongsToRun(resource, runId)),
+    listByFilters(docker, type, filters).filter((resource) => belongsToRun(resource, runId, scope)),
   );
 }
 
 export interface CleanupResult {
   removed: DockerResource[];
+  /** Already gone when re-inspected ("no such ..."): nothing left to remove. */
+  gone: DockerResource[];
+  /** Still present but no longer this run's (labels or name changed): left alone. */
   skipped: { resource: DockerResource; reason: string }[];
+  /** Removal failed, or the resource could not be inspected for another reason. */
   failed: { resource: DockerResource; error: string }[];
 }
 
@@ -152,17 +183,20 @@ export function applyCleanup(
   docker: DockerRunner,
   runId: string,
   plan: DockerResource[],
+  scope: string = TEST_NAME_PREFIX,
 ): CleanupResult {
-  const result: CleanupResult = { removed: [], skipped: [], failed: [] };
+  assertScope(scope);
+  const result: CleanupResult = { removed: [], gone: [], skipped: [], failed: [] };
   for (const planned of plan) {
     let current: DockerResource;
     try {
       current = inspectResource(docker, planned.type, planned.ref);
     } catch (err) {
-      result.skipped.push({ resource: planned, reason: `no longer inspectable: ${String(err)}` });
+      if (/no such/i.test(String(err))) result.gone.push(planned);
+      else result.failed.push({ resource: planned, error: `cannot inspect: ${String(err)}` });
       continue;
     }
-    if (!belongsToRun(current, runId)) {
+    if (!belongsToRun(current, runId, scope)) {
       result.skipped.push({ resource: planned, reason: "labels or name no longer match this run" });
       continue;
     }
@@ -191,6 +225,8 @@ function describe(resource: DockerResource): string {
 function main(argv: string[]): number {
   const runIndex = argv.indexOf("--run");
   const runId = runIndex >= 0 ? argv[runIndex + 1] : undefined;
+  const scopeIndex = argv.indexOf("--scope");
+  const scope = scopeIndex >= 0 ? (argv[scopeIndex + 1] ?? "") : TEST_NAME_PREFIX;
   const docker: DockerRunner = (args) =>
     execFileSync("docker", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 
@@ -208,21 +244,28 @@ function main(argv: string[]): number {
     return 2;
   }
 
-  const plan = planCleanup(docker, runId);
+  try {
+    assertScope(scope);
+  } catch (err) {
+    console.error(String(err));
+    return 2;
+  }
+  const plan = planCleanup(docker, runId, scope);
   if (!argv.includes("--apply")) {
     for (const resource of plan) console.log(`would remove: ${describe(resource)}`);
     console.log(`${plan.length} resource(s) of run ${runId}; dry run, nothing removed.`);
     return 0;
   }
 
-  const result = applyCleanup(docker, runId, plan);
+  const result = applyCleanup(docker, runId, plan, scope);
   for (const resource of result.removed) console.log(`removed: ${describe(resource)}`);
+  for (const resource of result.gone) console.log(`already gone: ${describe(resource)}`);
   for (const { resource, reason } of result.skipped)
     console.log(`skipped: ${describe(resource)}: ${reason}`);
   for (const { resource, error } of result.failed)
     console.error(`FAILED: ${describe(resource)}: ${error}`);
   console.log(
-    `run ${runId}: ${result.removed.length} removed, ${result.skipped.length} skipped, ${result.failed.length} failed.`,
+    `run ${runId}: ${result.removed.length} removed, ${result.gone.length} already gone, ${result.skipped.length} skipped, ${result.failed.length} failed.`,
   );
   return result.failed.length === 0 ? 0 : 1;
 }

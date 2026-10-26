@@ -19,7 +19,10 @@ interface FakeResource {
 }
 
 /** A tiny in-memory Docker that answers the list, inspect and remove commands the script uses. */
-function fakeDocker(resources: FakeResource[], options: { failRemove?: string[] } = {}) {
+function fakeDocker(
+  resources: FakeResource[],
+  options: { failRemove?: string[]; failInspect?: string[] } = {},
+) {
   const calls: string[][] = [];
   // Deep copy: a test that edits labels must not leak into the next test.
   const live = resources.map((r) => ({ ...r, labels: r.labels ? { ...r.labels } : null }));
@@ -44,6 +47,7 @@ function fakeDocker(resources: FakeResource[], options: { failRemove?: string[] 
     const ref = args[args.length - 1];
     const found = live.find((r) => r.type === type && r.ref === ref);
     if (verb === "inspect") {
+      if (options.failInspect?.includes(ref)) throw new Error(`permission denied: ${ref}`);
       if (!found) throw new Error(`No such ${type}: ${ref}`);
       const name = type === "container" ? `/${found.name}` : found.name;
       return JSON.stringify(
@@ -178,5 +182,37 @@ describe("belongsToRun and listOtherRuns", () => {
     const others = listOtherRuns(runner, RUN);
     expect(others.map((r) => r.ref)).toEqual(["c-other-run"]);
     expect(calls.some((args) => args[0] === "rm" || args[1] === "rm")).toBe(false);
+  });
+});
+
+describe("scope and uncertain leftovers (K114, K117)", () => {
+  test("a suite scope keeps another suite's container of the same run out of the plan", () => {
+    const { runner } = fakeDocker(WORLD);
+    const plan = planCleanup(runner, RUN, "aida-test-egress");
+    expect(plan.map((r) => `${r.type}:${r.ref}`)).toEqual([
+      "network:n-mine",
+      "volume:aida-test-egress_uploads_data",
+      `image:aida-test-egress-app:${RUN}`,
+    ]);
+    const result = applyCleanup(runner, RUN, plan, "aida-test-egress");
+    expect(result.removed.map((r) => r.ref)).not.toContain("c-mine");
+  });
+
+  test("a scope outside aida-test- is refused", () => {
+    const { runner, calls } = fakeDocker(WORLD);
+    expect(() => planCleanup(runner, RUN, "aida-")).toThrow(/must start with aida-test-/);
+    expect(() => applyCleanup(runner, RUN, [], "aida")).toThrow(/must start with aida-test-/);
+    expect(calls).toEqual([]);
+  });
+
+  test("a resource already gone is not a failure; one that cannot be inspected is", () => {
+    const world = fakeDocker(WORLD, { failInspect: ["n-mine"] });
+    const plan = planCleanup(fakeDocker(WORLD).runner, RUN);
+    const container = world.live.find((r) => r.ref === "c-mine");
+    if (container) world.live.splice(world.live.indexOf(container), 1);
+    const result = applyCleanup(world.runner, RUN, plan);
+    expect(result.gone.map((r) => r.ref)).toEqual(["c-mine"]);
+    expect(result.failed.map((f) => f.resource.ref)).toEqual(["n-mine"]);
+    expect(result.failed[0]?.error).toMatch(/cannot inspect/);
   });
 });

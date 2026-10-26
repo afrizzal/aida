@@ -7,17 +7,20 @@ import {
   acquireLock,
   assertComposeFollowsRuleJ,
   assertEnoughSpace,
+  assertNamesAbsent,
   assertProjectAbsent,
   assertSubnetFree,
   assertTagsFree,
   type ComposeConfig,
   cidrOverlaps,
+  composeResourceNames,
   type Docker,
   DockerPreflightError,
   dockerFreeBytes,
   hostFreeBytes,
   lockPath,
   MIN_FREE_BYTES,
+  parseDfAvailable,
   parseDfAvailableBytes,
   tagState,
 } from "../support/docker-test-preflight";
@@ -36,16 +39,21 @@ function scripted(answers: (args: string[]) => { code: number; stdout?: string; 
 }
 
 describe("free space", () => {
-  const df =
-    "Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 41152736 12000000 27000000 31% /\n";
+  const header = "Filesystem 1024-blocks Used Available Capacity Mounted on";
+  const df = `${header}\noverlay 41152736 12000000 27000000 31% /\n`;
+  const df2 = `${header}\noverlay 41152736 12000000 27000000 31% /\n/dev/vdb1 41152736 30000000 9000000 77% /aida-docker-root\n`;
 
   test("reads the available column of df -Pk in bytes", () => {
     expect(parseDfAvailableBytes(df)).toBe(27_000_000 * 1024);
+    expect(parseDfAvailable(df2)).toEqual([27_000_000 * 1024, 9_000_000 * 1024]);
   });
 
-  test("refuses df output it cannot read", () => {
+  test("refuses df output it cannot read, including a bad column under a good header", () => {
     expect(() => parseDfAvailableBytes("")).toThrow(DockerPreflightError);
-    expect(() => parseDfAvailableBytes("overlay 1 2 x 3% /")).toThrow(DockerPreflightError);
+    expect(() => parseDfAvailableBytes(header)).toThrow(DockerPreflightError);
+    expect(() => parseDfAvailableBytes(`${header}\noverlay 1 2 x 3% /`)).toThrow(/df row/);
+    expect(() => parseDfAvailable(`${header}\noverlay 1 2 3 4% /\nbroken row`)).toThrow(/df row/);
+    expect(() => parseDfAvailableBytes(df2)).toThrow(/one df row/);
   });
 
   test("20 GiB passes; anything below, or unreadable, stops", () => {
@@ -55,14 +63,20 @@ describe("free space", () => {
     expect(() => assertEnoughSpace("host", Number.NaN)).toThrow(DockerPreflightError);
   });
 
-  test("measures the host with statfs, taking the smallest directory", () => {
-    expect(hostFreeBytes([os.tmpdir(), os.homedir()])).toBeGreaterThan(0);
+  test("measures the host with statfs and takes the smallest directory", () => {
+    const sizes: Record<string, number> = { "/home": 50, "/repo": 30, "/other": 40 };
+    const statfs = (dir: string) => ({ bavail: sizes[dir], bsize: GIB });
+    expect(hostFreeBytes(["/home", "/repo", "/other"], statfs)).toBe(30 * GIB);
+    expect(() => hostFreeBytes([], statfs)).toThrow(DockerPreflightError);
+    expect(hostFreeBytes([os.tmpdir()])).toBeGreaterThan(0);
   });
 
-  test("measures the Docker VM with a labelled, named, never-pulling one-off container", () => {
-    const { docker, calls } = scripted(() => ({ code: 0, stdout: df }));
-    expect(dockerFreeBytes(docker, RUN)).toBe(27_000_000 * 1024);
-    const args = calls[0];
+  test("measures the VM at the container root and the read-only DockerRootDir, taking the smaller", () => {
+    const { docker, calls } = scripted((args) =>
+      args[0] === "info" ? { code: 0, stdout: "/var/lib/docker\n" } : { code: 0, stdout: df2 },
+    );
+    expect(dockerFreeBytes(docker, RUN)).toBe(9_000_000 * 1024);
+    const args = calls[1];
     expect(args.slice(0, 4)).toEqual(["run", "--rm", "--pull", "never"]);
     expect(args).toContain("--network");
     expect(args[args.indexOf("--name") + 1]).toMatch(
@@ -70,11 +84,61 @@ describe("free space", () => {
     );
     expect(args).toContain("aida.test=1");
     expect(args).toContain(`aida.test.run=${RUN}`);
+    expect(args[args.indexOf("--mount") + 1]).toBe(
+      "type=bind,source=/var/lib/docker,target=/aida-docker-root,readonly",
+    );
+    expect(args.slice(-3)).toEqual(["-Pk", "/", "/aida-docker-root"]);
   });
 
-  test("a failed probe stops instead of assuming space", () => {
-    const { docker } = scripted(() => ({ code: 125, stderr: "Unable to find image" }));
-    expect(() => dockerFreeBytes(docker, RUN)).toThrow(/nothing is pulled/);
+  test("a failed or partial probe stops instead of assuming space", () => {
+    const noInfo = scripted(() => ({ code: 1, stderr: "daemon down" }));
+    expect(() => dockerFreeBytes(noInfo.docker, RUN)).toThrow(/Docker root directory/);
+    const noImage = scripted((args) =>
+      args[0] === "info"
+        ? { code: 0, stdout: "/var/lib/docker" }
+        : { code: 125, stderr: "Unable to find image" },
+    );
+    expect(() => dockerFreeBytes(noImage.docker, RUN)).toThrow(/nothing is pulled/);
+    const oneRow = scripted((args) =>
+      args[0] === "info" ? { code: 0, stdout: "/var/lib/docker" } : { code: 0, stdout: df },
+    );
+    expect(() => dockerFreeBytes(oneRow.docker, RUN)).toThrow(/two df rows/);
+  });
+});
+
+describe("physical names", () => {
+  test("stops when a network or volume with the exact name exists, whatever its labels", () => {
+    const answers: Record<string, { code: number; stderr?: string }> = {
+      "network free": { code: 1, stderr: "Error response from daemon: network free not found" },
+      "volume free-vol": {
+        code: 1,
+        stderr: "Error response from daemon: get free-vol: no such volume",
+      },
+      "network taken": { code: 0 },
+      "volume broken": { code: 1, stderr: "permission denied" },
+    };
+    const { docker } = scripted(
+      (args) => answers[`${args[0]} ${args[args.length - 1]}`] ?? { code: 9 },
+    );
+    expect(() =>
+      assertNamesAbsent(docker, { networks: ["free"], volumes: ["free-vol"] }),
+    ).not.toThrow();
+    expect(() => assertNamesAbsent(docker, { networks: ["taken"] })).toThrow(
+      /named taken already exists/,
+    );
+    expect(() => assertNamesAbsent(docker, { volumes: ["broken"] })).toThrow(/Cannot tell/);
+  });
+
+  test("reads the physical names Compose resolved", () => {
+    expect(
+      composeResourceNames({
+        networks: { egress_internal: { name: "aida-test-egress_egress_internal" } },
+        volumes: { uploads_data: { name: "aida-test-egress_uploads_data" }, bare: {} },
+      }),
+    ).toEqual({
+      networks: ["aida-test-egress_egress_internal"],
+      volumes: ["aida-test-egress_uploads_data", "bare"],
+    });
   });
 });
 

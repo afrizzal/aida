@@ -29,6 +29,7 @@ import {
   acquireLock,
   assertComposeFollowsRuleJ,
   type ComposeConfig,
+  composeResourceNames,
   runBuildPreflight,
   runDocker,
 } from "../support/docker-test-preflight";
@@ -158,28 +159,37 @@ describe("egress isolation: no flow requires a route to the public internet", ()
     // build: nothing has been created on Docker until this point.
     const config = dc(["--profile", "control", "config", "--format", "json"], { timeout: 60_000 });
     if (config.code !== 0) throw new Error(`docker compose config failed:\n${config.stderr}`);
-    const tags = assertComposeFollowsRuleJ(
-      JSON.parse(config.stdout) as ComposeConfig,
-      COMPOSE_PROJECT,
-      RUN_ID,
-    );
+    const resolved = JSON.parse(config.stdout) as ComposeConfig;
+    const tags = assertComposeFollowsRuleJ(resolved, COMPOSE_PROJECT, RUN_ID);
+    const names = composeResourceNames(resolved);
     runBuildPreflight(runDocker, {
       runId: RUN_ID,
       project: COMPOSE_PROJECT,
       tags,
       subnet: EGRESS_SUBNET,
       hostDirs: [os.homedir(), PROJECT_ROOT],
+      networkNames: names.networks,
+      volumeNames: names.volumes,
     });
 
-    // Build once, after the checks; `up` must never rebuild or retag (K111).
+    // Build once, after the checks; `up` and `run` never rebuild, retag or pull (K111, K116).
+    for (const tag of tags) recordResource(RUN_ID, { type: "image", name: tag, state: "planned" });
     const build = dc(["build"], { timeout: 480_000 });
-    for (const tag of tags) recordResource(RUN_ID, { type: "image", name: tag, state: "created" });
     if (build.code !== 0) {
       throw new Error(
         `docker compose build failed (code ${build.code}):\n${build.stderr}\n${build.stdout}`,
       );
     }
-    const up = dc(["up", "-d", "--no-build"], { timeout: 300_000 });
+    for (const tag of tags) recordResource(RUN_ID, { type: "image", name: tag, state: "created" });
+    for (const name of names.networks)
+      recordResource(RUN_ID, { type: "network", name, state: "planned" });
+    for (const name of names.volumes)
+      recordResource(RUN_ID, { type: "volume", name, state: "planned" });
+    const up = dc(["up", "-d", "--no-build", "--pull", "never"], { timeout: 300_000 });
+    for (const line of dc(["ps", "-a", "--format", "{{.ID}} {{.Name}}"]).stdout.split("\n")) {
+      const [id, name] = line.trim().split(" ");
+      if (id && name) recordResource(RUN_ID, { type: "container", name, id, state: "created" });
+    }
     if (up.code !== 0) {
       throw new Error(`docker compose up failed (code ${up.code}):\n${up.stderr}\n${up.stdout}`);
     }
@@ -188,13 +198,22 @@ describe("egress isolation: no flow requires a route to the public internet", ()
   }, 900_000);
 
   afterAll(() => {
-    // Only this run's resources: run label, test label and the aida-test- prefix, re-checked
-    // one by one (K108). Containers first, then the network, the volume and the image tags.
+    // Without the lock this invocation created nothing, and another holder may be using the
+    // same run id: remove nothing (K114).
+    if (!releaseLock) return;
+    // Only this suite's resources: test label, run label and names under aida-test-egress
+    // (never the integration or E2E containers of the same run), re-checked one by one (K108,
+    // K114). Containers first, then the network, the volume and the image tags.
     const docker: DockerRunner = (args) =>
       execFileSync("docker", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     let failures: string[] = [];
     try {
-      const result = applyCleanup(docker, RUN_ID, planCleanup(docker, RUN_ID));
+      const result = applyCleanup(
+        docker,
+        RUN_ID,
+        planCleanup(docker, RUN_ID, COMPOSE_PROJECT),
+        COMPOSE_PROJECT,
+      );
       failures = result.failed.map((f) => `${f.resource.type} ${f.resource.name}: ${f.error}`);
     } finally {
       releaseLock?.();
@@ -256,7 +275,7 @@ describe("egress isolation: no flow requires a route to the public internet", ()
   test("negative control: a deliberate external lookup IS captured — proves the capture mechanism actually works", () => {
     const before = readDnsLogLines().length;
 
-    const control = dc(["run", "--rm", "negative-control"], { timeout: 30_000 });
+    const control = dc(["run", "--rm", "--pull", "never", "negative-control"], { timeout: 30_000 });
     expect(control.code, `negative-control container failed: ${control.stderr}`).toBe(0);
 
     const deadline = Date.now() + 10_000;
