@@ -15,9 +15,21 @@
 #
 # This suite is intentionally excluded from the default `pnpm test:integration` / PR path (it
 # builds and boots a full multi-container stack) — run it explicitly via `pnpm test:egress`.
+#
+# Run charter rule J (decisions K108 to K113, .planning/run-loop/J1-RENCANA.md): the project is
+# `aida-test-egress`; every service, build, network and volume carries `aida.test=1` and the
+# run's `aida.test.run`; every built image is tagged `aida-test-egress-<service>:<run id>`;
+# Postgres data sits on tmpfs (the image's VOLUME would otherwise create an unlabeled
+# anonymous volume). The suite checks all of this with `docker compose config` before it
+# builds, and removes the run's resources with scripts/test-docker-cleanup.ts, never `down -v`.
+x-test-labels: &test-labels
+  aida.test: "1"
+  aida.test.run: ${AIDA_TEST_RUN_ID:?set AIDA_TEST_RUN_ID}
+
 networks:
   egress_internal:
     internal: true
+    labels: *test-labels
     ipam:
       config:
         - subnet: 10.90.0.0/24
@@ -26,16 +38,24 @@ services:
   # Logging DNS resolver — every other service's `dns:` points here. Fixed IP required: compose
   # services' `dns:` entries must be literal IP addresses (resolv.conf syntax), not hostnames.
   dns-logger:
-    build: ./tests/integration/egress-fixtures/dns-logger
+    build:
+      context: ./tests/integration/egress-fixtures/dns-logger
+      labels: *test-labels
+    image: aida-test-egress-dns-logger:${AIDA_TEST_RUN_ID:?set AIDA_TEST_RUN_ID}
+    labels: *test-labels
     networks:
       egress_internal:
         ipv4_address: 10.90.0.2
     volumes:
-      - ./tests/integration/egress-fixtures/.dns-log:/var/log
+      # One directory per run (K113), created by the suite under the gitignored `.dns-log/`.
+      - ${AIDA_TEST_DNS_LOG_DIR:?set AIDA_TEST_DNS_LOG_DIR}:/var/log
     restart: unless-stopped
 
   db:
     image: pgvector/pgvector:pg16
+    labels: *test-labels
+    tmpfs:
+      - /var/lib/postgresql/data
     environment:
       POSTGRES_USER: aida
       POSTGRES_PASSWORD: egress-test-password
@@ -51,7 +71,11 @@ services:
       retries: 15
 
   stub-llm:
-    build: ./tests/integration/egress-fixtures/stub-llm
+    build:
+      context: ./tests/integration/egress-fixtures/stub-llm
+      labels: *test-labels
+    image: aida-test-egress-stub-llm:${AIDA_TEST_RUN_ID:?set AIDA_TEST_RUN_ID}
+    labels: *test-labels
     dns: [10.90.0.2]
     networks:
       egress_internal:
@@ -62,6 +86,7 @@ services:
   # (outbound send is the flow under test; inbound IMAP polling is not).
   stub-smtp:
     image: greenmail/standalone:latest
+    labels: *test-labels
     environment:
       GREENMAIL_OPTS: "-Dgreenmail.setup.test.smtp -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.auth.disabled -Dgreenmail.verbose"
     dns: [10.90.0.2]
@@ -73,6 +98,9 @@ services:
     build:
       context: .
       target: builder
+      labels: *test-labels
+    image: aida-test-egress-migrate:${AIDA_TEST_RUN_ID:?set AIDA_TEST_RUN_ID}
+    labels: *test-labels
     command: ["pnpm", "prisma", "migrate", "deploy"]
     depends_on:
       db:
@@ -97,7 +125,11 @@ services:
   # underlying calls to stub-llm/stub-smtp are identical either way, and `runner` is exactly as
   # cut off from the internet as this container is).
   app:
-    build: .
+    build:
+      context: .
+      labels: *test-labels
+    image: aida-test-egress-app:${AIDA_TEST_RUN_ID:?set AIDA_TEST_RUN_ID}
+    labels: *test-labels
     command: ["node", "server.js"]
     depends_on:
       db:
@@ -127,7 +159,11 @@ services:
       start_period: 30s
 
   worker:
-    build: .
+    build:
+      context: .
+      labels: *test-labels
+    image: aida-test-egress-worker:${AIDA_TEST_RUN_ID:?set AIDA_TEST_RUN_ID}
+    labels: *test-labels
     command: ["node", "dist/worker.mjs"]
     depends_on:
       db:
@@ -155,6 +191,9 @@ services:
     build:
       context: .
       target: builder
+      labels: *test-labels
+    image: aida-test-egress-runner:${AIDA_TEST_RUN_ID:?set AIDA_TEST_RUN_ID}
+    labels: *test-labels
     command: ["sleep", "infinity"]
     depends_on:
       db:
@@ -183,6 +222,7 @@ services:
   # `runner`) keeps the control's own network identity easy to grep out of dns-logger's log.
   negative-control:
     image: node:22-alpine
+    labels: *test-labels
     entrypoint: ["node", "-e"]
     command:
       - "require('dns').promises.lookup('canary.aida-egress-negative-control.invalid').then(()=>process.exit(0)).catch(()=>process.exit(0))"
@@ -195,3 +235,4 @@ services:
 volumes:
   # Shared by app and worker, as in docker-compose.yml (K68).
   uploads_data:
+    labels: *test-labels

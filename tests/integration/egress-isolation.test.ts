@@ -11,19 +11,47 @@
 // Runs via `pnpm test:egress` (NOT part of the default `pnpm test:integration` / PR path — see
 // package.json and vitest.egress.config.ts: this suite builds a multi-container stack and is
 // intentionally slow).
+//
+// Run charter rule J (decisions K108 to K113, .planning/run-loop/J1-RENCANA.md): project
+// `aida-test-egress`, run-labelled resources, run-tagged images, an exclusive lock, and the
+// preflight checks (project absent, tags free, subnet free, 20 GiB free on the host and in the
+// Docker VM) before anything is built. Teardown removes only this run's resources through
+// scripts/test-docker-cleanup.ts; there is no `down -v`.
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { applyCleanup, type DockerRunner, planCleanup } from "../../scripts/test-docker-cleanup";
+import { recordResource, testRunId } from "../support/docker-test-labels";
+import {
+  acquireLock,
+  assertComposeFollowsRuleJ,
+  type ComposeConfig,
+  runBuildPreflight,
+  runDocker,
+} from "../support/docker-test-preflight";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "../..");
 const COMPOSE_FILE = path.join(PROJECT_ROOT, "docker-compose.egress-test.yml");
-const COMPOSE_PROJECT = "aida-egress-test"; // explicit — never share the default "aida" project
-// name with the main docker-compose.yml, whose services (app/worker/migrate) would collide.
-const DNS_LOG_DIR = path.join(PROJECT_ROOT, "tests", "integration", "egress-fixtures", ".dns-log");
-const DNS_LOG_PATH = path.join(DNS_LOG_DIR, "dns-queries.log");
+// Rule J: test projects start with aida-test-; this one is named exactly aida-test-egress. Never
+// the default "aida" project of docker-compose.yml, whose services (app/worker/migrate) collide.
+const COMPOSE_PROJECT = "aida-test-egress";
+const EGRESS_SUBNET = "10.90.0.0/24"; // must match docker-compose.egress-test.yml
+const RUN_ID = testRunId();
+// One DNS log directory per run (K113). It lives under the repo, not os.tmpdir(): Colima mounts
+// only the home directory into its VM, so a bind mount from /var/folders would never reach the
+// host. The parent `.dns-log/` is gitignored.
+const DNS_LOG_ROOT = path.join(PROJECT_ROOT, "tests", "integration", "egress-fixtures", ".dns-log");
+let dnsLogDir = "";
+const dnsLogPath = () => path.join(dnsLogDir, "dns-queries.log");
+let releaseLock: (() => void) | undefined;
+
+function composeEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, AIDA_TEST_RUN_ID: RUN_ID, AIDA_TEST_DNS_LOG_DIR: dnsLogDir };
+}
 
 function dc(
   args: string[],
@@ -35,6 +63,7 @@ function dc(
       ["compose", "-p", COMPOSE_PROJECT, "-f", COMPOSE_FILE, ...args],
       {
         cwd: PROJECT_ROOT,
+        env: composeEnv(),
         encoding: "utf-8",
         timeout: opts.timeout ?? 300_000,
         maxBuffer: 32 * 1024 * 1024,
@@ -76,9 +105,9 @@ async function waitForHealthy(service: string, timeoutMs = 120_000): Promise<voi
 }
 
 function readDnsLogLines(): string[] {
-  if (!fs.existsSync(DNS_LOG_PATH)) return [];
+  if (!dnsLogDir || !fs.existsSync(dnsLogPath())) return [];
   return fs
-    .readFileSync(DNS_LOG_PATH, "utf-8")
+    .readFileSync(dnsLogPath(), "utf-8")
     .split("\n")
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
@@ -120,19 +149,60 @@ function runProbe(): { code: number; probe: ProbeOutput | null; stdout: string; 
 
 describe("egress isolation: no flow requires a route to the public internet", () => {
   beforeAll(async () => {
-    fs.rmSync(DNS_LOG_DIR, { recursive: true, force: true });
-    fs.mkdirSync(DNS_LOG_DIR, { recursive: true });
+    releaseLock = acquireLock(RUN_ID);
+    fs.mkdirSync(DNS_LOG_ROOT, { recursive: true });
+    dnsLogDir = fs.mkdtempSync(path.join(DNS_LOG_ROOT, "run-"));
 
-    const up = dc(["up", "-d", "--build"], { timeout: 480_000 });
+    // Resolve the compose file (with the `control` profile, so negative-control is checked too)
+    // and refuse it unless every resource follows rule J. Then the preflight checks, before any
+    // build: nothing has been created on Docker until this point.
+    const config = dc(["--profile", "control", "config", "--format", "json"], { timeout: 60_000 });
+    if (config.code !== 0) throw new Error(`docker compose config failed:\n${config.stderr}`);
+    const tags = assertComposeFollowsRuleJ(
+      JSON.parse(config.stdout) as ComposeConfig,
+      COMPOSE_PROJECT,
+      RUN_ID,
+    );
+    runBuildPreflight(runDocker, {
+      runId: RUN_ID,
+      project: COMPOSE_PROJECT,
+      tags,
+      subnet: EGRESS_SUBNET,
+      hostDirs: [os.homedir(), PROJECT_ROOT],
+    });
+
+    // Build once, after the checks; `up` must never rebuild or retag (K111).
+    const build = dc(["build"], { timeout: 480_000 });
+    for (const tag of tags) recordResource(RUN_ID, { type: "image", name: tag, state: "created" });
+    if (build.code !== 0) {
+      throw new Error(
+        `docker compose build failed (code ${build.code}):\n${build.stderr}\n${build.stdout}`,
+      );
+    }
+    const up = dc(["up", "-d", "--no-build"], { timeout: 300_000 });
     if (up.code !== 0) {
       throw new Error(`docker compose up failed (code ${up.code}):\n${up.stderr}\n${up.stdout}`);
     }
 
     await waitForHealthy("app", 120_000);
-  }, 600_000);
+  }, 900_000);
 
   afterAll(() => {
-    dc(["down", "-v", "--remove-orphans"], { timeout: 120_000 });
+    // Only this run's resources: run label, test label and the aida-test- prefix, re-checked
+    // one by one (K108). Containers first, then the network, the volume and the image tags.
+    const docker: DockerRunner = (args) =>
+      execFileSync("docker", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    let failures: string[] = [];
+    try {
+      const result = applyCleanup(docker, RUN_ID, planCleanup(docker, RUN_ID));
+      failures = result.failed.map((f) => `${f.resource.type} ${f.resource.name}: ${f.error}`);
+    } finally {
+      releaseLock?.();
+      if (dnsLogDir) fs.rmSync(dnsLogDir, { recursive: true, force: true });
+    }
+    if (failures.length > 0) {
+      throw new Error(`cleanup of run ${RUN_ID} left resources:\n${failures.join("\n")}`);
+    }
   }, 180_000);
 
   test("the production app container reaches a HEALTHY state with no route to the internet", () => {
