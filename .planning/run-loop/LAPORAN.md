@@ -29,7 +29,7 @@ Milestone v2.0 sudah dibuka (0b) dan daftar fitur Projects sudah dicek ke demo p
 
 ## 3. Menunggu owner
 
-Keputusan owner 2026-11-11 menjawab butir 0, 1, 2, 3, 5, 6, 7, 8, dan 9 di bawah (rincian di `ANTREAN.md`). Yang masih terbuka: butir 4 (`.env`, cek A1 sampai A3 diblokir hook pembaca rahasia, perlu dijalankan owner), 12.2-o1 sampai 12.2-o4, 14-o1 sampai 14-o3, 15-o1, dan konfirmasi dua tafsiran aturan J: (1) `aida-dev-db` tidak disentuh lagi; (2) cache BuildKit dan image dasar tarikan (`node:22-alpine`, `pgvector/pgvector:pg16`, `greenmail/standalone:latest`) tidak bisa diberi label `aida.test=1`, jadi tidak dianggap resource test dan tidak pernah dihapus test (K109, `J1-RENCANA.md`).
+Keputusan owner 2026-11-11 menjawab butir 0, 1, 2, 3, 5, 6, 7, 8, dan 9 di bawah (rincian di `ANTREAN.md`). Yang masih terbuka: butir 4 (`.env`, cek A1 sampai A3 diblokir hook pembaca rahasia, perlu dijalankan owner), 12.2-o1 sampai 12.2-o4, 14-o1 sampai 14-o3, 15-o1, dan konfirmasi dua tafsiran aturan J: (1) `aida-dev-db` tidak disentuh lagi; (2) cache BuildKit dan image dasar tarikan (`node:22-alpine`, `pgvector/pgvector:pg16`, `greenmail/standalone:latest`) tidak bisa diberi label `aida.test=1`, jadi tidak dianggap resource test dan tidak pernah dihapus test (K109, `J1-RENCANA.md`); (3) test memakai socket Docker Colima lewat `DOCKER_HOST` dari `docker context inspect`, endpoint yang sama dengan CLI `docker`, tanpa membuat, mengubah, atau menghapus berkas di `~/.colima`.
 
 0. **Fase 15 diparkir (15-o2).** Tiga siklus review plan Codex habis dengan 2 HIGH tersisa (CX3-1: pergantian akun A ke B ke A saat simpan view state lama masih berjalan; CX3-2: contoh test K100 di 15-12 bertentangan dengan API K105) dan 1 MEDIUM (CX3-3: Reload dialog tanggal yang gagal). Saran perbaikan ada di `15-REVIEWS.md`. Keputusan owner: izinkan siklus ke-4, terapkan perbaikan tanpa review tambahan, atau sederhanakan K100. Ini menghalangi eksekusi Fase 15, 16, dan 17.
 
@@ -101,6 +101,8 @@ Baris bertanda baseline berasal dari persiapan (`1ea4281`). Baris 0a dijalankan 
 | `pnpm build` (Fase 12, final) | 0 | dibangun |
 | `pnpm audit --prod` (Fase 12, final) | 1 | 7 critical, 52 high; sama dengan baseline, tanpa perubahan dependensi |
 | `pnpm test:integration` penuh dan `pnpm test:egress` (Fase 12) | blocked | O-1, tidak dijalankan |
+| `pnpm test` (J1, `fb3d3e6`) | 0 | 53 berkas, 876 test |
+| `pnpm test:integration` (J1, `fb3d3e6`, aturan J) | 0 | 94 berkas, 1297 test; suite egress kini di luar include. Percobaan pertama exit 1 karena `DOCKER_HOST` tidak disetel (tidak ada container dibuat) |
 
 ## 7. Package baru
 

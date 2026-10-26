@@ -22,7 +22,7 @@ Butir antrean J1, turunan keputusan owner 2026-11-11 butir 5 (aturan J di `PIAGA
 
 ## Tugas
 
-Status: tugas 4 selesai sesudahnya (suite egress, unit 876 lolos). Tugas 1 sampai 3 selesai di `5071f65` (typecheck exit 0, `pnpm lint` exit 0, `pnpm test` 52 berkas dan 855 test lolos, termasuk 17 test baru). Orkestrator menjalankan test Docker dengan `AIDA_TEST_RUN_ID` miliknya, lalu `pnpm test:docker-cleanup --run <runId>` (dry run, lalu `--apply`) di akhir putaran.
+Status: tugas 5 selesai (integration exit 0, 94 berkas, 1297 test; bukti di `RUN-LOG.md` putaran J1-4). Tugas 4 selesai sebelumnya (suite egress, unit 876 lolos). Tugas 1 sampai 3 selesai di `5071f65` (typecheck exit 0, `pnpm lint` exit 0, `pnpm test` 52 berkas dan 855 test lolos, termasuk 17 test baru). Orkestrator menjalankan test Docker dengan `AIDA_TEST_RUN_ID` miliknya, lalu `pnpm test:docker-cleanup --run <runId>` (dry run, lalu `--apply`) di akhir putaran.
 
 
 1. `tests/support/docker-test-resources.ts`: `runId`, label, nama, ledger, `labeledPostgres()` (nama, label, tmpfs), Ryuk mati. Test unit untuk nama, label, dan `runId`.
