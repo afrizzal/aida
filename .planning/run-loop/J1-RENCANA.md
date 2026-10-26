@@ -31,3 +31,23 @@ Status: tugas 5 selesai (integration exit 0, 94 berkas, 1297 test; bukti di `RUN
 4. Suite egress: project `aida-test-egress`, label di semua service, network, volume, dan `build.labels`; `image:` bertag run; lock; cek tag; cek ruang; cek subnet; `compose build`, lalu `up --no-build` dan `run --no-build`; log DNS per run; teardown lewat skrip pembersih. Keluarkan dari include integration.
 5. Verifikasi: `pnpm typecheck`, `pnpm lint`, `pnpm test`, lalu `pnpm test:integration` (Testcontainers, tanpa build image) dengan cek bahwa setiap container yang dibuat berlabel dan berawalan, dan tidak ada volume anonim baru. `pnpm test:egress` termasuk butir 0a2, bukan J1.
 6. Kritik diff oleh Codex (putaran 2 topik J1), perbaikan, lalu J1 selesai.
+
+## Codex putaran 2 (kritik diff)
+
+Pertanyaan `codex/j1-r2-tanya.md`, jawaban `codex/j1-r2-jawab.md` (model gpt-6.1-terra, effort xhigh): 1 kritis, 4 tinggi, 2 sedang. Putaran 3 (terakhir) untuk topik J1 tersisa.
+
+| ID | Temuan Codex | Keputusan |
+|---|---|---|
+| K114 | Kritis 1: teardown egress membersihkan semua resource run, termasuk container integrasi dengan run id yang sama, dan tetap berjalan walau lock gagal diambil | Diterima. Pembersih mendapat cakupan awalan tambahan (`--scope`, harus berawalan `aida-test-`); teardown egress hanya membersihkan nama berawalan `aida-test-egress` (container, network `aida-test-egress_*`, volume, tag `aida-test-egress-*`), dan hanya kalau invokasi ini memegang lock. Test unit untuk cakupan dan jalur lock gagal. |
+| K115 | Tinggi 2: cek tag lalu build tidak atomik; cek project hanya per label Compose | Diterima sebagian. Jaminan atomik terhadap proses yang tidak mematuhi lock tidak mungkin di Docker; tag memuat 16 hex acak run id, jadi tabrakan hanya terjadi bila run id dipakai ulang dengan sengaja. Batas ini ditulis di sini dan di `LAPORAN.md`. Ditambah: cek nama fisik network `aida-test-egress_egress_internal` dan volume `aida-test-egress_uploads_data`; kalau ada, berhenti. |
+| K116 | Tinggi 3: resource implisit dan ledger | Diterima. `up --no-build --pull never` dan `run --rm --pull never`. Tag dicatat `created` hanya sesudah build berhasil; sesudah `up`, container, network, dan volume project dicatat ke ledger. GreenMail tidak punya `VOLUME` (diperiksa 2026-11-11: `null`). Apakah build menarik atau memperbarui image dasar diukur di 0a2 (daftar image sebelum dan sesudah) dan dilaporkan. K109 tetap tafsiran yang menunggu owner. |
+| K117 | Tinggi 4: jalur gagal setup dan pelaporan sisa | Diterima. Helper menghentikan container bila pencatatan ledger gagal sesudah start; global setup integrasi menghentikan container bila migrasi gagal; setup E2E membuat direktori uploads sebelum container. Pembersih: inspeksi "No such" berarti sudah hilang; galat inspeksi lain dihitung gagal (exit 1). |
+| K118 | Tinggi 5: cek ruang belum membuktikan lokasi | Diterima. Ruang VM diukur di dua tempat dan diambil yang terkecil: `df -Pk /` di container (penyimpanan snapshot image) dan `df -Pk` pada `DockerRootDir` dari `docker info`, di-bind-mount read-only ke container sekali pakai. Gagal membaca salah satu: berhenti. Sisi host: filesystem direktori rumah dan repo; letak disk VM Colima di bawah direktori rumah adalah bawaan Colima dan tidak diverifikasi karena `~/.colima` tidak boleh dibaca (batas tertulis). |
+| K119 | Sedang 6: test belum membuktikan beberapa klaim | Diterima. Test df dua baris dengan kolom rusak; `hostFreeBytes` dengan `statfs` yang bisa disuntik dan test nilai terkecil; bukti empiris pewarisan run id tanpa id dari orkestrator (satu berkas test migrasi, ledger diperiksa). |
+| K120 | Sedang 7: socket di `~/.colima` berpotensi bertentangan dengan bunyi aturan J | Tidak diterima sebagai larangan. Aturan B (disetujui owner) mewajibkan `docker info` setiap putaran, dan perintah itu sendiri tersambung ke socket yang sama di `~/.colima`; bacaan harfiah akan melarang aturan B. Run tetap hanya tersambung ke socket, tanpa membaca, membuat, mengubah, atau menghapus berkas di sana. Dilaporkan ke owner sebagai tafsiran yang perlu dikonfirmasi (`LAPORAN.md` bagian 3). |
+
+### Tugas putaran perbaikan
+
+7. K114 sampai K119 di kode dan test unit.
+8. Bukti: typecheck, lint, unit; satu berkas test migrasi tanpa `AIDA_TEST_RUN_ID` (pewarisan run id); `pnpm test:integration` penuh dengan run id orkestrator; pembersih menemukan 0 sisa.
+9. Codex putaran 3 (terakhir) atas perbaikan. Kalau masih ada temuan tinggi: perbaiki yang jelas, catat sisanya sebagai batas, dan laporkan ke owner; tidak ada putaran 4.
