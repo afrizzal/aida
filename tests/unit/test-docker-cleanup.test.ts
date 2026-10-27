@@ -5,8 +5,19 @@ import {
   type DockerRunner,
   listOtherRuns,
   planCleanup,
+  planExact,
 } from "../../scripts/test-docker-cleanup";
 import { newRunId } from "../support/docker-test-labels";
+
+/** The daemon's real messages (J1-RENCANA.md, observed 2026-11-11). */
+function notFound(type: string, ref: string): string {
+  if (type === "container") return `Error response from daemon: No such container: ${ref}`;
+  if (type === "network") return `Error response from daemon: network ${ref} not found`;
+  if (type === "volume") return `Error response from daemon: get ${ref}: no such volume`;
+  return `Error response from daemon: No such image: ${ref}`;
+}
+const SOCKET_DOWN =
+  "failed to connect to the docker API at unix:///x/docker.sock; check if the path is correct and if the daemon is running: dial unix /x/docker.sock: connect: no such file or directory";
 
 const RUN = newRunId(1_700_000_000_000, Buffer.from("00112233445566aa", "hex"));
 const OTHER = newRunId(1_700_000_000_001, Buffer.from("ffeeddccbbaa9988", "hex"));
@@ -21,7 +32,7 @@ interface FakeResource {
 /** A tiny in-memory Docker that answers the list, inspect and remove commands the script uses. */
 function fakeDocker(
   resources: FakeResource[],
-  options: { failRemove?: string[]; failInspect?: string[] } = {},
+  options: { failRemove?: string[]; failInspect?: string[]; socketDown?: string[] } = {},
 ) {
   const calls: string[][] = [];
   // Deep copy: a test that edits labels must not leak into the next test.
@@ -48,7 +59,8 @@ function fakeDocker(
     const found = live.find((r) => r.type === type && r.ref === ref);
     if (verb === "inspect") {
       if (options.failInspect?.includes(ref)) throw new Error(`permission denied: ${ref}`);
-      if (!found) throw new Error(`No such ${type}: ${ref}`);
+      if (options.socketDown?.includes(ref)) throw new Error(SOCKET_DOWN);
+      if (!found) throw new Error(notFound(type, ref));
       const name = type === "container" ? `/${found.name}` : found.name;
       return JSON.stringify(
         type === "image" ? { labels: found.labels } : { name, labels: found.labels },
@@ -56,7 +68,7 @@ function fakeDocker(
     }
     if (verb === "rm") {
       if (options.failRemove?.includes(ref)) throw new Error(`cannot remove ${ref}`);
-      if (!found) throw new Error(`No such ${type}: ${ref}`);
+      if (!found) throw new Error(notFound(type, ref));
       live.splice(live.indexOf(found), 1);
       return "";
     }
@@ -214,5 +226,65 @@ describe("scope and uncertain leftovers (K114, K117)", () => {
     expect(result.gone.map((r) => r.ref)).toEqual(["c-mine"]);
     expect(result.failed.map((f) => f.resource.ref)).toEqual(["n-mine"]);
     expect(result.failed[0]?.error).toMatch(/cannot inspect/);
+  });
+});
+
+describe("exact refs and strict not-found (K121 to K123)", () => {
+  const sibling: FakeResource[] = [
+    ...WORLD,
+    // Another project that merely shares the prefix and, by accident, the run label.
+    { type: "network", ref: "n-sibling", name: "aida-test-egress-other_default", labels: mine },
+    {
+      type: "volume",
+      ref: "aida-test-egress-other_data",
+      name: "aida-test-egress-other_data",
+      labels: mine,
+    },
+  ];
+
+  test("plans exactly the given refs; a sibling project with the same prefix and run is untouched", () => {
+    const { runner, calls } = fakeDocker(sibling);
+    const plan = planExact(runner, RUN, {
+      container: [],
+      network: ["n-mine"],
+      volume: ["aida-test-egress_uploads_data"],
+      image: [`aida-test-egress-app:${RUN}`],
+    });
+    expect(plan.map((r) => r.ref)).toEqual([
+      "n-mine",
+      "aida-test-egress_uploads_data",
+      `aida-test-egress-app:${RUN}`,
+    ]);
+    applyCleanup(runner, RUN, plan);
+    const removed = calls
+      .filter((args) => args[0] === "rm" || args[1] === "rm")
+      .map((a) => a[a.length - 1]);
+    expect(removed).not.toContain("n-sibling");
+    expect(removed).not.toContain("aida-test-egress-other_data");
+  });
+
+  test("a given ref that is not ours (wrong labels or name) is left out; one not found is skipped", () => {
+    const { runner } = fakeDocker(sibling);
+    const plan = planExact(runner, RUN, {
+      container: ["c-other-run", "c-wrong-name", "does-not-exist"],
+      network: ["n-project"],
+    });
+    expect(plan).toEqual([]);
+  });
+
+  test("planning fails loudly when a ref cannot be inspected for another reason", () => {
+    const { runner } = fakeDocker(sibling, { socketDown: ["n-mine"] });
+    expect(() => planExact(runner, RUN, { network: ["n-mine"] })).toThrow(
+      /Cannot inspect network n-mine/,
+    );
+  });
+
+  test("a socket that cannot be reached is a failure, never 'already gone'", () => {
+    const { runner } = fakeDocker(WORLD);
+    const plan = planCleanup(runner, RUN);
+    const down = fakeDocker(WORLD, { socketDown: ["c-mine"] });
+    const result = applyCleanup(down.runner, RUN, plan);
+    expect(result.gone.map((r) => r.ref)).not.toContain("c-mine");
+    expect(result.failed.map((f) => f.resource.ref)).toContain("c-mine");
   });
 });

@@ -93,3 +93,24 @@ export function recordResource(
   const line = JSON.stringify({ ...entry, at: new Date().toISOString(), pid: process.pid });
   fs.appendFileSync(file, `${line}\n`);
 }
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * True only for the daemon's own "this resource does not exist" answer for this type and ref
+ * (run decision K123). Anything else, including a socket that cannot be reached ("connect: no
+ * such file or directory"), is not a "not found" and must be treated as a failure. Messages as
+ * observed on this daemon on 2026-11-11 (.planning/run-loop/J1-RENCANA.md).
+ */
+export function dockerNotFound(type: ResourceType, ref: string, message: string): boolean {
+  const r = escapeRegExp(ref);
+  const patterns: Record<ResourceType, RegExp> = {
+    container: new RegExp(`Error response from daemon: No such container: ${r}(\\s|$)`),
+    network: new RegExp(`Error response from daemon: network ${r} not found(\\s|$)`),
+    volume: new RegExp(`Error response from daemon: get ${r}: no such volume(\\s|$)`),
+    image: new RegExp(`Error response from daemon: No such image: ${r}(\\s|$)`),
+  };
+  return patterns[type].test(message);
+}

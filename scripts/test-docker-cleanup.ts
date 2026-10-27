@@ -13,12 +13,15 @@
 //   ... --scope aida-test-egress                     only names under that prefix (K114)
 //   pnpm test:docker-cleanup --others [--run <id>]   lists aida.test=1 resources of other runs
 //
-// Exit 1 when a removal fails or a resource cannot be inspected for a reason other than
-// "no such ..." (already gone), so an uncertain leftover is never reported as clean (K117).
+// Exit 1 when a removal fails or a resource cannot be inspected for a reason other than the
+// daemon's own "not found" for that type and ref (already gone), so an uncertain leftover is
+// never reported as clean (K117, K123). A suite that knows exactly what it created passes those
+// refs to planExact() instead of a name prefix (K121, K122).
 // ---------------------------------------------------------------------------
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import {
+  dockerNotFound,
   isRunId,
   type ResourceType,
   RUN_LABEL,
@@ -192,7 +195,7 @@ export function applyCleanup(
     try {
       current = inspectResource(docker, planned.type, planned.ref);
     } catch (err) {
-      if (/no such/i.test(String(err))) result.gone.push(planned);
+      if (dockerNotFound(planned.type, planned.ref, String(err))) result.gone.push(planned);
       else result.failed.push({ resource: planned, error: `cannot inspect: ${String(err)}` });
       continue;
     }
@@ -208,6 +211,32 @@ export function applyCleanup(
     }
   }
   return result;
+}
+
+export type ExactRefs = Partial<Record<ResourceType, string[]>>;
+
+/**
+ * Plans removal of exactly these refs, the ones a suite itself created, in removal order. A ref
+ * the daemon reports as not found is left out; a ref that cannot be inspected for any other
+ * reason throws, so the caller fails loudly. Each ref must still carry the test label, this
+ * run's label and the aida-test- prefix (K121).
+ */
+export function planExact(docker: DockerRunner, runId: string, refs: ExactRefs): DockerResource[] {
+  if (!isRunId(runId)) throw new Error(`Not a valid test run id: ${JSON.stringify(runId)}`);
+  const plan: DockerResource[] = [];
+  for (const type of REMOVAL_ORDER) {
+    for (const ref of refs[type] ?? []) {
+      let resource: DockerResource;
+      try {
+        resource = inspectResource(docker, type, ref);
+      } catch (err) {
+        if (dockerNotFound(type, ref, String(err))) continue;
+        throw new Error(`Cannot inspect ${type} ${ref}: ${String(err)}`);
+      }
+      if (belongsToRun(resource, runId)) plan.push(resource);
+    }
+  }
+  return plan;
 }
 
 /** aida.test=1 resources that do NOT belong to `runId` (or all of them without a run id). */

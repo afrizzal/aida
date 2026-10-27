@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
 import {
+  dockerNotFound,
   isRunId,
   ledgerPath,
   newRunId,
@@ -87,5 +88,41 @@ describe("ledger", () => {
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+describe("dockerNotFound (K123)", () => {
+  const ref = "aida-test-x";
+  test("recognises only the daemon's own not-found answer for that type and ref", () => {
+    expect(
+      dockerNotFound("container", ref, `Error response from daemon: No such container: ${ref}`),
+    ).toBe(true);
+    expect(
+      dockerNotFound("network", ref, `Error response from daemon: network ${ref} not found`),
+    ).toBe(true);
+    expect(
+      dockerNotFound("volume", ref, `Error response from daemon: get ${ref}: no such volume`),
+    ).toBe(true);
+    expect(
+      dockerNotFound("image", `${ref}:1`, `Error response from daemon: No such image: ${ref}:1`),
+    ).toBe(true);
+  });
+
+  test("a socket error, another ref, another type, or a prefix of the ref is not 'not found'", () => {
+    const socket =
+      "failed to connect to the docker API at unix:///x/docker.sock; check if the path is correct and if the daemon is running: dial unix /x/docker.sock: connect: no such file or directory";
+    expect(dockerNotFound("container", ref, socket)).toBe(false);
+    expect(
+      dockerNotFound("container", ref, "Error response from daemon: No such container: other"),
+    ).toBe(false);
+    expect(
+      dockerNotFound("network", ref, `Error response from daemon: No such container: ${ref}`),
+    ).toBe(false);
+    expect(
+      dockerNotFound("volume", ref, `Error response from daemon: get ${ref}-2: no such volume`),
+    ).toBe(false);
+    expect(
+      dockerNotFound("container", "a.b", "Error response from daemon: No such container: aXb"),
+    ).toBe(false);
   });
 });

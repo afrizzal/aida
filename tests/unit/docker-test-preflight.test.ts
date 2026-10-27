@@ -26,6 +26,9 @@ import {
 } from "../support/docker-test-preflight";
 
 const RUN = newRunId(1_700_000_000_000, Buffer.from("0011223344556677", "hex"));
+const SOCKET_DOWN =
+  "failed to connect to the docker API at unix:///x/docker.sock; check if the path is correct and if the daemon is running: dial unix /x/docker.sock: connect: no such file or directory";
+const noRecord = () => {};
 const GIB = 1024 ** 3;
 
 function scripted(answers: (args: string[]) => { code: number; stdout?: string; stderr?: string }) {
@@ -75,7 +78,7 @@ describe("free space", () => {
     const { docker, calls } = scripted((args) =>
       args[0] === "info" ? { code: 0, stdout: "/var/lib/docker\n" } : { code: 0, stdout: df2 },
     );
-    expect(dockerFreeBytes(docker, RUN)).toBe(9_000_000 * 1024);
+    expect(dockerFreeBytes(docker, RUN, noRecord)).toBe(9_000_000 * 1024);
     const args = calls[1];
     expect(args.slice(0, 4)).toEqual(["run", "--rm", "--pull", "never"]);
     expect(args).toContain("--network");
@@ -92,17 +95,17 @@ describe("free space", () => {
 
   test("a failed or partial probe stops instead of assuming space", () => {
     const noInfo = scripted(() => ({ code: 1, stderr: "daemon down" }));
-    expect(() => dockerFreeBytes(noInfo.docker, RUN)).toThrow(/Docker root directory/);
+    expect(() => dockerFreeBytes(noInfo.docker, RUN, noRecord)).toThrow(/Docker root directory/);
     const noImage = scripted((args) =>
       args[0] === "info"
         ? { code: 0, stdout: "/var/lib/docker" }
         : { code: 125, stderr: "Unable to find image" },
     );
-    expect(() => dockerFreeBytes(noImage.docker, RUN)).toThrow(/nothing is pulled/);
+    expect(() => dockerFreeBytes(noImage.docker, RUN, noRecord)).toThrow(/nothing is pulled/);
     const oneRow = scripted((args) =>
       args[0] === "info" ? { code: 0, stdout: "/var/lib/docker" } : { code: 0, stdout: df },
     );
-    expect(() => dockerFreeBytes(oneRow.docker, RUN)).toThrow(/two df rows/);
+    expect(() => dockerFreeBytes(oneRow.docker, RUN, noRecord)).toThrow(/two df rows/);
   });
 });
 
@@ -116,6 +119,11 @@ describe("physical names", () => {
       },
       "network taken": { code: 0 },
       "volume broken": { code: 1, stderr: "permission denied" },
+      "network down": { code: 1, stderr: SOCKET_DOWN },
+      "network other": {
+        code: 1,
+        stderr: "Error response from daemon: network another-name not found",
+      },
     };
     const { docker } = scripted(
       (args) => answers[`${args[0]} ${args[args.length - 1]}`] ?? { code: 9 },
@@ -127,6 +135,9 @@ describe("physical names", () => {
       /named taken already exists/,
     );
     expect(() => assertNamesAbsent(docker, { volumes: ["broken"] })).toThrow(/Cannot tell/);
+    // A socket that cannot be reached, or a "not found" for a different name, is not "absent".
+    expect(() => assertNamesAbsent(docker, { networks: ["down"] })).toThrow(/Cannot tell/);
+    expect(() => assertNamesAbsent(docker, { networks: ["other"] })).toThrow(/Cannot tell/);
   });
 
   test("reads the physical names Compose resolved", () => {
@@ -147,12 +158,15 @@ describe("image tags", () => {
     const { docker } = scripted((args) => {
       const ref = args[args.length - 1];
       if (ref === "taken:1") return { code: 0, stdout: "sha256:abc" };
-      if (ref === "free:1") return { code: 1, stderr: "Error: No such image: free:1" };
+      if (ref === "free:1")
+        return { code: 1, stderr: "Error response from daemon: No such image: free:1" };
+      if (ref === "down:1") return { code: 1, stderr: SOCKET_DOWN };
       return { code: 1, stderr: "Cannot connect to the Docker daemon" };
     });
     expect(tagState(docker, "taken:1")).toBe("taken");
     expect(tagState(docker, "free:1")).toBe("free");
     expect(() => tagState(docker, "broken:1")).toThrow(/Cannot tell/);
+    expect(() => tagState(docker, "down:1")).toThrow(/Cannot tell/);
     expect(() => assertTagsFree(docker, ["free:1", "taken:1"])).toThrow(/taken:1/);
     expect(() => assertTagsFree(docker, ["free:1"])).not.toThrow();
   });

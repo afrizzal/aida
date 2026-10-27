@@ -5,7 +5,14 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { RUN_LABEL, TEST_LABEL, TEST_NAME_PREFIX, testResourceName } from "./docker-test-labels";
+import {
+  dockerNotFound,
+  RUN_LABEL,
+  recordResource,
+  TEST_LABEL,
+  TEST_NAME_PREFIX,
+  testResourceName,
+} from "./docker-test-labels";
 
 /** Rule J says "20 GB"; read strictly as 20 GiB (K112). */
 export const MIN_FREE_BYTES = 20 * 1024 ** 3;
@@ -121,8 +128,14 @@ export function dockerRootDir(docker: Docker): string {
  * the smaller (K118): the container's own root (where image snapshots and layers live) and the
  * daemon's DockerRootDir, bind-mounted read-only. Both must be readable, or the check stops.
  */
-export function dockerFreeBytes(docker: Docker, runId: string): number {
+export function dockerFreeBytes(
+  docker: Docker,
+  runId: string,
+  record: typeof recordResource = recordResource,
+): number {
   const root = dockerRootDir(docker);
+  const name = testResourceName("df", runId);
+  record(runId, { type: "container", name, state: "planned" });
   const result = docker([
     "run",
     "--rm",
@@ -131,7 +144,7 @@ export function dockerFreeBytes(docker: Docker, runId: string): number {
     "--network",
     "none",
     "--name",
-    testResourceName("df", runId),
+    name,
     "--label",
     `${TEST_LABEL}=1`,
     "--label",
@@ -164,7 +177,7 @@ export function dockerFreeBytes(docker: Docker, runId: string): number {
 export function tagState(docker: Docker, ref: string): "free" | "taken" {
   const result = docker(["image", "inspect", "--format", "{{.Id}}", ref]);
   if (result.code === 0) return "taken";
-  if (/no such image/i.test(result.stderr)) return "free";
+  if (dockerNotFound("image", ref, result.stderr)) return "free";
   throw new DockerPreflightError(
     `Cannot tell whether image tag ${ref} exists: ${result.stderr.trim()}`,
   );
@@ -222,7 +235,7 @@ export function assertNamesAbsent(
         `A ${type} named ${name} already exists. Stopped without touching it.`,
       );
     }
-    if (!/no such|not found/i.test(result.stderr)) {
+    if (!dockerNotFound(type === "network" ? "network" : "volume", name, result.stderr)) {
       throw new DockerPreflightError(
         `Cannot tell whether ${type} ${name} exists: ${result.stderr.trim()}`,
       );

@@ -23,7 +23,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { applyCleanup, type DockerRunner, planCleanup } from "../../scripts/test-docker-cleanup";
+import {
+  applyCleanup,
+  type DockerRunner,
+  type ExactRefs,
+  planExact,
+} from "../../scripts/test-docker-cleanup";
 import { recordResource, testRunId } from "../support/docker-test-labels";
 import {
   acquireLock,
@@ -49,6 +54,11 @@ const DNS_LOG_ROOT = path.join(PROJECT_ROOT, "tests", "integration", "egress-fix
 let dnsLogDir = "";
 const dnsLogPath = () => path.join(dnsLogDir, "dns-queries.log");
 let releaseLock: (() => void) | undefined;
+// Set right before `compose build`: until then this invocation has created nothing on Docker,
+// so a stop in preflight must not trigger any cleanup (K121).
+let buildStarted = false;
+// Exactly what this invocation creates; teardown removes these and nothing else (K121, K122).
+const created: ExactRefs = { container: [], network: [], volume: [], image: [] };
 
 function composeEnv(): NodeJS.ProcessEnv {
   return { ...process.env, AIDA_TEST_RUN_ID: RUN_ID, AIDA_TEST_DNS_LOG_DIR: dnsLogDir };
@@ -86,6 +96,37 @@ function containerId(service: string): string {
   const id = stdout.trim();
   if (!id) throw new Error(`no running container found for service "${service}"`);
   return id;
+}
+
+/** IDs of every container of this project, including stopped ones; a failed listing throws. */
+function projectContainerIds(): string[] {
+  const ps = dc(["ps", "-a", "-q"]);
+  if (ps.code !== 0) throw new Error(`docker compose ps failed (code ${ps.code}):\n${ps.stderr}`);
+  return ps.stdout
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+/** Records the project's containers, and the network and volume once they exist (K124). */
+function recordProjectResources(names: { networks: string[]; volumes: string[] }): void {
+  for (const id of projectContainerIds()) {
+    recordResource(RUN_ID, {
+      type: "container",
+      name: `${COMPOSE_PROJECT} container`,
+      id,
+      state: "created",
+    });
+  }
+  for (const [type, list] of [
+    ["network", names.networks],
+    ["volume", names.volumes],
+  ] as const) {
+    for (const name of list) {
+      const inspected = runDocker([type, "inspect", "--format", "{{.Name}}", name]);
+      if (inspected.code === 0) recordResource(RUN_ID, { type, name, state: "created" });
+    }
+  }
 }
 
 async function waitForHealthy(service: string, timeoutMs = 120_000): Promise<void> {
@@ -173,7 +214,12 @@ describe("egress isolation: no flow requires a route to the public internet", ()
     });
 
     // Build once, after the checks; `up` and `run` never rebuild, retag or pull (K111, K116).
+    // The tags and the network and volume names were all proven absent above, under the lock.
+    created.image = tags;
+    created.network = names.networks;
+    created.volume = names.volumes;
     for (const tag of tags) recordResource(RUN_ID, { type: "image", name: tag, state: "planned" });
+    buildStarted = true;
     const build = dc(["build"], { timeout: 480_000 });
     if (build.code !== 0) {
       throw new Error(
@@ -181,15 +227,8 @@ describe("egress isolation: no flow requires a route to the public internet", ()
       );
     }
     for (const tag of tags) recordResource(RUN_ID, { type: "image", name: tag, state: "created" });
-    for (const name of names.networks)
-      recordResource(RUN_ID, { type: "network", name, state: "planned" });
-    for (const name of names.volumes)
-      recordResource(RUN_ID, { type: "volume", name, state: "planned" });
     const up = dc(["up", "-d", "--no-build", "--pull", "never"], { timeout: 300_000 });
-    for (const line of dc(["ps", "-a", "--format", "{{.ID}} {{.Name}}"]).stdout.split("\n")) {
-      const [id, name] = line.trim().split(" ");
-      if (id && name) recordResource(RUN_ID, { type: "container", name, id, state: "created" });
-    }
+    recordProjectResources(names);
     if (up.code !== 0) {
       throw new Error(`docker compose up failed (code ${up.code}):\n${up.stderr}\n${up.stdout}`);
     }
@@ -201,20 +240,21 @@ describe("egress isolation: no flow requires a route to the public internet", ()
     // Without the lock this invocation created nothing, and another holder may be using the
     // same run id: remove nothing (K114).
     if (!releaseLock) return;
-    // Only this suite's resources: test label, run label and names under aida-test-egress
-    // (never the integration or E2E containers of the same run), re-checked one by one (K108,
-    // K114). Containers first, then the network, the volume and the image tags.
-    const docker: DockerRunner = (args) =>
-      execFileSync("docker", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     let failures: string[] = [];
     try {
-      const result = applyCleanup(
-        docker,
-        RUN_ID,
-        planCleanup(docker, RUN_ID, COMPOSE_PROJECT),
-        COMPOSE_PROJECT,
-      );
-      failures = result.failed.map((f) => `${f.resource.type} ${f.resource.name}: ${f.error}`);
+      // Before `compose build` nothing was created on Docker. Whatever made the preflight stop
+      // (a tag, name or project that already exists) is not ours and stays untouched (K121).
+      if (buildStarted) {
+        // Exactly the refs this invocation created: the image tags, the network and volume
+        // names (proven absent before the build, under the lock), and the project's containers.
+        // Each is re-checked for the test label, this run's label and the aida-test- prefix
+        // before removal (K108, K121, K122). Containers first, then network, volume, image tags.
+        const docker: DockerRunner = (args) =>
+          execFileSync("docker", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+        const refs: ExactRefs = { ...created, container: projectContainerIds() };
+        const result = applyCleanup(docker, RUN_ID, planExact(docker, RUN_ID, refs));
+        failures = result.failed.map((f) => `${f.resource.type} ${f.resource.name}: ${f.error}`);
+      }
     } finally {
       releaseLock?.();
       if (dnsLogDir) fs.rmSync(dnsLogDir, { recursive: true, force: true });
@@ -275,6 +315,11 @@ describe("egress isolation: no flow requires a route to the public internet", ()
   test("negative control: a deliberate external lookup IS captured — proves the capture mechanism actually works", () => {
     const before = readDnsLogLines().length;
 
+    recordResource(RUN_ID, {
+      type: "container",
+      name: `${COMPOSE_PROJECT} negative-control run`,
+      state: "planned",
+    });
     const control = dc(["run", "--rm", "--pull", "never", "negative-control"], { timeout: 30_000 });
     expect(control.code, `negative-control container failed: ${control.stderr}`).toBe(0);
 
