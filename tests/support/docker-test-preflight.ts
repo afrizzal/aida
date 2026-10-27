@@ -334,7 +334,7 @@ export function acquireLock(runId: string, tmpDir: string = os.tmpdir()): () => 
 interface ComposeService {
   image?: string;
   labels?: Record<string, string>;
-  build?: { labels?: Record<string, string> };
+  build?: { labels?: Record<string, string>; tags?: string[] };
   tmpfs?: string[] | string;
   volumes?: { type?: string; source?: string; target?: string }[];
 }
@@ -376,6 +376,9 @@ export function assertComposeFollowsRuleJ(
   for (const [name, service] of Object.entries(config.services ?? {})) {
     if (!hasRunLabels(service.labels, runId)) problems.push(`service ${name} lacks the run labels`);
     if (service.build) {
+      // Extra build tags would be written by `compose build` without the tag check (review J1).
+      if ((service.build.tags ?? []).length > 0)
+        problems.push(`build of ${name} sets extra tags: ${(service.build.tags ?? []).join(", ")}`);
       if (!hasRunLabels(service.build.labels, runId))
         problems.push(`build of ${name} lacks the run labels`);
       const expected = `${project}-${name}:${runId}`;

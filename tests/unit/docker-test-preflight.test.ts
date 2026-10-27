@@ -93,6 +93,21 @@ describe("free space", () => {
     expect(args.slice(-3)).toEqual(["-Pk", "/", "/aida-docker-root"]);
   });
 
+  test("records the probe container as planned before running it (K124)", () => {
+    const events: string[] = [];
+    const docker: Docker = (args) => {
+      events.push(`docker ${args[0]}`);
+      return args[0] === "info"
+        ? { code: 0, stdout: "/var/lib/docker", stderr: "" }
+        : { code: 0, stdout: df2, stderr: "" };
+    };
+    const record = (_run: string, entry: { name: string; state: string }) => {
+      events.push(`record ${entry.state} ${entry.name.slice(0, 13)}`);
+    };
+    dockerFreeBytes(docker, RUN, record);
+    expect(events).toEqual(["docker info", "record planned aida-test-df-", "docker run"]);
+  });
+
   test("a failed or partial probe stops instead of assuming space", () => {
     const noInfo = scripted(() => ({ code: 1, stderr: "daemon down" }));
     expect(() => dockerFreeBytes(noInfo.docker, RUN, noRecord)).toThrow(/Docker root directory/);
@@ -314,6 +329,14 @@ describe("compose rule J check", () => {
       expect(() => assertComposeFollowsRuleJ(config, "aida-test-egress", RUN)).toThrow(message);
     });
   }
+
+  test("refuses extra build tags, which compose build would write without the tag check", () => {
+    const config = valid();
+    if (config.services?.app.build) config.services.app.build.tags = ["node:22-alpine"];
+    expect(() => assertComposeFollowsRuleJ(config, "aida-test-egress", RUN)).toThrow(
+      /sets extra tags: node:22-alpine/,
+    );
+  });
 
   test("refuses a project name without the aida-test- prefix", () => {
     expect(() => assertComposeFollowsRuleJ(valid(), "aida-egress-test", RUN)).toThrow(

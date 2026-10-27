@@ -28,6 +28,7 @@ import {
   type DockerRunner,
   type ExactRefs,
   planExact,
+  teardownRefs,
 } from "../../scripts/test-docker-cleanup";
 import { recordResource, testRunId } from "../support/docker-test-labels";
 import {
@@ -54,10 +55,14 @@ const DNS_LOG_ROOT = path.join(PROJECT_ROOT, "tests", "integration", "egress-fix
 let dnsLogDir = "";
 const dnsLogPath = () => path.join(dnsLogDir, "dns-queries.log");
 let releaseLock: (() => void) | undefined;
-// Set right before `compose build`: until then this invocation has created nothing on Docker,
-// so a stop in preflight must not trigger any cleanup (K121).
+// Set right before `compose build`. Before it, the only Docker resource this invocation makes is
+// the preflight's own `--rm` space probe, so a stop in preflight triggers no suite cleanup (K121);
+// a probe that failed to remove itself is left for `pnpm test:docker-cleanup --run <id>`.
 let buildStarted = false;
-// Exactly what this invocation creates; teardown removes these and nothing else (K121, K122).
+// The image tags and network and volume names this invocation proved absent and then created.
+// Teardown removes these plus the project's containers, each re-checked for this run's labels
+// (K121, K122). Containers are listed at teardown time, so a second invocation with the same run
+// id that bypassed the lock could lose its containers: the known limit K115.
 const created: ExactRefs = { container: [], network: [], volume: [], image: [] };
 
 function composeEnv(): NodeJS.ProcessEnv {
@@ -98,25 +103,25 @@ function containerId(service: string): string {
   return id;
 }
 
-/** IDs of every container of this project, including stopped ones; a failed listing throws. */
-function projectContainerIds(): string[] {
-  const ps = dc(["ps", "-a", "-q"]);
+/** Every container of this project, including stopped ones; a failed listing throws. */
+function projectContainers(): { id: string; name: string }[] {
+  const ps = dc(["ps", "-a", "--format", "{{.ID}} {{.Name}}"]);
   if (ps.code !== 0) throw new Error(`docker compose ps failed (code ${ps.code}):\n${ps.stderr}`);
   return ps.stdout
     .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
+    .map((l) => l.trim().split(" "))
+    .filter(([id, name]) => Boolean(id && name))
+    .map(([id, name]) => ({ id, name }));
+}
+
+function projectContainerIds(): string[] {
+  return projectContainers().map((c) => c.id);
 }
 
 /** Records the project's containers, and the network and volume once they exist (K124). */
 function recordProjectResources(names: { networks: string[]; volumes: string[] }): void {
-  for (const id of projectContainerIds()) {
-    recordResource(RUN_ID, {
-      type: "container",
-      name: `${COMPOSE_PROJECT} container`,
-      id,
-      state: "created",
-    });
+  for (const { id, name } of projectContainers()) {
+    recordResource(RUN_ID, { type: "container", name, id, state: "created" });
   }
   for (const [type, list] of [
     ["network", names.networks],
@@ -197,7 +202,7 @@ describe("egress isolation: no flow requires a route to the public internet", ()
 
     // Resolve the compose file (with the `control` profile, so negative-control is checked too)
     // and refuse it unless every resource follows rule J. Then the preflight checks, before any
-    // build: nothing has been created on Docker until this point.
+    // build; until the build, only the preflight's own `--rm` space probe touches Docker.
     const config = dc(["--profile", "control", "config", "--format", "json"], { timeout: 60_000 });
     if (config.code !== 0) throw new Error(`docker compose config failed:\n${config.stderr}`);
     const resolved = JSON.parse(config.stdout) as ComposeConfig;
@@ -228,10 +233,18 @@ describe("egress isolation: no flow requires a route to the public internet", ()
     }
     for (const tag of tags) recordResource(RUN_ID, { type: "image", name: tag, state: "created" });
     const up = dc(["up", "-d", "--no-build", "--pull", "never"], { timeout: 300_000 });
-    recordProjectResources(names);
-    if (up.code !== 0) {
-      throw new Error(`docker compose up failed (code ${up.code}):\n${up.stderr}\n${up.stdout}`);
+    let ledgerError = "";
+    try {
+      recordProjectResources(names);
+    } catch (err) {
+      ledgerError = String(err);
     }
+    if (up.code !== 0) {
+      throw new Error(
+        `docker compose up failed (code ${up.code}):\n${up.stderr}\n${up.stdout}${ledgerError ? `\nledger: ${ledgerError}` : ""}`,
+      );
+    }
+    if (ledgerError) throw new Error(`recording the project's resources failed: ${ledgerError}`);
 
     await waitForHealthy("app", 120_000);
   }, 900_000);
@@ -242,17 +255,18 @@ describe("egress isolation: no flow requires a route to the public internet", ()
     if (!releaseLock) return;
     let failures: string[] = [];
     try {
-      // Before `compose build` nothing was created on Docker. Whatever made the preflight stop
-      // (a tag, name or project that already exists) is not ours and stays untouched (K121).
-      if (buildStarted) {
-        // Exactly the refs this invocation created: the image tags, the network and volume
-        // names (proven absent before the build, under the lock), and the project's containers.
-        // Each is re-checked for the test label, this run's label and the aida-test- prefix
-        // before removal (K108, K121, K122). Containers first, then network, volume, image tags.
+      // The decision lives in teardownRefs() so it is unit-tested: nothing before the build
+      // started (whatever made the preflight stop is not ours), otherwise only the recorded refs
+      // plus the project's containers, each re-checked before removal (K108, K121, K122).
+      const refs = teardownRefs({ lockHeld: true, buildStarted, created }, projectContainerIds);
+      if (refs) {
         const docker: DockerRunner = (args) =>
           execFileSync("docker", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-        const refs: ExactRefs = { ...created, container: projectContainerIds() };
-        const result = applyCleanup(docker, RUN_ID, planExact(docker, RUN_ID, refs));
+        const { plan, notOurs } = planExact(docker, RUN_ID, refs);
+        for (const other of notOurs) {
+          console.warn(`left alone (not this run's): ${other.type} ${other.name}`);
+        }
+        const result = applyCleanup(docker, RUN_ID, plan);
         failures = result.failed.map((f) => `${f.resource.type} ${f.resource.name}: ${f.error}`);
       }
     } finally {

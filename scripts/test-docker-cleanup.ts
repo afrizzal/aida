@@ -10,7 +10,10 @@
 //
 //   pnpm test:docker-cleanup --run <runId>           dry run: prints what would be removed
 //   pnpm test:docker-cleanup --run <runId> --apply   removes it
-//   ... --scope aida-test-egress                     only names under that prefix (K114)
+//   ... --scope aida-test-egress                     only names under that prefix (K114). This is
+//                                                    a plain prefix: it also matches a sibling such
+//                                                    as aida-test-egress-other_*, limited only by
+//                                                    the run label. Suites use planExact() instead.
 //   pnpm test:docker-cleanup --others [--run <id>]   lists aida.test=1 resources of other runs
 //
 // Exit 1 when a removal fails or a resource cannot be inspected for a reason other than the
@@ -215,15 +218,21 @@ export function applyCleanup(
 
 export type ExactRefs = Partial<Record<ResourceType, string[]>>;
 
+export interface ExactPlan {
+  /** Refs that still carry the test label, this run's label and the aida-test- prefix. */
+  plan: DockerResource[];
+  /** Refs that exist but are not this run's: never removed, reported so a stop can be explained. */
+  notOurs: DockerResource[];
+}
+
 /**
  * Plans removal of exactly these refs, the ones a suite itself created, in removal order. A ref
  * the daemon reports as not found is left out; a ref that cannot be inspected for any other
- * reason throws, so the caller fails loudly. Each ref must still carry the test label, this
- * run's label and the aida-test- prefix (K121).
+ * reason throws, so the caller fails loudly (K121, K123).
  */
-export function planExact(docker: DockerRunner, runId: string, refs: ExactRefs): DockerResource[] {
+export function planExact(docker: DockerRunner, runId: string, refs: ExactRefs): ExactPlan {
   if (!isRunId(runId)) throw new Error(`Not a valid test run id: ${JSON.stringify(runId)}`);
-  const plan: DockerResource[] = [];
+  const result: ExactPlan = { plan: [], notOurs: [] };
   for (const type of REMOVAL_ORDER) {
     for (const ref of refs[type] ?? []) {
       let resource: DockerResource;
@@ -233,10 +242,37 @@ export function planExact(docker: DockerRunner, runId: string, refs: ExactRefs):
         if (dockerNotFound(type, ref, String(err))) continue;
         throw new Error(`Cannot inspect ${type} ${ref}: ${String(err)}`);
       }
-      if (belongsToRun(resource, runId)) plan.push(resource);
+      (belongsToRun(resource, runId) ? result.plan : result.notOurs).push(resource);
     }
   }
-  return plan;
+  return result;
+}
+
+export interface TeardownState {
+  /** This invocation acquired the suite lock. */
+  lockHeld: boolean;
+  /** This invocation started `compose build`; before that it created nothing it must remove. */
+  buildStarted: boolean;
+  /** Image tags and network and volume names this invocation proved absent, then created. */
+  created: ExactRefs;
+}
+
+/**
+ * Decides what a suite teardown may remove (K114, K121, K122). Nothing without the lock, nothing
+ * before the build started, and otherwise only the recorded refs plus the project's containers.
+ * `listContainers` is called only when there is something to remove.
+ */
+export function teardownRefs(
+  state: TeardownState,
+  listContainers: () => string[],
+): ExactRefs | null {
+  if (!state.lockHeld || !state.buildStarted) return null;
+  return {
+    container: listContainers(),
+    network: [...(state.created.network ?? [])],
+    volume: [...(state.created.volume ?? [])],
+    image: [...(state.created.image ?? [])],
+  };
 }
 
 /** aida.test=1 resources that do NOT belong to `runId` (or all of them without a run id). */

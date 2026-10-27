@@ -6,6 +6,7 @@ import {
   listOtherRuns,
   planCleanup,
   planExact,
+  teardownRefs,
 } from "../../scripts/test-docker-cleanup";
 import { newRunId } from "../support/docker-test-labels";
 
@@ -241,35 +242,33 @@ describe("exact refs and strict not-found (K121 to K123)", () => {
       labels: mine,
     },
   ];
+  const created = {
+    network: ["n-mine"],
+    volume: ["aida-test-egress_uploads_data"],
+    image: [`aida-test-egress-app:${RUN}`],
+  };
 
-  test("plans exactly the given refs; a sibling project with the same prefix and run is untouched", () => {
-    const { runner, calls } = fakeDocker(sibling);
-    const plan = planExact(runner, RUN, {
-      container: [],
-      network: ["n-mine"],
-      volume: ["aida-test-egress_uploads_data"],
-      image: [`aida-test-egress-app:${RUN}`],
-    });
+  test("a prefix scope would catch a sibling project; the exact teardown refs do not", () => {
+    const { runner } = fakeDocker(sibling);
+    const byPrefix = planCleanup(runner, RUN, "aida-test-egress").map((r) => r.ref);
+    expect(byPrefix).toContain("n-sibling");
+    const refs = teardownRefs({ lockHeld: true, buildStarted: true, created }, () => []);
+    const { plan } = planExact(runner, RUN, refs ?? {});
     expect(plan.map((r) => r.ref)).toEqual([
       "n-mine",
       "aida-test-egress_uploads_data",
       `aida-test-egress-app:${RUN}`,
     ]);
-    applyCleanup(runner, RUN, plan);
-    const removed = calls
-      .filter((args) => args[0] === "rm" || args[1] === "rm")
-      .map((a) => a[a.length - 1]);
-    expect(removed).not.toContain("n-sibling");
-    expect(removed).not.toContain("aida-test-egress-other_data");
   });
 
-  test("a given ref that is not ours (wrong labels or name) is left out; one not found is skipped", () => {
+  test("a given ref that exists but is not ours is reported, not planned; one not found is skipped", () => {
     const { runner } = fakeDocker(sibling);
-    const plan = planExact(runner, RUN, {
+    const { plan, notOurs } = planExact(runner, RUN, {
       container: ["c-other-run", "c-wrong-name", "does-not-exist"],
       network: ["n-project"],
     });
     expect(plan).toEqual([]);
+    expect(notOurs.map((r) => r.ref)).toEqual(["c-other-run", "c-wrong-name", "n-project"]);
   });
 
   test("planning fails loudly when a ref cannot be inspected for another reason", () => {
@@ -286,5 +285,31 @@ describe("exact refs and strict not-found (K121 to K123)", () => {
     const result = applyCleanup(down.runner, RUN, plan);
     expect(result.gone.map((r) => r.ref)).not.toContain("c-mine");
     expect(result.failed.map((f) => f.resource.ref)).toContain("c-mine");
+  });
+});
+
+describe("teardownRefs (K114, K121)", () => {
+  const created = { network: ["n"], volume: ["v"], image: ["i:1"] };
+
+  test("without the lock, or before the build started, nothing is removed and nothing is listed", () => {
+    let listed = 0;
+    const list = () => {
+      listed += 1;
+      return ["c1"];
+    };
+    expect(teardownRefs({ lockHeld: false, buildStarted: true, created }, list)).toBeNull();
+    expect(teardownRefs({ lockHeld: true, buildStarted: false, created }, list)).toBeNull();
+    expect(listed).toBe(0);
+  });
+
+  test("after the build started, exactly the recorded refs plus the project's containers", () => {
+    expect(
+      teardownRefs({ lockHeld: true, buildStarted: true, created }, () => ["c1", "c2"]),
+    ).toEqual({
+      container: ["c1", "c2"],
+      network: ["n"],
+      volume: ["v"],
+      image: ["i:1"],
+    });
   });
 });
