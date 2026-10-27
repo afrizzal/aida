@@ -127,3 +127,42 @@ All nine cycle 2 findings are accepted. C8 is closed: Codex accepted the rejecti
 ### Outcome
 
 The third and last review cycle ended with four HIGH findings. Under `run-loop/PIAGAM.md` → Titik keputusan ("3 siklus review plan habis dengan temuan HIGH tersisa → Parkir fase"), **Phase 8 is parked** (run-loop decision K24). The findings above are accepted and must be incorporated by a `--reviews` replan before any execution, but that replan would not be reviewed by Codex. Whether to unpark is the owner's decision (`run-loop/LAPORAN.md` → Menunggu owner).
+
+## Owner decisions 2026-11-11 and replan brief (cycle 4)
+
+The owner unparked Phase 8 (`run-loop/ANTREAN.md`, section "Keputusan owner 2026-11-11", items 4 to 7). Binding for this replan:
+
+- **One review cycle only (cycle 4), limited to R3-1 to R3-4.** If any HIGH remains after it, there is no cycle 5: Phase 8 is split. Dependency upgrades, CSP, non-root containers and rate limits go first; the Docker test tooling comes later. The owner gets a report.
+- **Rule J** (`run-loop/PIAGAM.md`, Aturan owner, item J and the run's strict reading under it) replaces K22's "all container proofs run in project `aida`":
+  - Test projects start with `aida-test-`, every test resource carries `aida.test=1`, and cleanup touches only what matches the label and the prefix.
+  - Never touch project `aida`, `aida-dev-db`, `smartcv-*` or any other project. No `docker system prune`, `docker volume prune`, `colima delete`, or anything in `~/.colima`.
+  - Image tags are unique and never overwrite an existing tag.
+  - Check free space on the host and in the VM before any image build; below 20 GiB, stop and report.
+  - The phase-end compose gate (former queue item J2) runs as an `aida-test-` project. If port 80 or 443 is taken, record that and park the gate; never stop another service.
+- **Rule I** (no GitHub cost):
+  - Only `runs-on: ubuntu-latest`, and no new scheduled workflow.
+  - Plan 08-05 triggers: `audit` on `pull_request`, push to `master` and `workflow_dispatch`; `egress` on a `pull_request` that changes the Dockerfile, a compose file or the lockfile, and on `workflow_dispatch`.
+  - Dependabot weekly with `open-pull-requests-limit: 3`.
+
+### Reuse the J1 test infrastructure
+
+Queue item J1 already built the rule-J tooling. Decisions K108 to K124, the observed Docker error messages and the stated limits are in `run-loop/J1-RENCANA.md`. Plans must reuse this tooling, not duplicate it:
+
+| Module | Provides |
+|---|---|
+| `tests/support/docker-test-labels.ts` | run id, labels, names, ledger, `dockerNotFound` |
+| `tests/support/docker-test-resources.ts` | `startLabeledPostgres` |
+| `tests/support/docker-test-preflight.ts` | `runBuildPreflight`, `assertComposeFollowsRuleJ`, `composeResourceNames`, `acquireLock`, the space probe |
+| `scripts/test-docker-cleanup.ts` | `planExact`, `applyCleanup`, `teardownRefs`; the `pnpm test:docker-cleanup` CLI |
+
+### Mapping
+
+| Finding | State after J1 | Plans to revise |
+|---|---|---|
+| R3-1 (project-wide cleanup race) | The pattern exists: exact-ref teardown after the lock, nothing removed before a build started (K121) | 08-14: the harness moves to `aida-test-` projects on top of J1. Also 08-16 Task 3 (compose gate) and the callers 08-21, 08-22, 08-23 |
+| R3-2 (unguarded egress suite) | Closed in code by J1: project `aida-test-egress`, preflight, exact-ref teardown, out of the integration include. The 0a2 run stopped at the space check (VM 13.9 GiB) | 08-19 is reduced to what J1 did not do. 08-05's egress job must handle the space stop on runners honestly |
+| R3-3 (image tags) | The pattern exists: run-tagged images, tag check, `build.tags` refused, removal by `repo:tag` | 08-09 (image build and removal), 08-14 (`checkRenderedConfig` becomes the J1 compose check), 08-16 (the compose gate needs a labelled overlay with an `image:` per built service) |
+| R3-4 (evidence matrix verifier) | Not touched by J1 | 08-16: run and record every evidence command, derive each state from its source line, and make the verifier match item, evidence kind and source state |
+| R3-5 (MEDIUM, reporter) | Not touched by J1 | 08-14 `classifyTest`: mixed cases |
+
+**Known blocker:** the Docker VM has 13.9 GiB free, below the 20 GiB threshold (0a2, waiting for the owner). Every plan step that builds images stops at preflight until the owner adds space. Plans record this as `blocked (space)`, never as passed.
