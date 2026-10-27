@@ -80,3 +80,22 @@ Status: tugas 10 selesai (`pnpm typecheck` dan `pnpm lint` exit 0; `pnpm test` 5
 
 11. Karena putaran Codex habis, perubahan sesudah putaran 3 direview oleh reviewer independen (subagen, tanpa konteks percakapan) sebelum J1 ditutup, mengikuti praktik K39 Fase 12. Temuan yang jelas diperbaiki; sisanya dicatat sebagai batas dan dilaporkan.
 12. J1 ditutup dengan batas tertulis (K109, K115, K118, K120) dan bukti egress menyusul di 0a2.
+
+## Review independen dan penutupan (2026-11-11)
+
+Reviewer independen (subagen baru tanpa konteks percakapan, hanya baca, tanpa Docker) memeriksa `2aeb40b`. Ia menjalankan tiga berkas unit test J1 (49 lolos) dan menelusuri setiap titik `beforeAll` bisa gagal. Hasilnya: tidak ada temuan kritis atau tinggi, dan tidak ada jalur yang menghapus, menghentikan, atau menimpa resource yang bukan buatan invokasi itu, kecuali batas K115 yang sudah tertulis. Ada 1 temuan sedang dan 7 rendah:
+
+| No | Temuan | Tindakan (`3435140`) |
+|---|---|---|
+| 1 | Sedang: gerbang `buildStarted` dan teardown daftar tepat tidak punya bukti otomatis | Keputusan dipindah ke fungsi murni `teardownRefs()`, dengan test unit (tanpa lock atau sebelum build: tidak ada yang dihapus atau didaftar) |
+| 2 | Rendah: komentar melebihi kode (probe ruang ada sebelum build; container didaftar saat teardown) | Komentar diperbaiki; batas K115 disebut |
+| 3 | Rendah: `planExact` membuang ref yang ada tetapi bukan milik run tanpa jejak | Mengembalikan `notOurs`; teardown mencetaknya |
+| 4 | Rendah: galat `up` bisa tertutup galat ledger; nama container di ledger placeholder | Galat `up` dipertahankan; nama container asli |
+| 5 | Rendah: test project tetangga tidak bisa gagal; pencatatan probe tidak diuji | Test kini membandingkan cakupan awalan (yang menangkap tetangga) dengan ref tepat; test urutan pencatatan probe |
+| 6 | Rendah: `--scope` di CLI masih awalan biasa | Didokumentasikan di kepala skrip; suite memakai ref tepat |
+| 7 | Rendah: `build.tags` tidak diperiksa | Ditolak oleh pemeriksaan config |
+| 8 | Rendah: pola pesan galat hanya untuk daemon ini | Batas tertulis: di Docker dengan kalimat lain, suite berhenti dan teardown gagal tanpa menghapus (aman, tetapi tidak bisa dipakai) |
+
+Bukti akhir: `pnpm typecheck` dan `pnpm lint` exit 0; `pnpm test` 53 berkas, 891 test; tidak ada pola "no such" atau "not found" longgar di `tests` dan `scripts`. `pnpm test:integration` terakhir (sesudah `2aeb40b`; perubahan sesudahnya tidak menyentuh jalur integration) exit 0, 94 berkas, 1297 test, 0 sisa.
+
+**J1 selesai.** Batas yang tetap terbuka dan dilaporkan ke owner: K109 (cache build dan image dasar tanpa label), K115 (tidak atomik terhadap proses yang tidak mematuhi lock), K118 (letak disk VM di sisi host tidak diverifikasi; cakupan penyimpanan builder belum terbukti), K120 (socket di `~/.colima`, menunggu konfirmasi), dan temuan 8 (pola pesan per daemon). Suite egress belum pernah dijalankan; itu butir 0a2, dan perubahan sesudah putaran Codex terakhir hanya direview oleh reviewer independen, tidak oleh Codex.
