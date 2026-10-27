@@ -1,0 +1,726 @@
+diff --git a/scripts/test-docker-cleanup.ts b/scripts/test-docker-cleanup.ts
+index d071957..61acbab 100644
+--- a/scripts/test-docker-cleanup.ts
++++ b/scripts/test-docker-cleanup.ts
+@@ -10,7 +10,11 @@
+ //
+ //   pnpm test:docker-cleanup --run <runId>           dry run: prints what would be removed
+ //   pnpm test:docker-cleanup --run <runId> --apply   removes it
++//   ... --scope aida-test-egress                     only names under that prefix (K114)
+ //   pnpm test:docker-cleanup --others [--run <id>]   lists aida.test=1 resources of other runs
++//
++// Exit 1 when a removal fails or a resource cannot be inspected for a reason other than
++// "no such ..." (already gone), so an uncertain leftover is never reported as clean (K117).
+ // ---------------------------------------------------------------------------
+ import { execFileSync } from "node:child_process";
+ import { pathToFileURL } from "node:url";
+@@ -114,12 +118,30 @@ export function inspectResource(
+   return { type, ref, name, labels: parsed.labels ?? {} };
+ }
+ 
+-/** True only when the resource carries the test label, this run's label, and the name prefix. */
+-export function belongsToRun(resource: DockerResource, runId: string): boolean {
++/** A cleanup scope is a name prefix that itself starts with `aida-test-`. */
++export function assertScope(scope: string): void {
++  if (!scope.startsWith(TEST_NAME_PREFIX)) {
++    throw new Error(
++      `A cleanup scope must start with ${TEST_NAME_PREFIX}: ${JSON.stringify(scope)}`,
++    );
++  }
++}
++
++/**
++ * True only when the resource carries the test label, this run's label, and a name under the
++ * scope (by default every `aida-test-` name). A suite passes its own scope so it never removes
++ * resources another suite created with the same run id (K114).
++ */
++export function belongsToRun(
++  resource: DockerResource,
++  runId: string,
++  scope: string = TEST_NAME_PREFIX,
++): boolean {
++  assertScope(scope);
+   if (resource.labels[TEST_LABEL] !== "1") return false;
+   if (resource.labels[RUN_LABEL] !== runId) return false;
+   const name = resource.type === "image" ? resource.name.split(":")[0] : resource.name;
+-  return name.startsWith(TEST_NAME_PREFIX);
++  return name.startsWith(scope);
+ }
+ 
+ function listByFilters(
+@@ -133,17 +155,26 @@ function listByFilters(
+ }
+ 
+ /** The resources of one run, in removal order. Lists by label, then checks each one itself. */
+-export function planCleanup(docker: DockerRunner, runId: string): DockerResource[] {
++export function planCleanup(
++  docker: DockerRunner,
++  runId: string,
++  scope: string = TEST_NAME_PREFIX,
++): DockerResource[] {
+   if (!isRunId(runId)) throw new Error(`Not a valid test run id: ${JSON.stringify(runId)}`);
++  assertScope(scope);
+   const filters = ["--filter", `label=${TEST_LABEL}=1`, "--filter", `label=${RUN_LABEL}=${runId}`];
+   return REMOVAL_ORDER.flatMap((type) =>
+-    listByFilters(docker, type, filters).filter((resource) => belongsToRun(resource, runId)),
++    listByFilters(docker, type, filters).filter((resource) => belongsToRun(resource, runId, scope)),
+   );
+ }
+ 
+ export interface CleanupResult {
+   removed: DockerResource[];
++  /** Already gone when re-inspected ("no such ..."): nothing left to remove. */
++  gone: DockerResource[];
++  /** Still present but no longer this run's (labels or name changed): left alone. */
+   skipped: { resource: DockerResource; reason: string }[];
++  /** Removal failed, or the resource could not be inspected for another reason. */
+   failed: { resource: DockerResource; error: string }[];
+ }
+ 
+@@ -152,17 +183,20 @@ export function applyCleanup(
+   docker: DockerRunner,
+   runId: string,
+   plan: DockerResource[],
++  scope: string = TEST_NAME_PREFIX,
+ ): CleanupResult {
+-  const result: CleanupResult = { removed: [], skipped: [], failed: [] };
++  assertScope(scope);
++  const result: CleanupResult = { removed: [], gone: [], skipped: [], failed: [] };
+   for (const planned of plan) {
+     let current: DockerResource;
+     try {
+       current = inspectResource(docker, planned.type, planned.ref);
+     } catch (err) {
+-      result.skipped.push({ resource: planned, reason: `no longer inspectable: ${String(err)}` });
++      if (/no such/i.test(String(err))) result.gone.push(planned);
++      else result.failed.push({ resource: planned, error: `cannot inspect: ${String(err)}` });
+       continue;
+     }
+-    if (!belongsToRun(current, runId)) {
++    if (!belongsToRun(current, runId, scope)) {
+       result.skipped.push({ resource: planned, reason: "labels or name no longer match this run" });
+       continue;
+     }
+@@ -191,6 +225,8 @@ function describe(resource: DockerResource): string {
+ function main(argv: string[]): number {
+   const runIndex = argv.indexOf("--run");
+   const runId = runIndex >= 0 ? argv[runIndex + 1] : undefined;
++  const scopeIndex = argv.indexOf("--scope");
++  const scope = scopeIndex >= 0 ? (argv[scopeIndex + 1] ?? "") : TEST_NAME_PREFIX;
+   const docker: DockerRunner = (args) =>
+     execFileSync("docker", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+ 
+@@ -208,21 +244,28 @@ function main(argv: string[]): number {
+     return 2;
+   }
+ 
+-  const plan = planCleanup(docker, runId);
++  try {
++    assertScope(scope);
++  } catch (err) {
++    console.error(String(err));
++    return 2;
++  }
++  const plan = planCleanup(docker, runId, scope);
+   if (!argv.includes("--apply")) {
+     for (const resource of plan) console.log(`would remove: ${describe(resource)}`);
+     console.log(`${plan.length} resource(s) of run ${runId}; dry run, nothing removed.`);
+     return 0;
+   }
+ 
+-  const result = applyCleanup(docker, runId, plan);
++  const result = applyCleanup(docker, runId, plan, scope);
+   for (const resource of result.removed) console.log(`removed: ${describe(resource)}`);
++  for (const resource of result.gone) console.log(`already gone: ${describe(resource)}`);
+   for (const { resource, reason } of result.skipped)
+     console.log(`skipped: ${describe(resource)}: ${reason}`);
+   for (const { resource, error } of result.failed)
+     console.error(`FAILED: ${describe(resource)}: ${error}`);
+   console.log(
+-    `run ${runId}: ${result.removed.length} removed, ${result.skipped.length} skipped, ${result.failed.length} failed.`,
++    `run ${runId}: ${result.removed.length} removed, ${result.gone.length} already gone, ${result.skipped.length} skipped, ${result.failed.length} failed.`,
+   );
+   return result.failed.length === 0 ? 0 : 1;
+ }
+diff --git a/tests/e2e/global-setup.ts b/tests/e2e/global-setup.ts
+index 9d7a1ce..fd585f7 100644
+--- a/tests/e2e/global-setup.ts
++++ b/tests/e2e/global-setup.ts
+@@ -64,12 +64,21 @@ export default async function globalSetup(_config: FullConfig) {
+   fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+   fs.mkdirSync(AUTH_DIR, { recursive: true });
+ 
+-  const container = await startLabeledPostgres({
+-    kind: "e2e",
+-    database: "aida_e2e",
+-    username: "e2e",
+-    password: "e2e",
+-  });
++  // Created before the container, so a failure here cannot leak it (K117).
++  const uploadsDir = fs.mkdtempSync(path.join(os.tmpdir(), "aida-e2e-uploads-"));
++
++  let container: Awaited<ReturnType<typeof startLabeledPostgres>>;
++  try {
++    container = await startLabeledPostgres({
++      kind: "e2e",
++      database: "aida_e2e",
++      username: "e2e",
++      password: "e2e",
++    });
++  } catch (err) {
++    fs.rmSync(uploadsDir, { recursive: true, force: true });
++    throw err;
++  }
+   const databaseUrl = container.getConnectionUri();
+ 
+   // A failed migration must not leak the container: teardown is only registered further down
+@@ -82,11 +91,10 @@ export default async function globalSetup(_config: FullConfig) {
+     });
+   } catch (err) {
+     await container.stop();
++    fs.rmSync(uploadsDir, { recursive: true, force: true });
+     throw err;
+   }
+ 
+-  const uploadsDir = fs.mkdtempSync(path.join(os.tmpdir(), "aida-e2e-uploads-"));
+-
+   const serverEnv = {
+     ...process.env,
+     DATABASE_URL: databaseUrl,
+diff --git a/tests/integration/egress-isolation.test.ts b/tests/integration/egress-isolation.test.ts
+index 84cfd5a..93b37e7 100644
+--- a/tests/integration/egress-isolation.test.ts
++++ b/tests/integration/egress-isolation.test.ts
+@@ -29,6 +29,7 @@ import {
+   acquireLock,
+   assertComposeFollowsRuleJ,
+   type ComposeConfig,
++  composeResourceNames,
+   runBuildPreflight,
+   runDocker,
+ } from "../support/docker-test-preflight";
+@@ -158,28 +159,37 @@ describe("egress isolation: no flow requires a route to the public internet", ()
+     // build: nothing has been created on Docker until this point.
+     const config = dc(["--profile", "control", "config", "--format", "json"], { timeout: 60_000 });
+     if (config.code !== 0) throw new Error(`docker compose config failed:\n${config.stderr}`);
+-    const tags = assertComposeFollowsRuleJ(
+-      JSON.parse(config.stdout) as ComposeConfig,
+-      COMPOSE_PROJECT,
+-      RUN_ID,
+-    );
++    const resolved = JSON.parse(config.stdout) as ComposeConfig;
++    const tags = assertComposeFollowsRuleJ(resolved, COMPOSE_PROJECT, RUN_ID);
++    const names = composeResourceNames(resolved);
+     runBuildPreflight(runDocker, {
+       runId: RUN_ID,
+       project: COMPOSE_PROJECT,
+       tags,
+       subnet: EGRESS_SUBNET,
+       hostDirs: [os.homedir(), PROJECT_ROOT],
++      networkNames: names.networks,
++      volumeNames: names.volumes,
+     });
+ 
+-    // Build once, after the checks; `up` must never rebuild or retag (K111).
++    // Build once, after the checks; `up` and `run` never rebuild, retag or pull (K111, K116).
++    for (const tag of tags) recordResource(RUN_ID, { type: "image", name: tag, state: "planned" });
+     const build = dc(["build"], { timeout: 480_000 });
+-    for (const tag of tags) recordResource(RUN_ID, { type: "image", name: tag, state: "created" });
+     if (build.code !== 0) {
+       throw new Error(
+         `docker compose build failed (code ${build.code}):\n${build.stderr}\n${build.stdout}`,
+       );
+     }
+-    const up = dc(["up", "-d", "--no-build"], { timeout: 300_000 });
++    for (const tag of tags) recordResource(RUN_ID, { type: "image", name: tag, state: "created" });
++    for (const name of names.networks)
++      recordResource(RUN_ID, { type: "network", name, state: "planned" });
++    for (const name of names.volumes)
++      recordResource(RUN_ID, { type: "volume", name, state: "planned" });
++    const up = dc(["up", "-d", "--no-build", "--pull", "never"], { timeout: 300_000 });
++    for (const line of dc(["ps", "-a", "--format", "{{.ID}} {{.Name}}"]).stdout.split("\n")) {
++      const [id, name] = line.trim().split(" ");
++      if (id && name) recordResource(RUN_ID, { type: "container", name, id, state: "created" });
++    }
+     if (up.code !== 0) {
+       throw new Error(`docker compose up failed (code ${up.code}):\n${up.stderr}\n${up.stdout}`);
+     }
+@@ -188,13 +198,22 @@ describe("egress isolation: no flow requires a route to the public internet", ()
+   }, 900_000);
+ 
+   afterAll(() => {
+-    // Only this run's resources: run label, test label and the aida-test- prefix, re-checked
+-    // one by one (K108). Containers first, then the network, the volume and the image tags.
++    // Without the lock this invocation created nothing, and another holder may be using the
++    // same run id: remove nothing (K114).
++    if (!releaseLock) return;
++    // Only this suite's resources: test label, run label and names under aida-test-egress
++    // (never the integration or E2E containers of the same run), re-checked one by one (K108,
++    // K114). Containers first, then the network, the volume and the image tags.
+     const docker: DockerRunner = (args) =>
+       execFileSync("docker", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+     let failures: string[] = [];
+     try {
+-      const result = applyCleanup(docker, RUN_ID, planCleanup(docker, RUN_ID));
++      const result = applyCleanup(
++        docker,
++        RUN_ID,
++        planCleanup(docker, RUN_ID, COMPOSE_PROJECT),
++        COMPOSE_PROJECT,
++      );
+       failures = result.failed.map((f) => `${f.resource.type} ${f.resource.name}: ${f.error}`);
+     } finally {
+       releaseLock?.();
+@@ -256,7 +275,7 @@ describe("egress isolation: no flow requires a route to the public internet", ()
+   test("negative control: a deliberate external lookup IS captured — proves the capture mechanism actually works", () => {
+     const before = readDnsLogLines().length;
+ 
+-    const control = dc(["run", "--rm", "negative-control"], { timeout: 30_000 });
++    const control = dc(["run", "--rm", "--pull", "never", "negative-control"], { timeout: 30_000 });
+     expect(control.code, `negative-control container failed: ${control.stderr}`).toBe(0);
+ 
+     const deadline = Date.now() + 10_000;
+diff --git a/tests/integration/global-setup.ts b/tests/integration/global-setup.ts
+index 66b3b70..02cc3fb 100644
+--- a/tests/integration/global-setup.ts
++++ b/tests/integration/global-setup.ts
+@@ -32,11 +32,18 @@ export async function setup() {
+     process.env.APP_ENCRYPTION_KEY = randomBytes(32).toString("base64");
+   }
+ 
+-  execSync("pnpm prisma migrate deploy && pnpm prisma generate", {
+-    env: { ...process.env, DATABASE_URL: url },
+-    stdio: "inherit",
+-    cwd: PROJECT_ROOT,
+-  });
++  // A failed migration must not leak the container: with Ryuk off nothing else removes it
++  // (run decision K117).
++  try {
++    execSync("pnpm prisma migrate deploy && pnpm prisma generate", {
++      env: { ...process.env, DATABASE_URL: url },
++      stdio: "inherit",
++      cwd: PROJECT_ROOT,
++    });
++  } catch (err) {
++    await container.stop();
++    throw err;
++  }
+ }
+ 
+ export async function teardown() {
+diff --git a/tests/support/docker-test-preflight.ts b/tests/support/docker-test-preflight.ts
+index f247acf..21c80e6 100644
+--- a/tests/support/docker-test-preflight.ts
++++ b/tests/support/docker-test-preflight.ts
+@@ -46,17 +46,32 @@ function gib(bytes: number): string {
+ 
+ // --- Free space (K112) ------------------------------------------------------------------------
+ 
+-/** Available bytes from `df -Pk <path>` output (POSIX format: 1024-byte blocks, column 4). */
+-export function parseDfAvailableBytes(output: string): number {
+-  const rows = output.trim().split("\n");
+-  const fields = rows[rows.length - 1]?.trim().split(/\s+/) ?? [];
+-  const availableKb = Number(fields[3]);
+-  if (rows.length < 2 || !Number.isFinite(availableKb) || availableKb < 0) {
++/** Available bytes of every data row of `df -Pk <paths...>` (POSIX: 1024-byte blocks, column 4). */
++export function parseDfAvailable(output: string): number[] {
++  const rows = output.trim().split("\n").slice(1);
++  if (rows.length === 0) {
+     throw new DockerPreflightError(
+       `Cannot read free space from df output: ${JSON.stringify(output)}`,
+     );
+   }
+-  return availableKb * 1024;
++  return rows.map((row) => {
++    const availableKb = Number(row.trim().split(/\s+/)[3]);
++    if (!Number.isFinite(availableKb) || availableKb < 0 || row.trim() === "") {
++      throw new DockerPreflightError(`Cannot read free space from df row: ${JSON.stringify(row)}`);
++    }
++    return availableKb * 1024;
++  });
++}
++
++/** Available bytes from single-path `df -Pk <path>` output. */
++export function parseDfAvailableBytes(output: string): number {
++  const values = parseDfAvailable(output);
++  if (values.length !== 1) {
++    throw new DockerPreflightError(
++      `Expected one df row, got ${values.length}: ${JSON.stringify(output)}`,
++    );
++  }
++  return values[0];
+ }
+ 
+ export function assertEnoughSpace(
+@@ -76,17 +91,38 @@ export function assertEnoughSpace(
+  * home directory's filesystem, so measuring the home directory covers it without reading
+  * `~/.colima` (rule J forbids touching it).
+  */
+-export function hostFreeBytes(dirs: string[]): number {
++export function hostFreeBytes(
++  dirs: string[],
++  statfs: (dir: string) => { bavail: number | bigint; bsize: number | bigint } = fs.statfsSync,
++): number {
++  if (dirs.length === 0) throw new DockerPreflightError("No host directory to measure");
+   return Math.min(
+     ...dirs.map((dir) => {
+-      const stats = fs.statfsSync(dir);
++      const stats = statfs(dir);
+       return Number(stats.bavail) * Number(stats.bsize);
+     }),
+   );
+ }
+ 
+-/** Free space where Docker stores container layers, measured from inside a one-off container. */
++/** The daemon's DockerRootDir, from `docker info`. */
++export function dockerRootDir(docker: Docker): string {
++  const result = docker(["info", "--format", "{{.DockerRootDir}}"]);
++  const dir = result.stdout.trim();
++  if (result.code !== 0 || !dir.startsWith("/") || /[,\s]/.test(dir)) {
++    throw new DockerPreflightError(
++      `Cannot read the Docker root directory: ${JSON.stringify(dir)} ${result.stderr.trim()}`,
++    );
++  }
++  return dir;
++}
++
++/**
++ * Free space inside the Docker VM, measured from a one-off container in two places and taking
++ * the smaller (K118): the container's own root (where image snapshots and layers live) and the
++ * daemon's DockerRootDir, bind-mounted read-only. Both must be readable, or the check stops.
++ */
+ export function dockerFreeBytes(docker: Docker, runId: string): number {
++  const root = dockerRootDir(docker);
+   const result = docker([
+     "run",
+     "--rm",
+@@ -100,18 +136,27 @@ export function dockerFreeBytes(docker: Docker, runId: string): number {
+     `${TEST_LABEL}=1`,
+     "--label",
+     `${RUN_LABEL}=${runId}`,
++    "--mount",
++    `type=bind,source=${root},target=/aida-docker-root,readonly`,
+     "--entrypoint",
+     "df",
+     SPACE_PROBE_IMAGE,
+     "-Pk",
+     "/",
++    "/aida-docker-root",
+   ]);
+   if (result.code !== 0) {
+     throw new DockerPreflightError(
+       `Could not measure free space in the Docker VM (${SPACE_PROBE_IMAGE} must already be present; nothing is pulled): ${result.stderr.trim()}`,
+     );
+   }
+-  return parseDfAvailableBytes(result.stdout);
++  const values = parseDfAvailable(result.stdout);
++  if (values.length !== 2) {
++    throw new DockerPreflightError(
++      `Expected two df rows from the space probe, got ${values.length}`,
++    );
++  }
++  return Math.min(...values);
+ }
+ 
+ // --- Image tags (K111) ------------------------------------------------------------------------
+@@ -158,6 +203,33 @@ export function assertProjectAbsent(docker: Docker, project: string): void {
+   }
+ }
+ 
++/**
++ * Stops when a network or volume with one of these exact names already exists, whatever its
++ * labels: the suite must not adopt or overwrite a resource it did not create (K115).
++ */
++export function assertNamesAbsent(
++  docker: Docker,
++  names: { networks?: string[]; volumes?: string[] },
++): void {
++  const checks: [string, string][] = [
++    ...(names.networks ?? []).map((name): [string, string] => ["network", name]),
++    ...(names.volumes ?? []).map((name): [string, string] => ["volume", name]),
++  ];
++  for (const [type, name] of checks) {
++    const result = docker([type, "inspect", "--format", "{{.Name}}", name]);
++    if (result.code === 0) {
++      throw new DockerPreflightError(
++        `A ${type} named ${name} already exists. Stopped without touching it.`,
++      );
++    }
++    if (!/no such|not found/i.test(result.stderr)) {
++      throw new DockerPreflightError(
++        `Cannot tell whether ${type} ${name} exists: ${result.stderr.trim()}`,
++      );
++    }
++  }
++}
++
+ // --- Subnet (K113) ----------------------------------------------------------------------------
+ 
+ function ipv4Range(cidr: string): [number, number] | null {
+@@ -255,8 +327,18 @@ interface ComposeService {
+ }
+ export interface ComposeConfig {
+   services?: Record<string, ComposeService>;
+-  networks?: Record<string, { labels?: Record<string, string>; external?: boolean }>;
+-  volumes?: Record<string, { labels?: Record<string, string>; external?: boolean }>;
++  networks?: Record<string, { name?: string; labels?: Record<string, string>; external?: boolean }>;
++  volumes?: Record<string, { name?: string; labels?: Record<string, string>; external?: boolean }>;
++}
++
++/** The physical network and volume names Compose will create for this config. */
++export function composeResourceNames(config: ComposeConfig): {
++  networks: string[];
++  volumes: string[];
++} {
++  const names = (entries: Record<string, { name?: string }> | undefined): string[] =>
++    Object.entries(entries ?? {}).map(([key, entry]) => entry.name ?? key);
++  return { networks: names(config.networks), volumes: names(config.volumes) };
+ }
+ 
+ function hasRunLabels(labels: Record<string, string> | undefined, runId: string): boolean {
+@@ -326,10 +408,14 @@ export interface PreflightOptions {
+   tags: string[];
+   subnet?: string;
+   hostDirs: string[];
++  /** Physical names the project will create; any existing one stops the build (K115). */
++  networkNames?: string[];
++  volumeNames?: string[];
+ }
+ 
+ export function runBuildPreflight(docker: Docker, options: PreflightOptions): void {
+   assertProjectAbsent(docker, options.project);
++  assertNamesAbsent(docker, { networks: options.networkNames, volumes: options.volumeNames });
+   assertTagsFree(docker, options.tags);
+   if (options.subnet) assertSubnetFree(docker, options.subnet);
+   assertEnoughSpace("the host", hostFreeBytes(options.hostDirs));
+diff --git a/tests/support/docker-test-resources.ts b/tests/support/docker-test-resources.ts
+index 47414ea..c6b992e 100644
+--- a/tests/support/docker-test-resources.ts
++++ b/tests/support/docker-test-resources.ts
+@@ -42,11 +42,17 @@ export async function startLabeledPostgres(
+   options: LabeledPostgresOptions,
+ ): Promise<StartedPostgreSqlContainer> {
+   const started = await labeledPostgres(options).start();
+-  recordResource(testRunId(), {
+-    type: "container",
+-    name: started.getName().replace(/^\//, ""),
+-    id: started.getId(),
+-    state: "created",
+-  });
++  try {
++    recordResource(testRunId(), {
++      type: "container",
++      name: started.getName().replace(/^\//, ""),
++      id: started.getId(),
++      state: "created",
++    });
++  } catch (err) {
++    // The caller never gets a handle if this throws, so stop the container here (K117).
++    await started.stop();
++    throw err;
++  }
+   return started;
+ }
+diff --git a/tests/unit/docker-test-preflight.test.ts b/tests/unit/docker-test-preflight.test.ts
+index b914c5f..1d6d718 100644
+--- a/tests/unit/docker-test-preflight.test.ts
++++ b/tests/unit/docker-test-preflight.test.ts
+@@ -7,17 +7,20 @@ import {
+   acquireLock,
+   assertComposeFollowsRuleJ,
+   assertEnoughSpace,
++  assertNamesAbsent,
+   assertProjectAbsent,
+   assertSubnetFree,
+   assertTagsFree,
+   type ComposeConfig,
+   cidrOverlaps,
++  composeResourceNames,
+   type Docker,
+   DockerPreflightError,
+   dockerFreeBytes,
+   hostFreeBytes,
+   lockPath,
+   MIN_FREE_BYTES,
++  parseDfAvailable,
+   parseDfAvailableBytes,
+   tagState,
+ } from "../support/docker-test-preflight";
+@@ -36,16 +39,21 @@ function scripted(answers: (args: string[]) => { code: number; stdout?: string;
+ }
+ 
+ describe("free space", () => {
+-  const df =
+-    "Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 41152736 12000000 27000000 31% /\n";
++  const header = "Filesystem 1024-blocks Used Available Capacity Mounted on";
++  const df = `${header}\noverlay 41152736 12000000 27000000 31% /\n`;
++  const df2 = `${header}\noverlay 41152736 12000000 27000000 31% /\n/dev/vdb1 41152736 30000000 9000000 77% /aida-docker-root\n`;
+ 
+   test("reads the available column of df -Pk in bytes", () => {
+     expect(parseDfAvailableBytes(df)).toBe(27_000_000 * 1024);
++    expect(parseDfAvailable(df2)).toEqual([27_000_000 * 1024, 9_000_000 * 1024]);
+   });
+ 
+-  test("refuses df output it cannot read", () => {
++  test("refuses df output it cannot read, including a bad column under a good header", () => {
+     expect(() => parseDfAvailableBytes("")).toThrow(DockerPreflightError);
+-    expect(() => parseDfAvailableBytes("overlay 1 2 x 3% /")).toThrow(DockerPreflightError);
++    expect(() => parseDfAvailableBytes(header)).toThrow(DockerPreflightError);
++    expect(() => parseDfAvailableBytes(`${header}\noverlay 1 2 x 3% /`)).toThrow(/df row/);
++    expect(() => parseDfAvailable(`${header}\noverlay 1 2 3 4% /\nbroken row`)).toThrow(/df row/);
++    expect(() => parseDfAvailableBytes(df2)).toThrow(/one df row/);
+   });
+ 
+   test("20 GiB passes; anything below, or unreadable, stops", () => {
+@@ -55,14 +63,20 @@ describe("free space", () => {
+     expect(() => assertEnoughSpace("host", Number.NaN)).toThrow(DockerPreflightError);
+   });
+ 
+-  test("measures the host with statfs, taking the smallest directory", () => {
+-    expect(hostFreeBytes([os.tmpdir(), os.homedir()])).toBeGreaterThan(0);
++  test("measures the host with statfs and takes the smallest directory", () => {
++    const sizes: Record<string, number> = { "/home": 50, "/repo": 30, "/other": 40 };
++    const statfs = (dir: string) => ({ bavail: sizes[dir], bsize: GIB });
++    expect(hostFreeBytes(["/home", "/repo", "/other"], statfs)).toBe(30 * GIB);
++    expect(() => hostFreeBytes([], statfs)).toThrow(DockerPreflightError);
++    expect(hostFreeBytes([os.tmpdir()])).toBeGreaterThan(0);
+   });
+ 
+-  test("measures the Docker VM with a labelled, named, never-pulling one-off container", () => {
+-    const { docker, calls } = scripted(() => ({ code: 0, stdout: df }));
+-    expect(dockerFreeBytes(docker, RUN)).toBe(27_000_000 * 1024);
+-    const args = calls[0];
++  test("measures the VM at the container root and the read-only DockerRootDir, taking the smaller", () => {
++    const { docker, calls } = scripted((args) =>
++      args[0] === "info" ? { code: 0, stdout: "/var/lib/docker\n" } : { code: 0, stdout: df2 },
++    );
++    expect(dockerFreeBytes(docker, RUN)).toBe(9_000_000 * 1024);
++    const args = calls[1];
+     expect(args.slice(0, 4)).toEqual(["run", "--rm", "--pull", "never"]);
+     expect(args).toContain("--network");
+     expect(args[args.indexOf("--name") + 1]).toMatch(
+@@ -70,11 +84,61 @@ describe("free space", () => {
+     );
+     expect(args).toContain("aida.test=1");
+     expect(args).toContain(`aida.test.run=${RUN}`);
++    expect(args[args.indexOf("--mount") + 1]).toBe(
++      "type=bind,source=/var/lib/docker,target=/aida-docker-root,readonly",
++    );
++    expect(args.slice(-3)).toEqual(["-Pk", "/", "/aida-docker-root"]);
++  });
++
++  test("a failed or partial probe stops instead of assuming space", () => {
++    const noInfo = scripted(() => ({ code: 1, stderr: "daemon down" }));
++    expect(() => dockerFreeBytes(noInfo.docker, RUN)).toThrow(/Docker root directory/);
++    const noImage = scripted((args) =>
++      args[0] === "info"
++        ? { code: 0, stdout: "/var/lib/docker" }
++        : { code: 125, stderr: "Unable to find image" },
++    );
++    expect(() => dockerFreeBytes(noImage.docker, RUN)).toThrow(/nothing is pulled/);
++    const oneRow = scripted((args) =>
++      args[0] === "info" ? { code: 0, stdout: "/var/lib/docker" } : { code: 0, stdout: df },
++    );
++    expect(() => dockerFreeBytes(oneRow.docker, RUN)).toThrow(/two df rows/);
+   });
++});
+ 
+-  test("a failed probe stops instead of assuming space", () => {
+-    const { docker } = scripted(() => ({ code: 125, stderr: "Unable to find image" }));
+-    expect(() => dockerFreeBytes(docker, RUN)).toThrow(/nothing is pulled/);
++describe("physical names", () => {
++  test("stops when a network or volume with the exact name exists, whatever its labels", () => {
++    const answers: Record<string, { code: number; stderr?: string }> = {
++      "network free": { code: 1, stderr: "Error response from daemon: network free not found" },
++      "volume free-vol": {
++        code: 1,
++        stderr: "Error response from daemon: get free-vol: no such volume",
++      },
++      "network taken": { code: 0 },
++      "volume broken": { code: 1, stderr: "permission denied" },
++    };
++    const { docker } = scripted(
++      (args) => answers[`${args[0]} ${args[args.length - 1]}`] ?? { code: 9 },
++    );
++    expect(() =>
++      assertNamesAbsent(docker, { networks: ["free"], volumes: ["free-vol"] }),
++    ).not.toThrow();
++    expect(() => assertNamesAbsent(docker, { networks: ["taken"] })).toThrow(
++      /named taken already exists/,
++    );
++    expect(() => assertNamesAbsent(docker, { volumes: ["broken"] })).toThrow(/Cannot tell/);
++  });
++
++  test("reads the physical names Compose resolved", () => {
++    expect(
++      composeResourceNames({
++        networks: { egress_internal: { name: "aida-test-egress_egress_internal" } },
++        volumes: { uploads_data: { name: "aida-test-egress_uploads_data" }, bare: {} },
++      }),
++    ).toEqual({
++      networks: ["aida-test-egress_egress_internal"],
++      volumes: ["aida-test-egress_uploads_data", "bare"],
++    });
+   });
+ });
+ 
+diff --git a/tests/unit/test-docker-cleanup.test.ts b/tests/unit/test-docker-cleanup.test.ts
+index a6eaf82..b5f41b8 100644
+--- a/tests/unit/test-docker-cleanup.test.ts
++++ b/tests/unit/test-docker-cleanup.test.ts
+@@ -19,7 +19,10 @@ interface FakeResource {
+ }
+ 
+ /** A tiny in-memory Docker that answers the list, inspect and remove commands the script uses. */
+-function fakeDocker(resources: FakeResource[], options: { failRemove?: string[] } = {}) {
++function fakeDocker(
++  resources: FakeResource[],
++  options: { failRemove?: string[]; failInspect?: string[] } = {},
++) {
+   const calls: string[][] = [];
+   // Deep copy: a test that edits labels must not leak into the next test.
+   const live = resources.map((r) => ({ ...r, labels: r.labels ? { ...r.labels } : null }));
+@@ -44,6 +47,7 @@ function fakeDocker(resources: FakeResource[], options: { failRemove?: string[]
+     const ref = args[args.length - 1];
+     const found = live.find((r) => r.type === type && r.ref === ref);
+     if (verb === "inspect") {
++      if (options.failInspect?.includes(ref)) throw new Error(`permission denied: ${ref}`);
+       if (!found) throw new Error(`No such ${type}: ${ref}`);
+       const name = type === "container" ? `/${found.name}` : found.name;
+       return JSON.stringify(
+@@ -180,3 +184,35 @@ describe("belongsToRun and listOtherRuns", () => {
+     expect(calls.some((args) => args[0] === "rm" || args[1] === "rm")).toBe(false);
+   });
+ });
++
++describe("scope and uncertain leftovers (K114, K117)", () => {
++  test("a suite scope keeps another suite's container of the same run out of the plan", () => {
++    const { runner } = fakeDocker(WORLD);
++    const plan = planCleanup(runner, RUN, "aida-test-egress");
++    expect(plan.map((r) => `${r.type}:${r.ref}`)).toEqual([
++      "network:n-mine",
++      "volume:aida-test-egress_uploads_data",
++      `image:aida-test-egress-app:${RUN}`,
++    ]);
++    const result = applyCleanup(runner, RUN, plan, "aida-test-egress");
++    expect(result.removed.map((r) => r.ref)).not.toContain("c-mine");
++  });
++
++  test("a scope outside aida-test- is refused", () => {
++    const { runner, calls } = fakeDocker(WORLD);
++    expect(() => planCleanup(runner, RUN, "aida-")).toThrow(/must start with aida-test-/);
++    expect(() => applyCleanup(runner, RUN, [], "aida")).toThrow(/must start with aida-test-/);
++    expect(calls).toEqual([]);
++  });
++
++  test("a resource already gone is not a failure; one that cannot be inspected is", () => {
++    const world = fakeDocker(WORLD, { failInspect: ["n-mine"] });
++    const plan = planCleanup(fakeDocker(WORLD).runner, RUN);
++    const container = world.live.find((r) => r.ref === "c-mine");
++    if (container) world.live.splice(world.live.indexOf(container), 1);
++    const result = applyCleanup(world.runner, RUN, plan);
++    expect(result.gone.map((r) => r.ref)).toEqual(["c-mine"]);
++    expect(result.failed.map((f) => f.resource.ref)).toEqual(["n-mine"]);
++    expect(result.failed[0]?.error).toMatch(/cannot inspect/);
++  });
++});
