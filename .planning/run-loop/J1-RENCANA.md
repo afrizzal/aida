@@ -76,5 +76,7 @@ Pesan galat Docker yang sebenarnya di daemon ini (diperiksa 2026-11-11 dengan na
 ### Tugas penutupan
 
 10. K121 sampai K124 di kode dan test unit; typecheck, lint, unit, dan integration.
+Status: tugas 10 selesai (`pnpm typecheck` dan `pnpm lint` exit 0; `pnpm test` 53 berkas, 887 test; `pnpm test:integration` exit 0, 94 berkas, 1297 test; 0 sisa; daftar container dan volume tidak berubah).
+
 11. Karena putaran Codex habis, perubahan sesudah putaran 3 direview oleh reviewer independen (subagen, tanpa konteks percakapan) sebelum J1 ditutup, mengikuti praktik K39 Fase 12. Temuan yang jelas diperbaiki; sisanya dicatat sebagai batas dan dilaporkan.
 12. J1 ditutup dengan batas tertulis (K109, K115, K118, K120) dan bukti egress menyusul di 0a2.
