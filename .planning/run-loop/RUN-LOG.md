@@ -1472,3 +1472,5 @@ Hasil 0a2: `pnpm test:egress` exit 1 dalam 11 detik; preflight berhenti sebelum 
 ## Putaran 12-o1 (2026-11-11)
 
 Cek A (26 GiB), B, H, dan Berhenti total lolos; regresi Rekriva tidak berjalan. 0a2 menunggu owner (ruang VM), jadi butir berikutnya 12-o1 (keputusan owner opsi a). Bukti dicek sebelum mengubah: `tests/integration/ticket-merge.test.ts` memeriksa `MERGED_INTO` dan `MERGED_FROM` di audit tiket, dan migrasi `20261108140000_inbox` membuat `TicketAuditEvent` append-only lewat trigger. AIDA-53 di `REQUIREMENTS.md` diubah bunyinya dan ditutup (traceability diperbarui); kriteria 2 Fase 12 dan baris progres di `ROADMAP.md` diperbarui; catatan keputusan di `12-VERIFICATION.md` (status fase tetap `human_needed`).
+
+J2 digabung ke replan Fase 08: plan 08-14 (harness container) dan 08-16 (gerbang compose) sudah memuat isinya dan wajib di-replan dengan aturan J (keputusan owner butir 4); owner juga meminta alat test Docker dikerjakan belakangan bila Fase 8 dipecah. Berikutnya: Fase 08 langkah 5 (replan dengan 4 HIGH siklus 3, aturan J, pemicu `audit` dan `egress`, Dependabot, lalu satu siklus review Codex khusus 4 HIGH).
