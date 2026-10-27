@@ -1456,3 +1456,7 @@ Jawaban Codex J1 putaran 3 (`codex/j1-r3-jawab.md`; model gpt-6.1-terra, effort 
 ## Putaran J1-8 (2026-11-11)
 
 Cek A (26 GiB), B, H, dan Berhenti total lolos; regresi Rekriva tidak berjalan. J1 tugas 10: K121 sampai K124 di kode. Teardown egress hanya berjalan sesudah invokasi ini memulai `compose build`, dan menghapus daftar tepat (tag, nama network dan volume dari config yang terbukti belum ada di bawah lock, ID container project), masing-masing diinspeksi ulang. `dockerNotFound` mengenali ketiadaan hanya dari pesan daemon per jenis yang memuat ref itu; galat socket dihitung gagal (dipakai pembersih, `assertNamesAbsent`, `tagState`). Ledger mencatat network dan volume sesudah terbukti ada, memeriksa kode keluar `compose ps`, dan mencatat probe ruang serta negative-control. Test baru gagal pada kode lama (socket mati dulu dihitung `gone`; daftar tepat menggantikan awalan). Bukti: typecheck dan lint exit 0; unit 53 berkas, 887 test; integration exit 0, 94 berkas, 1297 test; 0 sisa; daftar container dan volume tidak berubah.
+
+## Putaran J1-9 (2026-11-11)
+
+Cek A (26 GiB), B, H, dan Berhenti total lolos; regresi Rekriva tidak berjalan. J1 tugas 11: review independen atas `2aeb40b` (perbaikan K121 sampai K124 sesudah putaran Codex terakhir) oleh subagen baru tanpa konteks percakapan, hanya baca, tanpa Docker; berjalan di latar.
