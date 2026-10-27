@@ -62,10 +62,10 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 **Wave 1**
 
 - [ ] 08-01-PLAN.md — Upgrade `next` to >=16.4.1, pinned (Wave 1)
-- [ ] 08-05-PLAN.md — System font stack, telemetry off in CI, audit workflow, Dependabot, nightly egress job (Wave 1)
+- [ ] 08-05-PLAN.md — System font stack, telemetry off in CI, audit and egress workflows without new schedules (rule I), Dependabot weekly with limit 3 (Wave 1)
 - [ ] 08-06-PLAN.md — Categorized connection-test errors, `addTag` gate first, `sla-flag` comment (Wave 1)
 - [ ] 08-17-PLAN.md — E2E harness: cross-platform worker teardown, honesty-invariants flake (Wave 1)
-- [ ] 08-19-PLAN.md — Egress suite off the default integration path (review C1) (Wave 1)
+- [ ] 08-19-PLAN.md — Permanent guard keeping the rule-J egress suite (J1) off the integration path; egress recording rule (review C1, R3-2) (Wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -105,7 +105,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 **Wave 10** *(blocked on Wave 9 completion)*
 
-- [ ] 08-14-PLAN.md — Guarded project-`aida` container harness, four-state reporter, first runtime proofs (K22) (Wave 10)
+- [ ] 08-14-PLAN.md — Container harness on per-run `aida-test-` projects over J1 (rule J), four-state reporter, first runtime proofs (Wave 10)
 
 **Wave 11** *(blocked on Wave 10 completion)*
 
