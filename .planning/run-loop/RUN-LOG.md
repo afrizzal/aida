@@ -1450,3 +1450,5 @@ Cek A (26 GiB), B, H, dan Berhenti total lolos; regresi Rekriva tidak berjalan. 
 ## Putaran J1-7 (2026-11-11)
 
 Cek A (26 GiB), B, H, dan Berhenti total lolos; regresi Rekriva tidak berjalan. J1 tugas 9: Codex putaran 3 (terakhir untuk topik J1) atas perbaikan K114 sampai K119. Patch `codex/j1-r3-diff.patch` (`fb3d3e6` sampai `3e83a90`, 8 berkas, tanpa path rumah) dan pertanyaan `codex/j1-r3-tanya.md`.
+
+Jawaban Codex J1 putaran 3 (`codex/j1-r3-jawab.md`; model gpt-6.1-terra, effort xhigh; terakhir untuk topik J1): 1 kritis (teardown sesudah preflight gagal dapat menghapus resource yang menyebabkan berhenti), 2 tinggi (awalan `aida-test-egress` mencakup project lain; pola `no such` terlalu luas), 1 sedang (ledger dan batas K118 di LAPORAN). Klaim pola galat diverifikasi: galat socket mati memuat "no such file or directory". Semua diterima (K121 sampai K124). Karena putaran Codex habis, perbaikan sesudahnya direview reviewer independen sebelum J1 ditutup (praktik K39).

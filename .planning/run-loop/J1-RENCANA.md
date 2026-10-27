@@ -53,3 +53,28 @@ Pertanyaan `codex/j1-r2-tanya.md`, jawaban `codex/j1-r2-jawab.md` (model gpt-6.1
 Status: tugas 7 dan 8 selesai (`pnpm typecheck` dan `pnpm lint` exit 0; `pnpm test` 53 berkas, 881 test; satu berkas test migrasi tanpa `AIDA_TEST_RUN_ID` exit 0, 39 test, satu ledger untuk proses global setup dan worker; `pnpm test:integration` exit 0, 94 berkas, 1297 test, 4 container, 0 sisa, daftar container dan volume tidak berubah).
 
 9. Codex putaran 3 (terakhir) atas perbaikan. Kalau masih ada temuan tinggi: perbaiki yang jelas, catat sisanya sebagai batas, dan laporkan ke owner; tidak ada putaran 4.
+
+## Codex putaran 3 (terakhir)
+
+Pertanyaan `codex/j1-r3-tanya.md`, jawaban `codex/j1-r3-jawab.md` (model gpt-6.1-terra, effort xhigh): 1 kritis, 2 tinggi, 1 sedang. Batas 3 putaran untuk topik J1 sudah habis.
+
+Pesan galat Docker yang sebenarnya di daemon ini (diperiksa 2026-11-11 dengan nama yang tidak ada):
+
+- container: `Error response from daemon: No such container: <nama>`
+- network: `Error response from daemon: network <nama> not found`
+- volume: `Error response from daemon: get <nama>: no such volume`
+- image: `Error response from daemon: No such image: <repo:tag>`
+- socket mati: `failed to connect to the docker API at unix:///...: ... connect: no such file or directory`
+
+| ID | Temuan Codex | Keputusan |
+|---|---|---|
+| K121 | Kritis 1: lock diambil sebelum preflight; kalau preflight berhenti karena resource yang sudah ada (misalnya tag dengan label run yang sama), `afterAll` tetap membersihkan dan bisa menghapus resource itu | Diterima. Teardown egress hanya berjalan kalau invokasi ini sudah memulai `compose build`. Pembersihan memakai daftar tepat milik invokasi ini, bukan awalan: tag dari config, nama fisik network dan volume dari config (yang sudah dibuktikan belum ada saat preflight), dan ID container project dari `compose ps -a` sesudah lock dipegang. Setiap ref diinspeksi ulang (label test, label run, awalan) sebelum dihapus. |
+| K122 | Tinggi 2: awalan `aida-test-egress` juga cocok dengan `aida-test-egress-other_*` | Diterima, tertutup oleh K121 (daftar tepat). Test unit baru: resource project lain berawalan sama dan berlabel run sama tidak disentuh. |
+| K123 | Tinggi 3: pola `no such` terlalu luas; galat socket "no such file or directory" ikut dianggap hilang | Diterima. Ketiadaan dikenali hanya dari pesan daemon khusus jenis yang memuat ref itu (daftar di atas); galat lain, termasuk socket, dihitung gagal. Berlaku untuk pembersih, `assertNamesAbsent`, dan `tagState`. Test unit memakai pesan nyata di atas, termasuk pesan socket mati. |
+| K124 | Sedang 4: ledger dan bukti K116, K118 | Diterima. Sesudah `up`, network dan volume dicatat `created` hanya bila inspeksi berhasil; kode keluar `compose ps` diperiksa; container probe ruang dan negative-control dicatat `planned`. `run` sudah memakai `--pull never` (keputusan K116 memang tidak menyebut `--no-build` untuk `run`; image negative-control tidak di-build). Batas K118 sisi host dan K109 ditulis di `LAPORAN.md` bagian 3. |
+
+### Tugas penutupan
+
+10. K121 sampai K124 di kode dan test unit; typecheck, lint, unit, dan integration.
+11. Karena putaran Codex habis, perubahan sesudah putaran 3 direview oleh reviewer independen (subagen, tanpa konteks percakapan) sebelum J1 ditutup, mengikuti praktik K39 Fase 12. Temuan yang jelas diperbaiki; sisanya dicatat sebagai batas dan dilaporkan.
+12. J1 ditutup dengan batas tertulis (K109, K115, K118, K120) dan bukti egress menyusul di 0a2.
