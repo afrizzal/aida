@@ -1462,3 +1462,7 @@ Cek A (26 GiB), B, H, dan Berhenti total lolos; regresi Rekriva tidak berjalan. 
 Cek A (26 GiB), B, H, dan Berhenti total lolos; regresi Rekriva tidak berjalan. J1 tugas 11: review independen atas `2aeb40b` (perbaikan K121 sampai K124 sesudah putaran Codex terakhir) oleh subagen baru tanpa konteks percakapan, hanya baca, tanpa Docker; berjalan di latar.
 
 Review independen J1 selesai: tidak ada kritis atau tinggi; tidak ada jalur yang menyentuh resource bukan buatan invokasi itu kecuali batas K115. 1 sedang dan 7 rendah, yang jelas diperbaiki di `3435140` (fungsi murni `teardownRefs()` dengan test, `planExact` melaporkan `notOurs`, galat `up` dipertahankan, nama container asli di ledger, `build.tags` ditolak, komentar dan dokumentasi `--scope`); temuan 8 (pola pesan per daemon) dicatat sebagai batas. Bukti: typecheck dan lint exit 0, unit 53 berkas, 891 test; tanpa pola not-found longgar. **J1 selesai.** Berikutnya: 0a2 (baseline `pnpm test:egress` di bawah aturan J).
+
+## Putaran 0a2-1 (2026-11-11)
+
+Cek A (26 GiB), B, H, dan Berhenti total lolos; regresi Rekriva tidak berjalan; tidak ada lock suite yang tertinggal. Butir 0a2: `pnpm test:egress` di bawah aturan J, dengan run id orkestrator dan `DOCKER_HOST` dari `docker context inspect`. Sebelum run dicatat: 29 image, 30 container, 22 network, 24 volume. Berjalan di latar.
