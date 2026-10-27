@@ -292,6 +292,8 @@ None of these has happened. No visual, accessibility, UAT or human result is rec
 
 ### Owner question (not a gap, not met)
 
+**Resolved 2026-11-11:** the owner chose option (a) for 12-o1. AIDA-53 and ROADMAP criterion 2 now name the append-only `TicketAuditEvent`, which the merge writes (`MERGED_INTO`, `MERGED_FROM`, asserted in `tests/integration/ticket-merge.test.ts`). AIDA-53 is closed in `REQUIREMENTS.md`. The rest of this report is unchanged; the phase status stays `human_needed`.
+
 - **12-o1:** AIDA-53 "a full `AuditEvent` is written" and ROADMAP criterion 2 "leaves a full audit event". The merge audit is in `TicketAuditEvent`. Changing the requirement text, or another resolution compatible with 11 D-07, is the owner's call.
 
 ### Gaps Summary
