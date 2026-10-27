@@ -50,4 +50,6 @@ Pertanyaan `codex/j1-r2-tanya.md`, jawaban `codex/j1-r2-jawab.md` (model gpt-6.1
 
 7. K114 sampai K119 di kode dan test unit.
 8. Bukti: typecheck, lint, unit; satu berkas test migrasi tanpa `AIDA_TEST_RUN_ID` (pewarisan run id); `pnpm test:integration` penuh dengan run id orkestrator; pembersih menemukan 0 sisa.
+Status: tugas 7 dan 8 selesai (`pnpm typecheck` dan `pnpm lint` exit 0; `pnpm test` 53 berkas, 881 test; satu berkas test migrasi tanpa `AIDA_TEST_RUN_ID` exit 0, 39 test, satu ledger untuk proses global setup dan worker; `pnpm test:integration` exit 0, 94 berkas, 1297 test, 4 container, 0 sisa, daftar container dan volume tidak berubah).
+
 9. Codex putaran 3 (terakhir) atas perbaikan. Kalau masih ada temuan tinggi: perbaiki yang jelas, catat sisanya sebagai batas, dan laporkan ke owner; tidak ada putaran 4.
