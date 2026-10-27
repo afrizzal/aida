@@ -1466,3 +1466,5 @@ Review independen J1 selesai: tidak ada kritis atau tinggi; tidak ada jalur yang
 ## Putaran 0a2-1 (2026-11-11)
 
 Cek A (26 GiB), B, H, dan Berhenti total lolos; regresi Rekriva tidak berjalan; tidak ada lock suite yang tertinggal. Butir 0a2: `pnpm test:egress` di bawah aturan J, dengan run id orkestrator dan `DOCKER_HOST` dari `docker context inspect`. Sebelum run dicatat: 29 image, 30 container, 22 network, 24 volume. Berjalan di latar.
+
+Hasil 0a2: `pnpm test:egress` exit 1 dalam 11 detik; preflight berhenti sebelum build: "Free space on the Docker VM is 13.9 GiB, below the 20.0 GiB rule J requires". 4 test di-skip, tidak ada yang lolos. Sesudahnya daftar image, container, network, dan volume sama persis dengan sebelum run; lock dilepas; subdirektori log DNS dihapus; pembersih 0 sisa; ledger hanya mencatat probe ruang (`--rm`). Pengukuran terpisah: `/` dan `DockerRootDir` sama-sama `/dev/vdb1` 39,1G, terpakai 23,2G, sisa 13,9G; host 26 GiB. Sesuai aturan J (berhenti dan lapor), 0a2 menjadi `menunggu owner`; tidak ada yang dibersihkan untuk memberi ruang. Berikutnya: 12-o1.

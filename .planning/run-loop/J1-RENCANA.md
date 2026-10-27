@@ -99,3 +99,5 @@ Reviewer independen (subagen baru tanpa konteks percakapan, hanya baca, tanpa Do
 Bukti akhir: `pnpm typecheck` dan `pnpm lint` exit 0; `pnpm test` 53 berkas, 891 test; tidak ada pola "no such" atau "not found" longgar di `tests` dan `scripts`. `pnpm test:integration` terakhir (sesudah `2aeb40b`; perubahan sesudahnya tidak menyentuh jalur integration) exit 0, 94 berkas, 1297 test, 0 sisa.
 
 **J1 selesai.** Batas yang tetap terbuka dan dilaporkan ke owner: K109 (cache build dan image dasar tanpa label), K115 (tidak atomik terhadap proses yang tidak mematuhi lock), K118 (letak disk VM di sisi host tidak diverifikasi; cakupan penyimpanan builder belum terbukti), K120 (socket di `~/.colima`, menunggu konfirmasi), dan temuan 8 (pola pesan per daemon). Suite egress belum pernah dijalankan; itu butir 0a2, dan perubahan sesudah putaran Codex terakhir hanya direview oleh reviewer independen, tidak oleh Codex.
+
+Catatan 0a2 (2026-11-11): di mesin ini root container (`/`, overlay) dan `DockerRootDir` ada di filesystem yang sama (`/dev/vdb1`, 39,1G). Bagian K118 tentang lokasi penyimpanan VM terjawab untuk mesin ini; letak disk VM di sisi host tetap tidak diverifikasi.
