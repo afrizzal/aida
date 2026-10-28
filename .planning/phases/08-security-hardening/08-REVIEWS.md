@@ -185,3 +185,17 @@ Queue item J1 already built the rule-J tooling. Decisions K108 to K124, the obse
 ### Outcome of cycle 4: Phase 8 is split (owner decision 2026-11-11, item 4)
 
 HIGH findings remain, and the owner allowed no fifth cycle, so Phase 8 is split as the owner directed: "upgrade dependensi, CSP, non-root, rate limit dulu; alat test Docker belakangan. Lapor ke owner." Both remaining HIGH findings sit in the Docker test tooling (the full gate in 08-16 and the CI egress job in 08-05 Task 3). None sits in the dependency, CSP, non-root or rate-limit plans. The split design is in `08-SPLIT.md`.
+
+### Plan check after the split (2026-11-11)
+
+`gsd-plan-checker` checked the 18 Part A plans. **Verdict: PASS**, with no blockers, no warnings and 3 INFO notes:
+- 08-05 still describes the moved Task 3 in its Revision 4 history rows.
+- 08-04 names 08-15 in text.
+- A green Part A run still leaves AIDA-25, 27, 28, 29, 30 and 32 not fully closed, by design.
+
+What it confirmed:
+- No Part A plan depends on a moved plan's output. All such references are text only.
+- Waves match `depends_on`, and 08-24 comes last and covers every Part A plan.
+- Rules I and J hold, and all 95 `<automated>` commands are paired with a `<fails_when>`.
+
+The orchestrator found one more issue the checker missed. Plan 08-02 still creates its fixture and runs `prisma migrate dev` in the `aida-dev-db` container. The charter's strict reading of rule J ("Tafsiran run") forbids touching that container, so 08-02 is being revised to use a disposable `aida-test-devdb-*` container.
