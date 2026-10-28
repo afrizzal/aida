@@ -28,6 +28,10 @@
  *      called, `provider: "none"` recorded) before writing this file, per the plan's instruction
  *      to read the real implementation first.
  *
+ * Each test sets up its own chat provider and AI toggle through configureChatProviderOnStub, so (b)
+ * does not depend on (a): it passes alone, after (a), or after (a) failed. Radix selects are opened
+ * through pickSelectOption, which waits for a hydrated, interactive select (plan 08-17).
+ *
  * Runs in its own describe block with its own stub + worker (mirrors phase5-rag.spec.ts's
  * per-file lifecycle exactly). Because this file sits alphabetically BEFORE phase4-ai.spec.ts and
  * phase5-rag.spec.ts in the shared, single-container e2e run, its afterAll aggressively reverts
@@ -40,12 +44,12 @@ import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { EMBEDDING_DIMENSIONS } from "../../src/lib/rag/types";
 import { createTicket, orgId, prisma } from "./support/db";
 import { createLlmStub } from "./support/llm-stub";
+import { stopProcessTree } from "./support/process-tree";
 import { databaseUrl } from "./support/test-env";
-import { stopWorker } from "./support/worker";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "../..");
@@ -94,6 +98,8 @@ function startWorker(): Promise<void> {
         APP_ENCRYPTION_KEY: readEnvVar("APP_ENCRYPTION_KEY"),
       },
       stdio: "pipe",
+      // POSIX: own process group, so teardown reaches both the tsx parent and the worker.
+      detached: process.platform !== "win32",
     });
     const timer = setTimeout(
       () => reject(new Error(`worker did not start; log so far:\n${workerLog}`)),
@@ -131,6 +137,45 @@ async function gotoWarm(page: Page, urlPath: string): Promise<void> {
     .not.toBe(404);
 }
 
+// Under `next dev` the first click can reach the Radix Select trigger before /settings has
+// hydrated, and an unhydrated trigger silently ignores it (baseline 2026-11-08, full run: test (a)
+// timed out waiting for the "Ollama" option). Retrying open-then-pick waits for an interactive
+// select without changing what the test proves: the same option is picked and then asserted.
+async function pickSelectOption(page: Page, trigger: Locator, optionName: string): Promise<void> {
+  const option = page.getByRole("option", { name: optionName });
+  await expect(async () => {
+    // Closes a listbox a previous attempt may have half-opened.
+    await page.keyboard.press("Escape");
+    await trigger.click();
+    await expect(option).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 45_000, intervals: [500, 1_000, 2_000] });
+  await option.click();
+  await expect(trigger).toContainText(optionName);
+}
+
+// Configures the LLM (chat/completion) provider pointed at the stub and enables AI, through the
+// real /settings UI. Both tests call it, so neither depends on state another test saved.
+async function configureChatProviderOnStub(page: Page): Promise<void> {
+  await gotoWarm(page, "/settings");
+  const llmCard = page.locator("form").filter({ hasText: "AI Provider" });
+  await pickSelectOption(page, llmCard.getByLabel("Provider"), "Ollama");
+  const baseUrl = llmCard.getByLabel("Base URL");
+  await expect(baseUrl).toBeVisible();
+  await baseUrl.fill(stub.url);
+  await llmCard.getByRole("button", { name: "Save AI provider" }).click();
+  await expect(page.getByText("AI provider settings saved.")).toBeVisible();
+
+  const aiToggle = page.getByRole("switch", { name: "Enable AI" });
+  await expect(aiToggle).toBeEnabled();
+  if (!(await aiToggle.isChecked())) await aiToggle.click();
+  await expect
+    .poll(async () => {
+      const row = await prisma.setting.findFirst({ where: { key: "aiEnabled" } });
+      return row?.value ?? null;
+    })
+    .toBe("true");
+}
+
 // ---------------------------------------------------------------------------
 // Cross-file cleanup bookkeeping — every row this file creates in shared org-scoped state gets
 // deleted in afterAll (see file header comment).
@@ -157,7 +202,8 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await stopWorker(worker);
+  test.setTimeout(60_000);
+  if (worker) await stopProcessTree(worker);
   stub.stop();
 
   await prisma.setting.deleteMany({
@@ -180,28 +226,13 @@ test.afterAll(async () => {
 test("(a) a hostile Insight narrative cannot move the displayed SLA/CSAT numbers", async ({
   page,
 }) => {
-  test.setTimeout(90_000);
+  // 150 s: the select's toPass budget plus (b)'s own provider setup on top of the old 90 s.
+  test.setTimeout(150_000);
 
   // --- Configure the LLM (chat/completion) provider pointed at the stub, and enable AI. Embedding
   // is deliberately left UNCONFIGURED so only the narrative call (canNarrate), not clustering
   // (canCluster), is exercised — src/lib/insight/run-insight.ts's two independent AI gates.
-  await gotoWarm(page, "/settings");
-  const llmCard = page.locator("form").filter({ hasText: "AI Provider" });
-  await llmCard.getByLabel("Provider").click();
-  await page.getByRole("option", { name: "Ollama" }).click();
-  await llmCard.getByLabel("Base URL").fill(stub.url);
-  await llmCard.getByRole("button", { name: "Save AI provider" }).click();
-  await expect(page.getByText("AI provider settings saved.")).toBeVisible();
-
-  const aiToggle = page.getByRole("switch", { name: "Enable AI" });
-  await expect(aiToggle).toBeEnabled();
-  if (!(await aiToggle.isChecked())) await aiToggle.click();
-  await expect
-    .poll(async () => {
-      const row = await prisma.setting.findFirst({ where: { key: "aiEnabled" } });
-      return row?.value ?? null;
-    })
-    .toBe("true");
+  await configureChatProviderOnStub(page);
 
   // --- Seed two tickets with a KNOWN, non-trivial SLA/CSAT shape: one breached (so breachRate is
   // provably non-zero), one with a single CSAT response (so responseCount is provably not "100").
@@ -303,14 +334,15 @@ test("(a) a hostile Insight narrative cannot move the displayed SLA/CSAT numbers
 test("(b) a draft citing a chunk that was never retrieved renders no citation for it", async ({
   page,
 }) => {
-  test.setTimeout(90_000);
+  // 150 s: the select's toPass budget plus (b)'s own provider setup on top of the old 90 s.
+  test.setTimeout(150_000);
 
-  // --- Configure the embedding provider too (independent of the chat provider — Decision 5),
+  // --- This test sets up its own chat provider and AI toggle (it no longer relies on (a)), then
+  // configures the embedding provider too (independent of the chat provider — Decision 5),
   // pointed at the same stub, so KB embedding + retrieval both work.
-  await page.goto("/settings");
+  await configureChatProviderOnStub(page);
   const embedCard = page.locator("form").filter({ hasText: "Embedding Provider" });
-  await embedCard.getByLabel("Provider").click();
-  await page.getByRole("option", { name: "Ollama" }).click();
+  await pickSelectOption(page, embedCard.getByLabel("Provider"), "Ollama");
   await embedCard.getByLabel("Base URL").fill(stub.url);
   await embedCard.getByRole("button", { name: "Save embedding provider" }).click();
   await expect(page.getByText("Embedding provider settings saved.")).toBeVisible();
