@@ -47,6 +47,13 @@ function forwardWithSecurityHeaders(request: NextRequest, pathname: string) {
 
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set("Content-Security-Policy", csp);
+  return withSecurityHeaders(response, pathname);
+}
+
+// D-14: every exit, the JSON errors and the redirect included, carries nosniff, X-Frame-Options
+// and the referrer policy. One helper so the exits cannot drift. JSON and redirect bodies carry
+// no HTML, so they get no CSP.
+function withSecurityHeaders(response: NextResponse, pathname: string) {
   for (const [name, value] of Object.entries(securityHeadersFor(pathname))) {
     response.headers.set(name, value);
   }
@@ -57,12 +64,15 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (BLOCKED_PUBLIC_ROUTES.some((p) => pathname.startsWith(p))) {
-    return NextResponse.json(
-      {
-        error:
-          "Public self-registration is disabled. Ask an administrator to invite you, or complete /setup if this is a fresh install.",
-      },
-      { status: 403 },
+    return withSecurityHeaders(
+      NextResponse.json(
+        {
+          error:
+            "Public self-registration is disabled. Ask an administrator to invite you, or complete /setup if this is a fresh install.",
+        },
+        { status: 403 },
+      ),
+      pathname,
     );
   }
 
@@ -74,11 +84,21 @@ export function proxy(request: NextRequest) {
   if (!sessionCookie) {
     // API callers need a machine-readable 401 — a redirect lands them on the login page's HTML with a 200.
     if (pathname.startsWith("/api/")) {
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+      return withSecurityHeaders(
+        NextResponse.json({ error: "unauthorized" }, { status: 401 }),
+        pathname,
+      );
     }
-    return NextResponse.redirect(new URL("/login", request.url));
+    return withSecurityHeaders(NextResponse.redirect(new URL("/login", request.url)), pathname);
   }
-  return NextResponse.next();
+  return forwardWithSecurityHeaders(request, pathname);
 }
 
+// Matcher exclusions (D-11, review C13, R2-9): the proxy skips `_next/static` (immutable build
+// JS and CSS chunks), `_next/image` (the image optimizer, unused: src/ has no next/image import)
+// and `favicon.ico` (a static icon). None of them returns HTML, so none needs a CSP. Every other
+// path, including 404 pages, errors returned by routes and any route added later, runs this
+// proxy and gets the CSP and security headers. Responses Next.js produces before the proxy runs
+// (for example the 400 for a malformed percent-encoded path) never reach it; plan 08-08 records
+// that boundary. Never place a future HTML route under an excluded prefix.
 export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"] };
