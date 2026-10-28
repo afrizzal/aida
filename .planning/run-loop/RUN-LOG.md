@@ -1500,3 +1500,7 @@ Langkah 2 dan 3 pemecahan: 08-05 menyisakan Task 1 dan 2 (Revision 5); Task 3 (j
 
 Plan check Bagian A (`gsd-plan-checker`): PASS, tanpa blocker dan warning, 3 INFO. Temuan orkestrator: 08-02 masih memakai `aida-dev-db` untuk fixture dan `prisma migrate dev`, bertentangan dengan tafsiran ketat aturan J; 08-02 direvisi (container `aida-test-devdb-*` berlabel, tmpfs, port lain, dibersihkan lewat pembersih J1). Sesudah itu: eksekusi Bagian A.
 08-02 revisi 4: database dev sekali pakai `aida-test-devdb-*` (docker run berlabel, tmpfs, `--pull never`, port 55433 sampai 55452, cek identitas port), hanya dihapus lewat pembersih J1; daftar migrasi dari isi direktori (14 kini), bukan angka 7. Validator valid. Berikutnya: eksekusi Bagian A.
+
+## Putaran 08-exec-1 (2026-11-11)
+
+Cek A (27 GiB), B, H, dan Berhenti total lolos; regresi Rekriva tidak berjalan. Fase 08 langkah 6 (eksekusi Bagian A), satu plan per putaran karena `use_worktrees: false`. Plan 08-01 (upgrade `next`) didelegasikan ke `gsd-executor` dengan Aturan eksekutor verbatim, run id `mwbzitrz-2ce0bb0d4e44f006`, dan `DOCKER_HOST` dari `docker context inspect`; pembersihan akhir putaran oleh orkestrator.
