@@ -134,4 +134,4 @@ Dicek 2026-11-09 08.40 WIB:
 
 ## 10. Pemindahan `.next/` ke Trash
 
-Belum ada.
+Belum ada pemindahan `.next/`. Catatan terkait (2026-11-11, plan 08-01): `next dev` 16.4.6 membuat `AGENTS.md` di akar repo; eksekutor memindahkannya ke Trash (`~/.Trash/aida-AGENTS-md-<epoch>`), tidak di-commit, dan mematikan pembuatannya dengan `agentRules: false` di `next.config.ts` (`1f88eed`).

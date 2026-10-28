@@ -1504,3 +1504,5 @@ Plan check Bagian A (`gsd-plan-checker`): PASS, tanpa blocker dan warning, 3 INF
 ## Putaran 08-exec-1 (2026-11-11)
 
 Cek A (27 GiB), B, H, dan Berhenti total lolos; regresi Rekriva tidak berjalan. Fase 08 langkah 6 (eksekusi Bagian A), satu plan per putaran karena `use_worktrees: false`. Plan 08-01 (upgrade `next`) didelegasikan ke `gsd-executor` dengan Aturan eksekutor verbatim, run id `mwbzitrz-2ce0bb0d4e44f006`, dan `DOCKER_HOST` dari `docker context inspect`; pembersihan akhir putaran oleh orkestrator.
+
+08-01 selesai (`0d7796f`, `1f88eed`, `3ebb196`): `next` 16.4.6 dipatok persis (MIT). typecheck 0, unit 891, build 0, proxy 7/7, E2E tiga spec 7 lolos. Audit produksi exit 1: 2 critical, 45 high (semula 7 dan 52); sisa high di bawah `next` hanya `browserslist` (08-04), critical sisa di `proxy-addr` lewat shadcn (08-03) dan better-auth (08-02). Penyimpangan: `agentRules: false` karena `next dev` 16.4.6 menulis `AGENTS.md` (file itu dipindah ke Trash, dicatat di LAPORAN bagian 10). Peringatan Turbopack baru dari `local-file-storage.ts` dicatat di `deferred-items.md`. Pembersih run: 0 sisa. Direktori temp eksekutor dihapus. Berikutnya: 08-05.

@@ -62,7 +62,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 **Plans:** 0/23 plans complete
 **Wave 1**
 
-- [ ] 08-01-PLAN.md — Upgrade `next` to >=16.4.1, pinned (Wave 1)
+- [x] 08-01-PLAN.md — Upgrade `next` to >=16.4.1, pinned (Wave 1)
 - [ ] 08-05-PLAN.md — System font stack, telemetry off in CI, audit and egress workflows without new schedules (rule I), Dependabot weekly with limit 3 (Wave 1)
 - [ ] 08-06-PLAN.md — Categorized connection-test errors, `addTag` gate first, `sla-flag` comment (Wave 1)
 - [ ] 08-17-PLAN.md — E2E harness: cross-platform worker teardown, honesty-invariants flake (Wave 1)
