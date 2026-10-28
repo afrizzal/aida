@@ -166,3 +166,22 @@ Queue item J1 already built the rule-J tooling. Decisions K108 to K124, the obse
 | R3-5 (MEDIUM, reporter) | Not touched by J1 | 08-14 `classifyTest`: mixed cases |
 
 **Known blocker:** the Docker VM has 13.9 GiB free, below the 20 GiB threshold (0a2, waiting for the owner). Every plan step that builds images stops at preflight until the owner adds space. Plans record this as `blocked (space)`, never as passed.
+
+### Cycle 4 (the only one allowed, limited to R3-1 to R3-4)
+
+- **Question and answer:** `run-loop/codex/fase08-plan-r4-tanya.md` (commit `439e263`); `run-loop/codex/fase08-plan-r4-jawab.md`. Model `gpt-6.1-terra`, effort `xhigh`.
+- **Status of the four HIGH:**
+  - R3-1: closed in plan.
+  - R3-2: closed (the J1 guard is verified in code).
+  - R3-3: closed in plan, within the K115 limit.
+  - R3-4: partly closed.
+- **New findings,** both checked against the plans by the orchestrator:
+
+| ID | Codex severity | Finding | Orchestrator check | Disposition |
+|---|---|---|---|---|
+| R4-1 | HIGH | The end gate stalls on a file it requires. 08-23 adds `tests/container/volume-upgrade-render.test.ts` to the container include, but 08-16's evidence spec allows only five suite files, treats a sixth as `UNEXPECTED`, and may not change after its tested commit | Verified: `08-16-PLAN.md` never names `volume-upgrade-render` | Deferred to the Docker tooling part of the split (below). The spec must list the sixth file before the tested commit |
+| R4-2 | HIGH | CI can hide a failure behind `blocked (space)`. The 08-05 Task 3 classifier marks a failed run `blocked (space)` when it sees a space message and none of six markers, so a space stop in one file plus an assertion failure in another is mislabelled. That contradicts 08-19's rule that a blocker together with another error is `failed` | Verified in the plan contract | Deferred to the Docker tooling part of the split. Classification must come from the structured result of the whole suite, with mixed cases across files |
+
+### Outcome of cycle 4: Phase 8 is split (owner decision 2026-11-11, item 4)
+
+HIGH findings remain, and the owner allowed no fifth cycle, so Phase 8 is split as the owner directed: "upgrade dependensi, CSP, non-root, rate limit dulu; alat test Docker belakangan. Lapor ke owner." Both remaining HIGH findings sit in the Docker test tooling (the full gate in 08-16 and the CI egress job in 08-05 Task 3). None sits in the dependency, CSP, non-root or rate-limit plans. The split design is in `08-SPLIT.md`.
