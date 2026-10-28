@@ -1514,3 +1514,7 @@ Cek awal lolos. 08-05 selesai (`ee1aa81`, `c595569`, `fcd2306`): Inter diganti s
 ## Putaran 08-exec-3 (2026-11-11)
 
 Cek awal lolos. Brief eksekutor tetap ditulis (`EXECUTOR-BRIEF.md`, `6ec4250`). 08-06 selesai (`b156aee`, `4776d5b`, `f2a8d03`, `ab975c2`): empat tes koneksi Settings mengembalikan kategori tetap plus ID korelasi tanpa teks mentah; urutan gerbang `addTag` dikunci test (tes merah dibuktikan pada versi validate-first sementara, lalu dipulihkan); komentar `sla-flag.ts`. unit 57 berkas, 932 test; typecheck dan lint exit 0. Assertion E2E `phase5-rag.spec.ts` diubah eksekutor tanpa dijalankan; orkestrator menjalankannya: exit 0, 6 lolos. Pembersih run: 0 sisa. Item manual: teks galat tiga tombol di UI (terang dan gelap), kategori khusus untuk model Ollama yang belum ditarik. Berikutnya: 08-17.
+
+## Putaran 08-exec-4 (2026-11-11)
+
+Cek awal lolos. 08-17 selesai (`e8af4ec`, `c8f9d8d`, `9b73f28`, `45b3ea5`): `tests/e2e/support/process-tree.ts` (`killTree`, `stopProcessTree`, lintas platform, eskalasi SIGKILL), honesty-invariants tahan hidrasi; dua run `pnpm test:e2e` penuh exit 0, 209 lolos, 1 skip, honesty-invariants 2/2, worker 0 sebelum dan sesudah, tanpa `taskkill`. Penyimpangan: `kb-proposals.spec.ts` ikut diubah (masih memakai `taskkill`), `tests/e2e/support/worker.ts` lama dihapus; worker yang macet kini dibunuh, bukan menggagalkan hook. Hook peringatan konteks kembali menimpa `STATE.md` (`stopped_at` "context exhaustion", `last_activity_desc` berkutip); dipulihkan dengan `git checkout` dan posisi ditulis ulang. Berikutnya: 08-19.
