@@ -30,6 +30,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 **Coverage:** 91/91 requirements mapped (`REQUIREMENTS.md`).
 
 - [ ] **Phase 8: Security Hardening** — Dependency audit to zero critical and high, non-root containers, CSP, trusted client IP, public-route abuse controls
+- [ ] **Phase 8.1: Docker test tooling and runtime proofs** — Split from Phase 8 after plan review cycle 4 (owner decision 2026-11-11): container harness, runtime proofs, full gate, CI egress job; waits for owner (`08-SPLIT.md`)
 - [ ] **Phase 9: Operations** — Backup schedule, logo upload, password encoding, single `<h1>`, seed guard, permanent regression tests, repo health
 - [ ] **Phase 10: Team** — Invitations and roles, notifications and mentions
 - [ ] **Phase 11: Inbox** — Saved views, bulk actions, command palette, keyboard inbox, auto-close
@@ -105,24 +106,24 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 **Wave 10** *(blocked on Wave 9 completion)*
 
-- [ ] 08-14-PLAN.md — Container harness on per-run `aida-test-` projects over J1 (rule J), four-state reporter, first runtime proofs (Wave 10)
+- [ ] 08-14-PLAN.md (moved to Phase 8.1, `deferred-8.1/`, waits for owner) — Container harness on per-run `aida-test-` projects over J1 (rule J), four-state reporter, first runtime proofs (Wave 10)
 
 **Wave 11** *(blocked on Wave 10 completion)*
 
-- [ ] 08-21-PLAN.md — Production-mode host E2E: CSP, client identity and the health DB bound (reviews C6, C7) (Wave 11)
-- [ ] 08-22-PLAN.md — Real Caddy: spoofing, probe refusal at an instrumented upstream, health floods (Wave 11)
+- [ ] 08-21-PLAN.md (moved to Phase 8.1, `deferred-8.1/`, waits for owner) — Production-mode host E2E: CSP, client identity and the health DB bound (reviews C6, C7) (Wave 11)
+- [ ] 08-22-PLAN.md (moved to Phase 8.1, `deferred-8.1/`, waits for owner) — Real Caddy: spoofing, probe refusal at an instrumented upstream, health floods (Wave 11)
 
 **Wave 12** *(blocked on Wave 11 completion)*
 
-- [ ] 08-23-PLAN.md — Root-owned uploads volume procedure and non-root backup on the real stack (Wave 12)
+- [ ] 08-23-PLAN.md (moved to Phase 8.1, `deferred-8.1/`, waits for owner) — Root-owned uploads volume procedure and non-root backup on the real stack (Wave 12)
 
 **Wave 13** *(blocked on Wave 12 completion)*
 
-- [ ] 08-15-PLAN.md — `docs/SECURITY.md` reconciliation with an evidence-status table (Wave 13)
+- [ ] 08-15-PLAN.md (moved to Phase 8.1, `deferred-8.1/`, waits for owner) — `docs/SECURITY.md` reconciliation with an evidence-status table (Wave 13)
 
 **Wave 14** *(blocked on Wave 13 completion)*
 
-- [ ] 08-16-PLAN.md — End-of-phase gate on one tested commit, guarded compose gate, evidence matrix (Wave 14)
+- [ ] 08-16-PLAN.md (moved to Phase 8.1, `deferred-8.1/`, waits for owner) — End-of-phase gate on one tested commit, guarded compose gate, evidence matrix (Wave 14)
 
 ### Phase 9: Operations
 
