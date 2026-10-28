@@ -5,8 +5,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { orgId, prisma } from "./support/db";
+import { stopProcessTree } from "./support/process-tree";
 import { baseURL, databaseUrl } from "./support/test-env";
-import { stopWorker } from "./support/worker";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "../..");
@@ -100,6 +100,8 @@ function startWorker(): Promise<void> {
         APP_ENCRYPTION_KEY: readEnvVar("APP_ENCRYPTION_KEY"),
       },
       stdio: "pipe",
+      // POSIX: own process group, so teardown reaches both the tsx parent and the worker.
+      detached: process.platform !== "win32",
     });
     const timer = setTimeout(
       () => reject(new Error(`worker did not start; log so far:\n${workerLog}`)),
@@ -133,7 +135,8 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await stopWorker(worker);
+  test.setTimeout(60_000);
+  if (worker) await stopProcessTree(worker);
   stub.server?.close();
 });
 

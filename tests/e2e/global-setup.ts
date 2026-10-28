@@ -9,6 +9,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
 import { PrismaClient } from "../../src/generated/prisma/client";
 import { startLabeledPostgres } from "../support/docker-test-resources";
+import { killTree } from "./support/process-tree";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,22 +30,6 @@ const ORG_SLUG = "aida-e2e";
 export const MEMBER_EMAIL = "member@e2e.aida.test";
 const MEMBER_PASSWORD = "E2E-test-password-2!";
 const MEMBER_NAME = "E2E Member";
-
-function killTree(pid: number) {
-  if (process.platform === "win32") {
-    try {
-      execSync(`taskkill /pid ${pid} /t /f`);
-    } catch {
-      // process already gone
-    }
-    return;
-  }
-  try {
-    process.kill(-pid, "SIGTERM");
-  } catch {
-    // process already gone
-  }
-}
 
 async function waitForServer(url: string, timeoutMs = 120_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;

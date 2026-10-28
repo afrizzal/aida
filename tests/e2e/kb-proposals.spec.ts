@@ -22,7 +22,7 @@
  * records the rows it expects (action type, proposal, ticket), and the organization's rows must
  * equal that list after each case and once more after the worker has stopped.
  */
-import { type ChildProcess, execSync, spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -80,6 +80,7 @@ import { PROPOSAL_SYSTEM_PROMPT } from "../../src/lib/kb/proposal-prompt";
 import { EMBEDDING_DIMENSIONS } from "../../src/lib/rag/types";
 import { createTicket, orgId as e2eOrgId, prisma } from "./support/db";
 import { CHAT_MODEL, type ChatRequestRecord, createLlmStub, EMBED_MODEL } from "./support/llm-stub";
+import { stopProcessTree } from "./support/process-tree";
 import { databaseUrl } from "./support/test-env";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -164,6 +165,8 @@ function startWorker(): Promise<void> {
         APP_ENCRYPTION_KEY: readEnvVar("APP_ENCRYPTION_KEY"),
       },
       stdio: "pipe",
+      // POSIX: own process group, so teardown reaches both the tsx parent and the worker.
+      detached: process.platform !== "win32",
     });
     worker.stdout?.on("data", (chunk: Buffer) => {
       workerLog += chunk.toString();
@@ -181,35 +184,13 @@ function startWorker(): Promise<void> {
 }
 
 /**
- * Stops the worker and resolves once the process has closed (review c-IN-06), so no job of this
- * file still runs while afterAll checks the audit trail or the next file starts its own worker.
- * Rejects if it has not closed within WORKER_STOP_TIMEOUT_MS.
+ * Stops the worker tree and resolves once it is gone (review c-IN-06), so no job of this file
+ * still runs while afterAll checks the audit trail or the next file starts its own worker.
+ * Delegates to the shared cross-platform helper (plan 08-17): SIGTERM to the detached process
+ * group, SIGKILL after WORKER_STOP_TIMEOUT_MS, so the tree is gone either way.
  */
 async function stopWorker(): Promise<void> {
-  const child = worker;
-  if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return;
-  const closed = new Promise<void>((resolve) => child.once("close", () => resolve()));
-  if (process.platform === "win32") {
-    try {
-      execSync(`taskkill /pid ${child.pid} /t /f`);
-    } catch {
-      // already gone
-    }
-  } else {
-    child.kill("SIGTERM");
-  }
-  let timer: NodeJS.Timeout | undefined;
-  const bound = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`worker did not exit within ${WORKER_STOP_TIMEOUT_MS} ms`)),
-      WORKER_STOP_TIMEOUT_MS,
-    );
-  });
-  try {
-    await Promise.race([closed, bound]);
-  } finally {
-    clearTimeout(timer);
-  }
+  if (worker) await stopProcessTree(worker, WORKER_STOP_TIMEOUT_MS);
 }
 
 // ---------------------------------------------------------------------------

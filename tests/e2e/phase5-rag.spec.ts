@@ -7,8 +7,8 @@ import { NO_RELEVANT_CONTENT_MESSAGE } from "../../src/lib/rag/draft-prompt";
 import { EMBEDDING_DIMENSIONS } from "../../src/lib/rag/types";
 import { createTicket, orgId, prisma } from "./support/db";
 import { CHAT_MODEL, createLlmStub, EMBED_MODEL } from "./support/llm-stub";
+import { stopProcessTree } from "./support/process-tree";
 import { databaseUrl } from "./support/test-env";
-import { stopWorker } from "./support/worker";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "../..");
@@ -76,6 +76,8 @@ function startWorker(): Promise<void> {
         APP_ENCRYPTION_KEY: readEnvVar("APP_ENCRYPTION_KEY"),
       },
       stdio: "pipe",
+      // POSIX: own process group, so teardown reaches both the tsx parent and the worker.
+      detached: process.platform !== "win32",
     });
     const timer = setTimeout(
       () => reject(new Error(`worker did not start; log so far:\n${workerLog}`)),
@@ -127,7 +129,8 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await stopWorker(worker);
+  test.setTimeout(60_000);
+  if (worker) await stopProcessTree(worker);
   stub.stop();
 });
 
