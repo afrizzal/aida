@@ -32,7 +32,7 @@
     "@hookform/resolvers": "^5.4.0",
     "@prisma/adapter-pg": "7.8.0",
     "@prisma/client": "7.8.0",
-    "better-auth": "1.6.22",
+    "better-auth": "1.7.20",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -75,10 +75,7 @@
       "esbuild",
       "prisma",
       "sharp"
-    ],
-    "overrides": {
-      "better-call": "1.3.7"
-    }
+    ]
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
