@@ -1518,3 +1518,7 @@ Cek awal lolos. Brief eksekutor tetap ditulis (`EXECUTOR-BRIEF.md`, `6ec4250`). 
 ## Putaran 08-exec-4 (2026-11-11)
 
 Cek awal lolos. 08-17 selesai (`e8af4ec`, `c8f9d8d`, `9b73f28`, `45b3ea5`): `tests/e2e/support/process-tree.ts` (`killTree`, `stopProcessTree`, lintas platform, eskalasi SIGKILL), honesty-invariants tahan hidrasi; dua run `pnpm test:e2e` penuh exit 0, 209 lolos, 1 skip, honesty-invariants 2/2, worker 0 sebelum dan sesudah, tanpa `taskkill`. Penyimpangan: `kb-proposals.spec.ts` ikut diubah (masih memakai `taskkill`), `tests/e2e/support/worker.ts` lama dihapus; worker yang macet kini dibunuh, bukan menggagalkan hook. Hook peringatan konteks kembali menimpa `STATE.md` (`stopped_at` "context exhaustion", `last_activity_desc` berkutip); dipulihkan dengan `git checkout` dan posisi ditulis ulang. Berikutnya: 08-19.
+
+## Putaran 08-exec-5 (2026-11-11)
+
+Cek awal lolos (host 24 GiB). 08-19 selesai (`10a32cc`, `0d436b0`): guard `tests/unit/test-suite-config.test.ts` (5 pemeriksa teks atas berkas J1, 10 mutasi M1 sampai M10), 15 test; `pnpm test` 59 berkas, 950 test; typecheck dan lint exit 0; listing integration 94 berkas tanpa egress, listing egress 1. Penyimpangan: satu `docker ps` baca saja (0 container) walau plan melarang perintah docker; tercatat di SUMMARY. `test:integration` dan `test:egress` `not run` sesuai plan. Wave 1 Bagian A selesai. Berikutnya: wave 2 (08-02, 08-07).
