@@ -1510,3 +1510,7 @@ Cek A (27 GiB), B, H, dan Berhenti total lolos; regresi Rekriva tidak berjalan. 
 ## Putaran 08-exec-2 (2026-11-11)
 
 Cek awal lolos. 08-05 selesai (`ee1aa81`, `c595569`, `fcd2306`): Inter diganti stack font sistem (`next build` tanpa fetch Google, 0 baris); a11y-contrast E2E 18 lolos; `audit.yml`, Dependabot (`open-pull-requests-limit: 3` di 4 entri), env telemetri di ci, integration, audit; cek aturan I `rule I ok: 4 workflows`; lint dan typecheck exit 0; `integration.yml` hanya bertambah blok env. Task 3 tidak dieksekusi (08-05b). Tidak dijalankan: persetujuan visual font (item manual), run CI pertama (hanya berkas). Pembersih run: 0 sisa. Berikutnya: 08-06.
+
+## Putaran 08-exec-3 (2026-11-11)
+
+Cek awal lolos. Brief eksekutor tetap ditulis (`EXECUTOR-BRIEF.md`, `6ec4250`). 08-06 selesai (`b156aee`, `4776d5b`, `f2a8d03`, `ab975c2`): empat tes koneksi Settings mengembalikan kategori tetap plus ID korelasi tanpa teks mentah; urutan gerbang `addTag` dikunci test (tes merah dibuktikan pada versi validate-first sementara, lalu dipulihkan); komentar `sla-flag.ts`. unit 57 berkas, 932 test; typecheck dan lint exit 0. Assertion E2E `phase5-rag.spec.ts` diubah eksekutor tanpa dijalankan; orkestrator menjalankannya: exit 0, 6 lolos. Pembersih run: 0 sisa. Item manual: teks galat tiga tombol di UI (terang dan gelap), kategori khusus untuk model Ollama yang belum ditarik. Berikutnya: 08-17.
