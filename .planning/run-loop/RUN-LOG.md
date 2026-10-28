@@ -1526,3 +1526,7 @@ Cek awal lolos (host 24 GiB). 08-19 selesai (`10a32cc`, `0d436b0`): guard `tests
 ## Putaran 08-exec-6 (2026-11-11)
 
 Cek awal lolos. 08-02 selesai (`e170e28`, `c45473d`, `642d251`): better-auth 1.6.22 ke 1.7.20 dipatok persis (MIT), diff skema kosong (tanpa migrasi), override `better-call` dihapus; data, sesi bertanda tangan lama, dan alur setup bertahan di database yang diisi oleh 1.6.22. lint dan typecheck exit 0; unit 950; build 0; integration 94 berkas, 1297 test; E2E `authz` 2 lolos sesudah `.next` dipindah ke Trash (dicatat di LAPORAN bagian 10). Audit produksi exit 1: 1 critical, 43 high (semula 2 dan 45). Database dev `aida-test-devdb-mwc1g42e-7de8bc34be87f628-8c1791` di 127.0.0.1:55433, dihapus lewat pembersih J1, 0 sisa; `aida-dev-db` tidak disentuh. Berikutnya: 08-07.
+
+## Putaran 08-exec-7 (2026-11-11)
+
+Cek awal lolos. 08-07 selesai (`26f05b7`, `738c2f1`, `9cf1b7d`): nonce per request dan CSP D-11 di setiap keluaran `src/proxy.ts` (termasuk 403, 401, redirect), header klien `x-nonce` dan CSP ditimpa, `nosniff`, `X-Frame-Options: DENY`, referrer `no-referrer` di `/status` dan `/api/public/status`; nonce ke next-themes. Unit proxy 15, csp 9; `pnpm test` 60 berkas, 967; typecheck, lint, build (dua kali) exit 0; semua route dinamis. E2E tidak dijalankan (bukti runtime tanpa pelanggaran CSP milik 08-08). Wave 2 selesai. Berikutnya: 08-03.

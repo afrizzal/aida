@@ -71,7 +71,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 **Wave 2** *(blocked on Wave 1 completion)*
 
 - [x] 08-02-PLAN.md — Upgrade `better-auth` to >=1.7.7 with migration proof (Wave 2)
-- [ ] 08-07-PLAN.md — Nonce CSP with `strict-dynamic` and security headers in `src/proxy.ts` (Wave 2)
+- [x] 08-07-PLAN.md — Nonce CSP with `strict-dynamic` and security headers in `src/proxy.ts` (Wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
