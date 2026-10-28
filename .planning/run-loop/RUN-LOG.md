@@ -1522,3 +1522,7 @@ Cek awal lolos. 08-17 selesai (`e8af4ec`, `c8f9d8d`, `9b73f28`, `45b3ea5`): `tes
 ## Putaran 08-exec-5 (2026-11-11)
 
 Cek awal lolos (host 24 GiB). 08-19 selesai (`10a32cc`, `0d436b0`): guard `tests/unit/test-suite-config.test.ts` (5 pemeriksa teks atas berkas J1, 10 mutasi M1 sampai M10), 15 test; `pnpm test` 59 berkas, 950 test; typecheck dan lint exit 0; listing integration 94 berkas tanpa egress, listing egress 1. Penyimpangan: satu `docker ps` baca saja (0 container) walau plan melarang perintah docker; tercatat di SUMMARY. `test:integration` dan `test:egress` `not run` sesuai plan. Wave 1 Bagian A selesai. Berikutnya: wave 2 (08-02, 08-07).
+
+## Putaran 08-exec-6 (2026-11-11)
+
+Cek awal lolos. 08-02 selesai (`e170e28`, `c45473d`, `642d251`): better-auth 1.6.22 ke 1.7.20 dipatok persis (MIT), diff skema kosong (tanpa migrasi), override `better-call` dihapus; data, sesi bertanda tangan lama, dan alur setup bertahan di database yang diisi oleh 1.6.22. lint dan typecheck exit 0; unit 950; build 0; integration 94 berkas, 1297 test; E2E `authz` 2 lolos sesudah `.next` dipindah ke Trash (dicatat di LAPORAN bagian 10). Audit produksi exit 1: 1 critical, 43 high (semula 2 dan 45). Database dev `aida-test-devdb-mwc1g42e-7de8bc34be87f628-8c1791` di 127.0.0.1:55433, dihapus lewat pembersih J1, 0 sisa; `aida-dev-db` tidak disentuh. Berikutnya: 08-07.
