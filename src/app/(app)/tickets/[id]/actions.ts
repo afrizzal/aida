@@ -208,6 +208,9 @@ export async function assignTicket(
  * Adds a tag by name. The service finds or creates the tag inside its own transaction, after
  * the actor's membership check and before the ticket lock (Codex review C1), so a refused
  * request never leaves a new tag behind. This wrapper only forwards the raw name.
+ *
+ * Gate first (D-28, F-11): getSessionActor is the first statement, so an unauthenticated call is
+ * redirected before the name is trimmed or validated (tests/unit/add-tag-gate.test.ts).
  */
 export async function addTag(ticketId: string, name: string): Promise<MutationActionResult> {
   const actor = await getSessionActor();

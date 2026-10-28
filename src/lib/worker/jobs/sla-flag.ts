@@ -48,6 +48,18 @@ interface LockedRow {
   organizationId: string;
 }
 
+// Why the four raw statements below (two lock SELECTs, two UPDATEs) have no tenant filter
+// (D-28, F-13). This is a system cron job over all organizations by design: no request, no
+// session and no tenant input reaches it, and every bound value is the job's own clock or the ids
+// it just locked. Every predicate uses only the row's own columns (status through its own state,
+// isBreached, isAtRisk, slaPausedAt, the due and responded timestamps, the target minutes); the
+// state join and the UPDATEs pair each ticket with its own "organizationId". The lock SELECTs
+// return only id and "organizationId" to this function, the UPDATEs return a row count, and the
+// handler returns nothing, so no tenant can read another tenant's data through this job.
+// scopedDb does NOT intercept $queryRaw or $executeRaw: any copy of this pattern that returns
+// data to a caller or takes tenant input must add an explicit "organizationId" filter
+// (src/lib/rag/retrieve.ts and src/lib/tickets/search.ts show that discipline).
+
 /** Breach pass, lock step: overdue OPEN-group tickets without an open pause. */
 function lockBreachCandidates(tx: Prisma.TransactionClient, now: Date) {
   return tx.$queryRaw<LockedRow[]>`
