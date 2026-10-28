@@ -10,6 +10,12 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# D-27: build and test steps outside Docker must not phone home (Next.js telemetry,
+# Prisma checkpoint ping).
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+  CHECKPOINT_DISABLE: "1"
+
 jobs:
   build:
     name: lint · typecheck · test · build

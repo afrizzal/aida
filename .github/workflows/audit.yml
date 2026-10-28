@@ -1,0 +1,41 @@
+# Dependency audit (D-07, AIDA-26). A separate workflow, so its own concurrency group keeps
+# the audit and the CI build from cancelling each other. By the owner decision of 2026-11-11
+# (charter rule I, no new scheduled workflow) it runs only on pull requests, pushes to master
+# and manual dispatch, so an advisory published while the code is unchanged shows up at the
+# next pull request, push or manual run. Making it a required check is an owner repo setting.
+name: Dependency audit
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: false
+
+# D-27: build and test steps outside Docker must not phone home.
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+  CHECKPOINT_DISABLE: "1"
+
+jobs:
+  audit:
+    name: pnpm audit (production, high)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4          # reads the packageManager field in package.json
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+
+      # No install step: pnpm audit reads pnpm-lock.yaml.
+      - run: pnpm audit --prod --audit-level=high

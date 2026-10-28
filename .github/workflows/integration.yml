@@ -10,6 +10,12 @@ on:
     - cron: "0 3 * * *"      # 03:00 UTC nightly
   workflow_dispatch:
 
+# D-27: build and test steps outside Docker must not phone home (Next.js telemetry,
+# Prisma checkpoint ping).
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+  CHECKPOINT_DISABLE: "1"
+
 jobs:
   integration:
     name: Testcontainers integration suite
