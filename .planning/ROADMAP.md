@@ -79,7 +79,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 08-04-PLAN.md — `shadcn` out of production, remaining bumps, residual advisory table (Wave 4)
+- [x] 08-04-PLAN.md — `shadcn` out of production, remaining bumps, residual advisory table (Wave 4)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
