@@ -1,7 +1,9 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { requireOrgAdmin } from "@/lib/authz";
+import { type ConnectionTestResult, classifyConnectionError } from "@/lib/connection-test/errors";
 import { enqueueReembed } from "@/lib/kb/create-article";
 import { getLlmSettings, saveLlmSettings as persistLlmSettings } from "@/lib/llm/settings";
 import { testProviderConnection } from "@/lib/llm/test-connection";
@@ -74,14 +76,12 @@ export async function saveLlmSettings(input: LlmSettingsInput): Promise<{ ok: bo
 }
 
 /**
- * Real per-provider connectivity probe (D-04), mirroring testImapConnection/testSmtpConnection's
- * exact contract: 10s timeout (enforced inside testProviderConnection), falls back to the stored
- * decrypted key when the submitted form field is blank so an admin can Test without re-typing an
- * already-saved key, and never echoes the key in the returned error.
+ * Real per-provider connectivity probe (D-04): 10s timeout (enforced inside
+ * testProviderConnection), falls back to the stored decrypted key when the submitted form field is
+ * blank so an admin can Test without re-typing an already-saved key. A failure returns a fixed
+ * category and a correlation ID (D-25, F-08); the failure text is never echoed or logged.
  */
-export async function testLlmConnection(
-  input: LlmSettingsInput,
-): Promise<{ ok: boolean; error?: string }> {
+export async function testLlmConnection(input: LlmSettingsInput): Promise<ConnectionTestResult> {
   await requireOrgAdmin();
   const { db } = await getScopedDb();
 
@@ -96,7 +96,12 @@ export async function testLlmConnection(
     });
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: String((e as Error).message).slice(0, 200) };
+    // Log only the probe, the category and the correlation ID: no raw message, host, URL or
+    // credential (D-25).
+    const correlationId = randomUUID();
+    const category = classifyConnectionError(e);
+    console.error("[settings] connection test failed", { probe: "llm", category, correlationId });
+    return { ok: false, error: category, correlationId };
   }
 }
 
