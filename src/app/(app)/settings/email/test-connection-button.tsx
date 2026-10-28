@@ -3,10 +3,17 @@
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { CONNECTION_TEST_ERROR_MESSAGES } from "@/lib/connection-test/errors";
 import type { EmailSettingsInput } from "./actions";
 import { testImapConnection, testSmtpConnection } from "./actions";
 
 type Status = "idle" | "testing" | "success" | "failure";
+
+/** Fixed text only: a category message from the shared map, or the thrown-action fallback (D-25). */
+interface Failure {
+  message: string;
+  correlationId?: string;
+}
 
 interface TestConnectionButtonProps {
   kind: "imap" | "smtp";
@@ -16,11 +23,13 @@ interface TestConnectionButtonProps {
 
 /**
  * Reusable "Test connection" trigger — one instance for IMAP and one for SMTP. The underlying
- * Server Action applies a 10s timeout (Pitfall 5): this button must never spin indefinitely.
+ * Server Action applies a 10s timeout (Pitfall 5): this button must never spin indefinitely. A
+ * failure shows the fixed message for its category plus the correlation ID, never raw server text
+ * (D-25).
  */
 export function TestConnectionButton({ kind, getValues }: TestConnectionButtonProps) {
   const [status, setStatus] = useState<Status>("idle");
-  const [error, setError] = useState<string | undefined>(undefined);
+  const [failure, setFailure] = useState<Failure | undefined>(undefined);
 
   async function handleClick() {
     const values = await getValues();
@@ -33,12 +42,19 @@ export function TestConnectionButton({ kind, getValues }: TestConnectionButtonPr
     const result = await (kind === "imap"
       ? testImapConnection(values)
       : testSmtpConnection(values)
-    ).catch(() => ({ ok: false as const, error: "Unexpected error — please try again." }));
+    ).catch(() => null);
 
-    if (result.ok) {
+    if (result?.ok) {
       setStatus("success");
     } else {
-      setError(result.error);
+      setFailure(
+        result
+          ? {
+              message: CONNECTION_TEST_ERROR_MESSAGES[result.error],
+              correlationId: result.correlationId,
+            }
+          : { message: "Unexpected error — please try again." },
+      );
       setStatus("failure");
     }
   }
@@ -73,10 +89,13 @@ export function TestConnectionButton({ kind, getValues }: TestConnectionButtonPr
           </div>
         )}
 
-        {status === "failure" && (
-          <div className="mt-2 flex items-center gap-1.5 text-[12px] text-destructive">
-            <XCircle className="size-3.5" />
-            Connection failed: {error}
+        {status === "failure" && failure && (
+          <div className="mt-2 flex items-start gap-1.5 text-[12px] text-destructive">
+            <XCircle className="mt-0.5 size-3.5 shrink-0" />
+            <div>
+              <p>Connection failed: {failure.message}</p>
+              {failure.correlationId && <p>Reference: {failure.correlationId}</p>}
+            </div>
           </div>
         )}
       </div>

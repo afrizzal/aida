@@ -143,13 +143,13 @@ export async function saveEmbeddingSettings(
 
 /**
  * Real embedding-provider connectivity probe, mirroring testLlmConnection's exact contract: falls
- * back to the stored decrypted key when the submitted form field is blank, never echoes the key
- * in the returned error, and slices the error to 200 chars. Surfaces a clear failure for a
- * not-pulled Ollama embedding model or a bad key (Pitfall 8).
+ * back to the stored decrypted key when the submitted form field is blank. A failure (bad key,
+ * unreachable host, not-pulled Ollama model, Pitfall 8) returns a fixed category and a correlation
+ * ID (D-25, F-08); the failure text is never echoed or logged.
  */
 export async function testEmbeddingConnection(
   input: EmbeddingSettingsInput,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<ConnectionTestResult> {
   await requireOrgAdmin();
   const { db } = await getScopedDb();
 
@@ -164,7 +164,15 @@ export async function testEmbeddingConnection(
     });
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: String((e as Error).message).slice(0, 200) };
+    // Log only the probe, the category and the correlation ID (D-25).
+    const correlationId = randomUUID();
+    const category = classifyConnectionError(e);
+    console.error("[settings] connection test failed", {
+      probe: "embedding",
+      category,
+      correlationId,
+    });
+    return { ok: false, error: category, correlationId };
   }
 }
 

@@ -204,8 +204,8 @@ test("Settings: LLM + Embedding providers save and round-trip pointed at the RAG
 });
 
 // ---------------------------------------------------------------------------
-// 05-VERIFICATION.md human_verification item 2 — Test Connection success + a SPECIFIC failure
-// message (not a generic 500), mirroring phase4-ai.spec.ts's T3 pattern for the LLM provider.
+// 05-VERIFICATION.md human_verification item 2 — Test Connection success + a categorized failure
+// message (not a generic 500; since D-25 never the raw provider text), mirroring phase4-ai.spec.ts's T3 pattern for the LLM provider.
 // ---------------------------------------------------------------------------
 test("Settings: Embedding Test Connection succeeds against the stub, fails with a specific error", async ({
   page,
@@ -218,11 +218,16 @@ test("Settings: Embedding Test Connection succeeds against the stub, fails with 
 
   stub.embedMode = "fail";
   await embedCard.getByRole("button", { name: "Test connection" }).click();
+  // D-25 (F-08): the failure shows a fixed category message plus a reference, never the raw
+  // provider text. The stub's 404 "model not found" has no auth, network or config signal, so it
+  // is the "unknown" category.
   await expect(
     embedCard.getByText(
-      `Connection failed: model "${EMBED_MODEL}" not found, try pulling it first`,
+      "Connection failed: The connection test failed for an unknown reason. Check the server log for the reference below.",
     ),
   ).toBeVisible({ timeout: 15_000 });
+  await expect(embedCard.getByText(/^Reference: [0-9a-f-]{36}$/)).toBeVisible();
+  await expect(embedCard.getByText(/not found, try pulling it first/)).toHaveCount(0);
   stub.embedMode = "ok"; // reset — later tests need real embed() calls to succeed
 });
 
