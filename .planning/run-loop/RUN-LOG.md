@@ -1530,3 +1530,7 @@ Cek awal lolos. 08-02 selesai (`e170e28`, `c45473d`, `642d251`): better-auth 1.6
 ## Putaran 08-exec-7 (2026-11-11)
 
 Cek awal lolos. 08-07 selesai (`26f05b7`, `738c2f1`, `9cf1b7d`): nonce per request dan CSP D-11 di setiap keluaran `src/proxy.ts` (termasuk 403, 401, redirect), header klien `x-nonce` dan CSP ditimpa, `nosniff`, `X-Frame-Options: DENY`, referrer `no-referrer` di `/status` dan `/api/public/status`; nonce ke next-themes. Unit proxy 15, csp 9; `pnpm test` 60 berkas, 967; typecheck, lint, build (dua kali) exit 0; semua route dinamis. E2E tidak dijalankan (bukti runtime tanpa pelanggaran CSP milik 08-08). Wave 2 selesai. Berikutnya: 08-03.
+
+## Putaran 08-exec-8 (2026-11-11)
+
+Cek awal lolos (host 23 GiB). 08-03 selesai (`7d06455`, `b630886`, `4a3e466`): 11 test integrasi permanen D-02 tanpa mock (auth-upgrade 4: cookie, hash password, dan keanggotaan lama 1.6.22 bertahan sesudah migrasi; auth-bootstrap 3; auth-setup 4), helper `tests/integration/support/isolated-database.ts` (database terpisah di server Testcontainers berlabel milik run). `pnpm test:integration` penuh 97 berkas, 1308 test; typecheck 0; lint 0 sesudah satu perbaikan. `aida-dev-db` tidak dipakai, tanpa container `aida-test-devdb`. Pembersih run: 0 sisa. Wave 3 selesai. Berikutnya: 08-04.

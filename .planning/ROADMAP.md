@@ -75,7 +75,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 08-03-PLAN.md — Better Auth upgrade regression tests (Wave 3)
+- [x] 08-03-PLAN.md — Better Auth upgrade regression tests (Wave 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
