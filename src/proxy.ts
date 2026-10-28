@@ -1,5 +1,6 @@
 import { getSessionCookie } from "better-auth/cookies";
 import { type NextRequest, NextResponse } from "next/server";
+import { buildCsp, CSP_NONCE_HEADER, createNonce, securityHeadersFor } from "./lib/security/csp";
 
 const PUBLIC_PREFIXES = [
   "/login",
@@ -29,6 +30,29 @@ const PUBLIC_PREFIXES = [
 // otherwise short-circuit past it.
 const BLOCKED_PUBLIC_ROUTES = ["/api/auth/sign-up"];
 
+// CSP (D-11, D-12, AIDA-28, F-15): every request that passes through gets a fresh nonce and the
+// nonce policy from src/lib/security/csp.ts. Next.js reads the nonce from the *request*
+// Content-Security-Policy header during rendering and stamps it on its framework scripts, page
+// bundles and generated inline tags; the root layout reads `x-nonce` and hands it to next-themes.
+// Both request headers are overwritten here, never merged, because a client could otherwise send
+// its own `x-nonce` or a permissive policy and have the app trust it (D-12). The nonce is created
+// inside this call, never at module level, so two requests can never share one.
+function forwardWithSecurityHeaders(request: NextRequest, pathname: string) {
+  const nonce = createNonce();
+  const csp = buildCsp(nonce, { isDev: process.env.NODE_ENV === "development" });
+
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set(CSP_NONCE_HEADER, nonce);
+  requestHeaders.set("content-security-policy", csp);
+
+  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  response.headers.set("Content-Security-Policy", csp);
+  for (const [name, value] of Object.entries(securityHeadersFor(pathname))) {
+    response.headers.set(name, value);
+  }
+  return response;
+}
+
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -42,7 +66,9 @@ export function proxy(request: NextRequest) {
     );
   }
 
-  if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) return NextResponse.next();
+  if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) {
+    return forwardWithSecurityHeaders(request, pathname);
+  }
 
   const sessionCookie = getSessionCookie(request);
   if (!sessionCookie) {

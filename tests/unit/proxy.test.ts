@@ -1,11 +1,16 @@
 /**
  * AIDA-10: server-side auth-gate contract
- * Verifies edge proxy enforces authentication on (app) routes
- * without importing Prisma (Edge-safe).
+ * AIDA-28 (D-11 to D-14): nonce CSP and security headers on proxy exits
+ * Verifies the proxy enforces authentication on (app) routes. Proxy runs on the
+ * Node.js runtime in Next 16; this test still imports no Prisma.
  */
 import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
 import { proxy } from "@/proxy";
+
+function cspNonce(csp: string): string | undefined {
+  return /'nonce-([^']+)'/.exec(csp)?.[1];
+}
 
 describe("proxy — AIDA-10 auth gate", () => {
   it("A: redirects unauthenticated request on protected route to /login", async () => {
@@ -59,5 +64,15 @@ describe("proxy — AIDA-10 auth gate", () => {
     expect(response.status).not.toBe(403);
     expect(response.status).not.toBe(307);
     expect(response.status).not.toBe(302);
+  });
+
+  it("H (D-11): CSP with nonce on /login", async () => {
+    const response = proxy(new NextRequest("http://localhost/login"));
+    const csp = response.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain("'strict-dynamic'");
+    const nonce = cspNonce(csp);
+    expect(nonce).toBeTruthy();
+    expect(csp).toContain(`'nonce-${nonce}'`);
+    expect(response.headers.get("x-middleware-request-x-nonce")).toBe(nonce);
   });
 });
