@@ -60,8 +60,41 @@ function withSecurityHeaders(response: NextResponse, pathname: string) {
   return response;
 }
 
+// K125 (plan 08-08, AIDA-28): a path whose percent-encoding cannot be decoded (an incomplete
+// escape such as `%E0%A4%A`, or bytes that are not valid UTF-8) makes Next.js render its HTML 400
+// page with framework scripts and without this proxy's response headers, so that page would carry
+// no CSP. The proxy answers such a path itself, first, before every other branch: plain text, no
+// HTML, no script, under a static deny-all policy. Only the path is checked, never the query, and
+// the decoded value is thrown away; routing keeps using the raw pathname.
+const MALFORMED_PATH_CSP = "default-src 'none'; frame-ancestors 'none'";
+const MALFORMED_PATH_BODY = "Bad Request: malformed percent-encoding in the URL path.\n";
+
+function hasMalformedPathEncoding(pathname: string): boolean {
+  try {
+    decodeURIComponent(pathname);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+function malformedPathResponse() {
+  return new NextResponse(MALFORMED_PATH_BODY, {
+    status: 400,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Content-Security-Policy": MALFORMED_PATH_CSP,
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "Referrer-Policy": "no-referrer",
+    },
+  });
+}
+
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  if (hasMalformedPathEncoding(pathname)) return malformedPathResponse();
 
   if (BLOCKED_PUBLIC_ROUTES.some((p) => pathname.startsWith(p))) {
     return withSecurityHeaders(
@@ -98,7 +131,7 @@ export function proxy(request: NextRequest) {
 // JS and CSS chunks), `_next/image` (the image optimizer, unused: src/ has no next/image import)
 // and `favicon.ico` (a static icon). None of them returns HTML, so none needs a CSP. Every other
 // path, including 404 pages, errors returned by routes and any route added later, runs this
-// proxy and gets the CSP and security headers. Responses Next.js produces before the proxy runs
-// (for example the 400 for a malformed percent-encoded path) never reach it; plan 08-08 records
-// that boundary. Never place a future HTML route under an excluded prefix.
+// proxy and gets the CSP and security headers. A malformed percent-encoded path does reach the
+// proxy, and the K125 guard above answers it before Next.js can render its HTML 400 page; plan
+// 08-08 tests that boundary. Never place a future HTML route under an excluded prefix.
 export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"] };
