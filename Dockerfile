@@ -2,6 +2,10 @@
 # Shared base with Node 22 + corepack/pnpm (D-13)
 FROM node:22-alpine AS base
 RUN corepack enable
+# Telemetry off for every step built on this stage (D-27, AIDA-32): `next build`, `prisma
+# generate` and the one-shot `prisma migrate deploy` never phone home. deps, builder and the
+# migrate service (target builder) inherit these; runner starts from node:22-alpine and repeats them.
+ENV NEXT_TELEMETRY_DISABLED=1 CHECKPOINT_DISABLE=1
 
 # ---- Stage 2: deps ----
 # Install all dependencies into a clean layer for layer caching
@@ -54,7 +58,7 @@ RUN pnpm exec esbuild src/lib/worker/index.ts \
 # Docker Compose overrides CMD per service — same image, different start command (D-09)
 FROM node:22-alpine AS runner
 WORKDIR /app
-ENV NODE_ENV=production
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 CHECKPOINT_DISABLE=1
 
 # Next.js standalone: self-contained app server + traced node_modules (no symlinks, real files)
 # This includes @prisma/client, @prisma/adapter-pg, pg (all traced from src/lib/db.ts)
@@ -73,6 +77,15 @@ COPY --from=builder /tmp/prisma-scope ./node_modules/@prisma
 
 # Prisma schema directory — needed by the migrate service for prisma migrate deploy
 COPY --from=builder /app/prisma ./prisma
+
+# Non-root runtime (D-08, F-06, AIDA-27): app and worker run as the image's built-in `node` user
+# (UID/GID 1000). The code above stays root-owned, so the process can read but not change it.
+# The only writable path is the uploads directory: a fresh named volume copies this ownership on
+# first mount; an existing root-owned volume needs the manual step in docs/OPERATIONS.md
+# ("Upgrading an install whose containers ran as root"). Whether `.next/cache` must be writable
+# is proven at runtime by plan 08-14 (D-10); it is not made writable here.
+RUN mkdir -p /data/uploads && chown node:node /data/uploads
+USER node
 
 EXPOSE 3000
 
