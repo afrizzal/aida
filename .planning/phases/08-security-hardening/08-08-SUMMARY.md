@@ -2,7 +2,7 @@
 phase: 08-security-hardening
 plan: 08
 subsystem: security
-status: parked
+status: complete
 tags: [csp, e2e, nonce, sonner, radix, get-nonce, AIDA-28]
 requires: ["08-07", "08-04", "08-17"]
 provides:
@@ -15,7 +15,7 @@ tech-stack:
   patterns: ["static third-party inline style allowed by a recomputed sha256", "client-only get-nonce setNonce at render time"]
 key-files:
   created: [tests/e2e/csp.spec.ts, tests/unit/csp-style-hashes.test.ts]
-  modified: [src/lib/security/csp.ts, tests/unit/csp.test.ts, src/components/theme-provider.tsx]
+  modified: [src/lib/security/csp.ts, tests/unit/csp.test.ts, src/components/theme-provider.tsx, src/proxy.ts, tests/unit/proxy.test.ts]
 decisions:
   - "Next.js dev-tools chunk violations are excluded in the spec by source file and counted, not allowed in the policy"
   - "C13-boundary left failing as a recorded blocker: Next.js 400 HTML with nonced scripts and no CSP header"
@@ -144,3 +144,52 @@ None new. A full manual browse under the production policy is not claimed.
 - FOUND: tests/e2e/csp.spec.ts, tests/unit/csp-style-hashes.test.ts, src/components/theme-provider.tsx (setNonce)
 - FOUND: commits c4b5486, 631c2de, 24aa9a9, 38aa527
 - `git rev-list --count c9ee39f..HEAD` gives 4 before the docs commit
+
+## Fix attempt 1 (K125)
+
+Orchestrator decision K125, following the Codex consult (`.planning/run-loop/codex/fase08-0808-jawab.md`). The nonce policy is unchanged. Run id `mwc4c9m0-2a749e6ed309f797`; ledger base `3e84102`.
+
+**Fix.** `proxy()` in src/proxy.ts now starts with a guard: `decodeURIComponent(request.nextUrl.pathname)` inside `try/catch`, path only, never the query. The decoded value is discarded, so routing still uses the raw pathname. On failure the proxy answers before the blocked sign-up, public prefix and redirect branches with:
+- status 400 and `Content-Type: text/plain; charset=utf-8`;
+- the fixed body `Bad Request: malformed percent-encoding in the URL path.`;
+- `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`;
+- `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`.
+
+The matcher comment that said such paths never reach the proxy was corrected. The E2E run proves they do: the guard's response is what came back.
+
+**Tests.**
+- tests/unit/proxy.test.ts gained cases P to T. They cover incomplete escapes, invalid UTF-8 (including an encoded surrogate and an overlong form), the guard running before the 403, forward and 307 branches (with and without a session cookie), valid escaped paths that keep the nonce CSP, and malformed queries that do not trigger the guard.
+- RED: before the fix, P, Q and R failed (`expected 200 to be 400`, `expected 403 to be 400`). After the fix all 20 pass.
+- tests/e2e/csp.spec.ts C13-boundary was tightened as K125 asks. Both `/status/%E0%A4%A` and `/status/%C3%28` must return 400, exactly `text/plain; charset=utf-8`, no `<script`, the exact deny-all CSP, no report-only header, `nosniff`, `DENY` and `no-referrer`.
+- A new test, `C13-boundary control`, checks that `/status/abc%20def` is not a 400 and carries the nonce policy with `no-referrer`.
+- `grep -n "status/%E0%A4%A" tests/e2e/csp.spec.ts` prints only line 211, which is inside the C13-boundary test.
+
+Boundary lines (identical in the spec run and the full run):
+```
+PRE-PROXY-BOUNDARY {"urlPath":"/status/%E0%A4%A","status":400,"contentType":"text/plain; charset=utf-8","hasCsp":true,"hasScript":false}
+PRE-PROXY-BOUNDARY {"urlPath":"/status/%C3%28","status":400,"contentType":"text/plain; charset=utf-8","hasCsp":true,"hasScript":false}
+```
+
+| Commit | Subject |
+|--------|---------|
+| 27f4096 | test(08-08): RED unit tests for the malformed path encoding guard (K125) |
+| 1dbe82e | fix(08-08): reject malformed path encoding first in the proxy with a plain-text 400 (K125) |
+| 93af95d | test(08-08): tighten C13-boundary to the strict plain-text 400 and add a valid-escape control (K125) |
+
+| Command | Exit | Result |
+|---------|------|--------|
+| `pnpm exec vitest run tests/unit/proxy.test.ts` (before the fix) | 1 | 3 failed, 17 passed |
+| `pnpm exec vitest run tests/unit/proxy.test.ts` (after the fix) | 0 | 20 passed |
+| `pnpm test` | 0 | 62 files, 977 passed |
+| `pnpm typecheck` | 0 | clean |
+| `pnpm lint` | 0 | 578 files, clean |
+| `pnpm test:e2e tests/e2e/csp.spec.ts` (runs 1 and 2) | 1 | global setup timed out (see the stale `.next` note below); no test ran |
+| `pnpm test:e2e tests/e2e/csp.spec.ts` (run 3, fresh `.next`) | 0 | 10 passed |
+| `pnpm test:e2e` (full) | 0 | 219 passed, 1 skipped; honesty-invariants green |
+
+**Stale `.next` (reported per the brief).** In the first two spec runs, global setup timed out at `waitForURL(/\/login/)`. The dev server logged 379 and 366 `GET /setup 200` lines with `Compiled in` between them, which is a dev reload loop, and no POST. Following the executor brief, `.next` was moved to `~/.Trash/aida-next-1794401825`. The next run passed, so the loop came from the stale dev cache, not from the guard.
+
+**Coverage limit.** The guard covers paths that reach the proxy. Paths excluded by the matcher (`_next/static`, `_next/image`, `favicon.ico`) are outside it, as before. The test proves the two sampled malformed URLs under `next dev`. The `next start` run belongs to 08-21, and it is not claimed here.
+
+The C13-boundary blocker is resolved, and this plan is no longer parked. STATE and ROADMAP are left to the orchestrator.
+
