@@ -83,7 +83,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 08-08-PLAN.md — CSP zero-violation E2E on the five acceptance pages, 404 and error cases (Wave 5)
+- [x] 08-08-PLAN.md — CSP zero-violation E2E on the five acceptance pages, 404 and error cases (Wave 5)
 - [ ] 08-09-PLAN.md — Non-root `app`, `worker`, `migrate` images; root-owned volume procedure (Wave 5)
 
 **Wave 6** *(blocked on Wave 5 completion)*

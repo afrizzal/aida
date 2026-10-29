@@ -137,5 +137,6 @@ Dicek 2026-11-09 08.40 WIB:
 | Waktu | Plan | Tujuan | Sebab |
 |---|---|---|---|
 | 2026-11-11 | 08-02 | `~/.Trash/aida-next-1794397380` | E2E `authz.spec.ts` gagal: dev server terjebak reload loop dan `/setup` tidak terhidrasi; sesudah dipindah, ulangan lolos 2/2 |
+| 2026-11-11 | 08-08 perbaikan 1 | `~/.Trash/aida-next-1794401825` | global setup E2E gagal dua kali: dev server me-reload `/setup` berulang (379 dan 366 GET tanpa POST); sesudah dipindah, csp.spec 10 lolos dan E2E penuh 219 lolos |
 
 Catatan terkait (2026-11-11, plan 08-01): `next dev` 16.4.6 membuat `AGENTS.md` di akar repo; eksekutor memindahkannya ke Trash (`~/.Trash/aida-AGENTS-md-<epoch>`), tidak di-commit, dan mematikan pembuatannya dengan `agentRules: false` di `next.config.ts` (`1f88eed`).
