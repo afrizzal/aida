@@ -5,7 +5,7 @@ milestone_name: Helpdesk & Projects
 current_phase: 14
 current_phase_name: projects-foundation
 status: Phase 8 split after plan review cycle 4 (owner decision 2026-11-11); Part A (dependencies, CSP, non-root, rate limits) to execute next, Part B (Docker test tooling, Phase 8.1) waits for the owner; Phases 9, 10 and 15 unparked; Phases 11, 12, 12.1, 12.2 and 14 verified human_needed
-stopped_at: Phase 8 Part A: 13 of 18 plans done; next 08-18 (wave 7), then 08-12, 08-13, 08-20 and the Part A gate 08-24, one plan per round
+stopped_at: Phase 8 Part A: 14 of 18 plans done (waves 1 to 7); next wave 8 (08-12, 08-13), then 08-20 and the Part A gate 08-24, one plan per round
 last_updated: "2026-11-11T11:10:00.000Z"
 last_activity: 2026-11-09
 last_activity_desc: Phase 14 closed to human_needed. 13 plans, code review in three parts with fix batches F1 and F2, three Codex diff rounds with fixes F3 to F5 (run decisions K69 to K73), final gate on 41b1597 (lint, typecheck, unit 838, integration without egress 1297, build exit 0; E2E one failure fixed in tests by a60d339, full E2E 209 passed; audit --prod exit 1 baseline; test:egress blocked O-1), verifier 7 of 7 with no code gap. Open for the owner: 14-o1, 14-o2, 14-o3

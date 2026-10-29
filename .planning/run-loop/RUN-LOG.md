@@ -1564,3 +1564,7 @@ Cek awal lolos. 08-10 selesai (`ff70f94`, `f4c66f6`, `4a0a1d0`, `345ce54`): help
 ## Putaran 08-exec-13 (2026-11-11)
 
 Cek awal lolos. 08-11 selesai (`470ca22`, `bb223a6`, `f843071`): limiter atomik (transaksi dan advisory lock per scope dan hash IP), `public-limits.ts` dengan `Retry-After` detik penuh di setiap 429, scope baru `status-attachment` 120 per menit, limiter dijalankan pertama di keempat route publik. Integration rate-limit-atomic 4 dan public-route-limits 5 (RED lebih dulu); typecheck dan lint exit 0. E2E tiga spec gagal dua kali di run eksekutor (global setup macet di `/setup`, pola cache `.next` basi yang sama); orkestrator memindahkan `.next` ke Trash (LAPORAN bagian 10) lalu menjalankan ulang: exit 0, 13 lolos, 1 skip. Pembersih run: 0 sisa. Berikutnya: 08-18.
+
+## Putaran 08-exec-14 (2026-11-11)
+
+Cek awal lolos. 08-18 selesai (`bddae40`, `aec5466`, `fa2349d`): `TRUSTED_PROXY_HOPS` diteruskan ke service app (`docker-compose.yml`), baris kosong di `.env.example`, kontrak IP klien dan CDN di `docs/OPERATIONS.md` dan halaman environment website. Render compose (`config --quiet`, tanpa daemon) exit 0, cek docs exit 0, unit client-ip 32. Cek `git status .env` di plan diblokir hook pembaca rahasia, dilewati (`.env` tidak dibuka). Belum terverifikasi: perilaku `trusted_proxies` Caddy sungguhan (08-22, Fase 8.1). Wave 7 selesai. Berikutnya: 08-12.
