@@ -1546,3 +1546,5 @@ Cek awal lolos. 08-08 diparkir sementara (`c4b5486`, `631c2de`, `24aa9a9`, `38aa
 ## Putaran 08-08x-1 (2026-11-11)
 
 Cek awal lolos (host 22 GiB). Konsultasi Codex wajib untuk plan buntu 08-08 (C13-boundary): pertanyaan `codex/fase08-0808-tanya.md`.
+
+Jawaban Codex 08-08x (`codex/fase08-0808-jawab.md`; model gpt-6.1-terra, effort xhigh): rekomendasi guard encoding rusak di awal `proxy()` dengan 400 non-HTML dan CSP statis ketat, dan test C13-boundary yang diperketat. Opsi (a) melemahkan AIDA-28, opsi (c) tidak dibuktikan E2E tanpa Caddy. K125: perbaikan 1 mengikuti rekomendasi Codex. Ekspor dihapus.
