@@ -204,20 +204,46 @@ test.describe("CSP: anonymous public pages", () => {
     expectCspHeader(response.headers());
   });
 
+  // K125: a malformed percent-encoded path reaches the proxy, whose first branch answers it with a
+  // plain-text 400 under a static deny-all policy. Next.js would otherwise render its HTML 400 page
+  // with framework scripts and without the proxy's response headers (the original 08-08 blocker).
   test("C13-boundary: an error produced before the proxy is recorded", async ({ page }) => {
-    const response = await page.request.get("/status/%E0%A4%A");
-    const headers = response.headers();
-    const contentType = headers["content-type"] ?? "";
-    const body = await response.text();
-    const hasCsp = Boolean(headers["content-security-policy"]);
-    const hasScript = body.includes("<script");
-    console.log(
-      `PRE-PROXY-BOUNDARY ${JSON.stringify({ status: response.status(), contentType, hasCsp, hasScript })}`,
-    );
-    if (!hasCsp) {
-      expect(contentType.startsWith("text/html")).toBe(false);
-      expect(hasScript).toBe(false);
+    for (const urlPath of ["/status/%E0%A4%A", "/status/%C3%28"]) {
+      const response = await page.request.get(urlPath);
+      const headers = response.headers();
+      const contentType = headers["content-type"] ?? "";
+      const body = await response.text();
+      const hasCsp = Boolean(headers["content-security-policy"]);
+      const hasScript = body.includes("<script");
+      console.log(
+        `PRE-PROXY-BOUNDARY ${JSON.stringify({ urlPath, status: response.status(), contentType, hasCsp, hasScript })}`,
+      );
+      expect(response.status(), urlPath).toBe(400);
+      expect(contentType, urlPath).toBe("text/plain; charset=utf-8");
+      expect(contentType.includes("html"), urlPath).toBe(false);
+      expect(hasScript, urlPath).toBe(false);
+      expect(headers["content-security-policy"], urlPath).toBe(
+        "default-src 'none'; frame-ancestors 'none'",
+      );
+      expect(headers["content-security-policy-report-only"], urlPath).toBeUndefined();
+      expect(headers["x-content-type-options"], urlPath).toBe("nosniff");
+      expect(headers["x-frame-options"], urlPath).toBe("DENY");
+      expect(headers["referrer-policy"], urlPath).toBe("no-referrer");
     }
+  });
+
+  test("C13-boundary control: a valid escaped path gets the normal nonce policy", async ({
+    page,
+  }) => {
+    const response = await page.request.get("/status/abc%20def");
+    expect(response.status()).not.toBe(400);
+    const headers = response.headers();
+    expectCspHeader(headers);
+    expect(headers["content-security-policy"]).not.toBe(
+      "default-src 'none'; frame-ancestors 'none'",
+    );
+    expect(headers["referrer-policy"]).toBe("no-referrer");
+    expect(headers["x-content-type-options"]).toBe("nosniff");
   });
 });
 
