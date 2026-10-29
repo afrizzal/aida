@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod/v4";
 import { prisma } from "@/lib/db";
 import { checkRateLimit } from "@/lib/rate-limit/check-rate-limit";
+import { getRateLimitIdentity } from "@/lib/rate-limit/client-ip";
 import { recordCsat } from "@/lib/tickets/record-csat";
 
 export const runtime = "nodejs";
@@ -43,8 +44,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
     return NextResponse.json({ ok: true }, { status: 200 });
   }
 
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
-  if (!(await checkRateLimit("status-csat", ip))) {
+  if (!(await checkRateLimit("status-csat", getRateLimitIdentity(request)))) {
     return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
 

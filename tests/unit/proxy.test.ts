@@ -227,3 +227,36 @@ describe("proxy — K125 malformed path encoding guard", () => {
     expect(unauthorized.status).toBe(401);
   });
 });
+
+describe("proxy — D-18 client identity header for Better Auth", () => {
+  it("P (D-18): overwrites a client-sent x-aida-client-ip with the helper's identity", async () => {
+    const request = new NextRequest("http://localhost/api/auth/session", {
+      headers: { "x-aida-client-ip": "9.9.9.9", "x-forwarded-for": "203.0.113.5" },
+    });
+    const response = proxy(request);
+    expect(response.headers.get("x-middleware-request-x-aida-client-ip")).toBe("203.0.113.5");
+  });
+
+  it("Q (D-18): without X-Forwarded-For the header is the shared bucket, whatever the client sent", async () => {
+    const request = new NextRequest("http://localhost/api/auth/session", {
+      headers: { "x-aida-client-ip": "9.9.9.9" },
+    });
+    const response = proxy(request);
+    expect(response.headers.get("x-middleware-request-x-aida-client-ip")).toBe(
+      "shared:no-client-ip",
+    );
+  });
+
+  it("R (D-18): the same overwrite holds on an authenticated page request", async () => {
+    const request = new NextRequest("http://localhost/tickets", {
+      headers: {
+        cookie: "better-auth.session_token=abc",
+        "x-aida-client-ip": "9.9.9.9",
+        "x-forwarded-for": "198.51.100.66, 203.0.113.5",
+      },
+    });
+    const response = proxy(request);
+    expect(response.status).not.toBe(307);
+    expect(response.headers.get("x-middleware-request-x-aida-client-ip")).toBe("203.0.113.5");
+  });
+});

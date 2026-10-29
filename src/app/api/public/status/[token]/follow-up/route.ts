@@ -7,6 +7,7 @@ import { saveStagedFiles } from "@/lib/attachments/staged-files";
 import { prisma } from "@/lib/db";
 import { renderMarkdown } from "@/lib/markdown/render";
 import { checkRateLimit } from "@/lib/rate-limit/check-rate-limit";
+import { getRateLimitIdentity } from "@/lib/rate-limit/client-ip";
 import {
   ReplyTicketChangedError,
   reopenOnCustomerReply,
@@ -47,8 +48,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
     return NextResponse.json({ ok: true }, { status: 200 });
   }
 
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
-  if (!(await checkRateLimit("status-follow-up", ip))) {
+  if (!(await checkRateLimit("status-follow-up", getRateLimitIdentity(request)))) {
     return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
 

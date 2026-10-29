@@ -1,5 +1,6 @@
 import { getSessionCookie } from "better-auth/cookies";
 import { type NextRequest, NextResponse } from "next/server";
+import { CLIENT_IP_HEADER, getClientIp } from "./lib/rate-limit/client-ip";
 import { buildCsp, CSP_NONCE_HEADER, createNonce, securityHeadersFor } from "./lib/security/csp";
 
 const PUBLIC_PREFIXES = [
@@ -37,6 +38,11 @@ const BLOCKED_PUBLIC_ROUTES = ["/api/auth/sign-up"];
 // Both request headers are overwritten here, never merged, because a client could otherwise send
 // its own `x-nonce` or a permissive policy and have the app trust it (D-12). The nonce is created
 // inside this call, never at module level, so two requests can never share one.
+//
+// Client identity (D-18, AIDA-29): the same overwrite applies to `x-aida-client-ip`. The proxy is
+// its only writer: it is set from getClientIp() on every forwarded request, replacing anything a
+// client sent, and Better Auth reads only this header (src/lib/auth.ts,
+// advanced.ipAddress.ipAddressHeaders), so its limiter keys on the same identity as the routes.
 function forwardWithSecurityHeaders(request: NextRequest, pathname: string) {
   const nonce = createNonce();
   const csp = buildCsp(nonce, { isDev: process.env.NODE_ENV === "development" });
@@ -44,6 +50,7 @@ function forwardWithSecurityHeaders(request: NextRequest, pathname: string) {
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set(CSP_NONCE_HEADER, nonce);
   requestHeaders.set("content-security-policy", csp);
+  requestHeaders.set(CLIENT_IP_HEADER, getClientIp(request));
 
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set("Content-Security-Policy", csp);
