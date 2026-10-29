@@ -102,6 +102,55 @@ docker compose build
 docker compose up -d
 ```
 
+### Upgrading an install whose containers ran as root
+
+From this release, `app`, `worker` and `migrate` run as the image's built-in `node` user (UID/GID 1000) instead of root. A fresh install needs nothing: a new `uploads_data` volume takes its ownership from the image on first mount. An `uploads_data` volume written by an older release is owned by root, so new uploads fail with a permission error until its ownership changes. Do this once, in order:
+
+1. Before pulling the new release, still on the old images, take a backup:
+
+   ```bash
+   ./scripts/backup.sh ./backups
+   ```
+
+2. Pull and build the new release:
+
+   ```bash
+   git pull
+   docker compose build
+   ```
+
+3. Stop the services that write uploads:
+
+   ```bash
+   docker compose stop app worker
+   ```
+
+4. Find the real volume name. Compose prefixes it with the project name (for example `aida_uploads_data`); make sure the one you change is AIDA's:
+
+   ```bash
+   docker volume ls --filter name=uploads_data
+   ```
+
+5. **Warning: the next command recursively changes the owner of every file in the uploads volume. Run it only after the backup in step 1 has finished, and only against AIDA's uploads volume.** It runs a one-off container of the new image as root, mounting the volume at `/data/uploads`:
+
+   ```bash
+   docker compose run --rm --no-deps --user 0:0 --entrypoint chown app -R 1000:1000 /data/uploads
+   ```
+
+6. Verify the result. This must print `1000:1000` and nothing else (the second command prints the first file not owned by UID 1000, if any):
+
+   ```bash
+   docker compose run --rm --no-deps --entrypoint sh app -c 'stat -c "%u:%g" /data/uploads; find /data/uploads ! -user 1000 | head -n 1'
+   ```
+
+7. Start the stack:
+
+   ```bash
+   docker compose up -d
+   ```
+
+The procedure is idempotent: running steps 5 and 6 again changes nothing and prints the same result. There is deliberately no automatic fix: no root entrypoint, `su-exec` wrapper or init container changes operator data without the operator's consent.
+
 ## Logs
 
 ```bash
@@ -179,6 +228,9 @@ Demo mode (AIDA-22) turns a fresh `docker compose up` into an instantly explorab
 **The seeded AI results are stored data, not live model output.** Every seeded triage tag, drafted-reply audit row, and Insight run is stamped `provider: "demo"` / `model: "demo-seed"` — the UI renders it exactly like a real AI result would, but it was written directly by the seed script so every AI surface looks populated even with **zero LLM configured**. Turning on a real provider in Settings → AI does not touch this seeded data; it only affects new, live AI actions (Generate draft, Generate insights, Re-run triage) from that point forward.
 
 ## Troubleshooting
+
+**Uploads fail with a permission error after upgrading.**
+The `uploads_data` volume was written by an older release whose containers ran as root, while `app` and `worker` now run as the `node` user (UID 1000). Follow [Upgrading an install whose containers ran as root](#upgrading-an-install-whose-containers-ran-as-root): back up first, then change the volume's owner to `1000:1000` once and verify it.
 
 **`app` is unhealthy but `db` is up.**
 Check `DATABASE_URL` construction (Compose builds it from `POSTGRES_*`; a local `.env` override can conflict). Check the `migrate` service actually completed: `docker compose ps migrate` should show `Exited (0)`; if it exited non-zero, `app`/`worker` never start (they're gated on `migrate`'s success) — read `docker compose logs migrate`.
