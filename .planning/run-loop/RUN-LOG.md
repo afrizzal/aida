@@ -1552,3 +1552,7 @@ Jawaban Codex 08-08x (`codex/fase08-0808-jawab.md`; model gpt-6.1-terra, effort 
 ## Putaran 08-08x-2 (2026-11-11)
 
 Perbaikan 1 (K125) berhasil: guard encoding rusak di awal `proxy()` (path saja, dalam `try/catch`) mengembalikan 400 `text/plain` dengan CSP `default-src 'none'; frame-ancestors 'none'`, `nosniff`, `DENY`, `no-referrer`. Unit proxy 20 (RED lebih dulu, 3 gagal), `pnpm test` 977, typecheck dan lint exit 0, csp.spec 10 lolos, `pnpm test:e2e` penuh exit 0 (219 lolos, 1 skip). Dua run awal gagal di global setup karena cache dev `.next` (reload `/setup` berulang); `.next` dipindah ke Trash, dicatat di LAPORAN bagian 10. 08-08 ditutup. Pembersih run: 0 sisa. Berikutnya: 08-09.
+
+## Putaran 08-exec-11 (2026-11-11)
+
+Cek awal lolos (host 21 GiB). 08-09 selesai (`b196c58`, `f91e7cd`, `0163283`, `7e4e3f2`): image `app`, `worker`, `migrate` non-root; telemetri mati di image; jalur upgrade volume uploads lama didokumentasikan; skrip cek image rule J `scripts/test-image-check.ts`. Kedua cek image (runner, builder) `blocked (space)`: VM 13,9 GiB di bawah 20 GiB; tidak ada build dan tidak ada yang dihapus; dry run pembersih 0 sisa. Unit container-config 15 dan test-image-check 57 (RED lebih dulu); `pnpm test` 64 berkas, 1049; typecheck, lint, build host exit 0. Separuh build-path AIDA-27 dan AIDA-32 tetap terbuka (0a2). Wave 5 selesai. Berikutnya: 08-10.
