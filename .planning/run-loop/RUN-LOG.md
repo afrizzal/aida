@@ -1542,3 +1542,7 @@ Cek awal lolos. 08-04 selesai (`216a33b`, `3f48e65`, `506208d`): `shadcn` ke dev
 ## Putaran 08-exec-10 (2026-11-11)
 
 Cek awal lolos. 08-08 diparkir sementara (`c4b5486`, `631c2de`, `24aa9a9`, `38aa527` wip(parkir), `a8aa43b`): csp.spec 8 dari 9 lolos; dua pelanggaran nyata diperbaiki tanpa melonggarkan CSP (hash style statis sonner; nonce ke style scroll-lock Radix lewat `setNonce`); filter khusus untuk chunk dev-overlay Next.js di spec saja (kebijakan tidak berubah). C13-boundary gagal: halaman HTML 400 decode-error Next.js tanpa CSP. `pnpm test:e2e` penuh exit 1 (217 lolos, 1 skip, 1 gagal); unit 972, typecheck dan lint exit 0. Piagam mewajibkan 2 perbaikan dan 1 konsultasi Codex sebelum parkir final; butir antrean baru 08-08x (konsultasi Codex) dikerjakan berikutnya. Pembersih run: 0 sisa.
+
+## Putaran 08-08x-1 (2026-11-11)
+
+Cek awal lolos (host 22 GiB). Konsultasi Codex wajib untuk plan buntu 08-08 (C13-boundary): pertanyaan `codex/fase08-0808-tanya.md`.
