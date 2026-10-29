@@ -15,7 +15,7 @@ const PROD_POLICY_ABC =
   "default-src 'self'; " +
   "script-src 'self' 'nonce-abc' 'strict-dynamic'; " +
   "style-src 'self' 'unsafe-inline'; " +
-  "style-src-elem 'self' 'nonce-abc'; " +
+  "style-src-elem 'self' 'nonce-abc' 'sha256-CIxDM5jnsGiKqXs2v7NKCY5MzdR9gu6TtiMJrDw29AY=' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; " +
   "style-src-attr 'unsafe-inline'; " +
   "img-src 'self' data: blob:; " +
   "font-src 'self'; " +

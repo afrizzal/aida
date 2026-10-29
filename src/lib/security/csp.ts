@@ -24,6 +24,17 @@ export const CSP_NONCE_HEADER = "x-nonce";
 /** Paths whose URL carries a status token, so the token must never leak through `Referer` (D-14). */
 export const NO_REFERRER_PATH_PREFIXES = ["/status", "/api/public/status"] as const;
 
+/**
+ * sonner 2.0.7 injects one static <style> at module load (`__insertCSS` in dist/index.mjs) and
+ * offers no nonce option, so the strict style-src-elem blocked it (plan 08-08 E2E). Its CSS is a
+ * fixed string, so a hash allows exactly that text and nothing else. The element is appended to
+ * <head> empty before its text node, hence the empty-string hash as well. Proven need only
+ * (D-11); tests/unit/csp-style-hashes.test.ts recomputes the hash from the installed sonner, so a
+ * version bump that changes the CSS fails loudly instead of silently breaking toasts.
+ */
+export const SONNER_STYLE_HASH = "'sha256-CIxDM5jnsGiKqXs2v7NKCY5MzdR9gu6TtiMJrDw29AY='";
+export const EMPTY_STYLE_HASH = "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='";
+
 /** Base64 of 16 cryptographically random bytes (24 characters including padding). */
 export function createNonce(): string {
   const bytes = new Uint8Array(16);
@@ -42,7 +53,7 @@ export function buildCsp(nonce: string, opts: { isDev: boolean }): string {
     ["default-src", ["'self'"]],
     ["script-src", scriptSrc],
     ["style-src", ["'self'", "'unsafe-inline'"]],
-    ["style-src-elem", ["'self'", `'nonce-${nonce}'`]],
+    ["style-src-elem", ["'self'", `'nonce-${nonce}'`, SONNER_STYLE_HASH, EMPTY_STYLE_HASH]],
     ["style-src-attr", ["'unsafe-inline'"]],
     ["img-src", ["'self'", "data:", "blob:"]],
     ["font-src", ["'self'"]],
