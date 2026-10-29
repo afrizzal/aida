@@ -1560,3 +1560,7 @@ Cek awal lolos (host 21 GiB). 08-09 selesai (`b196c58`, `f91e7cd`, `0163283`, `7
 ## Putaran 08-exec-12 (2026-11-11)
 
 Cek awal lolos. 08-10 selesai (`ff70f94`, `f4c66f6`, `4a0a1d0`, `345ce54`): helper `src/lib/rate-limit/client-ip.ts` (XFF dari kanan, `TRUSTED_PROXY_HOPS` default 0 maks 10, nilai rusak ke satu bucket bersama); Caddyfile `header_up X-Forwarded-For {remote_host}` (berkas saja); intake, csat, follow-up dan Better Auth memakai `x-aida-client-ip` yang ditimpa proxy. Unit 1084; typecheck dan lint exit 0; integration `auth-ip-source` 3 lolos (run 1 ada galat teardown, diperbaiki di kode test). Bukti HTTP sungguhan (08-21) dan Caddy sungguhan (08-22) milik Fase 8.1. Pembersih run: 0 sisa. Berikutnya: 08-11.
+
+## Putaran 08-exec-13 (2026-11-11)
+
+Cek awal lolos. 08-11 selesai (`470ca22`, `bb223a6`, `f843071`): limiter atomik (transaksi dan advisory lock per scope dan hash IP), `public-limits.ts` dengan `Retry-After` detik penuh di setiap 429, scope baru `status-attachment` 120 per menit, limiter dijalankan pertama di keempat route publik. Integration rate-limit-atomic 4 dan public-route-limits 5 (RED lebih dulu); typecheck dan lint exit 0. E2E tiga spec gagal dua kali di run eksekutor (global setup macet di `/setup`, pola cache `.next` basi yang sama); orkestrator memindahkan `.next` ke Trash (LAPORAN bagian 10) lalu menjalankan ulang: exit 0, 13 lolos, 1 skip. Pembersih run: 0 sisa. Berikutnya: 08-18.

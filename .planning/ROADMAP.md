@@ -92,7 +92,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
-- [ ] 08-11-PLAN.md — Atomic limiter, limit before parsing and token lookup, attachment throttle (Wave 7)
+- [x] 08-11-PLAN.md — Atomic limiter, limit before parsing and token lookup, attachment throttle (Wave 7)
 - [ ] 08-18-PLAN.md — Client-IP deployment contract, CDN contract, `TRUSTED_PROXY_HOPS` plumbing (Wave 7)
 
 **Wave 8** *(blocked on Wave 7 completion)*
