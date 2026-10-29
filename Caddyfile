@@ -10,6 +10,10 @@
     max_size 12MB
   }
   reverse_proxy app:3000 {
+    # The app trusts X-Forwarded-For only because Caddy overwrites it with the TCP peer on
+    # every request (D-16); a client-sent value never reaches the app. Do not put another
+    # proxy in front of Caddy without reading docs/OPERATIONS.md, "Client IP and reverse proxies".
+    header_up X-Forwarded-For {remote_host}
     header_up X-Forwarded-Proto {scheme}
     header_up X-Forwarded-Host {host}
   }

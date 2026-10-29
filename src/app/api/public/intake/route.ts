@@ -5,6 +5,7 @@ import { ALLOWED_MIME, MAX_BYTES, MAX_TOTAL_REQUEST_BYTES } from "@/lib/attachme
 import { buildStorageKey, localFileStorage } from "@/lib/attachments/local-file-storage";
 import { prisma } from "@/lib/db";
 import { checkRateLimit } from "@/lib/rate-limit/check-rate-limit";
+import { getRateLimitIdentity } from "@/lib/rate-limit/client-ip";
 import { createTicket } from "@/lib/tickets/create-ticket";
 
 // File-bearing endpoints must run on the Node.js runtime (Buffer/node:fs), never Edge.
@@ -37,8 +38,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, token: null }, { status: 200 });
   }
 
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
-  if (!(await checkRateLimit("public-intake", ip))) {
+  if (!(await checkRateLimit("public-intake", getRateLimitIdentity(request)))) {
     return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
 
