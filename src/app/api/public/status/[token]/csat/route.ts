@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod/v4";
 import { prisma } from "@/lib/db";
-import { checkRateLimit } from "@/lib/rate-limit/check-rate-limit";
+import { consumeRateLimit } from "@/lib/rate-limit/check-rate-limit";
 import { getRateLimitIdentity } from "@/lib/rate-limit/client-ip";
+import { PUBLIC_RATE_LIMITS, rateLimitedResponse } from "@/lib/rate-limit/public-limits";
 import { recordCsat } from "@/lib/tickets/record-csat";
 
 export const runtime = "nodejs";
@@ -14,6 +15,14 @@ const csatSchema = z.object({
 
 export async function POST(request: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
+
+  // Limit before the token lookup and the body parse, so tokens cannot be probed at full
+  // speed and bodies cost nothing once over quota; honeypot hits count toward it (D-22).
+  const { scope, max, windowMs } = PUBLIC_RATE_LIMITS.csat;
+  const limit = await consumeRateLimit(scope, getRateLimitIdentity(request), { max, windowMs });
+  if (!limit.allowed) {
+    return rateLimitedResponse(limit.retryAfterSeconds);
+  }
 
   // Unauthenticated bearer-token flow — the token IS the authorization; bare prisma,
   // never scopedDb (no session/org context exists on this route).
@@ -42,10 +51,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
   // Honeypot (D-20): silent-success on trip, never a distinct status/error.
   if (((form.get("company_website") as string | null) ?? "") !== "") {
     return NextResponse.json({ ok: true }, { status: 200 });
-  }
-
-  if (!(await checkRateLimit("status-csat", getRateLimitIdentity(request)))) {
-    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
 
   const rawScore = form.get("score");

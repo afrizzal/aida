@@ -4,8 +4,9 @@ import { z } from "zod/v4";
 import { ALLOWED_MIME, MAX_BYTES, MAX_TOTAL_REQUEST_BYTES } from "@/lib/attachments/constants";
 import { buildStorageKey, localFileStorage } from "@/lib/attachments/local-file-storage";
 import { prisma } from "@/lib/db";
-import { checkRateLimit } from "@/lib/rate-limit/check-rate-limit";
+import { consumeRateLimit } from "@/lib/rate-limit/check-rate-limit";
 import { getRateLimitIdentity } from "@/lib/rate-limit/client-ip";
+import { PUBLIC_RATE_LIMITS, rateLimitedResponse } from "@/lib/rate-limit/public-limits";
 import { createTicket } from "@/lib/tickets/create-ticket";
 
 // File-bearing endpoints must run on the Node.js runtime (Buffer/node:fs), never Edge.
@@ -19,6 +20,14 @@ const intakeSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  // Limit first, before the size check and the body parse, so an over-quota client costs no
+  // parsing; honeypot hits count toward the quota (D-22).
+  const { scope, max, windowMs } = PUBLIC_RATE_LIMITS.intake;
+  const limit = await consumeRateLimit(scope, getRateLimitIdentity(request), { max, windowMs });
+  if (!limit.allowed) {
+    return rateLimitedResponse(limit.retryAfterSeconds);
+  }
+
   const contentLength = Number(request.headers.get("content-length") ?? 0);
   if (contentLength > MAX_TOTAL_REQUEST_BYTES) {
     return NextResponse.json({ error: "payload_too_large" }, { status: 413 });
@@ -36,10 +45,6 @@ export async function POST(request: Request) {
   // never tip off the bot with a different status code or error body.
   if (((form.get("company_website") as string | null) ?? "") !== "") {
     return NextResponse.json({ ok: true, token: null }, { status: 200 });
-  }
-
-  if (!(await checkRateLimit("public-intake", getRateLimitIdentity(request)))) {
-    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
 
   const parsed = intakeSchema.safeParse({

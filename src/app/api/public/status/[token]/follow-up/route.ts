@@ -6,8 +6,9 @@ import { buildStorageKey, localFileStorage } from "@/lib/attachments/local-file-
 import { saveStagedFiles } from "@/lib/attachments/staged-files";
 import { prisma } from "@/lib/db";
 import { renderMarkdown } from "@/lib/markdown/render";
-import { checkRateLimit } from "@/lib/rate-limit/check-rate-limit";
+import { consumeRateLimit } from "@/lib/rate-limit/check-rate-limit";
 import { getRateLimitIdentity } from "@/lib/rate-limit/client-ip";
+import { PUBLIC_RATE_LIMITS, rateLimitedResponse } from "@/lib/rate-limit/public-limits";
 import {
   ReplyTicketChangedError,
   reopenOnCustomerReply,
@@ -23,6 +24,14 @@ const followUpSchema = z.object({
 
 export async function POST(request: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
+
+  // Limit before the token lookup and the body parse, so tokens cannot be probed at full
+  // speed and bodies cost nothing once over quota; honeypot hits count toward it (D-22).
+  const { scope, max, windowMs } = PUBLIC_RATE_LIMITS.followUp;
+  const limit = await consumeRateLimit(scope, getRateLimitIdentity(request), { max, windowMs });
+  if (!limit.allowed) {
+    return rateLimitedResponse(limit.retryAfterSeconds);
+  }
 
   // Unauthenticated bearer-token flow — the token IS the authorization; bare prisma,
   // never scopedDb (no session/org context exists on this route).
@@ -46,10 +55,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
   // never tip off the bot with a different status code or error body.
   if (((form.get("company_website") as string | null) ?? "") !== "") {
     return NextResponse.json({ ok: true }, { status: 200 });
-  }
-
-  if (!(await checkRateLimit("status-follow-up", getRateLimitIdentity(request)))) {
-    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
 
   const parsed = followUpSchema.safeParse({ message: form.get("message") });
