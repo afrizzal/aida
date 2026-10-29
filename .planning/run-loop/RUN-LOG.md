@@ -1556,3 +1556,7 @@ Perbaikan 1 (K125) berhasil: guard encoding rusak di awal `proxy()` (path saja, 
 ## Putaran 08-exec-11 (2026-11-11)
 
 Cek awal lolos (host 21 GiB). 08-09 selesai (`b196c58`, `f91e7cd`, `0163283`, `7e4e3f2`): image `app`, `worker`, `migrate` non-root; telemetri mati di image; jalur upgrade volume uploads lama didokumentasikan; skrip cek image rule J `scripts/test-image-check.ts`. Kedua cek image (runner, builder) `blocked (space)`: VM 13,9 GiB di bawah 20 GiB; tidak ada build dan tidak ada yang dihapus; dry run pembersih 0 sisa. Unit container-config 15 dan test-image-check 57 (RED lebih dulu); `pnpm test` 64 berkas, 1049; typecheck, lint, build host exit 0. Separuh build-path AIDA-27 dan AIDA-32 tetap terbuka (0a2). Wave 5 selesai. Berikutnya: 08-10.
+
+## Putaran 08-exec-12 (2026-11-11)
+
+Cek awal lolos. 08-10 selesai (`ff70f94`, `f4c66f6`, `4a0a1d0`, `345ce54`): helper `src/lib/rate-limit/client-ip.ts` (XFF dari kanan, `TRUSTED_PROXY_HOPS` default 0 maks 10, nilai rusak ke satu bucket bersama); Caddyfile `header_up X-Forwarded-For {remote_host}` (berkas saja); intake, csat, follow-up dan Better Auth memakai `x-aida-client-ip` yang ditimpa proxy. Unit 1084; typecheck dan lint exit 0; integration `auth-ip-source` 3 lolos (run 1 ada galat teardown, diperbaiki di kode test). Bukti HTTP sungguhan (08-21) dan Caddy sungguhan (08-22) milik Fase 8.1. Pembersih run: 0 sisa. Berikutnya: 08-11.

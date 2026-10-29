@@ -88,7 +88,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 08-10-PLAN.md — Trusted-proxy-aware client-IP helper, Caddy header, Better Auth alignment (Wave 6)
+- [x] 08-10-PLAN.md — Trusted-proxy-aware client-IP helper, Caddy header, Better Auth alignment (Wave 6)
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
