@@ -102,3 +102,48 @@ describe("Dockerfile runner stage (D-08, D-27, AIDA-27, AIDA-32)", () => {
     }
   });
 });
+
+/** The text block of one top-level compose service (indented two spaces under `services:`). */
+function composeService(rel: string, name: string): string {
+  const text = read(rel);
+  const start = text.search(new RegExp(`^  ${name}:\\s*$`, "m"));
+  if (start < 0) throw new Error(`${rel} has no service ${name}`);
+  const rest = text.slice(start + 1);
+  const next = rest.search(/^ {2}[a-z][\w-]*:\s*$|^\S/m);
+  return next < 0 ? text.slice(start) : text.slice(start, start + 1 + next);
+}
+
+const MIGRATE_COMMAND =
+  'command: ["node", "node_modules/prisma/build/index.js", "migrate", "deploy"]';
+
+describe("non-root migrate through the builder stage (D-08, D-27)", () => {
+  it("D-08: the builder stage's last instruction is USER node", () => {
+    const builder = stage("builder");
+    expect(builder[builder.length - 1]).toBe("USER node");
+  });
+
+  it("D-08: the Prisma CLI entry the compose files call is the package's own bin.prisma", () => {
+    const pkg = JSON.parse(read("node_modules/prisma/package.json")) as { bin: { prisma: string } };
+    expect(`node_modules/prisma/${pkg.bin.prisma}`).toBe("node_modules/prisma/build/index.js");
+  });
+
+  for (const file of ["docker-compose.yml", "docker-compose.egress-test.yml"]) {
+    it(`D-08: ${file} migrate calls the Prisma CLI through node, not pnpm or corepack`, () => {
+      const migrate = composeService(file, "migrate");
+      expect(migrate).toContain(MIGRATE_COMMAND);
+      expect(migrate).not.toMatch(/command:\s*\[\s*"(pnpm|corepack|npx)"/);
+    });
+
+    it(`D-27: ${file} migrate keeps CHECKPOINT_DISABLE: "1"`, () => {
+      expect(composeService(file, "migrate")).toContain('CHECKPOINT_DISABLE: "1"');
+    });
+  }
+
+  it("J: the egress-test migrate keeps J1's run-tagged image and labels on the service and its build", () => {
+    const migrate = composeService("docker-compose.egress-test.yml", "migrate");
+    expect(migrate).toContain(
+      "image: aida-test-egress-migrate:${AIDA_TEST_RUN_ID:?set AIDA_TEST_RUN_ID}",
+    );
+    expect(migrate.match(/labels: \*test-labels/g)?.length).toBe(2);
+  });
+});

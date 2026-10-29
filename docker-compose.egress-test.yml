@@ -101,7 +101,10 @@ services:
       labels: *test-labels
     image: aida-test-egress-migrate:${AIDA_TEST_RUN_ID:?set AIDA_TEST_RUN_ID}
     labels: *test-labels
-    command: ["pnpm", "prisma", "migrate", "deploy"]
+    # Runs as the non-root `node` user of the builder stage (D-08). The Prisma CLI is called
+    # through node, not pnpm: corepack's pnpm download lives in root's cache at build time, so a
+    # non-root runtime would fetch pnpm from the registry (egress, and a failure offline).
+    command: ["node", "node_modules/prisma/build/index.js", "migrate", "deploy"]
     depends_on:
       db:
         condition: service_healthy

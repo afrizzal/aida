@@ -52,6 +52,12 @@ RUN pnpm exec esbuild src/lib/worker/index.ts \
     --outfile=dist/worker.mjs && \
     PRISMA_STORE=$(find /app/node_modules/.pnpm -maxdepth 1 -type d -name "@prisma+client@7.8.0*" | head -1) && \
     cp -rL "${PRISMA_STORE}/node_modules/@prisma" /tmp/prisma-scope
+# Non-root runtime for containers started from this stage (D-08, AIDA-27): the one-shot
+# `migrate` service and the egress-test `runner` use `target: builder`. Every build step above
+# already ran as root; at runtime the stage only reads files, and the Prisma CLI writes nothing
+# under /app. migrate calls the CLI through node (docker-compose.yml), not through corepack's
+# pnpm, whose download sits in root's cache.
+USER node
 
 # ---- Stage 4: runner ----
 # Minimal production image shared by app (node server.js) and worker (node dist/worker.cjs)
