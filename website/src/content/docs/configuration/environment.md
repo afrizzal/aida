@@ -25,11 +25,17 @@ This table covers exactly the variables in `.env.example` — nothing more, noth
 | `ADMIN_NAME` | No | *(blank)* | Display name for the auto-created admin above. |
 | `UPLOADS_DIR` | Yes | `/data/uploads` | Filesystem path for stored attachments. In Docker this is the `uploads_data` volume mount — don't change it unless you also change the volume mount in `docker-compose.yml`. |
 | `RATE_LIMIT_PEPPER` | Yes | — | Salts the per-IP hash used by the public-intake rate limiter (raw IPs are never stored). Generate with `openssl rand -base64 32`. |
+| `TRUSTED_PROXY_HOPS` | No | *(blank, meaning 0)* | Advanced. Number of trusted proxy addresses at the right end of X-Forwarded-For, 0 to 10. Leave blank behind the shipped Caddy; set only with a CDN in front of Caddy, see [Client IP and reverse proxies](https://github.com/afrizzal/aida/blob/master/docs/OPERATIONS.md#client-ip-and-reverse-proxies). An invalid value puts every client in one shared rate-limit bucket. |
 | `APP_ENCRYPTION_KEY` | Yes (once credentials saved) | — | AES-256-GCM key encrypting IMAP/SMTP and LLM provider secrets at rest. The app boots without it, but saving any credential in Settings requires it. Generate with `openssl rand -base64 32`. |
 | `DEMO_MODE` | No | *(blank)* | When exactly `true` **and** the database has zero tickets, auto-creates a demo org/admin/agent and loads the fictional demo dataset at boot. See [Try AIDA with demo data](/aida/getting-started/demo-mode/). Never enable on an internet-facing instance. |
 | `DEMO_ADMIN_EMAIL` | No | `admin@demo.aida.test` | Email for the auto-created demo admin account. Only takes effect when `DEMO_MODE=true`. |
 | `DEMO_ADMIN_PASSWORD` | No | `aida-demo-2026` | Password for the auto-created demo admin (and demo agent) account. Only takes effect when `DEMO_MODE=true`. |
 | `DEMO_AGENT_EMAIL` | No | `agent@demo.aida.test` | Email for the auto-created demo agent account. Only takes effect when `DEMO_MODE=true`. |
+
+AIDA trusts X-Forwarded-For only because the shipped Caddy overwrites it with the address of the
+connecting peer. Anyone putting a CDN or another proxy in front of Caddy must follow
+[Client IP and reverse proxies](https://github.com/afrizzal/aida/blob/master/docs/OPERATIONS.md#client-ip-and-reverse-proxies) in the operations guide before setting
+`TRUSTED_PROXY_HOPS`.
 
 ## Generate your secrets
 

@@ -186,7 +186,70 @@ Failure (HTTP 503, database unreachable):
 
 `worker.lastRunAt` is the timestamp the worker's heartbeat job last wrote. **A stale `lastRunAt` (not advancing over several minutes) means the worker process is down even though the app answers 200** — check `docker compose ps worker` and `docker compose logs worker`. If no heartbeat has ever run, the field reads `{"status":"no heartbeat yet"}` instead of a timestamp — expected briefly right after startup.
 
-The compose healthcheck for `app` deliberately targets `http://127.0.0.1:3000/api/health` rather than the `localhost` equivalent — Alpine Linux resolves the hostname `localhost` to `::1` (IPv6) while Next.js listens on `0.0.0.0` (IPv4 only), so that hostname inside the container silently fails to connect. This is an internal container-to-container detail; from the host, always use the Caddy-fronted `http://localhost/api/health` shown above, never port 3000 directly (it isn't published to the host).
+The compose healthcheck for `app` deliberately targets `http://127.0.0.1:3000/api/health` rather than the `localhost` equivalent — Alpine Linux resolves the hostname `localhost` to `::1` (IPv6) while Next.js listens on `0.0.0.0` (IPv4 only), so that hostname inside the container silently fails to connect. This is an internal container-to-container detail; from the host, always use the Caddy-fronted `http://localhost/api/health` shown above, never port 3000 directly (it isn't published to the host). Exposing port 3000 is unsupported; see [Client IP and reverse proxies](#client-ip-and-reverse-proxies).
+
+## Client IP and reverse proxies
+
+Rate limits on the public routes and on sign-in are keyed on the client's address. AIDA works out
+that address in one place, `src/lib/rate-limit/client-ip.ts`, and it is only as trustworthy as the
+proxy in front of the app. This section is the contract an operator has to keep.
+
+**Supported topology.** Only Caddy is published. Inside `reverse_proxy app:3000` the Caddyfile has:
+
+```
+header_up X-Forwarded-For {remote_host}
+```
+
+so Caddy replaces any X-Forwarded-For a client sends with the address of the TCP peer it actually
+saw. The app takes the rightmost entry of X-Forwarded-For as the client identity for rate limits.
+IPv4 addresses are used whole; IPv6 addresses are grouped by their /64. The app stores only a
+peppered hash of that key (see `RATE_LIMIT_PEPPER`), never the raw address.
+
+**The trust boundary is direct access to `app:3000`.** This path is not impossible: anything that
+can reach the container on port 3000 can talk to the app without Caddy. Whoever has that access
+chooses their own rate-limit identity, because the app takes X-Forwarded-For as sent (or, when the
+header is absent, the TCP peer address that Next.js fills in). The shipped `docker-compose.yml`
+does not publish port 3000. Keeping it unpublished, and keeping the `app` container off networks
+that other workloads share, is the operator's responsibility. Exposing port 3000 is unsupported.
+For the same reason, running an unknown proxy in front of Caddy is unsupported unless you set it
+up as described below.
+
+**Advanced: a CDN in front of Caddy.** When a CDN (or another proxy you control) sits in front of
+Caddy, Caddy would otherwise see only the CDN's address. To key on real clients:
+
+1. Configure Caddy's `trusted_proxies` with the CDN's published address ranges, in the global
+   options block (`servers { trusted_proxies static <ranges> }`). Caddy ignores an incoming
+   X-Forwarded-For unless the peer is in `trusted_proxies`.
+2. Remove the `header_up X-Forwarded-For {remote_host}` line from the Caddyfile, so Caddy appends
+   the CDN's address to the header instead of overwriting it.
+3. Set `TRUSTED_PROXY_HOPS` in `.env` to the number of trusted proxy addresses at the right end of
+   X-Forwarded-For as the app receives it: `1` for a CDN plus Caddy. The maximum is
+   `MAX_TRUSTED_PROXY_HOPS`, 10. The app then uses the entry that many places from the right.
+
+The CDN itself must keep its side of the contract:
+
+- It must overwrite the X-Forwarded-For a client sends, or sanitize it by appending the address it
+  observed, so the entry at the trusted position is always written by the CDN and never by the
+  client.
+- With `TRUSTED_PROXY_HOPS` above 0, restrict direct access to Caddy to the CDN's published ranges,
+  for example with a host firewall. A client that reaches Caddy directly arrives with a chain
+  shorter than declared and lands in the shared bucket described below, which it can then exhaust
+  for everyone else in that bucket.
+
+**Wrong settings fail closed.** An invalid `TRUSTED_PROXY_HOPS` (anything other than an integer
+from 0 to 10, written without a leading zero), a chain shorter than declared, or a malformed entry
+inside the trusted part of the chain puts every such request into one shared rate-limit bucket.
+An invalid value also logs one error line per process, naming the setting and no address:
+`TRUSTED_PROXY_HOPS must be an integer from 0 to 10; every request now uses the shared client bucket.`
+A value that is too low keys every client behind the CDN on the CDN's address: coarse, but never
+the client-sent value. A value that is too high sends every request to the shared bucket. Entries
+further left than the trusted position are client-controlled and are ignored, never parsed or
+validated, so a client cannot move itself into the shared bucket by sending garbage there.
+
+**Sign-in uses the same identity.** Better Auth's sign-in limiter reads the client address only
+from an internal header, `x-aida-client-ip`. The app's proxy (`src/proxy.ts`) overwrites that
+header on every request with the identity above, so a client-sent value never reaches Better Auth,
+and a raw X-Forwarded-For is never read for sign-in either.
 
 ## Environment variable reference
 
@@ -209,6 +272,7 @@ Every variable in `.env.example`, and nothing else. `Required` means the app wil
 | `ADMIN_NAME` | No | *(blank)* | Display name for the auto-created admin above. |
 | `UPLOADS_DIR` | Yes | `/data/uploads` | Filesystem path for stored attachments. In Docker this is the `uploads_data` volume mount — do not change it unless you also change the volume mount in `docker-compose.yml`. |
 | `RATE_LIMIT_PEPPER` | Yes | — | Salts the per-IP hash used by the public-intake rate limiter (raw IPs are never stored). Generate with `openssl rand -base64 32`. |
+| `TRUSTED_PROXY_HOPS` | No | *(blank, meaning 0)* | Advanced. Number of trusted proxy addresses at the right end of X-Forwarded-For, 0 to 10. Leave blank behind the shipped Caddy; set only with a CDN in front of Caddy, see [Client IP and reverse proxies](#client-ip-and-reverse-proxies). An invalid value puts every client in one shared rate-limit bucket. |
 | `APP_ENCRYPTION_KEY` | Yes (once credentials saved) | — | AES-256-GCM key encrypting IMAP/SMTP (and LLM) secrets at rest. The app boots without it, but saving any credential in Settings requires it. Generate with `openssl rand -base64 32`. **Must be preserved across restores/migrations** — losing or changing this key makes every previously stored credential permanently undecryptable. |
 | `DEMO_MODE` | No | *(blank)* | When exactly `true` **and** the database has zero tickets, the app auto-creates a demo org/admin/agent and loads the fictional demo dataset at boot. **Never enable this on an internet-facing instance** — the credentials below are documented publicly (README, this file). Leave blank for a normal install. |
 | `DEMO_ADMIN_EMAIL` | No | `admin@demo.aida.test` | Email for the auto-created demo admin account. Only takes effect when `DEMO_MODE=true`. |
