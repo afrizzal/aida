@@ -68,6 +68,8 @@ services:
       DB_POOL_MAX: "10"
       UPLOADS_DIR: /data/uploads
       RATE_LIMIT_PEPPER: ${RATE_LIMIT_PEPPER:-}
+      # Advanced: leave blank behind the shipped Caddy; see docs/OPERATIONS.md "Client IP and reverse proxies"
+      TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-}
       # Credential encryption at rest (email IMAP/SMTP passwords, future LLM keys) —
       # required for saving channel credentials in Settings; see .env.example
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
