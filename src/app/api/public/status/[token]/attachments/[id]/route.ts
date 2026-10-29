@@ -1,15 +1,25 @@
 import { NextResponse } from "next/server";
 import { localFileStorage } from "@/lib/attachments/local-file-storage";
+import { consumeRateLimit } from "@/lib/rate-limit/check-rate-limit";
+import { getRateLimitIdentity } from "@/lib/rate-limit/client-ip";
+import { PUBLIC_RATE_LIMITS, rateLimitedResponse } from "@/lib/rate-limit/public-limits";
 import { loadStatusAttachment } from "@/lib/tickets/status-page-data";
 
 // Reads from the local filesystem — must run on the Node.js runtime, never Edge.
 export const runtime = "nodejs";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ token: string; id: string }> },
 ) {
   const { token, id } = await params;
+
+  // Limit before any token work, so the route cannot be used to probe tokens at full speed (D-21).
+  const { scope, max, windowMs } = PUBLIC_RATE_LIMITS.statusAttachment;
+  const limit = await consumeRateLimit(scope, getRateLimitIdentity(request), { max, windowMs });
+  if (!limit.allowed) {
+    return rateLimitedResponse(limit.retryAfterSeconds);
+  }
 
   // Unauthenticated bearer-token flow — the token IS the authorization; bare prisma inside the
   // loader, never scopedDb (no session/org context exists on this route). The loader serves the
