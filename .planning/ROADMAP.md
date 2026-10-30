@@ -102,7 +102,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 **Wave 9** *(blocked on Wave 8 completion)*
 
-- [ ] 08-20-PLAN.md — `/api/health/probe` for the container healthcheck, refused by Caddy (review C2) (Wave 9)
+- [x] 08-20-PLAN.md — `/api/health/probe` for the container healthcheck, refused by Caddy (review C2) (Wave 9)
 
 **Wave 10** *(blocked on Wave 9 completion)*
 

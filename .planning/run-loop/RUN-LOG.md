@@ -1576,3 +1576,7 @@ Cek awal lolos. 08-12 selesai (`b77cbfc`, `235f633`, `2d2a7ae`): throttle memori
 ## Putaran 08-exec-16 (2026-11-11)
 
 Cek awal lolos. 08-13 selesai (`23e2b71`, `fb9c21f`, `968d536`, `af1ec7a`): intake dan follow-up menghitung byte yang diterima (di atas 31 MiB: 413), Caddy `max_size 32MiB` dan Next.js `proxyClientMaxBodySize` 33554432 dikunci test lockstep, batas gabungan 30 MiB untuk follow-up, validasi sebelum menyimpan dan pembersihan saat gagal. Unit 17; integration upload-caps dan route-limits 12; E2E tiga spec 6 lolos; build, typecheck, lint exit 0. Slip proses: satu `git stash list` baca saja (tanpa perubahan); dicatat. Pembersih run: 0 sisa. Wave 8 selesai. Berikutnya: 08-20.
+
+## Putaran 08-exec-17 (2026-11-11)
+
+Cek awal lolos (host 20 GiB). 08-20 selesai (`0632faa`, `6ed2d64`, `a8a0999`, `411372e`): `/api/health/probe` tanpa throttle di atas snapshot cache 08-12, healthcheck container memakai probe, Caddy menolaknya dengan 404 (berkas saja), `/api/health` tetap dengan throttle D-20. Unit health 16 (5 probe baru, RED lebih dulu), banjir 600 probe tetap 200 dengan 6 baca database; wiring, lockstep, container-config 22; render compose exit 0; `pnpm test` 70 berkas, 1116; typecheck dan lint exit 0. Bukti Caddy sungguhan (08-22) dan HTTP sungguhan (08-21) milik Fase 8.1. Wave 9 selesai. Berikutnya: gerbang Bagian A 08-24.
