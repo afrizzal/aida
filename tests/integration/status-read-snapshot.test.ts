@@ -17,6 +17,8 @@ const uploads = await vi.hoisted(async () => {
   const path = await import("node:path");
   const dir = await mkdtemp(path.join(os.tmpdir(), "aida-status-snapshot-"));
   process.env.UPLOADS_DIR = dir;
+  // A test-only value; the attachment route hashes rate-limit identifiers with it.
+  if (!process.env.RATE_LIMIT_PEPPER) process.env.RATE_LIMIT_PEPPER = "status-read-snapshot-test";
   return { dir };
 });
 

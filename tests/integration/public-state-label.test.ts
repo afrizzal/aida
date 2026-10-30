@@ -11,6 +11,13 @@ vi.hoisted(() => {
   if (!process.env.RATE_LIMIT_PEPPER) process.env.RATE_LIMIT_PEPPER = "public-state-label-test";
 });
 
+// A unique, valid client address per request. getClientIp maps a non-IP X-Forwarded-For to the
+// shared bucket (08-10), and IPv6 is keyed by its /64, so each call gets its own random /64.
+function uniqueClientIp(): string {
+  const hex = randomUUID().replace(/-/g, "");
+  return `fd00:${hex.slice(0, 4)}:${hex.slice(4, 8)}:${hex.slice(8, 12)}::1`;
+}
+
 import { POST as csatPost } from "@/app/api/public/status/[token]/csat/route";
 import { prisma } from "@/lib/db";
 import { runTicketMutation } from "@/lib/tickets/mutations";
@@ -35,7 +42,7 @@ async function postCsat(token: string, score = 5): Promise<{ status: number; err
     new Request(`http://localhost/api/public/status/${token}/csat`, {
       method: "POST",
       body: form,
-      headers: { "x-forwarded-for": `public-state-label-${randomUUID()}` },
+      headers: { "x-forwarded-for": uniqueClientIp() },
     }),
     { params: Promise.resolve({ token }) },
   );
