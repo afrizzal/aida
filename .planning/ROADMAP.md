@@ -98,7 +98,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 **Wave 8** *(blocked on Wave 7 completion)*
 
 - [x] 08-12-PLAN.md — `/api/health` cache and in-memory throttle in one process-global store (Wave 8)
-- [ ] 08-13-PLAN.md — Byte caps on received bytes, three-layer alignment, cleanup on failure (Wave 8)
+- [x] 08-13-PLAN.md — Byte caps on received bytes, three-layer alignment, cleanup on failure (Wave 8)
 
 **Wave 9** *(blocked on Wave 8 completion)*
 

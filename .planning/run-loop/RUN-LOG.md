@@ -1572,3 +1572,7 @@ Cek awal lolos. 08-18 selesai (`bddae40`, `aec5466`, `fa2349d`): `TRUSTED_PROXY_
 ## Putaran 08-exec-15 (2026-11-11)
 
 Cek awal lolos. 08-12 selesai (`b77cbfc`, `235f633`, `2d2a7ae`): throttle memori `/api/health` 60 per menit per identitas, bucket bersama 120 per menit, tanpa pengecualian loopback, sebelum akses database; cache baca database 3 detik termasuk 503, single-flight; satu store di `globalThis` (`Symbol.for("aida.health.state")`); `readHealthSnapshot()` satu-satunya jalur ke database. Unit 15 (RED lebih dulu), `pnpm test` 66 berkas, 1097; typecheck dan lint exit 0. Bukti runtime milik 08-14 (Fase 8.1). Item manual: setel batas 60 dan 120. Berikutnya: 08-13.
+
+## Putaran 08-exec-16 (2026-11-11)
+
+Cek awal lolos. 08-13 selesai (`23e2b71`, `fb9c21f`, `968d536`, `af1ec7a`): intake dan follow-up menghitung byte yang diterima (di atas 31 MiB: 413), Caddy `max_size 32MiB` dan Next.js `proxyClientMaxBodySize` 33554432 dikunci test lockstep, batas gabungan 30 MiB untuk follow-up, validasi sebelum menyimpan dan pembersihan saat gagal. Unit 17; integration upload-caps dan route-limits 12; E2E tiga spec 6 lolos; build, typecheck, lint exit 0. Slip proses: satu `git stash list` baca saja (tanpa perubahan); dicatat. Pembersih run: 0 sisa. Wave 8 selesai. Berikutnya: 08-20.
