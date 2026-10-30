@@ -71,3 +71,12 @@ A healthy instance returns:
 though the app answers 200** — the app and worker are separate processes, and a healthy `app`
 tells you nothing about `worker` on its own. Check `docker compose ps worker` and `docker compose
 logs worker` when this happens.
+
+The endpoint is public, so it guards the database. Its database read comes from a **3-second
+cache** (a 503 included), and concurrent requests share one read, so the status can lag by up
+to 3 seconds. Each client address may call it 60 times a minute; callers without a usable
+client address share 120 a minute, and the container healthcheck uses 6 of those. The throttle
+is in memory, per app process, and never logs or stores the addresses it counts. Over the limit
+you get HTTP 429 with `{"error":"rate_limited"}` and an integer `Retry-After` header; poll every
+10 seconds or slower. `worker.lastRunAt` stays in the public response by choice: it holds no
+tenant data and is served from the cache.

@@ -119,3 +119,71 @@ describe("GET /api/health throttle (D-20)", () => {
     }
   });
 });
+
+describe("GET /api/health cache and single-flight (D-20)", () => {
+  const findUnique = () => vi.mocked(prisma.systemSetting.findUnique);
+
+  it("serves two GETs within 3 s from one DB read; after 3 s plus 1 ms reads again", async () => {
+    vi.useFakeTimers();
+    await GET(req());
+    await GET(req());
+    expect(findUnique()).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(3001);
+    await GET(req());
+    expect(findUnique()).toHaveBeenCalledTimes(2);
+  });
+
+  it("DB down then up: 503 is cached for the TTL, then the next read returns 200", async () => {
+    vi.useFakeTimers();
+    findUnique().mockRejectedValueOnce(new Error("DB unreachable"));
+    expect((await GET(req())).status).toBe(503);
+    expect((await GET(req())).status).toBe(503);
+    expect(findUnique()).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(3001);
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    expect(findUnique()).toHaveBeenCalledTimes(2);
+  });
+
+  it("50 concurrent GETs from 50 identities while the read is pending cause one DB call and identical bodies", async () => {
+    let release: (v: typeof HEARTBEAT) => void = () => {};
+    findUnique().mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = resolve;
+      }) as never,
+    );
+    const pending = Array.from({ length: 50 }, (_, i) => GET(req(`198.51.100.${i + 1}`)));
+    await Promise.resolve();
+    release(HEARTBEAT);
+    const responses = await Promise.all(pending);
+    expect(findUnique()).toHaveBeenCalledTimes(1);
+    const bodies = await Promise.all(responses.map((r) => r.text()));
+    expect(responses.every((r) => r.status === 200)).toBe(true);
+    expect(new Set(bodies).size).toBe(1);
+  });
+
+  it("R2-7: a second module instance after vi.resetModules() shares the cache and the throttle counts", async () => {
+    vi.useFakeTimers();
+    const first = await import("@/lib/health/health-check");
+    await first.readHealthSnapshot();
+    for (let i = 0; i < 59; i++)
+      expect(first.checkHealthThrottle("203.0.113.50").allowed).toBe(true);
+    const callsBefore = findUnique().mock.calls.length;
+
+    vi.resetModules();
+    const second = await import("@/lib/health/health-check");
+    const secondDb = await import("@/lib/db");
+    expect(second).not.toBe(first);
+
+    const snapshot = await second.readHealthSnapshot();
+    expect(snapshot.status).toBe(200);
+    const secondCalls =
+      secondDb.prisma === prisma
+        ? 0
+        : vi.mocked(secondDb.prisma.systemSetting.findUnique).mock.calls.length;
+    expect(findUnique().mock.calls.length + secondCalls).toBe(callsBefore);
+
+    expect(second.checkHealthThrottle("203.0.113.50").allowed).toBe(true); // 60th
+    expect(second.checkHealthThrottle("203.0.113.50").allowed).toBe(false); // 61st
+  });
+});

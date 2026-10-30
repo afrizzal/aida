@@ -13,11 +13,17 @@ export const HEALTH_THROTTLE = {
   maxKeys: 10_000,
 } as const;
 
+// Within D-20's 2 to 5 seconds. The reported status may lag reality by up to 3 seconds,
+// in both directions: an outage and a recovery each show after at most one TTL.
+export const HEALTH_CACHE_TTL_MS = 3000;
+
 export type HealthSnapshot = { status: number; body: Record<string, unknown> };
 
 type HealthState = {
   perIdentity: MemoryThrottle;
   shared: MemoryThrottle;
+  cached: { expiresAt: number; snapshot: HealthSnapshot } | null;
+  inFlight: Promise<HealthSnapshot> | null;
 };
 
 // A production build may instantiate this module once per route bundle. Keeping the state on
@@ -35,6 +41,8 @@ function healthState(): HealthState {
         maxKeys: HEALTH_THROTTLE.maxKeys,
       }),
       shared: createMemoryThrottle({ ...HEALTH_THROTTLE.shared, maxKeys: 1 }),
+      cached: null,
+      inFlight: null,
     };
     g[STATE_KEY] = state;
   }
@@ -50,7 +58,29 @@ export function checkHealthThrottle(identity: string): {
   return throttle.consume(identity);
 }
 
-export async function readHealthSnapshot(): Promise<HealthSnapshot> {
+// The only path from health to the database: /api/health and the plan 08-20 probe both call it,
+// so together they cost at most one DB read per TTL per process. The result is cached whether it
+// is 200 or 503, and concurrent callers share one in-flight read (single-flight).
+export function readHealthSnapshot(): Promise<HealthSnapshot> {
+  const state = healthState();
+  if (state.cached && Date.now() < state.cached.expiresAt) {
+    return Promise.resolve(state.cached.snapshot);
+  }
+  if (state.inFlight) return state.inFlight;
+
+  const read = queryHealth()
+    .then((snapshot) => {
+      state.cached = { expiresAt: Date.now() + HEALTH_CACHE_TTL_MS, snapshot };
+      return snapshot;
+    })
+    .finally(() => {
+      state.inFlight = null;
+    });
+  state.inFlight = read;
+  return read;
+}
+
+async function queryHealth(): Promise<HealthSnapshot> {
   try {
     const hb = await prisma.systemSetting.findUnique({
       where: { key: "heartbeat:lastRunAt" },
@@ -72,4 +102,6 @@ export function resetHealthStateForTests(): void {
   const state = healthState();
   state.perIdentity.reset();
   state.shared.reset();
+  state.cached = null;
+  state.inFlight = null;
 }

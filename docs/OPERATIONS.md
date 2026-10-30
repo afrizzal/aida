@@ -188,6 +188,16 @@ Failure (HTTP 503, database unreachable):
 
 The compose healthcheck for `app` deliberately targets `http://127.0.0.1:3000/api/health` rather than the `localhost` equivalent — Alpine Linux resolves the hostname `localhost` to `::1` (IPv6) while Next.js listens on `0.0.0.0` (IPv4 only), so that hostname inside the container silently fails to connect. This is an internal container-to-container detail; from the host, always use the Caddy-fronted `http://localhost/api/health` shown above, never port 3000 directly (it isn't published to the host). Exposing port 3000 is unsupported; see [Client IP and reverse proxies](#client-ip-and-reverse-proxies).
 
+### Cache and throttle
+
+The endpoint is public and unauthenticated, so it protects the database itself (D-20):
+
+- **3-second cache.** The database read is cached for 3 seconds, a 503 included, and concurrent requests share one in-flight read. The reported status can therefore lag reality by up to 3 seconds, for an outage and for a recovery alike.
+- **In-memory throttle, per process.** Each client address may call the endpoint 60 times a minute. Callers without a usable client address share one bucket of 120 a minute; the container healthcheck sends 6. Loopback is not exempt. The throttle lives in the app's memory, never in the database, and its keys (client addresses) are never logged or stored. Restarting the app resets it.
+- **Over the limit** the endpoint answers HTTP 429 with `{"error":"rate_limited"}` and an integer `Retry-After` header (seconds until the window resets). A monitor that polls more often than once a second from one address will see 429s; poll every 10 seconds or slower.
+
+`worker.lastRunAt` stays in the public response by choice: it holds no tenant data, it is served from the cache, and the troubleshooting steps above rely on it. The limits (60, 120) are starting values and can be tuned from real monitoring traffic.
+
 ## Client IP and reverse proxies
 
 Rate limits on the public routes and on sign-in are keyed on the client's address. AIDA works out
