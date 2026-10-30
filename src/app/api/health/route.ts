@@ -1,19 +1,15 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { checkHealthThrottle, readHealthSnapshot } from "@/lib/health/health-check";
+import { getRateLimitIdentity } from "@/lib/rate-limit/client-ip";
+import { rateLimitedResponse } from "@/lib/rate-limit/public-limits";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  try {
-    const hb = await prisma.systemSetting.findUnique({
-      where: { key: "heartbeat:lastRunAt" },
-    });
-    return NextResponse.json({
-      status: "ok",
-      db: "connected",
-      worker: hb?.value ? { lastRunAt: hb.value } : { status: "no heartbeat yet" },
-    });
-  } catch {
-    return NextResponse.json({ status: "error", db: "unreachable" }, { status: 503 });
-  }
+// Public and unauthenticated: throttled in memory per client identity before any DB work (D-20).
+export async function GET(request: Request) {
+  const throttle = checkHealthThrottle(getRateLimitIdentity(request));
+  if (!throttle.allowed) return rateLimitedResponse(throttle.retryAfterSeconds);
+
+  const snapshot = await readHealthSnapshot();
+  return NextResponse.json(snapshot.body, { status: snapshot.status });
 }
