@@ -11,6 +11,12 @@
   request_body {
     max_size 32MiB
   }
+  # The container healthcheck's path (/api/health/probe). Caddy never forwards it, so no public
+  # request can reach or starve it, whatever the client-IP configuration (review C2). The path
+  # matcher is case-insensitive and runs on the cleaned, decoded path. Keep this block if you
+  # change the proxy setup.
+  @healthprobe path /api/health/probe*
+  respond @healthprobe 404
   reverse_proxy app:3000 {
     # The app trusts X-Forwarded-For only because Caddy overwrites it with the TCP peer on
     # every request (D-16); a client-sent value never reaches the app. Do not put another

@@ -155,7 +155,7 @@ services:
       egress_internal:
         ipv4_address: 10.90.0.14
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health/probe || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 15

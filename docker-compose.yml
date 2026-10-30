@@ -78,7 +78,8 @@ services:
     healthcheck:
       # Alpine's `localhost` resolves to ::1 (IPv6) but Next.js listens on 0.0.0.0 (IPv4 only).
       # Use explicit 127.0.0.1 to force IPv4.
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
+      # The probe path is unthrottled and refused by Caddy, so public traffic can never fail this check (review C2).
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health/probe || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
