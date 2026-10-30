@@ -1,13 +1,11 @@
-import { fileTypeFromBuffer } from "file-type";
 import { NextResponse } from "next/server";
 import { z } from "zod/v4";
+import { MAX_REQUEST_BODY_BYTES } from "@/lib/attachments/constants";
 import {
-  ALLOWED_MIME,
-  MAX_BYTES,
-  MAX_REQUEST_BODY_BYTES,
-  MAX_TOTAL_REQUEST_BYTES,
-} from "@/lib/attachments/constants";
-import { buildStorageKey, localFileStorage } from "@/lib/attachments/local-file-storage";
+  removeStoredUploads,
+  storeValidatedUploads,
+  validateUploadFiles,
+} from "@/lib/attachments/validate-uploads";
 import { prisma } from "@/lib/db";
 import { readBoundedFormData } from "@/lib/http/read-bounded-form-data";
 import { consumeRateLimit } from "@/lib/rate-limit/check-rate-limit";
@@ -65,71 +63,57 @@ export async function POST(request: Request) {
   }
   const { name, email, subject, message } = parsed.data;
 
+  // Every file is validated (size, running total, content sniff) before any is stored (D-24).
+  const files = form.getAll("file").filter((f): f is File => f instanceof File && f.size > 0);
+  const validated = await validateUploadFiles(files);
+  if (!validated.ok) {
+    return NextResponse.json({ error: validated.error }, { status: validated.status });
+  }
+
   // Single-org v1: bare prisma lookup (RESEARCH.md Open Q2). Becomes an org-slug-scoped
   // lookup if/when multi-org public intake is ever needed — out of scope for v1.
   const org = await prisma.organization.findFirstOrThrow();
 
-  const files = form.getAll("file").filter((f): f is File => f instanceof File && f.size > 0);
+  const stored = await storeValidatedUploads(org.id, validated.uploads);
 
-  const stored: {
-    storageKey: string;
-    originalFilename: string;
-    mimeType: string;
-    sizeBytes: number;
-  }[] = [];
-  let totalBytes = 0;
-  for (const file of files) {
-    if (file.size > MAX_BYTES) {
-      return NextResponse.json({ error: "file_too_large" }, { status: 413 });
-    }
-    totalBytes += file.size;
-    if (totalBytes > MAX_TOTAL_REQUEST_BYTES) {
-      return NextResponse.json({ error: "payload_too_large" }, { status: 413 });
-    }
-
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const sniffed = await fileTypeFromBuffer(buffer);
-    if (!sniffed || !ALLOWED_MIME.has(sniffed.mime)) {
-      return NextResponse.json({ error: "unsupported_file_type" }, { status: 415 });
-    }
-
-    const key = buildStorageKey(file.name);
-    await localFileStorage.save({ orgId: org.id, key, data: buffer });
-    stored.push({
-      storageKey: key,
-      originalFilename: file.name,
-      mimeType: sniffed.mime,
-      sizeBytes: file.size,
+  // A failure after the files are stored (ticket creation, attachment rows) removes them, then
+  // the error propagates unchanged (D-24).
+  let ticket: Awaited<ReturnType<typeof createTicket>>;
+  try {
+    ticket = await createTicket(org.id, {
+      subject,
+      priority: "NORMAL", // customers never set priority (D-05)
+      body: message,
+      contact: { email, name },
+      direction: "INBOUND",
     });
-  }
 
-  const ticket = await createTicket(org.id, {
-    subject,
-    priority: "NORMAL", // customers never set priority (D-05)
-    body: message,
-    contact: { email, name },
-    direction: "INBOUND",
-  });
-
-  if (stored.length > 0) {
-    // createTicket already created the initial inbound Message inside its own
-    // transaction — find it here to link the stored attachments to it.
-    const initialMessage = await prisma.message.findFirst({
-      where: { ticketId: ticket.id },
-      orderBy: { createdAt: "asc" },
-    });
-    if (initialMessage) {
-      await prisma.attachment.createMany({
-        data: stored.map((s) => ({
-          organizationId: org.id,
-          messageId: initialMessage.id,
-          storageKey: s.storageKey,
-          originalFilename: s.originalFilename,
-          mimeType: s.mimeType,
-          sizeBytes: s.sizeBytes,
-        })),
+    if (stored.length > 0) {
+      // createTicket already created the initial inbound Message inside its own
+      // transaction — find it here to link the stored attachments to it.
+      const initialMessage = await prisma.message.findFirst({
+        where: { ticketId: ticket.id },
+        orderBy: { createdAt: "asc" },
       });
+      if (initialMessage) {
+        await prisma.attachment.createMany({
+          data: stored.map((s) => ({
+            organizationId: org.id,
+            messageId: initialMessage.id,
+            storageKey: s.storageKey,
+            originalFilename: s.originalFilename,
+            mimeType: s.mimeType,
+            sizeBytes: s.sizeBytes,
+          })),
+        });
+      }
     }
+  } catch (err) {
+    await removeStoredUploads(
+      org.id,
+      stored.map((s) => s.storageKey),
+    );
+    throw err;
   }
 
   return NextResponse.json({ ok: true, token: ticket.statusToken }, { status: 200 });

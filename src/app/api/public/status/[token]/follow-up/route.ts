@@ -1,10 +1,13 @@
-import { fileTypeFromBuffer } from "file-type";
 import { NextResponse } from "next/server";
 import { z } from "zod/v4";
-import { ALLOWED_MIME, MAX_BYTES } from "@/lib/attachments/constants";
-import { buildStorageKey, localFileStorage } from "@/lib/attachments/local-file-storage";
-import { saveStagedFiles } from "@/lib/attachments/staged-files";
+import { MAX_REQUEST_BODY_BYTES } from "@/lib/attachments/constants";
+import {
+  removeStoredUploads,
+  storeValidatedUploads,
+  validateUploadFiles,
+} from "@/lib/attachments/validate-uploads";
 import { prisma } from "@/lib/db";
+import { readBoundedFormData } from "@/lib/http/read-bounded-form-data";
 import { renderMarkdown } from "@/lib/markdown/render";
 import { consumeRateLimit } from "@/lib/rate-limit/check-rate-limit";
 import { getRateLimitIdentity } from "@/lib/rate-limit/client-ip";
@@ -43,12 +46,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  let form: FormData;
-  try {
-    form = await request.formData();
-  } catch {
-    return NextResponse.json({ error: "invalid_form_data" }, { status: 400 });
+  // The body limit holds on the bytes actually received, however the body is framed; a
+  // Content-Length above the cap is only an early reject (D-24).
+  const body = await readBoundedFormData(request, MAX_REQUEST_BODY_BYTES);
+  if (!body.ok) {
+    return body.reason === "too_large"
+      ? NextResponse.json({ error: "payload_too_large" }, { status: 413 })
+      : NextResponse.json({ error: "invalid_form_data" }, { status: 400 });
   }
+  const form = body.form;
 
   // Honeypot (D-20): a real visitor never fills this in. Bots that auto-fill every
   // field get a normal-looking success response — no message is created, and we
@@ -68,29 +74,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
 
   const files = form.getAll("file").filter((f): f is File => f instanceof File && f.size > 0);
 
-  // Every file is validated (size, sniffed type) before any is stored, so a 413/415 leaves no
-  // file behind either.
-  const accepted: { file: File; buffer: Buffer; mime: string; key: string }[] = [];
-  for (const file of files) {
-    if (file.size > MAX_BYTES) {
-      return NextResponse.json({ error: "file_too_large" }, { status: 413 });
-    }
-
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const sniffed = await fileTypeFromBuffer(buffer);
-    if (!sniffed || !ALLOWED_MIME.has(sniffed.mime)) {
-      return NextResponse.json({ error: "unsupported_file_type" }, { status: 415 });
-    }
-    accepted.push({ file, buffer, mime: sniffed.mime, key: buildStorageKey(file.name) });
+  // Every file is validated (size, the combined cap shared with intake, sniffed type) before
+  // any is stored, so a 413/415 leaves no file behind (D-24, F-12).
+  const validated = await validateUploadFiles(files);
+  if (!validated.ok) {
+    return NextResponse.json({ error: validated.error }, { status: validated.status });
   }
 
-  // Review C7: files are staged before the transaction and discarded whenever no message
-  // commits (a refusal or a thrown error); the discard is best-effort (12-03, review R3-2).
-  const staged = await saveStagedFiles(
-    localFileStorage,
-    ticket.organizationId,
-    accepted.map((entry) => ({ key: entry.key, data: entry.buffer })),
-  );
+  // Review C7: files are stored before the transaction and removed whenever no message
+  // commits (a refusal or a thrown error); the removal is best-effort (12-03, review R3-2).
+  const stored = await storeValidatedUploads(ticket.organizationId, validated.uploads);
+  const discard = () =>
+    removeStoredUploads(
+      ticket.organizationId,
+      stored.map((s) => s.storageKey),
+    );
 
   // The effective ticket (the token's ticket, or its merge target) is decided inside the
   // transaction under the row lock (D-09, D-10), and nothing is written before that. The
@@ -122,22 +120,22 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
         },
       });
 
-      for (const entry of accepted) {
+      for (const entry of stored) {
         await tx.attachment.create({
           data: {
             organizationId: ticket.organizationId,
             messageId: created.id,
-            storageKey: entry.key,
-            originalFilename: entry.file.name,
-            mimeType: entry.mime,
-            sizeBytes: entry.file.size,
+            storageKey: entry.storageKey,
+            originalFilename: entry.originalFilename,
+            mimeType: entry.mimeType,
+            sizeBytes: entry.sizeBytes,
           },
         });
       }
       return "ok";
     });
   } catch (err) {
-    await staged.discard();
+    await discard();
     if (err instanceof ReplyTicketChangedError) {
       return NextResponse.json({ error: "TICKET_CHANGED" }, { status: 409 });
     }
@@ -145,7 +143,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
   }
 
   if (outcome !== "ok") {
-    await staged.discard();
+    await discard();
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
