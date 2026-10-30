@@ -124,7 +124,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 **Wave 14** *(blocked on Wave 13 completion)*
 
 - [ ] 08-16-PLAN.md (moved to Phase 8.1, `deferred-8.1/`, waits for owner) — End-of-phase gate on one tested commit, guarded compose gate, evidence matrix (Wave 14)
-- [ ] 08-24-PLAN.md — Part A gate: host gates on one tested commit, mechanical Part A evidence matrix, container rows moved to Phase 8.1, candidate v1.0.0 safe point (Wave 10)
+- [x] 08-24-PLAN.md — Part A gate: host gates on one tested commit, mechanical Part A evidence matrix, container rows moved to Phase 8.1, candidate v1.0.0 safe point (Wave 10)
 - [ ] 08-05b-PLAN.md (Phase 8.1, `deferred-8.1/`, waits for owner; carries R4-2) — CI egress workflow and result classifier
 
 ### Phase 9: Operations

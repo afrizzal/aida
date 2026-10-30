@@ -1580,3 +1580,7 @@ Cek awal lolos. 08-13 selesai (`23e2b71`, `fb9c21f`, `968d536`, `af1ec7a`): inta
 ## Putaran 08-exec-17 (2026-11-11)
 
 Cek awal lolos (host 20 GiB). 08-20 selesai (`0632faa`, `6ed2d64`, `a8a0999`, `411372e`): `/api/health/probe` tanpa throttle di atas snapshot cache 08-12, healthcheck container memakai probe, Caddy menolaknya dengan 404 (berkas saja), `/api/health` tetap dengan throttle D-20. Unit health 16 (5 probe baru, RED lebih dulu), banjir 600 probe tetap 200 dengan 6 baca database; wiring, lockstep, container-config 22; render compose exit 0; `pnpm test` 70 berkas, 1116; typecheck dan lint exit 0. Bukti Caddy sungguhan (08-22) dan HTTP sungguhan (08-21) milik Fase 8.1. Wave 9 selesai. Berikutnya: gerbang Bagian A 08-24.
+
+## Putaran 08-exec-18 (2026-11-11)
+
+Cek awal lolos (host 20 GiB). Gerbang Bagian A 08-24 (`61c8696`, `d402fd2`, `bf63deb`, `c782e25`; commit dites `61c8696`; kandidat titik aman v1.0.0, owner memutuskan): lint, typecheck, unit 1156, build, E2E 219 lolos; audit produksi exit 1 (0 critical, 10 high); integration exit 1 (13 dari 1327 gagal di 3 berkas, akibat rate limit Bagian A); `test:egress` dan dua cek image `blocked (space)` (cek host 19,4 GiB); dry run pembersih 0 sisa; daftar resource asing sama sebelum dan sesudah. `08-GATE-A.md` lolos `check` (31 baris matriks, 8 requirement). Bisa ditutup: AIDA-26, AIDA-31; dipecah: AIDA-28, AIDA-32; terbuka: AIDA-25, 27, 29, 30. Butir antrean baru 08-gap1 (perbaikan celah integration). Berikutnya: 08-gap1.
