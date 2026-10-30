@@ -75,8 +75,16 @@ logs worker` when this happens.
 The endpoint is public, so it guards the database. Its database read comes from a **3-second
 cache** (a 503 included), and concurrent requests share one read, so the status can lag by up
 to 3 seconds. Each client address may call it 60 times a minute; callers without a usable
-client address share 120 a minute, and the container healthcheck uses 6 of those. The throttle
+client address share 120 a minute. The throttle
 is in memory, per app process, and never logs or stores the addresses it counts. Over the limit
 you get HTTP 429 with `{"error":"rate_limited"}` and an integer `Retry-After` header; poll every
 10 seconds or slower. `worker.lastRunAt` stays in the public response by choice: it holds no
 tenant data and is served from the cache.
+
+The container healthcheck does not use `/api/health`. It calls
+`http://127.0.0.1:3000/api/health/probe`, which answers `{"status":"ok"}` (200) or
+`{"status":"error"}` (503) from the same **3-second cache**, with no rate limit. Caddy refuses that
+path with a 404, so no amount of public traffic can make the container unhealthy; point external
+monitors at `/api/health` through Caddy. Anything that can reach `app:3000` directly can call the
+probe and read the binary database status from it — that is the trust boundary described in the
+operations runbook's "Client IP and reverse proxies" section.
