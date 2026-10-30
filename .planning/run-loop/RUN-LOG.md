@@ -1568,3 +1568,7 @@ Cek awal lolos. 08-11 selesai (`470ca22`, `bb223a6`, `f843071`): limiter atomik 
 ## Putaran 08-exec-14 (2026-11-11)
 
 Cek awal lolos. 08-18 selesai (`bddae40`, `aec5466`, `fa2349d`): `TRUSTED_PROXY_HOPS` diteruskan ke service app (`docker-compose.yml`), baris kosong di `.env.example`, kontrak IP klien dan CDN di `docs/OPERATIONS.md` dan halaman environment website. Render compose (`config --quiet`, tanpa daemon) exit 0, cek docs exit 0, unit client-ip 32. Cek `git status .env` di plan diblokir hook pembaca rahasia, dilewati (`.env` tidak dibuka). Belum terverifikasi: perilaku `trusted_proxies` Caddy sungguhan (08-22, Fase 8.1). Wave 7 selesai. Berikutnya: 08-12.
+
+## Putaran 08-exec-15 (2026-11-11)
+
+Cek awal lolos. 08-12 selesai (`b77cbfc`, `235f633`, `2d2a7ae`): throttle memori `/api/health` 60 per menit per identitas, bucket bersama 120 per menit, tanpa pengecualian loopback, sebelum akses database; cache baca database 3 detik termasuk 503, single-flight; satu store di `globalThis` (`Symbol.for("aida.health.state")`); `readHealthSnapshot()` satu-satunya jalur ke database. Unit 15 (RED lebih dulu), `pnpm test` 66 berkas, 1097; typecheck dan lint exit 0. Bukti runtime milik 08-14 (Fase 8.1). Item manual: setel batas 60 dan 120. Berikutnya: 08-13.
