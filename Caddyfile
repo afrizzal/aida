@@ -4,10 +4,12 @@
 # Real domain: Caddy auto-obtains a Let's Encrypt certificate (auto-HTTPS).
 
 {$DOMAIN:localhost} {
-  # Defense-in-depth ceiling above the 10MB app-level attachment limit (leaves
-  # headroom for multipart boundary/header overhead) — Caddy has no default limit.
+  # Body ceiling (D-24): equals PROXY_BODY_LIMIT_BYTES in src/lib/attachments/constants.ts,
+  # checked by tests/unit/body-limit-lockstep.test.ts. The route itself refuses bodies above
+  # 31 MiB with its own 413, so this sits one MiB higher. The old 12MB value cut legitimate
+  # 12 to 30 MB intake submissions. Caddy has no default limit.
   request_body {
-    max_size 12MB
+    max_size 32MiB
   }
   reverse_proxy app:3000 {
     # The app trusts X-Forwarded-For only because Caddy overwrites it with the TCP peer on

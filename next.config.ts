@@ -1,5 +1,5 @@
 import type { NextConfig } from "next";
-import { MAX_TOTAL_REQUEST_BYTES } from "./src/lib/attachments/constants";
+import { PROXY_BODY_LIMIT_BYTES } from "./src/lib/attachments/constants";
 
 const nextConfig: NextConfig = {
   output: "standalone",
@@ -8,12 +8,13 @@ const nextConfig: NextConfig = {
   // checked-in CLAUDE.md, so keep the dev server from adding an untracked file.
   agentRules: false,
   experimental: {
-    // Next buffers request bodies at 10MB by default when a proxy/middleware is
-    // present, truncating anything larger BEFORE the route runs — which made the
-    // intake route's own 413 (file_too_large / payload_too_large) checks
-    // unreachable and broke legal multi-file submissions over 10MB combined.
-    // Keep this in lockstep with the intake route's combined cap.
-    proxyClientMaxBodySize: MAX_TOTAL_REQUEST_BYTES,
+    // Three body-size layers (D-24): Caddy `request_body max_size` and this proxy buffer both
+    // equal PROXY_BODY_LIMIT_BYTES (32 MiB); the public upload routes count received bytes and
+    // refuse anything above MAX_REQUEST_BODY_BYTES (31 MiB). Next truncates bodies above this
+    // value BEFORE the route runs, so it sits one MiB above the route cap: an oversized body
+    // still reaches the route and gets a clean 413. tests/unit/body-limit-lockstep.test.ts
+    // fails on any drift.
+    proxyClientMaxBodySize: PROXY_BODY_LIMIT_BYTES,
   },
 };
 
