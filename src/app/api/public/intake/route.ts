@@ -1,9 +1,15 @@
 import { fileTypeFromBuffer } from "file-type";
 import { NextResponse } from "next/server";
 import { z } from "zod/v4";
-import { ALLOWED_MIME, MAX_BYTES, MAX_TOTAL_REQUEST_BYTES } from "@/lib/attachments/constants";
+import {
+  ALLOWED_MIME,
+  MAX_BYTES,
+  MAX_REQUEST_BODY_BYTES,
+  MAX_TOTAL_REQUEST_BYTES,
+} from "@/lib/attachments/constants";
 import { buildStorageKey, localFileStorage } from "@/lib/attachments/local-file-storage";
 import { prisma } from "@/lib/db";
+import { readBoundedFormData } from "@/lib/http/read-bounded-form-data";
 import { consumeRateLimit } from "@/lib/rate-limit/check-rate-limit";
 import { getRateLimitIdentity } from "@/lib/rate-limit/client-ip";
 import { PUBLIC_RATE_LIMITS, rateLimitedResponse } from "@/lib/rate-limit/public-limits";
@@ -28,17 +34,15 @@ export async function POST(request: Request) {
     return rateLimitedResponse(limit.retryAfterSeconds);
   }
 
-  const contentLength = Number(request.headers.get("content-length") ?? 0);
-  if (contentLength > MAX_TOTAL_REQUEST_BYTES) {
-    return NextResponse.json({ error: "payload_too_large" }, { status: 413 });
+  // The body limit holds on the bytes actually received, however the body is framed; a
+  // Content-Length above the cap is only an early reject (D-24).
+  const body = await readBoundedFormData(request, MAX_REQUEST_BODY_BYTES);
+  if (!body.ok) {
+    return body.reason === "too_large"
+      ? NextResponse.json({ error: "payload_too_large" }, { status: 413 })
+      : NextResponse.json({ error: "invalid_form_data" }, { status: 400 });
   }
-
-  let form: FormData;
-  try {
-    form = await request.formData();
-  } catch {
-    return NextResponse.json({ error: "invalid_form_data" }, { status: 400 });
-  }
+  const form = body.form;
 
   // Honeypot (D-20): a real visitor never fills this in. Bots that auto-fill every
   // field get a normal-looking success response — no ticket is created, and we
