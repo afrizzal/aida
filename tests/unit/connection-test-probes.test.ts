@@ -1,11 +1,15 @@
+import http from "node:http";
 import net from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { createImapClient } from "../../src/lib/channels/email/imap-client";
 import {
   EMAIL_PROBE_TIMEOUT_MS,
   probeImapConnection,
+  probeSmtpConnection,
 } from "../../src/lib/channels/email/test-connection";
 import { classifyConnectionError } from "../../src/lib/connection-test/errors";
+import { testProviderConnection } from "../../src/lib/llm/test-connection";
+import { testEmbeddingConnection } from "../../src/lib/rag/embed-test-connection";
 
 // K127 (08-REVIEW.md, c-CR-01): the real probe clients against local fake servers on 127.0.0.1.
 // Every network or protocol failure (closed port, a port that never greets, a port running some
@@ -37,6 +41,25 @@ async function tcpServer(onSocket: (socket: net.Socket) => void): Promise<number
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   return (server.address() as net.AddressInfo).port;
 }
+
+/** An HTTP server on 127.0.0.1 with a random port. */
+async function httpServer(handler: http.RequestListener): Promise<number> {
+  const server = http.createServer(handler);
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+  });
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return (server.address() as net.AddressInfo).port;
+}
+
+/** Answers every request with one fixed status, content type and body. */
+const httpAnswer = (status: number, contentType: string, body: string) =>
+  httpServer((_req, res) => {
+    res.writeHead(status, { "content-type": contentType });
+    res.end(body);
+  });
 
 /** A port on 127.0.0.1 that was free a moment ago and has nothing listening now. */
 async function closedPort(): Promise<number> {
@@ -152,5 +175,127 @@ describe("IMAP probe with the real imapflow client (K127, c-CR-01)", () => {
     expect(options.connectionTimeout).toBe(1234);
     expect(options.greetingTimeout).toBe(1234);
     expect(EMAIL_PROBE_TIMEOUT_MS).toBe(10_000);
+  });
+});
+
+/** A minimal SMTP server: greets, advertises AUTH, answers AUTH with `authReply`. */
+const smtpRejectingAuth = (authReply: string) =>
+  tcpServer((socket) => {
+    socket.write("220 fake.test ESMTP ready\r\n");
+    onLines(socket, (line) => {
+      const command = (line.split(" ")[0] ?? "").toUpperCase();
+      if (command === "EHLO") socket.write("250-fake.test\r\n250 AUTH PLAIN LOGIN\r\n");
+      else if (command === "AUTH") socket.write(`${authReply}\r\n`);
+      else if (command === "QUIT") socket.end("221 bye\r\n");
+      else socket.write("502 5.5.2 not implemented\r\n");
+    });
+  });
+
+const smtpCategory = (port: number) =>
+  categoryOf(
+    probeSmtpConnection(
+      {
+        smtpHost: "127.0.0.1",
+        smtpPort: port,
+        smtpSecure: false,
+        smtpUser: "support",
+        smtpPassword: "fake-smtp-password",
+      },
+      { timeoutMs: TEST_TIMEOUT_MS },
+    ),
+  );
+
+describe("SMTP probe with the real nodemailer client (K127, c-WR-01)", () => {
+  it.each([
+    ["a closed port", () => closedPort()],
+    ["a port that accepts and never greets", () => silent()],
+    ["an SSH banner followed by a close", () => bannerAndClose("SSH-2.0-OpenSSH_9.6\r\n")],
+    [
+      "an HTTP reply on an open connection",
+      () => bannerAndWait("HTTP/1.1 400 Bad Request\r\n\r\n"),
+    ],
+    ["a server that closes at once", () => tcpServer((socket) => socket.destroy())],
+    [
+      "an SMTP server answering AUTH with a non-credential reply (454)",
+      () => smtpRejectingAuth("454 4.7.0 Temporary authentication failure"),
+    ],
+  ])("gives connection_failed for %s", async (_label, start) => {
+    expect(await smtpCategory(await start())).toBe("connection_failed");
+  });
+
+  it.each([
+    ["530 5.7.0 Authentication required"],
+    ["534 5.7.9 Authentication mechanism is too weak"],
+    ["535 5.7.8 Authentication credentials invalid"],
+  ])("gives authentication_failed when an SMTP server answers AUTH with %s", async (reply) => {
+    expect(await smtpCategory(await smtpRejectingAuth(reply))).toBe("authentication_failed");
+  });
+
+  it("collapses closed, silent and wrong-service into one category", async () => {
+    const categories = new Set([
+      await smtpCategory(await closedPort()),
+      await smtpCategory(await silent()),
+      await smtpCategory(await bannerAndClose("SSH-2.0-OpenSSH_9.6\r\n")),
+      await smtpCategory(await tcpServer((socket) => socket.destroy())),
+    ]);
+    expect([...categories]).toEqual(["connection_failed"]);
+  });
+});
+
+const ollamaProbes = {
+  llm: (port: number) =>
+    testProviderConnection({
+      provider: "ollama",
+      model: "llama3",
+      apiKey: "",
+      ollamaBaseUrl: `http://127.0.0.1:${port}`,
+    }),
+  embedding: (port: number) =>
+    testEmbeddingConnection({
+      provider: "ollama",
+      model: "nomic-embed-text",
+      apiKey: "",
+      ollamaBaseUrl: `http://127.0.0.1:${port}`,
+    }),
+};
+
+describe.each(
+  Object.entries(ollamaProbes),
+)("Ollama %s probe with the real ollama client (K127, c-WR-01)", (_probe, run) => {
+  const ollamaCategory = async (port: number) => categoryOf(run(port));
+
+  it.each([
+    ["a closed port", () => closedPort()],
+    [
+      "an HTTP 404 with a text body (any web server, or a missing model)",
+      () => httpAnswer(404, "text/plain", "404 page not found"),
+    ],
+    [
+      "an HTTP 404 with an Ollama JSON error",
+      () =>
+        httpAnswer(404, "application/json", '{"error":"model not found, try pulling it first"}'),
+    ],
+    ["an HTTP 500", () => httpAnswer(500, "application/json", '{"error":"boom"}')],
+    ["a 200 with a body that is not JSON", () => httpAnswer(200, "text/html", "<html>hi</html>")],
+    ["a non-HTTP banner followed by a close", () => bannerAndClose("SSH-2.0-OpenSSH_9.6\r\n")],
+    ["a server that closes at once", () => tcpServer((socket) => socket.destroy())],
+  ])("gives connection_failed for %s", async (_label, start) => {
+    expect(await ollamaCategory(await start())).toBe("connection_failed");
+  });
+
+  it.each([[401], [403]])("gives authentication_failed for an HTTP %i", async (status) => {
+    expect(
+      await ollamaCategory(await httpAnswer(status, "application/json", '{"error":"denied"}')),
+    ).toBe("authentication_failed");
+  });
+
+  it("collapses closed, other web servers and other services into one category", async () => {
+    const categories = new Set([
+      await ollamaCategory(await closedPort()),
+      await ollamaCategory(await httpAnswer(404, "text/plain", "404 page not found")),
+      await ollamaCategory(await httpAnswer(200, "text/html", "<html>hi</html>")),
+      await ollamaCategory(await bannerAndClose("SSH-2.0-OpenSSH_9.6\r\n")),
+    ]);
+    expect([...categories]).toEqual(["connection_failed"]);
   });
 });

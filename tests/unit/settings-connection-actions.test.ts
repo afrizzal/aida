@@ -260,6 +260,22 @@ describe("testSmtpConnection (D-25, F-08)", () => {
     expectLogExcludes("smtp.internal.example", "Connection timeout");
   });
 
+  it("returns connection_failed for a non-SMTP greeting (EPROTOCOL, K127)", async () => {
+    smtpVerifyRejects(
+      Object.assign(
+        new Error("Invalid greeting. response=SSH-2.0-OpenSSH_9.6 smtp.internal.example"),
+        {
+          code: "EPROTOCOL",
+        },
+      ),
+    );
+
+    const result = await testSmtpConnection(EMAIL_INPUT);
+
+    expectFailure(result, "connection_failed");
+    expectLogExcludes("smtp.internal.example", "SSH-2.0", "Invalid greeting");
+  });
+
   it("returns authentication_failed for EAUTH with SMTP 535", async () => {
     smtpVerifyRejects(
       Object.assign(new Error("Invalid login: 535 5.7.8 user support pass smtp-secret-pw"), {

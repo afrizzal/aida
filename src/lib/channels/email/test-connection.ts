@@ -26,5 +26,17 @@ export async function probeSmtpConnection(
   const transport = createSmtpTransport(config, {
     timeoutMs: opts?.timeoutMs ?? EMAIL_PROBE_TIMEOUT_MS,
   });
-  await transport.verify();
+  try {
+    await transport.verify();
+  } catch (e) {
+    // nodemailer's verify() rejects with a bare `Error("Connection closed")`, no code, when the
+    // server ends the connection before the SMTP session finishes. Give it nodemailer's own
+    // connection code so it classifies like every other close (K127).
+    if (e instanceof Error && e.message === "Connection closed" && !("code" in e)) {
+      throw Object.assign(new Error("SMTP connection closed", { cause: e }), {
+        code: "ECONNECTION",
+      });
+    }
+    throw e;
+  }
 }

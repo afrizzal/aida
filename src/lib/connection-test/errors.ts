@@ -43,7 +43,7 @@ export const CONNECTION_TEST_ERROR_MESSAGES: Record<ConnectionTestErrorCategory,
   authentication_failed:
     "The server rejected the credentials. Check the API key, username or password.",
   connection_failed:
-    "AIDA could not reach the server. Check the address and that the server is running and reachable from AIDA.",
+    "AIDA could not reach the server, or the server did not answer as expected (for example a different service on that port, or a model that does not exist there). Check the address, the port and the model name, and that the right server is running and reachable from AIDA.",
   unknown:
     "The connection test failed for an unknown reason. Check the server log for the reference below.",
 };
@@ -75,6 +75,15 @@ const CONNECTION_CODES = new Set([
   "UND_ERR_CONNECT_TIMEOUT",
   "UND_ERR_SOCKET",
   "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+  "UND_ERR_CLOSED",
+  "UND_ERR_HEADERS_OVERFLOW",
+  "UND_ERR_RES_CONTENT_LENGTH_MISMATCH",
+  "UND_ERR_RES_EXCEEDED_MAX_SIZE",
+  "UND_ERR_INFO",
+  "UND_ERR_PRX_TLS",
+  // nodemailer: a greeting or reply that is not SMTP (K127).
+  "EPROTOCOL",
   // imapflow 1.x (lib/imap-flow.js, lib/connection-deadline.js, lib/handler/*): timeouts, early
   // close, lost connection, and replies that are not IMAP (K127).
   "CONNECT_TIMEOUT",
@@ -96,13 +105,24 @@ const CONNECTION_CODES = new Set([
   "ETHROTTLE",
   "COMPRESS_TRAILING_DATA",
 ]);
-/** imapflow's parser errors (`ParserError1` ... `ParserError11`, `ParserErrorExchange`). */
-const CONNECTION_CODE_PREFIXES = ["ParserError"];
+/**
+ * imapflow's parser errors (`ParserError1` ... `ParserError11`, `ParserErrorExchange`) and the
+ * llhttp parser codes undici sets when a reply is not HTTP (`HPE_INVALID_CONSTANT`, ...).
+ */
+const CONNECTION_CODE_PREFIXES = ["ParserError", "HPE_"];
 const CONNECTION_NAMES = new Set([
   "APIConnectionError",
   "APIConnectionTimeoutError",
   "AbortError",
   "TimeoutError",
+  // undici's socket, parser and timeout errors.
+  "HTTPParserError",
+  "SocketError",
+  "ConnectTimeoutError",
+  "HeadersTimeoutError",
+  "BodyTimeoutError",
+  // A body that is not JSON where the probe expects JSON (K127).
+  "SyntaxError",
 ]);
 
 type ErrorLike = Record<string, unknown>;
@@ -161,13 +181,31 @@ function isConfig(e: ErrorLike): boolean {
   return !!message && CONFIG_MESSAGE_PREFIXES.some((prefix) => message.startsWith(prefix));
 }
 
-function isAuth(e: ErrorLike): boolean {
+/** An HTTP status on the error (`status`, `statusCode`, or ollama's `status_code`), 100..599. */
+function httpStatus(e: ErrorLike): number | undefined {
   const status =
     numberProp(e, "status") ?? numberProp(e, "statusCode") ?? numberProp(e, "status_code");
+  return status !== undefined && Number.isInteger(status) && status >= 100 && status <= 599
+    ? status
+    : undefined;
+}
+
+/** An SMTP reply code on a nodemailer error (`responseCode`), 200..599. */
+function smtpReplyCode(e: ErrorLike): number | undefined {
+  const code = numberProp(e, "responseCode");
+  return code !== undefined && Number.isInteger(code) && code >= 200 && code <= 599
+    ? code
+    : undefined;
+}
+
+function isAuth(e: ErrorLike): boolean {
+  const status = httpStatus(e);
   if (status !== undefined && AUTH_STATUSES.has(status)) return true;
-  if (stringProp(e, "code") === "EAUTH") return true;
-  const responseCode = numberProp(e, "responseCode");
+  const responseCode = smtpReplyCode(e);
   if (responseCode !== undefined && AUTH_SMTP_RESPONSE_CODES.has(responseCode)) return true;
+  // nodemailer's EAUTH without a server reply is its own credential check ("Missing credentials").
+  // With a reply other than 530, 534 or 535 the server did not reject the credentials (K127).
+  if (stringProp(e, "code") === "EAUTH" && responseCode === undefined) return true;
   try {
     if (e.authenticationFailed === true) return true;
   } catch {
@@ -177,6 +215,9 @@ function isAuth(e: ErrorLike): boolean {
 }
 
 function isConnection(e: ErrorLike): boolean {
+  // Any other HTTP status on the probe call, or any other SMTP reply: a server answered, but not
+  // as the probe expected (another web server, a missing model, a non-credential SMTP refusal).
+  if (httpStatus(e) !== undefined || smtpReplyCode(e) !== undefined) return true;
   const code = stringProp(e, "code");
   if (code) {
     if (CONNECTION_CODES.has(code)) return true;

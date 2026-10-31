@@ -76,6 +76,69 @@ describe("classifyConnectionError (D-25, F-08)", () => {
     );
   });
 
+  it("maps protocol mismatches to connection_failed (K127, c-WR-01)", () => {
+    // nodemailer: a greeting or reply that is not SMTP.
+    expect(classifyConnectionError(withProps("Invalid greeting", { code: "EPROTOCOL" }))).toBe(
+      "connection_failed",
+    );
+    // A body that is not JSON (an HTML page where Ollama was expected).
+    expect(classifyConnectionError(new SyntaxError("Unexpected token '<'"))).toBe(
+      "connection_failed",
+    );
+    // undici: a reply that is not HTTP, and its other socket and body failures.
+    const notHttp = new TypeError("fetch failed", {
+      cause: Object.assign(new Error("Response does not match the HTTP/1.1 protocol"), {
+        name: "HTTPParserError",
+        code: "HPE_INVALID_CONSTANT",
+      }),
+    });
+    expect(classifyConnectionError(notHttp)).toBe("connection_failed");
+    for (const code of [
+      "UND_ERR_BODY_TIMEOUT",
+      "UND_ERR_CLOSED",
+      "UND_ERR_HEADERS_OVERFLOW",
+      "UND_ERR_RES_CONTENT_LENGTH_MISMATCH",
+      "UND_ERR_RES_EXCEEDED_MAX_SIZE",
+      "UND_ERR_INFO",
+      "UND_ERR_PRX_TLS",
+    ]) {
+      expect(classifyConnectionError(withProps("x", { code })), code).toBe("connection_failed");
+    }
+  });
+
+  it("maps a non-auth HTTP status on the probe call to connection_failed (K127, c-WR-01)", () => {
+    for (const status of [400, 404, 405, 429, 500, 502, 503]) {
+      expect(classifyConnectionError(withProps("x", { status })), `status ${status}`).toBe(
+        "connection_failed",
+      );
+      expect(classifyConnectionError(withProps("x", { statusCode: status }))).toBe(
+        "connection_failed",
+      );
+      // ollama's ResponseError carries `status_code`.
+      expect(classifyConnectionError(withProps("x", { status_code: status }))).toBe(
+        "connection_failed",
+      );
+    }
+    expect(classifyConnectionError(withProps("x", { status_code: 401 }))).toBe(
+      "authentication_failed",
+    );
+  });
+
+  it("keeps only SMTP 530, 534 and 535 as authentication_failed (K127, c-WR-01)", () => {
+    // A non-credential SMTP reply to AUTH (nodemailer still says EAUTH) is a protocol answer.
+    for (const responseCode of [421, 454, 500, 502, 504]) {
+      expect(
+        classifyConnectionError(withProps("Invalid login", { code: "EAUTH", responseCode })),
+        String(responseCode),
+      ).toBe("connection_failed");
+    }
+    for (const responseCode of [530, 534, 535]) {
+      expect(classifyConnectionError(withProps("x", { code: "EAUTH", responseCode }))).toBe(
+        "authentication_failed",
+      );
+    }
+  });
+
   it("maps TLS and certificate codes to connection_failed", () => {
     for (const code of [
       "ERR_TLS_CERT_ALTNAME_INVALID",
@@ -199,8 +262,11 @@ describe("classifyConnectionError (D-25, F-08)", () => {
     for (const value of [undefined, null, "", 0, 42, new Error(""), {}, [], "ECONNREFUSED"]) {
       expect(classifyConnectionError(value), JSON.stringify(value) ?? "undefined").toBe("unknown");
     }
-    expect(classifyConnectionError(withProps("x", { status: 500 }))).toBe("unknown");
+    // K127: a non-auth HTTP status is connection_failed now (see the c-WR-01 case above).
+    expect(classifyConnectionError(withProps("x", { status: 500 }))).toBe("connection_failed");
     expect(classifyConnectionError(withProps("x", { code: 401 }))).toBe("unknown");
+    expect(classifyConnectionError(withProps("x", { status: 99 }))).toBe("unknown");
+    expect(classifyConnectionError(withProps("x", { status: "500" }))).toBe("unknown");
   });
 
   it("returns only the four ASCII category literals, whatever the raw message encoding", () => {
@@ -232,7 +298,7 @@ describe("classifyConnectionError (D-25, F-08)", () => {
       authentication_failed:
         "The server rejected the credentials. Check the API key, username or password.",
       connection_failed:
-        "AIDA could not reach the server. Check the address and that the server is running and reachable from AIDA.",
+        "AIDA could not reach the server, or the server did not answer as expected (for example a different service on that port, or a model that does not exist there). Check the address, the port and the model name, and that the right server is running and reachable from AIDA.",
       unknown:
         "The connection test failed for an unknown reason. Check the server log for the reference below.",
     });

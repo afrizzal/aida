@@ -222,11 +222,11 @@ test("Settings: Embedding Test Connection succeeds against the stub, fails with 
   stub.embedMode = "fail";
   await embedCard.getByRole("button", { name: "Test connection" }).click();
   // D-25 (F-08): the failure shows a fixed category message plus a reference, never the raw
-  // provider text. The stub's 404 "model not found" has no auth, network or config signal, so it
-  // is the "unknown" category.
+  // provider text. K127: the stub's 404 "model not found" is a non-auth HTTP status on the probe
+  // call, so it is the "connection_failed" category, whose text names a missing model.
   await expect(
     embedCard.getByText(
-      "Connection failed: The connection test failed for an unknown reason. Check the server log for the reference below.",
+      "Connection failed: AIDA could not reach the server, or the server did not answer as expected (for example a different service on that port, or a model that does not exist there). Check the address, the port and the model name, and that the right server is running and reachable from AIDA.",
     ),
   ).toBeVisible({ timeout: 15_000 });
   await expect(embedCard.getByText(/^Reference: [0-9a-f-]{36}$/)).toBeVisible();
