@@ -85,23 +85,27 @@ function hasMalformedPathEncoding(pathname: string): boolean {
   }
 }
 
-function malformedPathResponse() {
-  return new NextResponse(MALFORMED_PATH_BODY, {
+// The static headers come from the shared helper like every other exit (review a-IN-a4), so a
+// header added to securityHeadersFor() reaches this 400 too. Referrer-Policy is then forced to
+// no-referrer whatever the path: the path could not be decoded, so it cannot be classified, and it
+// may be a status path that carries a token.
+function malformedPathResponse(pathname: string) {
+  const response = new NextResponse(MALFORMED_PATH_BODY, {
     status: 400,
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
       "Content-Security-Policy": MALFORMED_PATH_CSP,
-      "X-Content-Type-Options": "nosniff",
-      "X-Frame-Options": "DENY",
-      "Referrer-Policy": "no-referrer",
     },
   });
+  withSecurityHeaders(response, pathname);
+  response.headers.set("Referrer-Policy", "no-referrer");
+  return response;
 }
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (hasMalformedPathEncoding(pathname)) return malformedPathResponse();
+  if (hasMalformedPathEncoding(pathname)) return malformedPathResponse(pathname);
 
   if (BLOCKED_PUBLIC_ROUTES.some((p) => pathname.startsWith(p))) {
     return withSecurityHeaders(
