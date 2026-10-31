@@ -8,8 +8,11 @@ import {
   probeSmtpConnection,
 } from "../../src/lib/channels/email/test-connection";
 import { classifyConnectionError } from "../../src/lib/connection-test/errors";
-import { testProviderConnection } from "../../src/lib/llm/test-connection";
-import { testEmbeddingConnection } from "../../src/lib/rag/embed-test-connection";
+import { PROBE_TIMEOUT_MS, testProviderConnection } from "../../src/lib/llm/test-connection";
+import {
+  EMBEDDING_PROBE_TIMEOUT_MS,
+  testEmbeddingConnection,
+} from "../../src/lib/rag/embed-test-connection";
 
 // K127 (08-REVIEW.md, c-CR-01): the real probe clients against local fake servers on 127.0.0.1.
 // Every network or protocol failure (closed port, a port that never greets, a port running some
@@ -297,5 +300,63 @@ describe.each(
       await ollamaCategory(await bannerAndClose("SSH-2.0-OpenSSH_9.6\r\n")),
     ]);
     expect([...categories]).toEqual(["connection_failed"]);
+  });
+});
+
+describe("Ollama probe deadline (c-WR-03)", () => {
+  it("defaults to the documented 10 s budget for the Settings actions", () => {
+    expect(PROBE_TIMEOUT_MS).toBe(10_000);
+    expect(EMBEDDING_PROBE_TIMEOUT_MS).toBe(10_000);
+  });
+
+  const probes = {
+    llm: (port: number) =>
+      testProviderConnection(
+        {
+          provider: "ollama",
+          model: "llama3",
+          apiKey: "",
+          ollamaBaseUrl: `http://127.0.0.1:${port}`,
+        },
+        { timeoutMs: TEST_TIMEOUT_MS },
+      ),
+    embedding: (port: number) =>
+      testEmbeddingConnection(
+        {
+          provider: "ollama",
+          model: "nomic-embed-text",
+          apiKey: "",
+          ollamaBaseUrl: `http://127.0.0.1:${port}`,
+        },
+        { timeoutMs: TEST_TIMEOUT_MS },
+      ),
+  };
+
+  it.each(
+    Object.entries(probes),
+  )("%s: a port that accepts and never answers fails as connection_failed within the timeout", async (_probe, run) => {
+    const started = Date.now();
+    expect(await categoryOf(run(await silent()))).toBe("connection_failed");
+    expect(Date.now() - started).toBeLessThan(3_000);
+  });
+
+  it.each(
+    Object.entries(probes),
+  )("%s: an HTTP server that never sends a response fails as connection_failed within the timeout", async (_probe, run) => {
+    const started = Date.now();
+    expect(await categoryOf(run(await httpServer(() => {})))).toBe("connection_failed");
+    expect(Date.now() - started).toBeLessThan(3_000);
+  });
+
+  it.each(
+    Object.entries(probes),
+  )("%s: headers sent, body never finished, fails as connection_failed within the timeout", async (_probe, run) => {
+    const port = await httpServer((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.write('{"models":');
+    });
+    const started = Date.now();
+    expect(await categoryOf(run(port))).toBe("connection_failed");
+    expect(Date.now() - started).toBeLessThan(3_000);
   });
 });
