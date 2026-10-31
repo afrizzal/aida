@@ -75,7 +75,29 @@ const CONNECTION_CODES = new Set([
   "UND_ERR_CONNECT_TIMEOUT",
   "UND_ERR_SOCKET",
   "UND_ERR_HEADERS_TIMEOUT",
+  // imapflow 1.x (lib/imap-flow.js, lib/connection-deadline.js, lib/handler/*): timeouts, early
+  // close, lost connection, and replies that are not IMAP (K127).
+  "CONNECT_TIMEOUT",
+  "GREETING_TIMEOUT",
+  "UPGRADE_TIMEOUT",
+  "ETIMEOUT",
+  "NoConnection",
+  "EConnectionClosed",
+  "ClosedAfterConnectText",
+  "ClosedAfterConnectTLS",
+  "STARTTLS_INJECTION",
+  "InvalidResponse",
+  "UnexpectedTag",
+  "ResponseProcessingFailed",
+  "LineTooLarge",
+  "ResponseTooLarge",
+  "LiteralTooLarge",
+  "MAX_IMAP_NESTING_REACHED",
+  "ETHROTTLE",
+  "COMPRESS_TRAILING_DATA",
 ]);
+/** imapflow's parser errors (`ParserError1` ... `ParserError11`, `ParserErrorExchange`). */
+const CONNECTION_CODE_PREFIXES = ["ParserError"];
 const CONNECTION_NAMES = new Set([
   "APIConnectionError",
   "APIConnectionTimeoutError",
@@ -158,6 +180,7 @@ function isConnection(e: ErrorLike): boolean {
   const code = stringProp(e, "code");
   if (code) {
     if (CONNECTION_CODES.has(code)) return true;
+    if (CONNECTION_CODE_PREFIXES.some((prefix) => code.startsWith(prefix))) return true;
     if (code.startsWith("ERR_TLS_") || code.startsWith("ERR_SSL_") || code.startsWith("CERT_")) {
       return true;
     }

@@ -39,6 +39,43 @@ describe("classifyConnectionError (D-25, F-08)", () => {
     }
   });
 
+  it("maps imapflow 1.x connection codes to connection_failed (K127, c-CR-01)", () => {
+    for (const code of [
+      "CONNECT_TIMEOUT",
+      "GREETING_TIMEOUT",
+      "UPGRADE_TIMEOUT",
+      "ETIMEOUT",
+      "NoConnection",
+      "EConnectionClosed",
+      "ClosedAfterConnectText",
+      "ClosedAfterConnectTLS",
+      "STARTTLS_INJECTION",
+      "InvalidResponse",
+      "UnexpectedTag",
+      "ResponseProcessingFailed",
+      "LineTooLarge",
+      "ResponseTooLarge",
+      "LiteralTooLarge",
+      "MAX_IMAP_NESTING_REACHED",
+      "ETHROTTLE",
+      "COMPRESS_TRAILING_DATA",
+      "ParserError1",
+      "ParserError11",
+      "ParserErrorExchange",
+    ]) {
+      expect(classifyConnectionError(withProps("x", { code })), code).toBe("connection_failed");
+    }
+  });
+
+  it("keeps an imapflow authentication failure as authentication_failed", () => {
+    class AuthenticationFailure extends Error {
+      authenticationFailed = true;
+    }
+    expect(classifyConnectionError(new AuthenticationFailure("Authentication failed"))).toBe(
+      "authentication_failed",
+    );
+  });
+
   it("maps TLS and certificate codes to connection_failed", () => {
     for (const code of [
       "ERR_TLS_CERT_ALTNAME_INVALID",

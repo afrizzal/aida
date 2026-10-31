@@ -170,6 +170,25 @@ describe("testImapConnection (D-25, F-08)", () => {
 
     await expect(testImapConnection(EMAIL_INPUT)).resolves.toEqual({ ok: true });
     expect(client.logout).toHaveBeenCalledOnce();
+    // The action's own budget: about 10 s per phase, connect phase included (K127).
+    expect(createImapClient).toHaveBeenCalledWith(expect.anything(), { timeoutMs: 10_000 });
+  });
+
+  it("returns connection_failed for an imapflow GREETING_TIMEOUT (K127, c-CR-01)", async () => {
+    vi.mocked(createImapClient).mockReturnValueOnce({
+      connect: vi.fn(async () => {
+        throw Object.assign(
+          new Error("Failed to receive greeting from mail.internal.example. Maybe should use TLS?"),
+          { code: "GREETING_TIMEOUT" },
+        );
+      }),
+      logout: vi.fn(),
+    } as unknown as ReturnType<typeof createImapClient>);
+
+    const result = await testImapConnection(EMAIL_INPUT);
+
+    expectFailure(result, "connection_failed");
+    expectLogExcludes("mail.internal.example", "greeting");
   });
 });
 

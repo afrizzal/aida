@@ -3,12 +3,15 @@
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { requireOrgAdmin } from "@/lib/authz";
-import { createImapClient } from "@/lib/channels/email/imap-client";
 import {
   getEmailSettings,
   saveEmailSettings as persistEmailSettings,
 } from "@/lib/channels/email/settings";
-import { createSmtpTransport } from "@/lib/channels/email/smtp-client";
+import {
+  EMAIL_PROBE_TIMEOUT_MS,
+  probeImapConnection,
+  probeSmtpConnection,
+} from "@/lib/channels/email/test-connection";
 import {
   ConnectionTestConfigError,
   type ConnectionTestResult,
@@ -96,8 +99,8 @@ function requireHost(host: unknown): string {
 }
 
 /**
- * Real IMAP connectivity probe (D-24, Pitfall 5) — fails fast within a 10s timeout rather than
- * hanging on a bad host/port. Falls back to the stored decrypted password when the form field is
+ * Real IMAP connectivity probe (D-24, Pitfall 5) — each phase (TCP/TLS connect, greeting, socket
+ * inactivity) has a 10s budget, so a bad or filtered host/port fails instead of hanging (K127). Falls back to the stored decrypted password when the form field is
  * blank, so an admin can Test without re-typing an already-saved password. The port and host are
  * validated and the client is constructed inside the `try`, so a constructor error is classified
  * too. A failure returns a fixed category and a correlation ID (D-25, F-08); the failure text is
@@ -110,7 +113,7 @@ export async function testImapConnection(input: EmailSettingsInput): Promise<Con
   const imapPassword = input.imapPassword || (await getEmailSettings(db)).imapPassword;
 
   try {
-    const client = createImapClient(
+    await probeImapConnection(
       {
         imapHost: requireHost(input.imapHost),
         imapPort: parsePort(input.imapPort),
@@ -118,10 +121,8 @@ export async function testImapConnection(input: EmailSettingsInput): Promise<Con
         imapUser: input.imapUser,
         imapPassword,
       },
-      { timeoutMs: 10000 },
+      { timeoutMs: EMAIL_PROBE_TIMEOUT_MS },
     );
-    await client.connect();
-    await client.logout();
     return { ok: true };
   } catch (e) {
     // Log only the probe, the category and the correlation ID (D-25).
@@ -143,7 +144,7 @@ export async function testSmtpConnection(input: EmailSettingsInput): Promise<Con
   const smtpPassword = input.smtpPassword || (await getEmailSettings(db)).smtpPassword;
 
   try {
-    const transport = createSmtpTransport(
+    await probeSmtpConnection(
       {
         smtpHost: requireHost(input.smtpHost),
         smtpPort: parsePort(input.smtpPort),
@@ -151,9 +152,8 @@ export async function testSmtpConnection(input: EmailSettingsInput): Promise<Con
         smtpUser: input.smtpUser,
         smtpPassword,
       },
-      { timeoutMs: 10000 },
+      { timeoutMs: EMAIL_PROBE_TIMEOUT_MS },
     );
-    await transport.verify();
     return { ok: true };
   } catch (e) {
     // Log only the probe, the category and the correlation ID (D-25).
