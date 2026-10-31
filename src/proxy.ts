@@ -134,11 +134,16 @@ export function proxy(request: NextRequest) {
   return forwardWithSecurityHeaders(request, pathname);
 }
 
-// Matcher exclusions (D-11, review C13, R2-9): the proxy skips `_next/static` (immutable build
-// JS and CSS chunks), `_next/image` (the image optimizer, unused: src/ has no next/image import)
-// and `favicon.ico` (a static icon). None of them returns HTML, so none needs a CSP. Every other
-// path, including 404 pages, errors returned by routes and any route added later, runs this
-// proxy and gets the CSP and security headers. A malformed percent-encoded path does reach the
-// proxy, and the K125 guard above answers it before Next.js can render its HTML 400 page; plan
-// 08-08 tests that boundary. Never place a future HTML route under an excluded prefix.
-export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"] };
+// Matcher exclusions (D-11, review C13, R2-9, a-WR-a1): the proxy skips only two anchored paths.
+// - `/_next/static/` with its trailing slash: the immutable build JS, CSS and media files.
+// - exactly `/_next/image`: the image optimizer endpoint (unused: src/ has no next/image import),
+//   which answers with an image or a plain-text error.
+// Anything that merely starts with those strings, such as `/_next/staticX` or `/_next/image-foo`,
+// runs the proxy, because Next.js renders the app's HTML not-found page for it. There is no
+// favicon exclusion: the app ships no favicon file (public/ holds only .gitkeep, and src/app has
+// no favicon or icon file), so `/favicon.ico` is an ordinary path that gets the proxy's
+// redirect or not-found page with the CSP. Every other path, including 404 pages, errors
+// returned by routes and any route added later, runs this proxy and gets the CSP, the security
+// headers and the K125 guard above. tests/unit/proxy-matcher.test.ts checks the matcher with
+// Next's own matcher helper. Never place a future HTML route under an excluded path.
+export const config = { matcher: ["/((?!_next/static/|_next/image$).*)"] };
