@@ -8,6 +8,7 @@ import { GET as attachmentGet } from "@/app/api/public/status/[token]/attachment
 import { POST as csatPost } from "@/app/api/public/status/[token]/csat/route";
 import { POST as followUpPost } from "@/app/api/public/status/[token]/follow-up/route";
 import { prisma } from "@/lib/db";
+import { CONSOLE_METHODS, serializeLogArg } from "../support/console-capture";
 
 beforeAll(async () => {
   process.env.RATE_LIMIT_PEPPER ||= `test-pepper-${randomUUID()}`;
@@ -121,7 +122,7 @@ describe("status token never reaches a log line", () => {
   it("csat, follow-up and attachment calls log nothing containing the token", async () => {
     const token = `tok-${randomUUID()}`;
     const seen: unknown[] = [];
-    for (const method of ["log", "info", "warn", "error"] as const) {
+    for (const method of CONSOLE_METHODS) {
       vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
         seen.push(...args);
       });
@@ -139,15 +140,8 @@ describe("status token never reaches a log line", () => {
       }),
       { params: Promise.resolve({ token, id }) },
     );
-    const leaked = seen.filter((arg) => {
-      const text =
-        typeof arg === "string"
-          ? arg
-          : arg instanceof Error
-            ? `${arg.message}${arg.stack}`
-            : JSON.stringify(arg);
-      return (text ?? String(arg)).includes(token);
-    });
+    // Deep serialization: a token inside a nested Error ({ err }) or its cause is seen (d-WR-d2).
+    const leaked = seen.filter((arg) => serializeLogArg(arg).includes(token));
     expect(leaked).toEqual([]);
   });
 });

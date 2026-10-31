@@ -1,4 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import {
+  type ConsoleSpies,
+  loggedTexts,
+  restoreConsole,
+  spyOnConsole,
+} from "../support/console-capture";
 
 // The four Settings connection-test Server Actions (D-25, AIDA-31, F-08): every failure returns a
 // fixed category plus a fresh correlation ID, and neither the response nor the server log carries
@@ -34,27 +40,66 @@ import { testEmbeddingConnection as probeEmbeddingConnection } from "../../src/l
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-let errorSpy: MockInstance<typeof console.error>;
+let consoleSpies: ConsoleSpies;
+let errorSpy: MockInstance<(...args: unknown[]) => void>;
 
 beforeEach(() => {
-  errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  consoleSpies = spyOnConsole();
+  errorSpy = consoleSpies.error;
 });
 
 afterEach(() => {
   vi.clearAllMocks();
-  errorSpy.mockRestore();
+  restoreConsole(consoleSpies);
 });
 
-/** Every console.error argument, serialized, must exclude each raw fragment. */
+/**
+ * The failure was logged, and no argument of any console call (log, info, warn, error, debug),
+ * serialized deeply with an Error's message, stack and cause, contains any raw fragment (d-WR-d2).
+ */
 function expectLogExcludes(...fragments: string[]) {
   expect(errorSpy).toHaveBeenCalled();
-  for (const call of errorSpy.mock.calls) {
-    for (const arg of call) {
-      const text = typeof arg === "string" ? arg : JSON.stringify(arg);
-      for (const fragment of fragments) expect(text).not.toContain(fragment);
-    }
+  for (const text of loggedTexts(consoleSpies)) {
+    for (const fragment of fragments) expect(text).not.toContain(fragment);
   }
 }
+
+describe("expectLogExcludes negative controls (d-WR-d2)", () => {
+  const cleanLine = () =>
+    console.error("[settings] connection test failed", { probe: "llm", category: "unknown" });
+
+  it("rejects a raw Error nested in the logged object", () => {
+    cleanLine();
+    console.error("[settings] connection test failed", {
+      err: new Error("401 Incorrect API key sk-live-NESTED at https://llm.corp.example"),
+    });
+    expect(() => expectLogExcludes("sk-live-NESTED")).toThrow();
+    expect(() => expectLogExcludes("llm.corp.example")).toThrow();
+  });
+
+  it("rejects a secret that only appears in an Error's cause", () => {
+    cleanLine();
+    console.error({ err: new Error("fetch failed", { cause: new Error("sk-live-CAUSE") }) });
+    expect(() => expectLogExcludes("sk-live-CAUSE")).toThrow();
+  });
+
+  it.each(["log", "info", "warn", "debug"] as const)("watches console.%s too", (method) => {
+    cleanLine();
+    console[method](new Error(`raw ${method} sk-live-METHOD`));
+    expect(() => expectLogExcludes("sk-live-METHOD")).toThrow();
+  });
+
+  it("rejects a value nested several objects deep", () => {
+    cleanLine();
+    console.error({ a: { b: { c: { d: { e: { f: "sk-live-DEEP" } } } } } });
+    expect(() => expectLogExcludes("sk-live-DEEP")).toThrow();
+  });
+
+  it("passes when only the clean line was logged", () => {
+    cleanLine();
+    expectLogExcludes("sk-live", "llm.corp.example");
+  });
+});
 
 describe("testLlmConnection (D-25, F-08)", () => {
   it("returns connection_failed with a correlation ID and never echoes or logs the raw host", async () => {
