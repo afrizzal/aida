@@ -30,6 +30,8 @@ Milestone v2.0 sudah dibuka (0b) dan daftar fitur Projects sudah dicek ke demo p
 
 ## 3. Menunggu owner
 
+**Paling baru (2026-11-11): Bagian A Fase 8 dieksekusi dan gerbangnya hampir hijau.** 18/18 plan selesai. Gerbang 08-24 diulang sesudah perbaikan test 08-gap1 di `4d0eefd`: lint, typecheck, unit 1156, build, integration 1327, E2E 219 lolos. Yang belum hijau: audit produksi exit 1 (10 high; dua di antaranya nodemailer, butir 08-o3) dan langkah Docker `blocked (space)` (host 18,5 GiB, turun dari 19,4 GiB; VM 13,9 GiB; butir 0a2). Kandidat titik aman `v1.0.0`: `4d0eefd` (bagian 4). Berikutnya run menjalankan code review dan kritik diff Codex atas Bagian A.
+
 **Paling baru (2026-11-11): Fase 8 dipecah sesuai keputusan owner butir 4.** Replan siklus 4 merevisi delapan plan dengan aturan I dan J dan alat J1. Codex siklus 4 (satu-satunya): R3-1, R3-2, R3-3 tertutup; R3-4 sebagian; dua HIGH baru, keduanya di alat test Docker: R4-1 (spesifikasi gerbang 08-16 tidak memuat berkas suite keenam yang diwajibkan 08-23, sehingga gerbang macet) dan R4-2 (classifier CI egress di 08-05 Task 3 bisa melabeli kegagalan lain sebagai `blocked (space)`). Tanpa siklus 5. Bagian A (upgrade dependensi, CSP, non-root, rate limit, dan gerbang baru 08-24) dikerjakan dulu. Bagian B (Fase 8.1: harness container, bukti runtime, gerbang lengkap, job egress CI) menunggu keputusan owner: anggaran review untuk R4-1 dan R4-2, dan blocker ruang VM (0a2) serta `caddy:2` (08-o2). Rincian di `08-SPLIT.md`. Titik aman `v1.0.0`: commit Bagian A akan dilaporkan sebagai kandidat; cukup atau tidaknya keputusan owner.
 
 **Baru (2026-11-11): perilaku CI dari revisi 08-05 (08-o1).** Job `egress` di CI akan merah berlabel `blocked (space)` bila runner punya kurang dari 20 GiB (runner standar: 14 GB menurut GitHub), termasuk di setiap PR Dependabot yang mengubah lockfile; `egress` jangan dijadikan required check; batas Dependabot 3 berlaku per entri (sampai 12 PR). Rincian dan opsi di `ANTREAN.md` 08-o1. Tidak berbiaya (repo publik, `ubuntu-latest`).
@@ -54,7 +56,7 @@ Keputusan owner 2026-11-11 menjawab butir 0, 1, 2, 3, 5, 6, 7, 8, dan 9 di bawah
 
 ## 4. Titik aman rilis `v1.0.0`
 
-Belum ada. Fase 08 diparkir sebelum eksekusi, jadi belum ada commit yang aman untuk `v1.0.0` dari run ini.
+Kandidat (2026-11-11): `4d0eefd`, commit yang dites gerbang Bagian A Fase 8 (08-24, diulang sesudah 08-gap1). Di commit itu lint, typecheck, unit 1156, build, integration 1327 dan E2E 219 lolos. Yang belum: audit produksi exit 1 (10 high, 08-o3), `test:egress` dan cek image non-root `blocked (space)`, dan code review serta verifikasi Bagian A belum dijalankan. Kandidat sebelumnya `61c8696` gugur karena integration gagal 13 test di sana. Ini hanya kandidat; owner yang memutuskan. Bukti: `08-GATE-A.md`.
 
 ## 5. Keputusan penting
 
@@ -110,6 +112,12 @@ Baris bertanda baseline berasal dari persiapan (`1ea4281`). Baris 0a dijalankan 
 | `pnpm test:integration` penuh dan `pnpm test:egress` (Fase 12) | blocked | O-1, tidak dijalankan |
 | `pnpm test` (J1, `fb3d3e6`) | 0 | 53 berkas, 876 test |
 | `pnpm test:integration` (J1, `fb3d3e6`, aturan J) | 0 | 94 berkas, 1297 test; suite egress kini di luar include. Percobaan pertama exit 1 karena `DOCKER_HOST` tidak disetel (tidak ada container dibuat) |
+| `pnpm lint`, `pnpm typecheck`, `pnpm build` (gerbang 08-24 ulang, `4d0eefd`) | 0 | bersih |
+| `pnpm test` (gerbang 08-24 ulang) | 0 | 71 berkas, 1156 test |
+| `pnpm test:integration` (gerbang 08-24 ulang) | 0 | 101 berkas, 1327 test (di `61c8696`: exit 1, 13 gagal karena rate limit, diperbaiki di test oleh 08-gap1) |
+| `pnpm test:e2e` (gerbang 08-24 ulang) | 0 | 219 lolos, 1 skip; run pertama exit 1 dengan 0 test (global setup macet di `/setup`), lolos sesudah `.next` dipindah |
+| `pnpm audit --prod` (gerbang 08-24 ulang) | 1 | 0 critical, 10 high (baseline 7 critical, 52 high) |
+| `pnpm test:egress` dan dua cek image (gerbang 08-24 ulang) | blocked | ruang host 18,5 GiB, di bawah 20 GiB (aturan J); tidak ada yang dibuat |
 
 ## 7. Package baru
 
@@ -139,5 +147,6 @@ Dicek 2026-11-09 08.40 WIB:
 | 2026-11-11 | 08-02 | `~/.Trash/aida-next-1794397380` | E2E `authz.spec.ts` gagal: dev server terjebak reload loop dan `/setup` tidak terhidrasi; sesudah dipindah, ulangan lolos 2/2 |
 | 2026-11-11 | 08-08 perbaikan 1 | `~/.Trash/aida-next-1794401825` | global setup E2E gagal dua kali: dev server me-reload `/setup` berulang (379 dan 366 GET tanpa POST); sesudah dipindah, csp.spec 10 lolos dan E2E penuh 219 lolos |
 | 2026-11-11 | 08-11 (orkestrator) | `~/.Trash/aida-next-1794404056` | global setup E2E macet di `/setup` dua kali pada run eksekutor; sesudah dipindah, ketiga spec 08-11 lolos (13 lolos, 1 skip) |
+| 2026-11-11 | 08-24 ulang | `~/.Trash/aida-next-1794408154` | E2E penuh run pertama exit 1 dengan 0 test: global setup macet di `/setup` (`global-setup.ts:165`); sesudah dipindah, E2E penuh 219 lolos |
 
 Catatan terkait (2026-11-11, plan 08-01): `next dev` 16.4.6 membuat `AGENTS.md` di akar repo; eksekutor memindahkannya ke Trash (`~/.Trash/aida-AGENTS-md-<epoch>`), tidak di-commit, dan mematikan pembuatannya dengan `agentRules: false` di `next.config.ts` (`1f88eed`).
