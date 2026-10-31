@@ -140,6 +140,22 @@ describe("CI telemetry, dependency automation and GitHub cost guards (D-06, D-07
     }
   });
 
+  it("a-WR-a2: ci.yml, integration.yml and audit.yml give the token contents: read only, with no job override", () => {
+    for (const name of ["ci.yml", "integration.yml", "audit.yml"]) {
+      const text = wf(name);
+      const permissions = (columnZeroBlock(text, "permissions") ?? [])
+        .map((l) => l.trim())
+        .filter((l) => l !== "");
+      expect(permissions, name).toEqual(["contents: read"]);
+      for (const job of jobBlocks(text)) {
+        expect(
+          job.lines.filter((l) => /^\s+permissions:/.test(l)),
+          `${name} job ${job.id}`,
+        ).toEqual([]);
+      }
+    }
+  });
+
   it("D-07, rule I: audit.yml runs pnpm audit on pull_request, push to master and dispatch only", () => {
     expect(exists(`${WORKFLOWS_DIR}/audit.yml`)).toBe(true);
     const audit = wf("audit.yml");

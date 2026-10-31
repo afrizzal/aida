@@ -10,6 +10,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege (review a-WR-a2): no step writes to the repository or calls the GitHub API;
+# checkout needs read access only, and the setup-node cache uses the runner's own cache token.
+permissions:
+  contents: read
+
 # D-27: build and test steps outside Docker must not phone home (Next.js telemetry,
 # Prisma checkpoint ping).
 env:
