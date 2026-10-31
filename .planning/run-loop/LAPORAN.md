@@ -80,6 +80,7 @@ Rincian ada di `RUN-LOG.md` putaran 1 dan 2. Jawaban Codex disimpan di `codex/ro
 - Fase 12 (putaran 38 sampai 62): dipecah menjadi 12, 12.1, 12.2 (K32); merge menolak kontak berbeda dan provenance per link memakai `Message.seq` (K33); menambah link ke sumber merge ditolak (K34); balasan email keluar tetap di thread tiket tempat ia ditulis dan thread sebuah tiket adalah pesan yang ditulis di tiket itu (K37 dan K38, menggantikan K36 sesudah Codex menunjukkan alasannya tidak cukup); aturan berhenti untuk siklus perbaiki-review di satu fungsi (K39). Sesudah putaran Codex terakhir, setiap perubahan direview oleh reviewer independen sebelum gerbang.
 - Koreksi kejujuran: AIDA-10 di v1 tercatat selesai, padahal alur undangan tidak pernah ada (F-16). Centang v1 tidak diubah. Celahnya dicatat di `PROJECT.md` dan ditutup oleh AIDA-42.
 - Fase 8 Bagian A, langkah 7 (2026-11-11): code review empat bagian atas `a6a8499..HEAD` memberi 3 critical, 25 warning, 28 info (`08-REVIEW.md`, `-b`, `-c`, `-d`). Critical: nonce basi sesudah refresh memblokir style dialog dan ganti tema (K126); test koneksi IMAP masih membedakan port terbuka dan tertutup, sehingga AIDA-31 belum bisa ditutup walau gerbang menyebutnya bisa (K127); verifier gerbang tidak mencocokkan exit code cek image. Keputusan K127 sampai K130: satu aturan kategori untuk keempat probe (galat jaringan dan protokol menjadi `connection_failed`), batas jumlah berkas dan panjang teks di route publik, tunggu limiter dibatasi menjadi 429. Pendapat Codex menyusul di kritik diff. Delapan butir info ditunda dengan alasan.
+- Ruang host turun dari 26 GiB (pagi 2026-11-11) ke 17 GiB. Enam salinan `.next` kini ada di Trash dan tetap memakan disk; run tidak boleh menghapusnya. Mengosongkan Trash adalah keputusan owner.
 
 ## 6. Hasil test dan audit
 
@@ -149,5 +150,7 @@ Dicek 2026-11-09 08.40 WIB:
 | 2026-11-11 | 08-08 perbaikan 1 | `~/.Trash/aida-next-1794401825` | global setup E2E gagal dua kali: dev server me-reload `/setup` berulang (379 dan 366 GET tanpa POST); sesudah dipindah, csp.spec 10 lolos dan E2E penuh 219 lolos |
 | 2026-11-11 | 08-11 (orkestrator) | `~/.Trash/aida-next-1794404056` | global setup E2E macet di `/setup` dua kali pada run eksekutor; sesudah dipindah, ketiga spec 08-11 lolos (13 lolos, 1 skip) |
 | 2026-11-11 | 08-24 ulang | `~/.Trash/aida-next-1794408154` | E2E penuh run pertama exit 1 dengan 0 test: global setup macet di `/setup` (`global-setup.ts:165`); sesudah dipindah, E2E penuh 219 lolos |
+| 2026-11-11 | 08 F1 (perbaikan review) | `~/.Trash/aida-next-1794410194` | E2E pertama macet di `/setup` sebelum ada perubahan `src/`; sesudah dipindah, E2E penuh berjalan (run merah untuk K126) |
+| 2026-11-11 | 08 F1 (perbaikan review) | `~/.Trash/aida-next-1794410651` | `csp.spec` sesudah perbaikan K126 macet di `/setup`; sesudah dipindah, 11 lolos; E2E penuh akhir 220 lolos tanpa pemindahan lagi |
 
 Catatan terkait (2026-11-11, plan 08-01): `next dev` 16.4.6 membuat `AGENTS.md` di akar repo; eksekutor memindahkannya ke Trash (`~/.Trash/aida-AGENTS-md-<epoch>`), tidak di-commit, dan mematikan pembuatannya dengan `agentRules: false` di `next.config.ts` (`1f88eed`).
