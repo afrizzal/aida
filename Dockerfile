@@ -60,7 +60,7 @@ RUN pnpm exec esbuild src/lib/worker/index.ts \
 USER node
 
 # ---- Stage 4: runner ----
-# Minimal production image shared by app (node server.js) and worker (node dist/worker.cjs)
+# Minimal production image shared by app (node server.js) and worker (node dist/worker.mjs)
 # Docker Compose overrides CMD per service — same image, different start command (D-09)
 FROM node:22-alpine AS runner
 WORKDIR /app
@@ -95,5 +95,5 @@ USER node
 
 EXPOSE 3000
 
-# Default CMD runs the Next.js app; worker service overrides to: node dist/worker.cjs
+# Default CMD runs the Next.js app; worker service overrides to: node dist/worker.mjs
 CMD ["node", "server.js"]
