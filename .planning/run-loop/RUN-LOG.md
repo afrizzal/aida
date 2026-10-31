@@ -1584,3 +1584,7 @@ Cek awal lolos (host 20 GiB). 08-20 selesai (`0632faa`, `6ed2d64`, `a8a0999`, `4
 ## Putaran 08-exec-18 (2026-11-11)
 
 Cek awal lolos (host 20 GiB). Gerbang Bagian A 08-24 (`61c8696`, `d402fd2`, `bf63deb`, `c782e25`; commit dites `61c8696`; kandidat titik aman v1.0.0, owner memutuskan): lint, typecheck, unit 1156, build, E2E 219 lolos; audit produksi exit 1 (0 critical, 10 high); integration exit 1 (13 dari 1327 gagal di 3 berkas, akibat rate limit Bagian A); `test:egress` dan dua cek image `blocked (space)` (cek host 19,4 GiB); dry run pembersih 0 sisa; daftar resource asing sama sebelum dan sesudah. `08-GATE-A.md` lolos `check` (31 baris matriks, 8 requirement). Bisa ditutup: AIDA-26, AIDA-31; dipecah: AIDA-28, AIDA-32; terbuka: AIDA-25, 27, 29, 30. Butir antrean baru 08-gap1 (perbaikan celah integration). Berikutnya: 08-gap1.
+
+## Putaran 08-gap1-1 (2026-11-11)
+
+Cek awal lolos (host 19 GiB). 08-gap1 (`c403af7`, `e57ac75`): sebab akar dua berkas adalah XFF bukan IP di test, yang sejak 08-10 masuk satu bucket bersama 5 per jam (produk gagal tertutup sesuai rancangan); satu berkas tanpa `RATE_LIMIT_PEPPER`. Perbaikan hanya di test (IP IPv6 unik per request, pepper di `vi.hoisted`). Integration penuh exit 0, 101 berkas, 1327 test; unit 1156; typecheck dan lint exit 0. Pembersih run: 0 sisa. Berikutnya: gerbang 08-24 ulang.
