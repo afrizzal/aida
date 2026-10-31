@@ -100,6 +100,10 @@ async function expectNoViolations(page: Page, collector: CspCollector): Promise<
   expect(collector.consoleErrors, JSON.stringify(collector.consoleErrors, null, 2)).toEqual([]);
 }
 
+function cspNonce(csp: string): string | undefined {
+  return /'nonce-([^']+)'/.exec(csp)?.[1];
+}
+
 /** The enforced policy carries a nonce and 'strict-dynamic'; no report-only header is used. */
 function expectEnforcedCsp(response: Response): void {
   const headers = response.headers();
@@ -276,6 +280,64 @@ test.describe("CSP: admin pages", () => {
     }).toPass({ timeout: 30_000 });
     await page.keyboard.press("Escape");
     await expect(menu).toBeHidden();
+    await expectNoViolations(page, collector);
+  });
+
+  // K126 (review a-CR-a1): the document's CSP is fixed by the first HTML response, but every
+  // router.refresh() renders the root layout again under a fresh proxy nonce. The client must
+  // keep stamping the document's nonce on the style tags that Radix scroll lock
+  // (react-style-singleton through get-nonce) and next-themes' transition style insert. Sending
+  // an internal note is the product's own router.refresh() (composer.tsx).
+  test("K126: after a router.refresh() the scroll-lock and theme styles still carry the document nonce", async ({
+    page,
+  }) => {
+    const collector = await collectCsp(page);
+    const response = await gotoWarm(page, `/tickets/${ticket.id}`);
+    expectEnforcedCsp(response);
+    const documentNonce = cspNonce(response.headers()["content-security-policy"] ?? "");
+    expect(documentNonce).toBeTruthy();
+
+    const noteText = `K126 refresh note ${ts}`;
+    // Hydration-robust: a click before hydration does nothing, so retry until the mode flips.
+    await expect(async () => {
+      await page.getByRole("button", { name: "Internal Note" }).click();
+      await expect(page.getByPlaceholder("Write an internal note…")).toBeVisible({
+        timeout: 2_000,
+      });
+    }).toPass({ timeout: 30_000 });
+    await page.getByPlaceholder("Write an internal note…").fill(noteText);
+    const refreshed = page.waitForResponse(
+      (res) =>
+        res.request().method() === "GET" &&
+        res.request().headers().rsc === "1" &&
+        res.request().headers()["next-router-prefetch"] === undefined &&
+        new URL(res.url()).pathname === `/tickets/${ticket.id}`,
+    );
+    const [postResponse] = await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          res.url().includes(`/api/tickets/${ticket.id}/messages`) &&
+          res.request().method() === "POST",
+      ),
+      page.getByRole("button", { name: "Save Internal Note" }).click(),
+    ]);
+    expect(postResponse.status()).toBe(200);
+    // Precondition: the refresh payload was rendered under a different nonce than the document.
+    const refreshResponse = await refreshed;
+    const refreshNonce = cspNonce(refreshResponse.headers()["content-security-policy"] ?? "");
+    expect(refreshNonce).toBeTruthy();
+    expect(refreshNonce).not.toBe(documentNonce);
+    await expect(page.locator(".border-l-warning").filter({ hasText: noteText })).toBeVisible();
+
+    // Radix DropdownMenu is modal by default: opening it inserts the scroll-lock <style>.
+    const menu = page.getByRole("menu");
+    await page.getByRole("button", { name: "Change status" }).click();
+    await expect(menu).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+    // disableTransitionOnChange inserts a <style> on every theme change.
+    await toggleTheme(page);
+    await toggleTheme(page);
     await expectNoViolations(page, collector);
   });
 
