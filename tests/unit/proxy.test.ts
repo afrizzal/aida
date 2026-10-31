@@ -5,7 +5,8 @@
  * Node.js runtime in Next 16; this test still imports no Prisma.
  */
 import { NextRequest } from "next/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildCsp } from "@/lib/security/csp";
 import { proxy } from "@/proxy";
 
 function cspNonce(csp: string): string | undefined {
@@ -258,5 +259,64 @@ describe("proxy — D-18 client identity header for Better Auth", () => {
     const response = proxy(request);
     expect(response.status).not.toBe(307);
     expect(response.headers.get("x-middleware-request-x-aida-client-ip")).toBe("203.0.113.5");
+  });
+});
+
+// Review d-WR-d3: the header the proxy emits is pinned to buildCsp() for the same nonce and mode,
+// on every forwarding branch, so a looser string, an extra source or a wrong mode test in
+// src/proxy.ts fails here (csp.test.ts pins buildCsp() itself to the D-11 string).
+describe("proxy — d-WR-d3 emitted CSP equals buildCsp()", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const forwarded = [
+    { label: "public prefix /login", request: () => new NextRequest("http://localhost/login") },
+    { label: "status page", request: () => new NextRequest("http://localhost/status/abc") },
+    {
+      label: "authenticated /tickets",
+      request: () =>
+        new NextRequest("http://localhost/tickets", {
+          headers: { cookie: "better-auth.session_token=abc" },
+        }),
+    },
+  ];
+
+  function scriptAndStyleElem(csp: string): string[] {
+    return csp
+      .split("; ")
+      .filter((d) => d.startsWith("script-src ") || d.startsWith("style-src-elem "));
+  }
+
+  for (const nodeEnv of ["production", "test", "development"] as const) {
+    it(`NODE_ENV=${nodeEnv}: response and forwarded request CSP equal buildCsp(nonce, { isDev: ${nodeEnv === "development"} })`, () => {
+      vi.stubEnv("NODE_ENV", nodeEnv);
+      for (const { label, request } of forwarded) {
+        const response = proxy(request());
+        const csp = response.headers.get("content-security-policy") ?? "";
+        const nonce = response.headers.get("x-middleware-request-x-nonce") ?? "";
+        expect(nonce.length, label).toBeGreaterThanOrEqual(22);
+        expect(csp, label).toBe(buildCsp(nonce, { isDev: nodeEnv === "development" }));
+        expect(response.headers.get("x-middleware-request-content-security-policy"), label).toBe(
+          csp,
+        );
+      }
+    });
+  }
+
+  it("production and other non-development modes never emit 'unsafe-eval', a script or element 'unsafe-inline', or a wildcard", () => {
+    for (const nodeEnv of ["production", "test"]) {
+      vi.stubEnv("NODE_ENV", nodeEnv);
+      for (const { label, request } of forwarded) {
+        const csp = proxy(request()).headers.get("content-security-policy") ?? "";
+        expect(csp, `${nodeEnv} ${label}`).not.toContain("'unsafe-eval'");
+        const directives = scriptAndStyleElem(csp);
+        expect(directives, `${nodeEnv} ${label}`).toHaveLength(2);
+        for (const directive of directives) {
+          expect(directive, `${nodeEnv} ${label}`).not.toContain("'unsafe-inline'");
+          expect(directive.split(" "), `${nodeEnv} ${label}`).not.toContain("*");
+        }
+      }
+    }
   });
 });

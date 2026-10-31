@@ -104,6 +104,20 @@ function cspNonce(csp: string): string | undefined {
   return /'nonce-([^']+)'/.exec(csp)?.[1];
 }
 
+/**
+ * Review d-WR-d3: script-src and style-src-elem are present and never carry 'unsafe-inline' or a
+ * bare `*`. A looser policy would block less and so pass the zero-violation checks more easily.
+ */
+function expectNoLooseScriptOrStyleElem(csp: string): void {
+  for (const name of ["script-src", "style-src-elem"]) {
+    const directive = csp.split("; ").find((d) => d.startsWith(`${name} `));
+    expect(directive, `${name} missing from ${csp}`).toBeTruthy();
+    const sources = (directive ?? "").split(" ").slice(1);
+    expect(sources, name).not.toContain("'unsafe-inline'");
+    expect(sources, name).not.toContain("*");
+  }
+}
+
 /** The enforced policy carries a nonce and 'strict-dynamic'; no report-only header is used. */
 function expectEnforcedCsp(response: Response): void {
   const headers = response.headers();
@@ -111,6 +125,7 @@ function expectEnforcedCsp(response: Response): void {
   expect(csp, `no content-security-policy header on ${response.url()}`).toBeTruthy();
   expect(csp).toContain("'strict-dynamic'");
   expect(csp).toContain("'nonce-");
+  expectNoLooseScriptOrStyleElem(csp);
   expect(headers["content-security-policy-report-only"]).toBeUndefined();
 }
 
@@ -120,6 +135,7 @@ function expectCspHeader(headers: Record<string, string>): void {
   expect(csp, "no content-security-policy header").toBeTruthy();
   expect(csp).toContain("'nonce-");
   expect(csp).toContain("'strict-dynamic'");
+  expectNoLooseScriptOrStyleElem(csp);
 }
 
 /** A 404 can need a compile on first hit too; poll until the router answers 404. */
