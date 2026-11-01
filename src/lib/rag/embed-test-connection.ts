@@ -1,7 +1,7 @@
 // Connectivity probe for the embedding provider (mirrors src/lib/llm/test-connection.ts) — a
-// trivial real embed() call (not just a models.list()) so a not-pulled Ollama model surfaces a
-// clear "Test Connection" failure instead of a generic 500 later during chunk embedding
-// (Pitfall 8).
+// trivial real embed() call (not just a models.list()) so a not-pulled Ollama model fails at
+// "Test Connection" time (category connection_failed, K127) instead of later during chunk
+// embedding (Pitfall 8).
 import { Ollama } from "ollama";
 import OpenAI from "openai";
 import { fetchWithDeadline } from "../connection-test/deadline-fetch";

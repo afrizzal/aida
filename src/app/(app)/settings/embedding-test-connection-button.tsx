@@ -23,9 +23,10 @@ interface EmbeddingTestConnectionButtonProps {
 /**
  * "Test Connection" trigger for the embedding provider form — mirrors LlmTestConnectionButton's
  * 4-state idle/testing/success/failure shape exactly (D-04). The underlying Server Action does a
- * real trivial embed() call so a not-pulled Ollama embedding model surfaces a clear error
- * (Pitfall 8) instead of a generic failure later during chunk embedding. A failure shows the fixed
- * message for its category plus the correlation ID, never raw server text (D-25).
+ * real trivial embed() call so a not-pulled Ollama embedding model fails at Test time (category
+ * `connection_failed`, whose fixed text names a missing model as one cause) instead of later
+ * during chunk embedding (Pitfall 8). A failure shows the fixed message for its category plus the
+ * correlation ID, never raw server text (D-25, K127).
  */
 export function EmbeddingTestConnectionButton({ getValues }: EmbeddingTestConnectionButtonProps) {
   const [status, setStatus] = useState<Status>("idle");
