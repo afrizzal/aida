@@ -84,7 +84,9 @@ tenant data and is served from the cache.
 The container healthcheck does not use `/api/health`. It calls
 `http://127.0.0.1:3000/api/health/probe`, which answers `{"status":"ok"}` (200) or
 `{"status":"error"}` (503) from the same **3-second cache**, with no rate limit. Caddy refuses that
-path with a 404, so no amount of public traffic can make the container unhealthy; point external
-monitors at `/api/health` through Caddy. Anything that can reach `app:3000` directly can call the
+path with a 404, so public requests can never reach the probe or use up a quota it depends on: the
+health throttle cannot make the container unhealthy. Heavy load still can, because the probe reads
+the same database snapshot; traffic that saturates the app or the database connection pool can make
+it time out or answer 503. Point external monitors at `/api/health` through Caddy. Anything that can reach `app:3000` directly can call the
 probe and read the binary database status from it — that is the trust boundary described in the
 operations runbook's "Client IP and reverse proxies" section.
