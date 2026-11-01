@@ -16,7 +16,9 @@
 //   pnpm exec tsx scripts/test-image-check.ts --verify <log> <exit> <target>
 //
 // Output: exactly one IMAGE-CHECK-TEARDOWN line and one IMAGE-CHECK-RESULT line. Exit 0 passed,
-// 1 failed, 3 blocked, 4 not run, 2 usage.
+// 1 failed, 3 blocked, 4 not run, 2 usage. On SIGINT or SIGTERM the docker build client is stopped,
+// the same teardown runs on this run's own records only, and the run ends `not run (interrupted)`
+// with exit 4; --verify refuses that result.
 // ---------------------------------------------------------------------------
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -68,6 +70,9 @@ export const EXIT_CODES: Record<CheckState, number> = {
 
 /** Ten minutes without new build output ends the build (the binaries.prisma.sh stall, 2026-11-08). */
 export const BUILD_QUIET_MS = 600_000;
+
+/** After SIGTERM to the docker client (watchdog or interrupt), SIGKILL follows this much later. */
+export const KILL_GRACE_MS = 10_000;
 
 /** The text J1's assertEnoughSpace throws inside runBuildPreflight. */
 export const J1_SPACE_STOP =
@@ -284,11 +289,19 @@ export interface ImageCheckDeps {
   runDir: string;
   docker: Docker;
   cleanupDocker: DockerRunner;
-  build(args: string[], logFile: string, quietMs: number): Promise<BuildOutcome>;
+  /** `signal` aborts on SIGINT or SIGTERM: the build must stop its child and settle. */
+  build(
+    args: string[],
+    logFile: string,
+    quietMs: number,
+    signal: AbortSignal,
+  ): Promise<BuildOutcome>;
   preflight?: (docker: Docker, options: PreflightOptions) => void;
   lock?: (runId: string) => () => void;
   record?: (runId: string, entry: LedgerEntry) => void;
   print?: (line: string) => void;
+  /** Subscribes to SIGINT and SIGTERM; returns the unsubscribe. Default: none (main passes them). */
+  interrupts?: (onSignal: (signal: string) => void) => () => void;
 }
 
 export interface ImageCheckResult {
@@ -408,6 +421,20 @@ export async function runImageCheck(
     result.evidence = evidence;
   };
 
+  // c-WR-06: an interrupt aborts the build, then the run takes the normal teardown below, which
+  // touches only what this run recorded (its tag, by repo:tag after the ID re-check, and the lock).
+  const abort = new AbortController();
+  let interrupted: string | null = null;
+  const unsubscribe = (deps.interrupts ?? (() => () => {}))((signal) => {
+    if (interrupted !== null) return;
+    interrupted = signal;
+    abort.abort();
+  });
+  const stopIfInterrupted = (stage: string) => {
+    if (interrupted !== null)
+      throw new Stop("not run", "interrupted", `Interrupted by ${interrupted} ${stage}`);
+  };
+
   let release: (() => void) | null = null;
   let buildStarted = false;
   const created: ExactRefs = {};
@@ -430,6 +457,7 @@ export async function runImageCheck(
       const c = classifyPreflightFailure(messageOf(err));
       throw new Stop(c.state, c.cause, messageOf(err));
     }
+    stopIfInterrupted("before the tag check; nothing was built");
 
     // (c) The tag must be free; a taken tag is never overwritten.
     let state: "free" | "taken";
@@ -467,6 +495,7 @@ export async function runImageCheck(
       const c = classifyPreflightFailure(messageOf(err));
       throw new Stop(c.state, c.cause, messageOf(err));
     }
+    stopIfInterrupted("before the build started; nothing was built");
 
     // (f) The build.
     record(deps.runId, { type: "image", name: result.tag, state: "planned" });
@@ -477,6 +506,7 @@ export async function runImageCheck(
       imageBuildArgs(target, result.tag, deps.runId),
       logFile,
       BUILD_QUIET_MS,
+      abort.signal,
     );
 
     // (g) Whatever the exit: which image does the tag point to now?
@@ -493,6 +523,9 @@ export async function runImageCheck(
       recorded[result.tag] = after.id;
       record(deps.runId, { type: "image", name: result.tag, id: after.id, state: "created" });
     }
+    stopIfInterrupted(
+      `during the build (exit ${outcome.code}); the docker build client was stopped`,
+    );
 
     // (h) A failed or stalled build. A build that exits 0 without its tag is failed (c-IN-04).
     if (outcome.code === 0 && !outcome.watchdogFired && after.id === null) {
@@ -578,6 +611,7 @@ export async function runImageCheck(
       }
       release();
     }
+    unsubscribe();
     const names = [
       ...problems,
       ...teardown.failed,
@@ -692,7 +726,12 @@ export type SpawnBuild = (
 
 /** Starts the docker client; ends it after `quietMs` without new output. */
 export function buildWithWatchdog(repoRoot: string, spawnBuild: SpawnBuild = spawn) {
-  return (args: string[], logFile: string, quietMs: number): Promise<BuildOutcome> =>
+  return (
+    args: string[],
+    logFile: string,
+    quietMs: number,
+    signal?: AbortSignal,
+  ): Promise<BuildOutcome> =>
     new Promise((resolve) => {
       const env: Record<string, string> = {};
       for (const key of ["PATH", "HOME", ...DOCKER_CLIENT_VARS]) {
@@ -717,16 +756,29 @@ export function buildWithWatchdog(repoRoot: string, spawnBuild: SpawnBuild = spa
       };
       child.stdout?.on("data", onData);
       child.stderr?.on("data", onData);
+      // SIGTERM once; SIGKILL after the grace if the client has not closed (c-WR-06). The child is
+      // killed explicitly, so a SIGTERM that reaches only this Node process still stops the build.
+      let killTimer: NodeJS.Timeout | null = null;
+      const stopChild = () => {
+        if (done || killTimer !== null) return;
+        child.kill("SIGTERM");
+        killTimer = setTimeout(() => {
+          if (!done) child.kill("SIGKILL");
+        }, KILL_GRACE_MS);
+      };
       const timer = setInterval(() => {
         if (Date.now() - last > quietMs && !watchdogFired) {
           watchdogFired = true;
-          child.kill("SIGTERM");
+          stopChild();
         }
       }, 5_000);
+      const onAbort = () => stopChild();
       const finish = (code: number) => {
         if (done) return;
         done = true;
         clearInterval(timer);
+        if (killTimer !== null) clearTimeout(killTimer);
+        signal?.removeEventListener("abort", onAbort);
         fs.closeSync(out);
         resolve({ code, watchdogFired });
       };
@@ -734,8 +786,25 @@ export function buildWithWatchdog(repoRoot: string, spawnBuild: SpawnBuild = spa
         if (!done) fs.writeSync(out, `spawn error: ${err.message}\n`);
         finish(127);
       });
-      child.on("close", (code, signal) => finish(code ?? (signal ? 143 : 1)));
+      child.on("close", (code, killedBy) => finish(code ?? (killedBy ? 143 : 1)));
+      if (signal?.aborted) stopChild();
+      else signal?.addEventListener("abort", onAbort, { once: true });
     });
+}
+
+/**
+ * SIGINT and SIGTERM for the CLI. The listeners stay until the run unsubscribes, so a second
+ * signal cannot end the process half-way through teardown; SIGKILL remains the hard stop.
+ */
+export function processInterrupts(onSignal: (signal: string) => void): () => void {
+  const listeners = (["SIGINT", "SIGTERM"] as const).map((name) => {
+    const listener = () => onSignal(name);
+    process.on(name, listener);
+    return [name, listener] as const;
+  });
+  return () => {
+    for (const [name, listener] of listeners) process.off(name, listener);
+  };
 }
 
 async function main(argv: string[]): Promise<number> {
@@ -764,6 +833,7 @@ async function main(argv: string[]): Promise<number> {
       docker: runDocker,
       cleanupDocker,
       build: buildWithWatchdog(repoRoot),
+      interrupts: processInterrupts,
     });
     return EXIT_CODES[result.state];
   }

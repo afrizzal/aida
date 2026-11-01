@@ -6,7 +6,7 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import type { DockerRunner } from "../../scripts/test-docker-cleanup";
 import {
   type BuildChild,
@@ -21,6 +21,8 @@ import {
   imageCheckTag,
   inspectFindings,
   J1_SPACE_STOP,
+  KILL_GRACE_MS,
+  processInterrupts,
   RESULT_PREFIX,
   removableTags,
   runImageCheck,
@@ -619,6 +621,121 @@ describe("runImageCheck flow", () => {
   });
 });
 
+// --- interrupts (c-WR-06) ------------------------------------------------------------------
+
+function fakeInterrupts() {
+  let handler: ((signal: string) => void) | null = null;
+  let unsubscribed = 0;
+  return {
+    subscribe: (h: (signal: string) => void) => {
+      handler = h;
+      return () => {
+        unsubscribed++;
+        handler = null;
+      };
+    },
+    fire: (signal: string) => handler?.(signal),
+    active: () => handler !== null,
+    unsubscribed: () => unsubscribed,
+  };
+}
+
+const OWN_LABELS = { "aida.test": "1", "aida.test.run": RUN };
+
+describe("runImageCheck on SIGINT and SIGTERM", () => {
+  it("c-WR-06: a signal during the build stops it, removes only its own tag, releases the lock", async () => {
+    const fake = fakeDaemon();
+    const foreign = `aida-test-nonroot-runner:${OTHER}`;
+    fake.images.set(foreign, { id: "sha256:foreign", labels: null, config: {} });
+    const f = flow(fake);
+    const sig = fakeInterrupts();
+    let seen: AbortSignal | undefined;
+    f.deps.interrupts = sig.subscribe;
+    f.deps.build = (args, logFile, _quiet, signal) =>
+      new Promise((resolve) => {
+        f.buildCalls.push(args);
+        fs.writeFileSync(logFile, "#12 [builder 5/7] RUN pnpm build\n");
+        fake.images.set(TAG, { id: "sha256:built", labels: OWN_LABELS, config: goodConfig() });
+        seen = signal;
+        signal?.addEventListener("abort", () => resolve({ code: 143, watchdogFired: false }));
+        setImmediate(() => sig.fire("SIGTERM"));
+      });
+    const result = await runImageCheck("runner", f.deps);
+    expect(seen?.aborted).toBe(true);
+    expect(result).toMatchObject({
+      state: "not run",
+      cause: "interrupted",
+      imageId: "sha256:built",
+    });
+    expect(result.evidence).toContain("SIGTERM");
+    expect(EXIT_CODES[result.state]).not.toBe(0);
+    expectAllowed(fake, [TAG]);
+    expect(fake.images.has(TAG)).toBe(false);
+    expect(fake.images.has(foreign)).toBe(true);
+    expect(fake.images.has("node:22-alpine")).toBe(true);
+    expect(teardownOf(f.lines)).toMatchObject({ created: true, removed: [TAG], remaining: [] });
+    expect(fs.existsSync(lockPath(f.lockDir))).toBe(false);
+    expect(sig.active()).toBe(false);
+    expect(verifyImageCheckLog(`${f.lines.join("\n")}\n`, 4, "runner").ok).toBe(false);
+  });
+
+  it("c-WR-06: a signal that stops the build before it tagged anything removes nothing", async () => {
+    const fake = fakeDaemon();
+    const f = flow(fake);
+    const sig = fakeInterrupts();
+    f.deps.interrupts = sig.subscribe;
+    f.deps.build = (_args, logFile, _quiet, signal) =>
+      new Promise((resolve) => {
+        fs.writeFileSync(logFile, "#9 [deps 4/5] RUN pnpm install\n");
+        signal?.addEventListener("abort", () => resolve({ code: 130, watchdogFired: false }));
+        setImmediate(() => sig.fire("SIGINT"));
+      });
+    const result = await runImageCheck("runner", f.deps);
+    expect(result).toMatchObject({ state: "not run", cause: "interrupted", imageId: null });
+    expectAllowed(fake, []);
+    expect(fs.existsSync(lockPath(f.lockDir))).toBe(false);
+  });
+
+  it("c-WR-06: a signal before the build started creates and removes nothing", async () => {
+    const fake = fakeDaemon();
+    const sig = fakeInterrupts();
+    const f = flow(fake, { preflight: () => sig.fire("SIGINT") });
+    f.deps.interrupts = sig.subscribe;
+    const result = await runImageCheck("runner", f.deps);
+    expect(result).toMatchObject({ state: "not run", cause: "interrupted" });
+    expect(result.evidence).toContain("SIGINT");
+    expect(f.buildCalls).toEqual([]);
+    expectAllowed(fake, []);
+    expect(teardownOf(f.lines)).toMatchObject({ created: false, removed: [] });
+    expect(fs.existsSync(lockPath(f.lockDir))).toBe(false);
+    expect(sig.unsubscribed()).toBe(1);
+  });
+
+  it("c-WR-06: a run without a signal unsubscribes its handler when it ends", async () => {
+    const fake = fakeDaemon();
+    const f = flow(fake);
+    const sig = fakeInterrupts();
+    f.deps.interrupts = sig.subscribe;
+    expect((await runImageCheck("runner", f.deps)).state).toBe("passed");
+    expect(sig.active()).toBe(false);
+    expect(sig.unsubscribed()).toBe(1);
+  });
+
+  it("c-WR-06: processInterrupts listens to SIGINT and SIGTERM and removes both listeners", () => {
+    const before = [process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")];
+    const seen: string[] = [];
+    const off = processInterrupts((s) => seen.push(s));
+    expect([process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")]).toEqual([
+      before[0] + 1,
+      before[1] + 1,
+    ]);
+    process.emit("SIGTERM", "SIGTERM");
+    off();
+    expect(seen).toEqual(["SIGTERM"]);
+    expect([process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")]).toEqual(before);
+  });
+});
+
 describe("defaults", () => {
   it("J: the real steps are J1's own runBuildPreflight, acquireLock and recordResource", () => {
     expect(DEFAULT_STEPS.preflight).toBe(runBuildPreflight);
@@ -809,6 +926,65 @@ function fakeSpawn() {
 }
 
 describe("buildWithWatchdog", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("c-WR-06: an abort sends SIGTERM, then SIGKILL after the grace, and settles on close", async () => {
+    vi.useFakeTimers();
+    const s = fakeSpawn();
+    const abort = new AbortController();
+    const logFile = path.join(tmp("aida-image-check-build-"), "build.log");
+    const done = buildWithWatchdog("/repo", s.spawnBuild)(
+      ["build", "."],
+      logFile,
+      60_000,
+      abort.signal,
+    );
+    const child = s.children[0];
+    abort.abort();
+    expect(child.kills).toEqual(["SIGTERM"]);
+    vi.advanceTimersByTime(KILL_GRACE_MS - 1);
+    expect(child.kills).toEqual(["SIGTERM"]);
+    vi.advanceTimersByTime(1);
+    expect(child.kills).toEqual(["SIGTERM", "SIGKILL"]);
+    child.emit("close", null, "SIGKILL");
+    await expect(done).resolves.toEqual({ code: 143, watchdogFired: false });
+  });
+
+  it("c-WR-06: the watchdog escalates to SIGKILL when the client ignores SIGTERM", async () => {
+    vi.useFakeTimers();
+    const s = fakeSpawn();
+    const logFile = path.join(tmp("aida-image-check-build-"), "build.log");
+    const done = buildWithWatchdog("/repo", s.spawnBuild)(["build", "."], logFile, 10_000);
+    const child = s.children[0];
+    vi.advanceTimersByTime(15_000);
+    expect(child.kills).toEqual(["SIGTERM"]);
+    vi.advanceTimersByTime(KILL_GRACE_MS);
+    expect(child.kills).toEqual(["SIGTERM", "SIGKILL"]);
+    child.emit("close", null, "SIGKILL");
+    await expect(done).resolves.toEqual({ code: 143, watchdogFired: true });
+  });
+
+  it("c-WR-06: a child that closes after SIGTERM is never sent SIGKILL", async () => {
+    vi.useFakeTimers();
+    const s = fakeSpawn();
+    const abort = new AbortController();
+    const logFile = path.join(tmp("aida-image-check-build-"), "build.log");
+    const done = buildWithWatchdog("/repo", s.spawnBuild)(
+      ["build", "."],
+      logFile,
+      60_000,
+      abort.signal,
+    );
+    const child = s.children[0];
+    abort.abort();
+    child.emit("close", null, "SIGTERM");
+    vi.advanceTimersByTime(KILL_GRACE_MS * 2);
+    expect(child.kills).toEqual(["SIGTERM"]);
+    await expect(done).resolves.toEqual({ code: 143, watchdogFired: false });
+  });
+
   it("c-IN-03: a spawn error followed by close settles once and never throws EBADF", async () => {
     const s = fakeSpawn();
     const logFile = path.join(tmp("aida-image-check-build-"), "build.log");
