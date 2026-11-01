@@ -798,6 +798,9 @@ describe("verifyImageCheckLog", () => {
     expect(v.ok).toBe(true);
     expect(v.line).toContain('word="blocked (space)"');
   });
+  it("c-CR-02: the accepted line echoes the exit it was given, last, for the gate to compare", () => {
+    expect(verifyImageCheckLog(log(result()), 3, "runner").line).toMatch(/ tag=\S+ exit=3$/);
+  });
   it("R2-8: the same with exit 1 is refused", () => {
     expect(verifyImageCheckLog(log(result()), 1, "runner").ok).toBe(false);
   });

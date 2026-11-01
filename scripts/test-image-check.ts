@@ -698,7 +698,7 @@ export function verifyImageCheckLog(
   }
   return {
     ok: true,
-    line: `${VERIFY_PREFIX}state=${r.state} cause=${r.cause} word="${summaryWord(r.state, r.cause)}" target=${target} tag=${r.tag}`,
+    line: `${VERIFY_PREFIX}state=${r.state} cause=${r.cause} word="${summaryWord(r.state, r.cause)}" target=${target} tag=${r.tag} exit=${exitCode}`,
   };
 }
 

@@ -819,7 +819,70 @@ function hostRow(ev: Evidence, slug: string): ResultRow {
   return { key: "", exit: exitText(exit), word: exit === 0 ? "passed" : "failed", note: log };
 }
 
-function imageRow(ev: Evidence, target: string): ResultRow {
+/**
+ * c-CR-02: the exit test-image-check.ts gives each summary word (its EXIT_CODES: passed 0,
+ * blocked 3, not run 4). `failed` and anything else has none, so it can never be backed.
+ */
+export function imageWordExit(word: string): number | null {
+  if (word === "passed") return 0;
+  if (word === "blocked (space)" || word === "blocked (with evidence)") return 3;
+  if (/^not run \(parked: [a-z-]+\)$/.test(word)) return 4;
+  return null;
+}
+
+/** test-image-check.ts summaryWord, restated so this script imports nothing that runs Docker. */
+function imageSummaryWord(state: unknown, cause: unknown): string {
+  if (state === "passed") return "passed";
+  if (state === "blocked") return cause === "space" ? "blocked (space)" : "blocked (with evidence)";
+  if (state === "not run") return `not run (parked: ${String(cause)})`;
+  return "failed";
+}
+
+/**
+ * c-CR-02: the cross-checks that tie one image row together: the recorded exit, the verify line,
+ * the image log's own IMAGE-CHECK-RESULT line and the gate's run id. Returns the disagreements.
+ */
+function imageDisagreements(
+  word: string,
+  exit: number | null,
+  verify: string,
+  clog: string,
+  target: string,
+  runId: string,
+): string[] {
+  const out: string[] = [];
+  const want = imageWordExit(word);
+  if (want === null || exit !== want)
+    out.push(`exit ${exitText(exit)} disagrees with ${word} (expects ${want ?? "none"})`);
+  const field = (k: string) => verify.match(new RegExp(` ${k}=(\\S+)`))?.[1] ?? null;
+  const tag = `aida-test-nonroot-${target}:${runId}`;
+  if (field("target") !== target) out.push(`verify target ${field("target")}, expects ${target}`);
+  if (field("tag") !== tag) out.push(`verify tag ${field("tag")}, expects tag ${tag}`);
+  const echoed = field("exit");
+  if (echoed !== null && echoed !== exitText(exit))
+    out.push(`verify exit=${echoed}, image exit file ${exitText(exit)}`);
+  const results = lines(clog).filter((l) => l.startsWith("IMAGE-CHECK-RESULT "));
+  if (results.length !== 1) {
+    out.push(`${results.length} IMAGE-CHECK-RESULT lines in image-${target}.log, expects 1`);
+    return out;
+  }
+  let r: Record<string, unknown>;
+  try {
+    r = JSON.parse(results[0].slice("IMAGE-CHECK-RESULT ".length)) as Record<string, unknown>;
+  } catch {
+    out.push(`unreadable IMAGE-CHECK-RESULT line in image-${target}.log`);
+    return out;
+  }
+  if (r.runId !== runId) out.push(`IMAGE-CHECK-RESULT run id ${String(r.runId)}, expects ${runId}`);
+  if (r.target !== target)
+    out.push(`IMAGE-CHECK-RESULT target ${String(r.target)}, expects ${target}`);
+  if (r.tag !== tag) out.push(`IMAGE-CHECK-RESULT tag ${String(r.tag)}, expects ${tag}`);
+  const own = imageSummaryWord(r.state, r.cause);
+  if (own !== word) out.push(`IMAGE-CHECK-RESULT says ${own}, verify says ${word}`);
+  return out;
+}
+
+function imageRow(ev: Evidence, target: string, runId: string): ResultRow {
   const exit = ev.exit(`image-${target}`, true);
   const vexit = ev.exit(`image-${target}-verify`, false);
   const vlog = ev.read(`image-${target}-verify.log`) ?? "";
@@ -839,6 +902,13 @@ function imageRow(ev: Evidence, target: string): ResultRow {
     if (word === "blocked (space)" && !space) {
       word = "failed";
       note += `; no space line in image-${target}.log`;
+    }
+    if (word !== "failed") {
+      const problems = imageDisagreements(word, exit, vlines[0], clog, target, runId);
+      if (problems.length > 0) {
+        word = "failed";
+        note += `; ${problems.join("; ")}`;
+      }
     }
   }
   if (vexit !== 0) note += `; verify exit ${exitText(vexit)}`;
@@ -951,8 +1021,8 @@ export function deriveGate(
         word: e.word,
         note: `log ${ev.path("egress.log")}; ${e.note}`,
       };
-    } else if (r.slug === "image-runner") row = imageRow(ev, "runner");
-    else if (r.slug === "image-builder") row = imageRow(ev, "builder");
+    } else if (r.slug === "image-runner") row = imageRow(ev, "runner", runId);
+    else if (r.slug === "image-builder") row = imageRow(ev, "builder", runId);
     else row = cleanupRow(ev, runId);
     return { ...row, key: r.key };
   });

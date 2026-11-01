@@ -11,11 +11,13 @@ import {
   classifyEgress,
   deriveGate,
   fileWord,
+  imageWordExit,
   main,
   SPEC,
   WORDS,
   worstOf,
 } from "../../scripts/part-a-gate-check";
+import { type CheckState, EXIT_CODES, summaryWord } from "../../scripts/test-image-check";
 import { assertEnoughSpace } from "../support/docker-test-preflight";
 
 const RUN = "mwc6vmbv-8de59ebf3cc1c67e";
@@ -107,9 +109,10 @@ interface Fixture {
   egressExit?: number;
   egressFiles?: VFile[];
   egressLog?: string;
-  imageVerify?: string;
+  imageVerify?: string | ((target: string) => string);
   imageVerifyExit?: number;
-  imageLog?: string;
+  imageLog?: string | ((target: string) => string);
+  imageExit?: number;
   cleanupLog?: string;
   foreignAfter?: string;
   patch?: string;
@@ -117,6 +120,52 @@ interface Fixture {
 }
 
 const EGRESS = "tests/integration/egress-isolation.test.ts";
+
+/** The two lines test-image-check.ts prints, in its own JSON shape (c-CR-02). */
+function imageLog(
+  t: string,
+  over: { state?: string; cause?: string; evidence?: string; runId?: string; tag?: string } = {},
+): string {
+  const runId = over.runId ?? RUN;
+  const teardown = {
+    created: false,
+    removed: [],
+    gone: [],
+    skipped: [],
+    notOurs: [],
+    leftAlone: [],
+    failed: [],
+    remaining: [],
+    runId,
+  };
+  const result = {
+    target: t,
+    tag: over.tag ?? `aida-test-nonroot-${t}:${runId}`,
+    runId,
+    state: over.state ?? "blocked",
+    cause: over.cause ?? "space",
+    evidence: over.evidence ?? spaceLine(),
+    imageId: null,
+    user: null,
+    env: [],
+    labels: {},
+    baseImageBefore: "sha256:base",
+    baseImageAfter: null,
+    runDir: "/tmp/aida-image-check-x",
+  };
+  return `IMAGE-CHECK-TEARDOWN ${JSON.stringify(teardown)}\nIMAGE-CHECK-RESULT ${JSON.stringify(result)}\n`;
+}
+
+function verifyLine(t: string, state: string, cause: string, word: string, extra = ""): string {
+  return `IMAGE-CHECK-VERIFY state=${state} cause=${cause} word="${word}" target=${t} tag=aida-test-nonroot-${t}:${RUN}${extra}\n`;
+}
+
+/** A consistent passed image check for both targets; `exit` is what image-<t>.exit records. */
+const passedImages = (exit: number): Fixture => ({
+  imageExit: exit,
+  imageLog: (t) => imageLog(t, { state: "passed", cause: "none", evidence: "" }),
+  imageVerify: (t) => verifyLine(t, "passed", "none", "passed"),
+});
 
 function makeDir(f: Fixture = {}): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aida-gate-a-test-"));
@@ -168,17 +217,14 @@ function makeDir(f: Fixture = {}): string {
       f.egressFiles ?? [{ path: EGRESS, asserts: ["skipped", "skipped", "skipped", "skipped"] }],
     ),
   );
+  const pick = (v: string | ((target: string) => string) | undefined, t: string, d: string) =>
+    v === undefined ? d : typeof v === "function" ? v(t) : v;
   for (const t of ["runner", "builder"]) {
-    cmd(
-      `image-${t}`,
-      3,
-      f.imageLog ?? `IMAGE-CHECK-RESULT {"state":"blocked","evidence":"${spaceLine()}"}\n`,
-    );
+    cmd(`image-${t}`, f.imageExit ?? 3, pick(f.imageLog, t, imageLog(t)));
     cmd(
       `image-${t}-verify`,
       f.imageVerifyExit ?? 0,
-      f.imageVerify ??
-        `IMAGE-CHECK-VERIFY state=blocked cause=space word="blocked (space)" target=${t} tag=aida-test-nonroot-${t}:${RUN}\n`,
+      pick(f.imageVerify, t, verifyLine(t, "blocked", "space", "blocked (space)")),
     );
   }
   cmd(
@@ -283,6 +329,98 @@ describe("part-a-gate-check: literal derivation cases", () => {
     expect(
       result(derive({ imageLog: "IMAGE-CHECK-RESULT {}\n" }).model, "image check builder").word,
     ).toBe("failed");
+  });
+
+  it("c-CR-02: L7a a consistent passed image check with exit 0 is passed", () => {
+    expect(result(derive(passedImages(0)).model, "image check runner").word).toBe("passed");
+  });
+
+  it("c-CR-02: L7b exit 1 next to a verify log saying passed is failed, and check fails", () => {
+    const dir = makeDir(passedImages(1));
+    const res = deriveGate(dir);
+    const r = result(res.model, "image check runner");
+    expect(r.exit).toBe("1");
+    expect(r.word).toBe("failed");
+    expect(r.note).toContain("exit 1 disagrees with passed (expects 0)");
+    // The gate as the old verifier derived it: exit 1, Result passed.
+    const file = path.join(dir, "gate.md");
+    fs.writeFileSync(file, `${res.text}\n## Notes\n\n- free text\n`);
+    const text = editCell(fs.readFileSync(file, "utf8"), R, "image check runner", 2, "passed");
+    expectRejected(file, text, "results", "image check runner");
+  });
+
+  it("c-CR-02: L7c only exit 3 backs blocked, only exit 4 backs not run", () => {
+    expect(result(derive({ imageExit: 0 }).model, "image check runner").word).toBe("failed");
+    expect(result(derive({ imageExit: 1 }).model, "image check runner").word).toBe("failed");
+    expect(result(derive({ imageExit: 4 }).model, "image check runner").word).toBe("failed");
+    const lock = (exit: number): Fixture => ({
+      imageExit: exit,
+      imageLog: (t) => imageLog(t, { state: "not run", cause: "lock", evidence: "Lock x is held" }),
+      imageVerify: (t) => verifyLine(t, "not run", "lock", "not run (parked: lock)"),
+    });
+    expect(result(derive(lock(4)).model, "image check runner").word).toBe("not run (parked: lock)");
+    expect(result(derive(lock(3)).model, "image check runner").word).toBe("failed");
+  });
+
+  it("c-CR-02: L7d the image log's own result line must agree with the verify line", () => {
+    const fx = passedImages(0);
+    fx.imageLog = (t) => imageLog(t, { state: "blocked", cause: "space" });
+    const r = result(derive(fx).model, "image check runner");
+    expect(r.word).toBe("failed");
+    expect(r.note).toContain("IMAGE-CHECK-RESULT says blocked (space), verify says passed");
+  });
+
+  it("c-CR-02: L7e a result line of another run, or a verify tag of another run, is failed", () => {
+    const other = "mwc6vmbv-0000000000000000";
+    const fx = passedImages(0);
+    fx.imageLog = (t) =>
+      imageLog(t, { state: "passed", cause: "none", evidence: "", runId: other });
+    expect(result(derive(fx).model, "image check runner").word).toBe("failed");
+    const fy = passedImages(0);
+    fy.imageVerify = (t) =>
+      verifyLine(t, "passed", "none", "passed").replace(`:${RUN}`, `:${other}`);
+    const r = result(derive(fy).model, "image check runner");
+    expect(r.word).toBe("failed");
+    expect(r.note).toContain(`expects tag aida-test-nonroot-runner:${RUN}`);
+  });
+
+  it("c-CR-02: L7f two result lines, none, or an unreadable one is failed", () => {
+    const fx = passedImages(0);
+    const one = (t: string) => imageLog(t, { state: "passed", cause: "none", evidence: "" });
+    fx.imageLog = (t) => `${one(t)}${one(t).split("\n")[1]}\n`;
+    expect(result(derive(fx).model, "image check runner").word).toBe("failed");
+    expect(
+      result(derive({ ...passedImages(0), imageLog: "" }).model, "image check runner").word,
+    ).toBe("failed");
+    expect(
+      result(
+        derive({ ...passedImages(0), imageLog: "IMAGE-CHECK-RESULT {not json\n" }).model,
+        "image check runner",
+      ).word,
+    ).toBe("failed");
+  });
+
+  it("c-CR-02: L7g an exit echoed on the verify line must match the image exit file", () => {
+    const fx = passedImages(0);
+    fx.imageVerify = (t) => verifyLine(t, "passed", "none", "passed", " exit=1");
+    expect(result(derive(fx).model, "image check runner").word).toBe("failed");
+    fx.imageVerify = (t) => verifyLine(t, "passed", "none", "passed", " exit=0");
+    expect(result(derive(fx).model, "image check runner").word).toBe("passed");
+  });
+
+  it("c-CR-02: the gate's word-to-exit table matches the image check's own exit codes", () => {
+    const cases: [CheckState, string][] = [
+      ["passed", "none"],
+      ["blocked", "space"],
+      ["blocked", "measure"],
+      ["blocked", "docker"],
+      ["blocked", "external"],
+      ["not run", "lock"],
+      ["not run", "foreign"],
+    ];
+    for (const [state, cause] of cases)
+      expect(imageWordExit(summaryWord(state, cause))).toBe(EXIT_CODES[state]);
+    expect(imageWordExit("failed")).toBeNull();
   });
 
   it("J: L8 the cleanup dry run is passed only with 0 resources of the gate's run id", () => {
