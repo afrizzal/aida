@@ -494,7 +494,10 @@ export async function runImageCheck(
       record(deps.runId, { type: "image", name: result.tag, id: after.id, state: "created" });
     }
 
-    // (h) A failed or stalled build.
+    // (h) A failed or stalled build. A build that exits 0 without its tag is failed (c-IN-04).
+    if (outcome.code === 0 && !outcome.watchdogFired && after.id === null) {
+      throw new Stop("failed", "build", `build exited 0 but ${result.tag} is absent`);
+    }
     if (outcome.code !== 0 || outcome.watchdogFired) {
       const logTail = tail(logFile, 80);
       const c = classifyBuildFailure(readLog(logFile), outcome.watchdogFired);

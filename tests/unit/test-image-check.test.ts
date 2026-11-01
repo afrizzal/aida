@@ -598,6 +598,15 @@ describe("runImageCheck flow", () => {
     });
   });
 
+  it("c-IN-04: a build that exits 0 without producing its tag is failed/build, not blocked", async () => {
+    const fake = fakeDaemon();
+    const f = flow(fake, { build: { code: 0, watchdogFired: false, noImage: true } });
+    const result = await runImageCheck("runner", f.deps);
+    expect(result).toMatchObject({ state: "failed", cause: "build", imageId: null });
+    expect(result.evidence).toContain(`build exited 0 but ${TAG} is absent`);
+    expectAllowed(fake, []);
+  });
+
   it("R2-8: the result and teardown lines are printed exactly once each", async () => {
     const fake = fakeDaemon();
     const f = flow(fake);
