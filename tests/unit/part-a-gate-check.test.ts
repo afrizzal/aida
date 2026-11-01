@@ -13,6 +13,7 @@ import {
   fileWord,
   imageWordExit,
   main,
+  quote,
   SPEC,
   splitRow,
   WORDS,
@@ -660,6 +661,40 @@ describe("part-a-gate-check: literal derivation cases", () => {
     const r = result(m, "pnpm test:e2e");
     expect(r.word).toBe("failed");
     expect(r.note).toContain("expected=0");
+  });
+
+  it("c-IN-06: quote redacts URL credentials, bearer tokens and token or auth assignments", () => {
+    const cases: [string, string, string][] = [
+      [
+        "postgresql://aida:hunter2@db:5432/aida?schema=x",
+        "hunter2",
+        "postgresql://<redacted>@db:5432",
+      ],
+      ["GET https://ghp_abc123@github.com/x", "ghp_abc123", "https://<redacted>@github.com/x"],
+      ["Authorization: Bearer eyJhbGciOi.payload.sig", "eyJhbGciOi", "Authorization: <redacted>"],
+      ["sent Bearer abc.def-ghi to the API", "abc.def-ghi", "Bearer <redacted>"],
+      ["Authorization: Basic dXNlcjpwYXNz", "dXNlcjpwYXNz", "Authorization: <redacted>"],
+      ["GITHUB_TOKEN=ghs_xyz789 pnpm audit", "ghs_xyz789", "GITHUB_TOKEN=<redacted>"],
+      ["//registry.npmjs.org/:_authToken=npm_secret1", "npm_secret1", "_authToken=<redacted>"],
+      ['{"access_token":"tok-1234"}', "tok-1234", "access_token"],
+    ];
+    for (const [line, secret, kept] of cases) {
+      const q = quote(line);
+      expect(q, line).not.toContain(secret);
+      expect(q, line).toContain(kept);
+    }
+  });
+
+  it("c-IN-06: quote leaves gate text without credentials unchanged", () => {
+    for (const line of [
+      spaceLine(),
+      `IMAGE-CHECK-VERIFY state=blocked cause=space word="blocked (space)" target=runner tag=aida-test-nonroot-runner:${RUN} exit=3`,
+      "tests/integration/auth-ip-source.test.ts: passed=3 failed=0 skipped=0",
+      "Severity: 2 low | 30 moderate | 10 high",
+      "https://github.com/advisories/GHSA-gpj5-g38j-94v9",
+      "node_modules/@prisma/engines postinstall",
+    ])
+      expect(quote(line)).toBe(`"${line}"`);
   });
 
   it("J: worstOf and WORDS follow rule A-11's order", () => {

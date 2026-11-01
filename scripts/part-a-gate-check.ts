@@ -471,6 +471,19 @@ export function quote(text: string): string {
     /(PASSWORD|SECRET|PEPPER|_KEY)(\s*[=:]\s*)("[^"]*"|'[^']*'|\S+)/gi,
     "$1$2<redacted>",
   );
+  // c-IN-06: URL credentials (`scheme://user:pass@` or `scheme://token@`), an Authorization
+  // header with its scheme, a bare bearer token, and token or auth assignments (`GITHUB_TOKEN=`,
+  // npm's `_authToken=`, JSON `"access_token":`).
+  s = s.replace(/\/\/[^/\s@]+@/g, "//<redacted>@");
+  s = s.replace(
+    /\b((?:proxy-)?authorization)(["']?\s*[=:]\s*)(?:(?:bearer|basic|digest|token)\s+)?("[^"]*"|'[^']*'|[^\s"',;]+)/gi,
+    "$1$2<redacted>",
+  );
+  s = s.replace(/\bBearer\s+[^\s"',;]+/gi, "Bearer <redacted>");
+  s = s.replace(
+    /\b([A-Za-z0-9_]*(?:token|auth)[A-Za-z0-9_]*)(["']?\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s"',;]+)/gi,
+    "$1$2<redacted>",
+  );
   if (s.length > 300) s = s.slice(0, 300);
   return `"${s}"`;
 }
