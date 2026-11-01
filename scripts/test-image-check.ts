@@ -676,8 +676,22 @@ const DOCKER_CLIENT_VARS = [
   "DOCKER_TLS_VERIFY",
 ];
 
+/** The part of a spawned child the build runner uses (a real ChildProcess, or a test fake). */
+export interface BuildChild {
+  stdout: NodeJS.EventEmitter | null;
+  stderr: NodeJS.EventEmitter | null;
+  on(event: "error", listener: (err: Error) => void): unknown;
+  on(event: "close", listener: (code: number | null, signal: string | null) => void): unknown;
+  kill(signal: NodeJS.Signals): boolean;
+}
+export type SpawnBuild = (
+  command: string,
+  args: string[],
+  options: { cwd: string; env: NodeJS.ProcessEnv; stdio: ["ignore", "pipe", "pipe"] },
+) => BuildChild;
+
 /** Starts the docker client; ends it after `quietMs` without new output. */
-function buildWithWatchdog(repoRoot: string) {
+export function buildWithWatchdog(repoRoot: string, spawnBuild: SpawnBuild = spawn) {
   return (args: string[], logFile: string, quietMs: number): Promise<BuildOutcome> =>
     new Promise((resolve) => {
       const env: Record<string, string> = {};
@@ -686,7 +700,7 @@ function buildWithWatchdog(repoRoot: string) {
         if (value !== undefined && value !== "") env[key] = value;
       }
       const out = fs.openSync(logFile, "a");
-      const child = spawn("docker", args, {
+      const child = spawnBuild("docker", args, {
         cwd: repoRoot,
         // Only PATH, HOME and the Docker client variables; the project types NODE_ENV as required.
         env: env as NodeJS.ProcessEnv,
@@ -694,12 +708,15 @@ function buildWithWatchdog(repoRoot: string) {
       });
       let last = Date.now();
       let watchdogFired = false;
+      // A failed spawn emits `error` and then `close` (c-IN-03): settle once, write after neither.
+      let done = false;
       const onData = (chunk: Buffer) => {
+        if (done) return;
         last = Date.now();
         fs.writeSync(out, chunk);
       };
-      child.stdout.on("data", onData);
-      child.stderr.on("data", onData);
+      child.stdout?.on("data", onData);
+      child.stderr?.on("data", onData);
       const timer = setInterval(() => {
         if (Date.now() - last > quietMs && !watchdogFired) {
           watchdogFired = true;
@@ -707,12 +724,14 @@ function buildWithWatchdog(repoRoot: string) {
         }
       }, 5_000);
       const finish = (code: number) => {
+        if (done) return;
+        done = true;
         clearInterval(timer);
         fs.closeSync(out);
         resolve({ code, watchdogFired });
       };
       child.on("error", (err) => {
-        fs.writeSync(out, `spawn error: ${err.message}\n`);
+        if (!done) fs.writeSync(out, `spawn error: ${err.message}\n`);
         finish(127);
       });
       child.on("close", (code, signal) => finish(code ?? (signal ? 143 : 1)));

@@ -2,12 +2,15 @@
 // Every J1 message is produced by calling the real J1 function with a scripted fake runner, so a
 // wording change in J1 breaks this file instead of silently changing a classification. No case
 // uses the real Docker CLI, the real runBuildPreflight (checked by identity only) or a child process.
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { DockerRunner } from "../../scripts/test-docker-cleanup";
 import {
+  type BuildChild,
+  buildWithWatchdog,
   classifyBuildFailure,
   classifyPreflightFailure,
   DEFAULT_STEPS,
@@ -780,5 +783,41 @@ describe("verifyImageCheckLog", () => {
     expect(summaryWord("blocked", "docker")).toBe("blocked (with evidence)");
     expect(summaryWord("not run", "foreign")).toBe("not run (parked: foreign)");
     expect(summaryWord("failed", "build")).toBe("failed");
+  });
+});
+
+// --- the build runner, on a fake child (no process is started) -----------------------------
+
+class FakeChild extends EventEmitter implements BuildChild {
+  readonly stdout = new EventEmitter();
+  readonly stderr = new EventEmitter();
+  readonly kills: string[] = [];
+  kill(signal: NodeJS.Signals): boolean {
+    this.kills.push(signal);
+    return true;
+  }
+}
+
+function fakeSpawn() {
+  const children: FakeChild[] = [];
+  const spawnBuild = () => {
+    const child = new FakeChild();
+    children.push(child);
+    return child;
+  };
+  return { children, spawnBuild };
+}
+
+describe("buildWithWatchdog", () => {
+  it("c-IN-03: a spawn error followed by close settles once and never throws EBADF", async () => {
+    const s = fakeSpawn();
+    const logFile = path.join(tmp("aida-image-check-build-"), "build.log");
+    const done = buildWithWatchdog("/repo", s.spawnBuild)(["build", "."], logFile, 60_000);
+    const child = s.children[0];
+    // Node's order on a failed spawn (ENOENT): `error`, then `close` from the same handle.
+    expect(() => child.emit("error", new Error("spawn docker ENOENT"))).not.toThrow();
+    expect(() => child.emit("close", -2, null)).not.toThrow();
+    await expect(done).resolves.toEqual({ code: 127, watchdogFired: false });
+    expect(fs.readFileSync(logFile, "utf8")).toBe("spawn error: spawn docker ENOENT\n");
   });
 });
