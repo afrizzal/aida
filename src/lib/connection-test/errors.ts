@@ -136,7 +136,11 @@ function causeChain(e: unknown): ErrorLike[] {
     if (current === null || typeof current !== "object" || seen.has(current)) break;
     seen.add(current);
     chain.push(current as ErrorLike);
-    current = (current as ErrorLike).cause;
+    try {
+      current = (current as ErrorLike).cause;
+    } catch {
+      break; // A hostile getter ends the chain instead of throwing.
+    }
   }
   return chain;
 }
@@ -159,17 +163,22 @@ function numberProp(e: ErrorLike, key: string): number | undefined {
   }
 }
 
+function constructorName(e: ErrorLike): string | undefined {
+  try {
+    const ctor = (e as { constructor?: { name?: unknown } }).constructor;
+    return ctor && typeof ctor.name === "string" ? ctor.name : undefined;
+  } catch {
+    return undefined; // A hostile getter must not turn classification into a throw.
+  }
+}
+
 /** Own `name` plus the constructor name (SDK error classes do not always set `name`). */
 function names(e: ErrorLike): string[] {
   const result: string[] = [];
   const own = stringProp(e, "name");
   if (own) result.push(own);
-  try {
-    const ctor = (e as { constructor?: { name?: unknown } }).constructor;
-    if (ctor && typeof ctor.name === "string") result.push(ctor.name);
-  } catch {
-    // A hostile getter must not turn classification into a throw.
-  }
+  const ctor = constructorName(e);
+  if (ctor) result.push(ctor);
   return result;
 }
 
@@ -243,4 +252,120 @@ export function classifyConnectionError(e: unknown): ConnectionTestErrorCategory
   if (chain.some(isAuth)) return "authentication_failed";
   if (chain.some(isConnection)) return "connection_failed";
   return "unknown";
+}
+
+// --- Server log shape (K127, c-WR-02) ---------------------------------------------------------
+//
+// The log line under the correlation ID carries the error's name, code and HTTP status, each only
+// from the fixed sets below. A value outside them is logged as "other" and a missing one as
+// "none", so no message, host, port, URL, header or stack can reach the log through these fields.
+
+const LOG_NAMES = new Set([
+  "Error",
+  "TypeError",
+  "SyntaxError",
+  "RangeError",
+  "DOMException",
+  "AbortError",
+  "TimeoutError",
+  "ConnectionTestConfigError",
+  // imapflow
+  "AuthenticationFailure",
+  // ollama
+  "ResponseError",
+  // undici
+  "HTTPParserError",
+  "SocketError",
+  "ConnectTimeoutError",
+  "HeadersTimeoutError",
+  "BodyTimeoutError",
+  // openai and anthropic SDKs
+  "APIError",
+  "APIConnectionError",
+  "APIConnectionTimeoutError",
+  "APIUserAbortError",
+  "AuthenticationError",
+  "PermissionDeniedError",
+  "BadRequestError",
+  "NotFoundError",
+  "ConflictError",
+  "UnprocessableEntityError",
+  "RateLimitError",
+  "InternalServerError",
+]);
+
+const LOG_CODES = new Set([
+  ...CONFIG_CODES,
+  ...CONNECTION_CODES,
+  // nodemailer
+  "EAUTH",
+  "ENOAUTH",
+  "EOAUTH2",
+  "ECONFIG",
+  "EENVELOPE",
+  "EMESSAGE",
+  "ESTREAM",
+  "EREQUIRETLS",
+  // imapflow parser errors
+  ...Array.from({ length: 11 }, (_, i) => `ParserError${i + 1}`),
+  "ParserErrorExchange",
+  // undici's HTTP parser
+  "HPE_INVALID_CONSTANT",
+  "HPE_INVALID_VERSION",
+  "HPE_INVALID_STATUS",
+  "HPE_INVALID_HEADER_TOKEN",
+  "HPE_HEADER_OVERFLOW",
+  // TLS and certificates
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+  "ERR_SSL_WRONG_VERSION_NUMBER",
+  "CERT_HAS_EXPIRED",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+]);
+
+const LOG_STATUSES = new Set([
+  400, 401, 403, 404, 405, 407, 408, 409, 410, 413, 415, 422, 429, 500, 501, 502, 503, 504,
+]);
+
+/** The allowlisted shape of a failure, for the server log line under the correlation ID. */
+export interface ConnectionErrorLogShape {
+  name: string;
+  code: string;
+  status: number | "other" | "none";
+}
+
+function logName(e: ErrorLike | undefined): string {
+  if (!e) return "none";
+  const own = stringProp(e, "name");
+  const ctor = constructorName(e);
+  if (own !== undefined && own !== "Error") return LOG_NAMES.has(own) ? own : "other";
+  // Subclasses that keep the inherited name "Error" (imapflow's AuthenticationFailure).
+  if (ctor !== undefined && ctor !== "Error" && LOG_NAMES.has(ctor)) return ctor;
+  if (own === "Error") return "Error";
+  if (ctor !== undefined) return LOG_NAMES.has(ctor) ? ctor : "other";
+  return "none";
+}
+
+/**
+ * The thrown value's name, plus the first `code` and the first HTTP status found on its cause
+ * chain, each from a fixed set (otherwise "other", or "none" when absent). Never a message.
+ */
+export function connectionErrorLogShape(e: unknown): ConnectionErrorLogShape {
+  const chain = causeChain(e);
+  let code: string | undefined;
+  let status: number | undefined;
+  for (const link of chain) {
+    code ??= stringProp(link, "code");
+    status ??=
+      numberProp(link, "status") ??
+      numberProp(link, "statusCode") ??
+      numberProp(link, "status_code");
+  }
+  return {
+    name: logName(chain[0]),
+    code: code === undefined ? "none" : LOG_CODES.has(code) ? code : "other",
+    status: status === undefined ? "none" : LOG_STATUSES.has(status) ? status : "other",
+  };
 }

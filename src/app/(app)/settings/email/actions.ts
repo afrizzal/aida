@@ -16,6 +16,7 @@ import {
   ConnectionTestConfigError,
   type ConnectionTestResult,
   classifyConnectionError,
+  connectionErrorLogShape,
 } from "@/lib/connection-test/errors";
 import { getScopedDb } from "@/lib/session";
 
@@ -125,10 +126,16 @@ export async function testImapConnection(input: EmailSettingsInput): Promise<Con
     );
     return { ok: true };
   } catch (e) {
-    // Log only the probe, the category and the correlation ID (D-25).
+    // Log only the probe, the category, the correlation ID and the allowlisted error shape (D-25,
+    // K127).
     const correlationId = randomUUID();
     const category = classifyConnectionError(e);
-    console.error("[settings] connection test failed", { probe: "imap", category, correlationId });
+    console.error("[settings] connection test failed", {
+      probe: "imap",
+      category,
+      correlationId,
+      error: connectionErrorLogShape(e),
+    });
     return { ok: false, error: category, correlationId };
   }
 }
@@ -156,10 +163,16 @@ export async function testSmtpConnection(input: EmailSettingsInput): Promise<Con
     );
     return { ok: true };
   } catch (e) {
-    // Log only the probe, the category and the correlation ID (D-25).
+    // Log only the probe, the category, the correlation ID and the allowlisted error shape (D-25,
+    // K127).
     const correlationId = randomUUID();
     const category = classifyConnectionError(e);
-    console.error("[settings] connection test failed", { probe: "smtp", category, correlationId });
+    console.error("[settings] connection test failed", {
+      probe: "smtp",
+      category,
+      correlationId,
+      error: connectionErrorLogShape(e),
+    });
     return { ok: false, error: category, correlationId };
   }
 }

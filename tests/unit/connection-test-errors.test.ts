@@ -4,6 +4,7 @@ import {
   CONNECTION_TEST_ERROR_MESSAGES,
   ConnectionTestConfigError,
   classifyConnectionError,
+  connectionErrorLogShape,
 } from "../../src/lib/connection-test/errors";
 
 function withProps(message: string, props: Record<string, unknown>): Error {
@@ -302,5 +303,102 @@ describe("classifyConnectionError (D-25, F-08)", () => {
       unknown:
         "The connection test failed for an unknown reason. Check the server log for the reference below.",
     });
+  });
+});
+
+describe("connectionErrorLogShape (K127, c-WR-02)", () => {
+  it("gives the name, the first code and the first HTTP status found on the cause chain", () => {
+    const fetchFailed = new TypeError("fetch failed", {
+      cause: withProps("connect ECONNREFUSED 10.0.0.5:11434", { code: "ECONNREFUSED" }),
+    });
+    expect(connectionErrorLogShape(fetchFailed)).toEqual({
+      name: "TypeError",
+      code: "ECONNREFUSED",
+      status: "none",
+    });
+
+    const notFound = Object.assign(new Error("model 'llama3' not found at 10.0.0.5"), {
+      name: "ResponseError",
+      status_code: 404,
+    });
+    expect(connectionErrorLogShape(notFound)).toEqual({
+      name: "ResponseError",
+      code: "none",
+      status: 404,
+    });
+
+    class AuthenticationFailure extends Error {
+      authenticationFailed = true;
+    }
+    expect(connectionErrorLogShape(new AuthenticationFailure("Authentication failed"))).toEqual({
+      name: "AuthenticationFailure",
+      code: "none",
+      status: "none",
+    });
+    expect(
+      connectionErrorLogShape(
+        withProps("Greeting from mail.internal.example", { code: "GREETING_TIMEOUT" }),
+      ),
+    ).toEqual({ name: "Error", code: "GREETING_TIMEOUT", status: "none" });
+  });
+
+  it("logs anything outside the fixed sets as other, and nothing at all as none", () => {
+    expect(
+      connectionErrorLogShape(
+        Object.assign(new Error("x"), {
+          name: "Error at http://10.0.0.5:11434",
+          code: "ECONNREFUSED 10.0.0.5:11434",
+          status: 599,
+        }),
+      ),
+    ).toEqual({ name: "other", code: "other", status: "other" });
+    expect(connectionErrorLogShape(withProps("x", { status: 1e9 }))).toEqual({
+      name: "Error",
+      code: "none",
+      status: "other",
+    });
+    for (const value of [undefined, null, "", "ECONNREFUSED 10.0.0.5", 42, Symbol("s")]) {
+      expect(connectionErrorLogShape(value)).toEqual({
+        name: "none",
+        code: "none",
+        status: "none",
+      });
+    }
+  });
+
+  it("never carries a message, host, port, URL, header or stack, whatever the input", () => {
+    const hostile = Object.assign(
+      new Error(
+        "401 sk-live-SHAPE at https://user:pw@llm.corp.example:8443/v1 Authorization: Bearer t0k",
+      ),
+      {
+        name: "sk-live-NAME",
+        code: "sk-live-CODE",
+        status: "401 sk-live-STATUS",
+        headers: { authorization: "Bearer sk-live-HEADER" },
+        cause: withProps("connect 10.0.0.5:11434", { code: "10.0.0.5", url: "http://10.0.0.5" }),
+      },
+    );
+    const shape = connectionErrorLogShape(hostile);
+    expect(Object.keys(shape).sort()).toEqual(["code", "name", "status"]);
+    const text = JSON.stringify(shape);
+    for (const fragment of ["sk-live", "10.0.0.5", "llm.corp.example", "8443", "Bearer", "http"]) {
+      expect(text).not.toContain(fragment);
+    }
+  });
+
+  it("survives hostile getters and cycles", () => {
+    const trap = new Proxy(
+      {},
+      {
+        get() {
+          throw new Error("trap");
+        },
+      },
+    );
+    expect(connectionErrorLogShape(trap)).toEqual({ name: "none", code: "none", status: "none" });
+    const a = new Error("a") as Error & { cause?: unknown };
+    a.cause = a;
+    expect(connectionErrorLogShape(a)).toEqual({ name: "Error", code: "none", status: "none" });
   });
 });

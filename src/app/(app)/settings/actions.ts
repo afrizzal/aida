@@ -3,7 +3,11 @@
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { requireOrgAdmin } from "@/lib/authz";
-import { type ConnectionTestResult, classifyConnectionError } from "@/lib/connection-test/errors";
+import {
+  type ConnectionTestResult,
+  classifyConnectionError,
+  connectionErrorLogShape,
+} from "@/lib/connection-test/errors";
 import { enqueueReembed } from "@/lib/kb/create-article";
 import { getLlmSettings, saveLlmSettings as persistLlmSettings } from "@/lib/llm/settings";
 import { testProviderConnection } from "@/lib/llm/test-connection";
@@ -96,11 +100,16 @@ export async function testLlmConnection(input: LlmSettingsInput): Promise<Connec
     });
     return { ok: true };
   } catch (e) {
-    // Log only the probe, the category and the correlation ID: no raw message, host, URL or
-    // credential (D-25).
+    // Log only the probe, the category, the correlation ID and the allowlisted error shape: no
+    // raw message, host, URL or credential (D-25, K127).
     const correlationId = randomUUID();
     const category = classifyConnectionError(e);
-    console.error("[settings] connection test failed", { probe: "llm", category, correlationId });
+    console.error("[settings] connection test failed", {
+      probe: "llm",
+      category,
+      correlationId,
+      error: connectionErrorLogShape(e),
+    });
     return { ok: false, error: category, correlationId };
   }
 }
@@ -164,13 +173,15 @@ export async function testEmbeddingConnection(
     });
     return { ok: true };
   } catch (e) {
-    // Log only the probe, the category and the correlation ID (D-25).
+    // Log only the probe, the category, the correlation ID and the allowlisted error shape (D-25,
+    // K127).
     const correlationId = randomUUID();
     const category = classifyConnectionError(e);
     console.error("[settings] connection test failed", {
       probe: "embedding",
       category,
       correlationId,
+      error: connectionErrorLogShape(e),
     });
     return { ok: false, error: category, correlationId };
   }

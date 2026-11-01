@@ -119,7 +119,9 @@ describe("testLlmConnection (D-25, F-08)", () => {
     expect(result.correlationId).toMatch(UUID);
     expect(Object.keys(result).sort()).toEqual(["correlationId", "error", "ok"]);
     expect(JSON.stringify(result)).not.toContain("10.0.0.5");
-    expectLogExcludes("10.0.0.5", "ECONNREFUSED");
+    // K127 logs the allowlisted code (ECONNREFUSED) by design; the raw message, host and port
+    // still never reach the log.
+    expectLogExcludes("10.0.0.5", "11434", "connect ECONNREFUSED");
   });
 
   it("returns ok: true when the probe resolves", async () => {
@@ -296,6 +298,75 @@ describe("testSmtpConnection (D-25, F-08)", () => {
 
     expectFailure(result, "invalid_configuration");
     expect(createSmtpTransport).not.toHaveBeenCalled();
+  });
+});
+
+describe("server log line (K127, c-WR-02)", () => {
+  it("carries the probe, category, correlation ID and an allowlisted error shape only", async () => {
+    vi.mocked(probeEmbeddingConnection).mockRejectedValueOnce(
+      Object.assign(new Error("model 'nomic' not found at http://10.0.0.5:11434 key sk-live-LOG"), {
+        name: "ResponseError",
+        status_code: 404,
+      }),
+    );
+
+    const result = await testEmbeddingConnection({
+      provider: "ollama",
+      model: "nomic",
+      ollamaBaseUrl: "http://10.0.0.5:11434",
+    });
+
+    expectFailure(result, "connection_failed");
+    const correlationId = (result as { correlationId: string }).correlationId;
+    expect(errorSpy.mock.calls).toEqual([
+      [
+        "[settings] connection test failed",
+        {
+          probe: "embedding",
+          category: "connection_failed",
+          correlationId,
+          error: { name: "ResponseError", code: "none", status: 404 },
+        },
+      ],
+    ]);
+    expectLogExcludes("10.0.0.5", "11434", "sk-live", "not found", "nomic");
+  });
+
+  it.each([
+    [
+      "llm",
+      () =>
+        testLlmConnection({ provider: "ollama", model: "m", ollamaBaseUrl: "http://10.0.0.5:1" }),
+    ],
+    ["imap", () => testImapConnection(EMAIL_INPUT)],
+    ["smtp", () => testSmtpConnection(EMAIL_INPUT)],
+  ])("logs the same shape for the %s probe", async (probe, run) => {
+    const refused = new TypeError("fetch failed", {
+      cause: Object.assign(new Error("connect ECONNREFUSED 10.0.0.5:1"), { code: "ECONNREFUSED" }),
+    });
+    vi.mocked(testProviderConnection).mockRejectedValueOnce(refused);
+    vi.mocked(createImapClient).mockImplementationOnce(() => {
+      throw refused;
+    });
+    vi.mocked(createSmtpTransport).mockImplementationOnce(() => {
+      throw refused;
+    });
+
+    const result = await run();
+
+    expectFailure(result, "connection_failed");
+    expect(errorSpy.mock.calls).toEqual([
+      [
+        "[settings] connection test failed",
+        {
+          probe,
+          category: "connection_failed",
+          correlationId: (result as { correlationId: string }).correlationId,
+          error: { name: "TypeError", code: "ECONNREFUSED", status: "none" },
+        },
+      ],
+    ]);
+    expectLogExcludes("10.0.0.5", "connect ECONNREFUSED");
   });
 });
 
