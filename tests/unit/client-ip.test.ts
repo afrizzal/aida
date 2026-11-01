@@ -259,4 +259,15 @@ describe("Caddy contract (D-16)", () => {
     const block = /reverse_proxy app:3000 \{([\s\S]*?)\n {2}\}/.exec(caddyfile)?.[1] ?? "";
     expect(block).toMatch(/^\s*header_up X-Forwarded-For \{remote_host\}\s*$/m);
   });
+
+  it("b-IN-b1: Caddy strips a client-sent x-aida-client-ip inside reverse_proxy (second fence behind src/proxy.ts)", () => {
+    const caddyfile = readFileSync(path.join(__dirname, "../../Caddyfile"), "utf8");
+    const block = /reverse_proxy app:3000 \{([\s\S]*?)\n {2}\}/.exec(caddyfile)?.[1] ?? "";
+    const strip = block
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => !line.startsWith("#"))
+      .find((line) => /^header_up\s+-/i.test(line));
+    expect(strip?.toLowerCase()).toBe(`header_up -${CLIENT_IP_HEADER}`);
+  });
 });

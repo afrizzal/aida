@@ -271,7 +271,8 @@ validated, so a client cannot move itself into the shared bucket by sending garb
 **Sign-in uses the same identity.** Better Auth's sign-in limiter reads the client address only
 from an internal header, `x-aida-client-ip`. The app's proxy (`src/proxy.ts`) overwrites that
 header on every request with the identity above, so a client-sent value never reaches Better Auth,
-and a raw X-Forwarded-For is never read for sign-in either.
+and a raw X-Forwarded-For is never read for sign-in either. Caddy also strips a client-sent
+`x-aida-client-ip` (`header_up -X-Aida-Client-Ip`); keep that line if you change the proxy setup.
 
 ## Environment variable reference
 

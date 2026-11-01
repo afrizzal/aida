@@ -22,6 +22,9 @@
     # every request (D-16); a client-sent value never reaches the app. Do not put another
     # proxy in front of Caddy without reading docs/OPERATIONS.md, "Client IP and reverse proxies".
     header_up X-Forwarded-For {remote_host}
+    # Better Auth reads the client identity only from this header, and src/proxy.ts overwrites
+    # it on every request; stripping a client-sent copy here is a second fence (review b-IN-b1).
+    header_up -X-Aida-Client-Ip
     header_up X-Forwarded-Proto {scheme}
     header_up X-Forwarded-Host {host}
   }
