@@ -58,18 +58,38 @@ async function waitForGroupExit(pid: number, timeoutMs: number): Promise<boolean
   return true;
 }
 
+/** How a `stopProcessTree` call ended (review d-WR-d6). */
+export interface StopResult {
+  /** The tree was gone without SIGKILL: it exited on SIGTERM, or had already exited. */
+  graceful: boolean;
+  /**
+   * No member of the tree was observed at the end. POSIX: the group probe answered ESRCH.
+   * Windows: the child's exit was seen.
+   */
+  gone: boolean;
+  /** SIGKILL was sent because the tree outlived SIGTERM by `timeoutMs`. */
+  escalated: boolean;
+}
+
 /**
- * Stops the tree rooted at `child` and resolves once it is gone. SIGTERM first (the worker stops
+ * Stops the tree rooted at `child` and reports how it ended. SIGTERM first (the worker stops
  * pg-boss and exits, which can take several seconds); if the group is still there after
- * `timeoutMs`, SIGKILL and wait up to 5 s more. On Windows it waits for the child's `exit` event
- * up to `timeoutMs`. Never throws.
+ * `timeoutMs`, SIGKILL and wait up to `killWaitMs` (5 s) more. On Windows it waits for the child's
+ * `exit` event up to `timeoutMs`. Never throws: the caller decides what the result means, for
+ * example with `assertTreeStopped`.
  */
-export async function stopProcessTree(child: ChildProcess, timeoutMs = 15_000): Promise<void> {
+export async function stopProcessTree(
+  child: ChildProcess,
+  timeoutMs = 15_000,
+  opts: { killWaitMs?: number } = {},
+): Promise<StopResult> {
   const pid = child.pid;
-  if (!pid) return;
+  if (!pid) return { graceful: true, gone: true, escalated: false };
 
   if (process.platform === "win32") {
-    if (child.exitCode !== null || child.signalCode !== null) return;
+    if (child.exitCode !== null || child.signalCode !== null) {
+      return { graceful: true, gone: true, escalated: false };
+    }
     const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
     killTree(pid);
     let timer: NodeJS.Timeout | undefined;
@@ -78,13 +98,38 @@ export async function stopProcessTree(child: ChildProcess, timeoutMs = 15_000): 
     });
     await Promise.race([exited, bound]);
     clearTimeout(timer);
-    return;
+    const gone = child.exitCode !== null || child.signalCode !== null;
+    return { graceful: gone, gone, escalated: false };
   }
 
   // The group, not the leader, decides: a grandchild can outlive an already-exited parent.
-  if (!groupAlive(pid)) return;
+  if (!groupAlive(pid)) return { graceful: true, gone: true, escalated: false };
   killTree(pid, "SIGTERM");
-  if (await waitForGroupExit(pid, timeoutMs)) return;
+  if (await waitForGroupExit(pid, timeoutMs))
+    return { graceful: true, gone: true, escalated: false };
   killTree(pid, "SIGKILL");
-  await waitForGroupExit(pid, KILL_WAIT_MS);
+  const gone = await waitForGroupExit(pid, opts.killWaitMs ?? KILL_WAIT_MS);
+  return { graceful: false, gone, escalated: true };
+}
+
+/**
+ * Throws if `result` shows that the tree named `label` is still alive, or, with
+ * `requireGraceful`, that it needed SIGKILL. A spec calls this after its cleanup, so a hung
+ * SIGTERM path or a surviving tree fails the run instead of passing silently (review d-WR-d6).
+ */
+export function assertTreeStopped(
+  result: StopResult,
+  label: string,
+  opts: { timeoutMs: number; requireGraceful: boolean },
+): void {
+  if (!result.gone) {
+    throw new Error(
+      `${label} process tree is still alive after stopProcessTree (escalated to SIGKILL: ${String(result.escalated)})`,
+    );
+  }
+  if (opts.requireGraceful && !result.graceful) {
+    throw new Error(
+      `${label} did not exit within ${opts.timeoutMs} ms of SIGTERM and was stopped with SIGKILL`,
+    );
+  }
 }

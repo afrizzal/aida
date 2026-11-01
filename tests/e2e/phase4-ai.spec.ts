@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { orgId, prisma } from "./support/db";
-import { stopProcessTree } from "./support/process-tree";
+import { assertTreeStopped, stopProcessTree } from "./support/process-tree";
 import { baseURL, databaseUrl } from "./support/test-env";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -136,8 +136,10 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   test.setTimeout(60_000);
-  if (worker) await stopProcessTree(worker);
+  const stopped = worker ? await stopProcessTree(worker) : null;
   stub.server?.close();
+  // A worker tree that outlived SIGKILL fails the file (review d-WR-d6).
+  if (stopped) assertTreeStopped(stopped, "worker", { timeoutMs: 15_000, requireGraceful: false });
 });
 
 /** ai-triage jobs for one ticket that pg-boss has not finished (waiting, retry or running). */

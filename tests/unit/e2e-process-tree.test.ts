@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { killTree, stopProcessTree } from "../e2e/support/process-tree";
+import { assertTreeStopped, killTree, stopProcessTree } from "../e2e/support/process-tree";
 
 // The E2E worker is a two-process tree (tsx CLI parent, worker child). These cases build the same
 // shape: a detached parent that spawns a long-running grandchild and reports its pid on stdout.
@@ -101,7 +102,109 @@ describe("stopProcessTree", () => {
     await new Promise<void>((resolve) => child.once("exit", () => resolve()));
     const pid = child.pid as number;
 
-    await expect(stopProcessTree(child)).resolves.toBeUndefined();
+    await expect(stopProcessTree(child)).resolves.toEqual({
+      graceful: true,
+      gone: true,
+      escalated: false,
+    });
     expect(() => killTree(pid)).not.toThrow();
+  });
+});
+
+// Review d-WR-d6: the caller sees how the tree stopped, so a worker whose SIGTERM path is broken,
+// or a tree that survives SIGKILL, fails its spec instead of being cleaned up silently.
+describe("stopProcessTree reports how the tree stopped (review d-WR-d6)", () => {
+  it.skipIf(process.platform === "win32")(
+    "a tree that exits on SIGTERM is graceful and gone",
+    async () => {
+      const { parent } = await startTree(false);
+      await expect(stopProcessTree(parent)).resolves.toEqual({
+        graceful: true,
+        gone: true,
+        escalated: false,
+      });
+    },
+    20_000,
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "a child that ignores SIGTERM is reported as escalated and not graceful",
+    async () => {
+      const { parent, grandchild } = await startTree(true);
+      await expect(stopProcessTree(parent, 1_000)).resolves.toEqual({
+        graceful: false,
+        gone: true,
+        escalated: true,
+      });
+      expect(isAlive(grandchild)).toBe(false);
+    },
+    20_000,
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "a tree that survives SIGKILL is reported as not gone",
+    async () => {
+      // No real process can be made to survive SIGKILL, so process.kill is replaced: every
+      // signal "succeeds" and the group always answers the existence probe. Nothing is sent to
+      // the fake pid.
+      const fake = Object.assign(new EventEmitter(), {
+        pid: 4_000_000,
+        exitCode: null,
+        signalCode: null,
+      }) as unknown as ChildProcess;
+      const kill = vi.spyOn(process, "kill").mockImplementation(() => true);
+      try {
+        await expect(stopProcessTree(fake, 100, { killWaitMs: 300 })).resolves.toEqual({
+          graceful: false,
+          gone: false,
+          escalated: true,
+        });
+        const sent = kill.mock.calls.filter(([, signal]) => signal !== 0);
+        expect(sent).toEqual([
+          [-4_000_000, "SIGTERM"],
+          [-4_000_000, "SIGKILL"],
+        ]);
+      } finally {
+        kill.mockRestore();
+      }
+    },
+    20_000,
+  );
+});
+
+describe("assertTreeStopped (review d-WR-d6)", () => {
+  it("throws 'did not exit within' when a graceful stop is required and SIGKILL was needed", () => {
+    expect(() =>
+      assertTreeStopped({ graceful: false, gone: true, escalated: true }, "worker", {
+        timeoutMs: 60_000,
+        requireGraceful: true,
+      }),
+    ).toThrow("worker did not exit within 60000 ms of SIGTERM");
+  });
+
+  it("throws when the tree survived SIGKILL, whether or not a graceful stop is required", () => {
+    for (const requireGraceful of [true, false]) {
+      expect(() =>
+        assertTreeStopped({ graceful: false, gone: false, escalated: true }, "dev server", {
+          timeoutMs: 15_000,
+          requireGraceful,
+        }),
+      ).toThrow("dev server process tree is still alive");
+    }
+  });
+
+  it("accepts a graceful stop, and an escalated stop when grace is not required", () => {
+    expect(() =>
+      assertTreeStopped({ graceful: true, gone: true, escalated: false }, "worker", {
+        timeoutMs: 60_000,
+        requireGraceful: true,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertTreeStopped({ graceful: false, gone: true, escalated: true }, "dev server", {
+        timeoutMs: 15_000,
+        requireGraceful: false,
+      }),
+    ).not.toThrow();
   });
 });

@@ -80,7 +80,7 @@ import { PROPOSAL_SYSTEM_PROMPT } from "../../src/lib/kb/proposal-prompt";
 import { EMBEDDING_DIMENSIONS } from "../../src/lib/rag/types";
 import { createTicket, orgId as e2eOrgId, prisma } from "./support/db";
 import { CHAT_MODEL, type ChatRequestRecord, createLlmStub, EMBED_MODEL } from "./support/llm-stub";
-import { stopProcessTree } from "./support/process-tree";
+import { assertTreeStopped, type StopResult, stopProcessTree } from "./support/process-tree";
 import { databaseUrl } from "./support/test-env";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -187,10 +187,13 @@ function startWorker(): Promise<void> {
  * Stops the worker tree and resolves once it is gone (review c-IN-06), so no job of this file
  * still runs while afterAll checks the audit trail or the next file starts its own worker.
  * Delegates to the shared cross-platform helper (plan 08-17): SIGTERM to the detached process
- * group, SIGKILL after WORKER_STOP_TIMEOUT_MS, so the tree is gone either way.
+ * group, SIGKILL after WORKER_STOP_TIMEOUT_MS. afterAll asserts the result: a worker that needed
+ * SIGKILL, or a tree that is still alive, fails the file (review d-WR-d6), as the old
+ * "worker did not exit within WORKER_STOP_TIMEOUT_MS" rejection did.
  */
-async function stopWorker(): Promise<void> {
-  if (worker) await stopProcessTree(worker, WORKER_STOP_TIMEOUT_MS);
+async function stopWorker(): Promise<StopResult> {
+  if (!worker) return { graceful: true, gone: true, escalated: false };
+  return stopProcessTree(worker, WORKER_STOP_TIMEOUT_MS);
 }
 
 // ---------------------------------------------------------------------------
@@ -557,8 +560,13 @@ test.afterEach(async () => {
 
 test.afterAll(async () => {
   releaseHold?.();
-  await stopWorker();
+  const stopped = await stopWorker();
   stub.stop();
+  // A tree that is still alive could still write rows: stop before checking them.
+  assertTreeStopped(stopped, "worker", {
+    timeoutMs: WORKER_STOP_TIMEOUT_MS,
+    requireGraceful: false,
+  });
   // Nothing more can be written now: the audit trail is complete, and the shared E2E
   // organization is as this file found it (review c-WR-02).
   if (orgId !== "") {
@@ -571,6 +579,11 @@ test.afterAll(async () => {
     expect(await prisma.setting.count({ where: { organizationId: orgId } })).toBe(0);
   }
   expect(await e2eOrganizationCounts()).toEqual(e2eCountsBefore);
+  // The worker's SIGTERM path (pg-boss stop) must work: SIGKILL cleans up but fails the file.
+  assertTreeStopped(stopped, "worker", {
+    timeoutMs: WORKER_STOP_TIMEOUT_MS,
+    requireGraceful: true,
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -7,7 +7,7 @@ import { NO_RELEVANT_CONTENT_MESSAGE } from "../../src/lib/rag/draft-prompt";
 import { EMBEDDING_DIMENSIONS } from "../../src/lib/rag/types";
 import { createTicket, orgId, prisma } from "./support/db";
 import { CHAT_MODEL, createLlmStub, EMBED_MODEL } from "./support/llm-stub";
-import { stopProcessTree } from "./support/process-tree";
+import { assertTreeStopped, stopProcessTree } from "./support/process-tree";
 import { databaseUrl } from "./support/test-env";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -130,8 +130,10 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   test.setTimeout(60_000);
-  if (worker) await stopProcessTree(worker);
+  const stopped = worker ? await stopProcessTree(worker) : null;
   stub.stop();
+  // A worker tree that outlived SIGKILL fails the file (review d-WR-d6).
+  if (stopped) assertTreeStopped(stopped, "worker", { timeoutMs: 15_000, requireGraceful: false });
 });
 
 // ---------------------------------------------------------------------------
