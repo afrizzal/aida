@@ -7,3 +7,9 @@
 ## From 08-04
 
 - **better-auth peer snapshot re-breaks on every `pnpm add` or `pnpm remove`.** pnpm re-resolves `@better-auth/core@1.7.20` against `better-call@1.1.8` and `@better-fetch/fetch@1.1.21`, the copies the dev-only `@better-auth/cli@1.4.21` brings in. The build then fails with `kAPIErrorHeaderSymbol was not found`. Workaround used in 08-02 and 08-04: `pnpm remove better-auth && pnpm add better-auth@1.7.20 --save-exact`, then check `grep "'@better-auth/core@1.7.20(" pnpm-lock.yaml` for `better-call@1.4.5`. A permanent fix (dropping or replacing the dev CLI) is out of 08-04's scope. Any plan that changes packages, and Dependabot PRs, should re-check this.
+
+## From the Part A code review (step 7, 2026-11-11)
+
+- **Ollama probe accepts any 200 JSON (F2 observation).** An HTTP service that answers the Ollama probe path with status 200 and any valid JSON makes the Test pass, because the probes do not check the response shape. Not a text oracle, but it tells "some JSON service answered" apart from `connection_failed`. Left for the Codex diff critique and Phase 8.1.
+- The rows deferred in the "Orchestrator dispositions" section of `08-REVIEW.md` (a-IN-a3, a-IN-a5, a-IN-a6, a-IN-a7, b-IN-b5, b-IN-b6, b-IN-b8, c-IN-07), with the reasons given there.
+
