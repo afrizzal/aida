@@ -17,7 +17,8 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ALLOWED_MIME, MAX_BYTES } from "@/lib/attachments/constants";
+import { ALLOWED_MIME, MAX_BYTES, MAX_FILES_PER_REQUEST } from "@/lib/attachments/constants";
+import { tooManyFilesMessage } from "@/lib/public-forms/limits";
 
 const requestSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -50,6 +51,10 @@ export function RequestForm() {
       setFileNames([]);
       setFileError(null);
       return true;
+    }
+    if (files.length > MAX_FILES_PER_REQUEST) {
+      setFileError(tooManyFilesMessage("request"));
+      return false;
     }
     for (const file of Array.from(files)) {
       if (file.size > MAX_BYTES) {
@@ -95,6 +100,11 @@ export function RequestForm() {
       return;
     }
     if (!res.ok) {
+      const failure = (await res.json().catch(() => null)) as { error?: unknown } | null;
+      if (res.status === 413 && failure?.error === "too_many_files") {
+        form.setError("root", { message: tooManyFilesMessage("request") });
+        return;
+      }
       form.setError("root", { message: "Something went wrong. Please try again." });
       return;
     }

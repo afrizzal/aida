@@ -1,13 +1,18 @@
 // Public upload validation and storage (plan 08-13, D-24, AIDA-30, F-12).
 //
-// validateUploadFiles checks every file (per-file size, running total against the combined cap,
-// sniffed content type) and stores nothing, so a later invalid file leaves no earlier file on
-// disk. storeValidatedUploads saves the validated files and, if one save fails, deletes the ones
+// validateUploadFiles first checks the number of files, before reading any (K128), then checks
+// every file (per-file size, running total against the combined cap, sniffed content type) and
+// stores nothing, so a later invalid file leaves no earlier file on disk. storeValidatedUploads saves the validated files and, if one save fails, deletes the ones
 // already saved before rethrowing. removeStoredUploads is the cleanup for a later failure
 // (ticket creation, attachment rows, a rolled-back transaction); it is best-effort and never
 // throws, so the caller's own error survives (see staged-files.ts for the delete semantics).
 import { fileTypeFromBuffer } from "file-type";
-import { ALLOWED_MIME, MAX_BYTES, MAX_TOTAL_REQUEST_BYTES } from "@/lib/attachments/constants";
+import {
+  ALLOWED_MIME,
+  MAX_BYTES,
+  MAX_FILES_PER_REQUEST,
+  MAX_TOTAL_REQUEST_BYTES,
+} from "@/lib/attachments/constants";
 import { buildStorageKey, localFileStorage } from "@/lib/attachments/local-file-storage";
 import { saveStagedFiles } from "@/lib/attachments/staged-files";
 
@@ -25,10 +30,14 @@ export type UploadValidationResult =
   | {
       ok: false;
       status: 413 | 415;
-      error: "file_too_large" | "payload_too_large" | "unsupported_file_type";
+      error: "too_many_files" | "file_too_large" | "payload_too_large" | "unsupported_file_type";
     };
 
 export async function validateUploadFiles(files: File[]): Promise<UploadValidationResult> {
+  // Before any file is read: a body of tiny parts must not cost one read, sniff and save each.
+  if (files.length > MAX_FILES_PER_REQUEST) {
+    return { ok: false, status: 413, error: "too_many_files" };
+  }
   const uploads: ValidatedUpload[] = [];
   let totalBytes = 0;
   for (const file of files) {

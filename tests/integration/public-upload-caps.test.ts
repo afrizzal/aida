@@ -52,6 +52,7 @@ vi.mock("@/lib/markdown/render", async (importOriginal) => {
 
 import { POST as intakePost } from "@/app/api/public/intake/route";
 import { POST as followUpPost } from "@/app/api/public/status/[token]/follow-up/route";
+import * as uploadConstants from "@/lib/attachments/constants";
 import { MAX_BYTES, MAX_REQUEST_BODY_BYTES } from "@/lib/attachments/constants";
 import { localFileStorage } from "@/lib/attachments/local-file-storage";
 import { prisma } from "@/lib/db";
@@ -253,5 +254,50 @@ describe("stored files are removed when a later step fails (D-24)", () => {
     ).rejects.toThrow("render failed");
     expect(await messageCount()).toBe(messages);
     expect(await countStored()).toBe(before);
+  });
+});
+
+// K128 (review b-WR-b2): a count cap, checked before any file is read. Neither shipped public
+// form sets a count, so the cap is K128's default of 10. Read through the module namespace so
+// the red run (before the constant existed) fails on the assertion, not on an import error.
+const FILE_CAP = 10;
+
+/** `n` one-byte parts that claim to be GIFs; each would answer 415 if it were read. */
+function oneByteGifs(n: number): File[] {
+  return Array.from({ length: n }, (_, i) => new File(["G"], `g${i}.gif`, { type: "image/gif" }));
+}
+
+describe("file count cap (K128, b-WR-b2)", () => {
+  it("the cap is 10 files per request", () => {
+    expect((uploadConstants as Record<string, unknown>).MAX_FILES_PER_REQUEST).toBe(FILE_CAP);
+  });
+
+  it("intake: cap + 1 one-byte GIF parts answer 413 too_many_files before any file is read or stored", async () => {
+    const before = await countStored();
+    const res = await intakePost(intakeRequest(oneByteGifs(FILE_CAP + 1)));
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: "too_many_files" });
+    expect(await countStored()).toBe(before);
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  it("intake: exactly cap parts pass the count check and are read (each one-byte part then fails the sniff)", async () => {
+    const res = await intakePost(intakeRequest(oneByteGifs(FILE_CAP)));
+    expect(res.status).toBe(415);
+    expect(await res.json()).toEqual({ error: "unsupported_file_type" });
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  it("follow-up: cap + 1 one-byte GIF parts answer 413 too_many_files, create no message, store nothing", async () => {
+    const before = await countStored();
+    const messages = await messageCount();
+    const res = await followUpPost(followUpRequest(ticket.token, oneByteGifs(FILE_CAP + 1)), {
+      params: Promise.resolve({ token: ticket.token }),
+    });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: "too_many_files" });
+    expect(await messageCount()).toBe(messages);
+    expect(await countStored()).toBe(before);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 });

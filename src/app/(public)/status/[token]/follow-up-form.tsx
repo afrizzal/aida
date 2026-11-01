@@ -7,7 +7,8 @@ import { HoneypotField } from "@/components/public/honeypot-field";
 import { AttachmentChip, formatBytes } from "@/components/tickets/attachment-chip";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ALLOWED_MIME, MAX_BYTES } from "@/lib/attachments/constants";
+import { ALLOWED_MIME, MAX_BYTES, MAX_FILES_PER_REQUEST } from "@/lib/attachments/constants";
+import { tooManyFilesMessage } from "@/lib/public-forms/limits";
 
 interface FollowUpFormProps {
   token: string;
@@ -30,6 +31,11 @@ export function FollowUpForm({ token }: FollowUpFormProps) {
   // and does real byte-sniffed MIME detection via `file-type` (never trust this).
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const selected = Array.from(event.target.files ?? []);
+    if (files.length + selected.length > MAX_FILES_PER_REQUEST) {
+      setFileError(tooManyFilesMessage("follow-up"));
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
     for (const file of selected) {
       if (file.size > MAX_BYTES) {
         setFileError(`"${file.name}" is larger than 10MB.`);
@@ -75,6 +81,11 @@ export function FollowUpForm({ token }: FollowUpFormProps) {
         return;
       }
       if (!res.ok) {
+        const failure = (await res.json().catch(() => null)) as { error?: unknown } | null;
+        if (res.status === 413 && failure?.error === "too_many_files") {
+          setSendError(tooManyFilesMessage("follow-up"));
+          return;
+        }
         setSendError("Couldn't send your follow-up. Try again.");
         return;
       }
