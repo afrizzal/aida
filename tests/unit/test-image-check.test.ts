@@ -405,6 +405,8 @@ function flow(
       log?: string;
       config?: unknown;
       noImage?: boolean;
+      /** What the base image tag points to after the build (a pull or a moved tag). */
+      baseAfter?: string;
     };
     preflight?: ImageCheckDeps["preflight"];
     lockDir?: string;
@@ -430,6 +432,8 @@ function flow(
         const labels = (config as { Labels?: Record<string, string> }).Labels ?? null;
         fake.images.set(args[args.indexOf("--tag") + 1], { id: "sha256:built", labels, config });
       }
+      if (b.baseAfter !== undefined)
+        fake.images.set("node:22-alpine", { id: b.baseAfter, labels: null, config: {} });
       return { code: b.code, watchdogFired: b.watchdogFired };
     },
     preflight: (docker, opts) => {
@@ -551,6 +555,49 @@ describe("runImageCheck flow", () => {
     expectAllowed(fake, [TAG]);
   });
 
+  it("c-WR-04: a base image that moved during the build is failed, named, and never touched", async () => {
+    const fake = fakeDaemon();
+    const f = flow(fake, { build: { code: 0, watchdogFired: false, baseAfter: "sha256:newbase" } });
+    const result = await runImageCheck("runner", f.deps);
+    expect(result).toMatchObject({
+      state: "failed",
+      cause: "base-image",
+      baseImageBefore: "sha256:base",
+      baseImageAfter: "sha256:newbase",
+    });
+    expect(result.evidence).toContain("node:22-alpine");
+    expect(result.evidence).toContain("sha256:base");
+    expect(result.evidence).toContain("sha256:newbase");
+    expectAllowed(fake, [TAG]);
+    expect(fake.images.get("node:22-alpine")?.id).toBe("sha256:newbase");
+  });
+
+  it("c-WR-04: a base image that was absent and then pulled by the build is failed", async () => {
+    const fake = fakeDaemon();
+    fake.images.delete("node:22-alpine");
+    const f = flow(fake, { build: { code: 0, watchdogFired: false, baseAfter: "sha256:pulled" } });
+    const result = await runImageCheck("runner", f.deps);
+    expect(result).toMatchObject({
+      state: "failed",
+      cause: "base-image",
+      baseImageBefore: "absent",
+      baseImageAfter: "sha256:pulled",
+    });
+    expect(result.evidence).toContain("node:22-alpine");
+    expectAllowed(fake, [TAG]);
+    expect(fake.images.has("node:22-alpine")).toBe(true);
+  });
+
+  it("c-WR-04: an unchanged base image passes with before and after recorded", async () => {
+    const fake = fakeDaemon();
+    const result = await runImageCheck("runner", flow(fake).deps);
+    expect(result).toMatchObject({
+      state: "passed",
+      baseImageBefore: "sha256:base",
+      baseImageAfter: "sha256:base",
+    });
+  });
+
   it("R2-8: the result and teardown lines are printed exactly once each", async () => {
     const fake = fakeDaemon();
     const f = flow(fake);
@@ -612,6 +659,8 @@ const PASSED = result({
   user: "node",
   env: ["NEXT_TELEMETRY_DISABLED=1", "CHECKPOINT_DISABLE=1"],
   labels: { "aida.test": "1", "aida.test.run": RUN },
+  // A passed run records the base image after the build too (c-WR-04).
+  baseImageAfter: "sha256:base",
 });
 
 describe("verifyImageCheckLog", () => {
@@ -636,6 +685,22 @@ describe("verifyImageCheckLog", () => {
     );
     expect(v.ok).toBe(true);
     expect(v.line).toContain('word="passed"');
+  });
+  it("c-WR-04: passed with base image IDs that differ is refused", () => {
+    const moved = { ...PASSED, baseImageAfter: "sha256:other" };
+    const v = verifyImageCheckLog(
+      log(moved, teardown({ created: true, removed: [TAG] })),
+      0,
+      "runner",
+    );
+    expect(v.ok).toBe(false);
+    expect(v.line).toContain("node:22-alpine");
+  });
+  it("c-WR-04: passed without a recorded base image ID after the build is refused", () => {
+    const none = { ...PASSED, baseImageAfter: null };
+    expect(
+      verifyImageCheckLog(log(none, teardown({ created: true, removed: [TAG] })), 0, "runner").ok,
+    ).toBe(false);
   });
   it("R2-8: passed without the removal is refused", () => {
     expect(verifyImageCheckLog(log(PASSED, teardown({ created: true })), 0, "runner").ok).toBe(

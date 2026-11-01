@@ -338,9 +338,21 @@ function imageId(docker: Docker, ref: string): { id: string | null; error?: stri
   return { id: null, error: r.stderr.trim() || `exit ${r.code}` };
 }
 
+/** The base image's ID, `absent` when the daemon has no such image, or `unreadable: <error>`. */
 function baseImageId(docker: Docker): string {
   const r = imageId(docker, BASE_IMAGE);
+  if (r.error !== undefined) return `unreadable: ${r.error}`;
   return r.id ?? "absent";
+}
+
+/**
+ * c-WR-04: the base image is shared daemon state this run did not create (K109). When the build
+ * pulled it or moved its tag, the run cannot pass; the base image itself is never touched.
+ */
+export function baseImageProblem(before: string | null, after: string | null): string | null {
+  if (before !== null && after !== null && before === after && before.startsWith("sha256:"))
+    return null;
+  return `Base image ${BASE_IMAGE} was ${before ?? "not recorded"} before the build and ${after ?? "not recorded"} after it (a pull or a moved tag); it was not touched (K109)`;
 }
 
 function readLog(file: string): string {
@@ -508,7 +520,11 @@ export async function runImageCheck(
     for (const key of [TEST_LABEL, RUN_LABEL]) if (key in labels) result.labels[key] = labels[key];
     result.baseImageAfter = baseImageId(deps.docker);
     const findings = inspectFindings(config, deps.runId);
-    if (findings.length > 0) setState({ state: "failed", cause: "config" }, findings.join("\n"));
+    const base = baseImageProblem(result.baseImageBefore, result.baseImageAfter);
+    if (base !== null)
+      setState({ state: "failed", cause: "base-image" }, [base, ...findings].join("\n"));
+    else if (findings.length > 0)
+      setState({ state: "failed", cause: "config" }, findings.join("\n"));
     else setState({ state: "passed", cause: "none" }, "");
   } catch (err) {
     if (err instanceof Stop) setState(err, err.evidence);
@@ -640,6 +656,8 @@ export function verifyImageCheckLog(
       return refuse("passed without the run labels");
     }
     if (!(t.removed ?? []).includes(r.tag)) return refuse(`passed but ${r.tag} was not removed`);
+    const base = baseImageProblem(r.baseImageBefore, r.baseImageAfter);
+    if (base !== null) return refuse(`passed but ${base}`);
   }
   return {
     ok: true,
