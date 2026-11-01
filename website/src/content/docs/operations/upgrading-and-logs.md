@@ -8,6 +8,46 @@ healthy instance apart from one that only looks healthy.
 
 ## Upgrading
 
+:::caution[Upgrading from a release whose containers ran as root?]
+`app`, `worker` and `migrate` now run as the image's built-in `node` user (UID/GID 1000). A fresh
+install needs nothing. An existing `uploads_data` volume written by an older release is owned by
+root, so new uploads and inbound email attachments fail with a permission error until you change
+its ownership once. Use the steps in the next section instead of the plain upgrade below.
+:::
+
+### One-time uploads ownership change (installs that ran as root)
+
+Do this once, in order:
+
+1. Before pulling the new release, still on the old images, take a backup:
+   `./scripts/backup.sh ./backups`
+2. Pull and build the new release: `git pull`, then `docker compose build`.
+3. Stop the services that write uploads: `docker compose stop app worker`.
+4. Find the real volume name with `docker volume ls --filter name=uploads_data`. Compose prefixes
+   it with the project name (for example `aida_uploads_data`); make sure the one you change is
+   AIDA's.
+5. **The next command recursively changes the owner of every file in the uploads volume. Run it
+   only after the backup in step 1 has finished, and only against AIDA's uploads volume.** It runs
+   a one-off container of the new image as root:
+
+   ```bash
+   docker compose run --rm --no-deps --user 0:0 --entrypoint chown app -R 1000:1000 /data/uploads
+   ```
+
+6. Verify. This must print `1000:1000` and nothing else:
+
+   ```bash
+   docker compose run --rm --no-deps --entrypoint sh app -c 'stat -c "%u:%g" /data/uploads; find /data/uploads ! -user 1000 | head -n 1'
+   ```
+
+7. Start the stack: `docker compose up -d`.
+
+Running steps 5 and 6 again changes nothing. There is deliberately no automatic fix: nothing
+changes your data's ownership without you running it. The full procedure is in
+[Upgrading an install whose containers ran as root](https://github.com/afrizzal/aida/blob/master/docs/OPERATIONS.md#upgrading-an-install-whose-containers-ran-as-root).
+
+### Every upgrade
+
 Back up first:
 
 ```bash
