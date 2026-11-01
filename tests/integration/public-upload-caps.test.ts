@@ -51,13 +51,14 @@ vi.mock("@/lib/markdown/render", async (importOriginal) => {
 });
 
 import { POST as intakePost } from "@/app/api/public/intake/route";
+import { POST as csatPost } from "@/app/api/public/status/[token]/csat/route";
 import { POST as followUpPost } from "@/app/api/public/status/[token]/follow-up/route";
 import * as uploadConstants from "@/lib/attachments/constants";
 import { MAX_BYTES, MAX_REQUEST_BODY_BYTES } from "@/lib/attachments/constants";
 import { localFileStorage } from "@/lib/attachments/local-file-storage";
 import { prisma } from "@/lib/db";
 import { uniqueClientIp } from "../support/client-ip";
-import { seedContactTicket, seedOrgWithMembers } from "../support/lifecycle-fixtures";
+import { seedContactTicket, seedOrgWithMembers, stateIdFor } from "../support/lifecycle-fixtures";
 
 // Every storage write goes through localFileStorage.save (validate-uploads.ts, staged-files.ts).
 // Counting the calls tells "validate every file, then store" from "store, then remove on
@@ -382,5 +383,49 @@ describe("public text field caps (K129, b-WR-b3)", () => {
     expect(body.error).toBe("validation_failed");
     expect(body.issues.map((i) => i.path)).toEqual([["message"]]);
     expect(await messageCount()).toBe(messages + 1);
+  });
+});
+
+// Review b-IN-b3: CSAT carries a score and a comment of at most 2 000 characters, so its body is
+// read through the same bounded reader with a small fixed cap instead of an unbounded parse.
+describe("csat body limit (b-IN-b3)", () => {
+  it("answers 413 payload_too_large to a body over the CSAT cap and records nothing; a normal rating is accepted", async () => {
+    const { orgId } = await seedOrgWithMembers(prisma, ["owner"]);
+    const seeded = await seedContactTicket(orgId, { contactEmail: "csat-cap@example.test" });
+    await prisma.ticket.update({
+      where: { id: seeded.id },
+      data: { stateId: await stateIdFor(orgId, "RESOLVED"), resolvedAt: new Date() },
+    });
+    const { statusToken: token } = await prisma.ticket.findUniqueOrThrow({
+      where: { id: seeded.id },
+      select: { statusToken: true },
+    });
+    const send = (form: FormData) =>
+      csatPost(
+        new Request(`http://localhost/api/public/status/${token}/csat`, {
+          method: "POST",
+          headers: { "x-forwarded-for": uniqueClientIp() },
+          body: form,
+        }),
+        { params: Promise.resolve({ token }) },
+      );
+    const rows = () => prisma.csatResponse.count({ where: { ticketId: seeded.id } });
+
+    // A valid rating plus 64 KiB in a field the route ignores: before the cap it parsed whole.
+    const oversized = new FormData();
+    oversized.set("score", "5");
+    oversized.set("padding", "x".repeat(64 * 1024));
+    const refused = await send(oversized);
+    expect(refused.status).toBe(413);
+    expect(await refused.json()).toEqual({ error: "payload_too_large" });
+    expect(await rows()).toBe(0);
+
+    // The largest real form (score plus a 2 000-character comment of 3-byte characters) fits.
+    const normal = new FormData();
+    normal.set("score", "4");
+    normal.set("comment", "\u20ac".repeat(2000));
+    const accepted = await send(normal);
+    expect(accepted.status).toBe(200);
+    expect(await rows()).toBe(1);
   });
 });

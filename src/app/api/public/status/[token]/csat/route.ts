@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod/v4";
+import { CSAT_MAX_BODY_BYTES } from "@/lib/attachments/constants";
 import { prisma } from "@/lib/db";
+import { readBoundedFormData } from "@/lib/http/read-bounded-form-data";
 import { consumeRateLimit } from "@/lib/rate-limit/check-rate-limit";
 import { getRateLimitIdentity } from "@/lib/rate-limit/client-ip";
 import { PUBLIC_RATE_LIMITS, rateLimitedResponse } from "@/lib/rate-limit/public-limits";
@@ -41,12 +43,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
     return NextResponse.json({ error: "not_eligible" }, { status: 409 });
   }
 
-  let form: FormData;
-  try {
-    form = await request.formData();
-  } catch {
-    return NextResponse.json({ error: "invalid_form_data" }, { status: 400 });
+  // Bounded on the bytes actually received, like intake and follow-up (review b-IN-b3).
+  const body = await readBoundedFormData(request, CSAT_MAX_BODY_BYTES);
+  if (!body.ok) {
+    return body.reason === "too_large"
+      ? NextResponse.json({ error: "payload_too_large" }, { status: 413 })
+      : NextResponse.json({ error: "invalid_form_data" }, { status: 400 });
   }
+  const form = body.form;
 
   // Honeypot (D-20): silent-success on trip, never a distinct status/error.
   if (((form.get("company_website") as string | null) ?? "") !== "") {
