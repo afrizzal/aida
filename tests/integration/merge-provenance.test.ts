@@ -26,6 +26,7 @@ import { localFileStorage } from "@/lib/attachments/local-file-storage";
 import { prisma } from "@/lib/db";
 import { type MergeActor, mergeTickets } from "@/lib/tickets/merge";
 import { loadStatusPageData } from "@/lib/tickets/status-page-data";
+import { uniqueClientHeaders } from "../support/client-ip";
 import { seedContactTicket, seedOrgWithMembers, stateIdFor } from "../support/lifecycle-fixtures";
 
 afterAll(async () => {
@@ -110,9 +111,12 @@ async function pageIds(token: string): Promise<string[]> {
 }
 
 async function attachmentStatus(token: string, attachmentId: string): Promise<number> {
-  const response = await getAttachment(new Request("http://localhost/attachment"), {
-    params: Promise.resolve({ token, id: attachmentId }),
-  });
+  const response = await getAttachment(
+    new Request("http://localhost/attachment", { headers: uniqueClientHeaders() }),
+    {
+      params: Promise.resolve({ token, id: attachmentId }),
+    },
+  );
   return response.status;
 }
 
@@ -162,7 +166,7 @@ async function followUp(token: string, body: string): Promise<number> {
     new Request(`http://localhost/api/public/status/${token}/follow-up`, {
       method: "POST",
       body: form,
-      headers: { "x-forwarded-for": `provenance-${randomUUID()}` },
+      headers: uniqueClientHeaders(),
     }),
     { params: Promise.resolve({ token }) },
   );
@@ -176,7 +180,7 @@ async function csat(token: string, score: number): Promise<number> {
     new Request(`http://localhost/api/public/status/${token}/csat`, {
       method: "POST",
       body: form,
-      headers: { "x-forwarded-for": `provenance-${randomUUID()}` },
+      headers: uniqueClientHeaders(),
     }),
     { params: Promise.resolve({ token }) },
   );

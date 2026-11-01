@@ -27,6 +27,7 @@ import { localFileStorage } from "@/lib/attachments/local-file-storage";
 import { prisma } from "@/lib/db";
 import { type MergeActor, type MergeResult, mergeTickets } from "@/lib/tickets/merge";
 import { loadStatusPageData, setStatusReadObserverForTests } from "@/lib/tickets/status-page-data";
+import { uniqueClientHeaders } from "../support/client-ip";
 import { seedContactTicket, seedOrgWithMembers } from "../support/lifecycle-fixtures";
 
 afterEach(() => {
@@ -148,9 +149,12 @@ describe("status reads see one snapshot while a merge commits between them (Code
     const sourceToken = await tokenOf(source.id);
 
     const merge = mergeBetweenReads(actor, source.id, target.id);
-    const response = await getAttachment(new Request("http://localhost/attachment"), {
-      params: Promise.resolve({ token: sourceToken, id: reply.attachmentId }),
-    });
+    const response = await getAttachment(
+      new Request("http://localhost/attachment", { headers: uniqueClientHeaders() }),
+      {
+        params: Promise.resolve({ token: sourceToken, id: reply.attachmentId }),
+      },
+    );
 
     expect(merge.calls).toBe(1);
     expect(merge.result).toMatchObject({ ok: true });
@@ -171,9 +175,12 @@ describe("status reads see one snapshot while a merge commits between them (Code
 
     const merge = mergeBetweenReads(actor, source.id, target.id);
     const data = await loadStatusPageData(targetToken);
-    const attachment = await getAttachment(new Request("http://localhost/attachment"), {
-      params: Promise.resolve({ token: targetToken, id: sourceReply.attachmentId }),
-    });
+    const attachment = await getAttachment(
+      new Request("http://localhost/attachment", { headers: uniqueClientHeaders() }),
+      {
+        params: Promise.resolve({ token: targetToken, id: sourceReply.attachmentId }),
+      },
+    );
 
     expect(merge.result).toMatchObject({ ok: true });
     expect(data?.messages.map((message) => message.id)).toEqual(targetIds);

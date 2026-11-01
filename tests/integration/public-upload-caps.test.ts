@@ -1,7 +1,7 @@
 // Public upload caps (plan 08-13, D-24, AIDA-30, F-12): byte limits on the bytes actually
 // received, the combined cap on follow-up, validate-all-then-store, and cleanup on failure.
-// Route handlers are called in-process against real Postgres; each case uses its own
-// X-Forwarded-For identity (5 requests per hour per identity).
+// Route handlers are called in-process against real Postgres; every request uses its own
+// X-Forwarded-For identity (5 requests per hour per identity; tests/support/client-ip.ts).
 import { readdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -44,6 +44,7 @@ import { POST as intakePost } from "@/app/api/public/intake/route";
 import { POST as followUpPost } from "@/app/api/public/status/[token]/follow-up/route";
 import { MAX_BYTES, MAX_REQUEST_BODY_BYTES } from "@/lib/attachments/constants";
 import { prisma } from "@/lib/db";
+import { uniqueClientIp } from "../support/client-ip";
 import { seedContactTicket, seedOrgWithMembers } from "../support/lifecycle-fixtures";
 
 afterEach(() => {
@@ -54,12 +55,6 @@ afterEach(() => {
 afterAll(async () => {
   await rm(uploads.dir, { recursive: true, force: true });
 });
-
-let ipCounter = 10;
-function nextIp(): string {
-  ipCounter += 1;
-  return `198.51.100.${ipCounter}`;
-}
 
 /** Counts every file under UPLOADS_DIR, across org directories. */
 async function countStored(): Promise<number> {
@@ -89,7 +84,7 @@ function chunkedRequest(url: string, total: number): Request {
     method: "POST",
     headers: {
       "content-type": "multipart/form-data; boundary=x",
-      "x-forwarded-for": nextIp(),
+      "x-forwarded-for": uniqueClientIp(),
     },
     body: chunkedBody(total),
     duplex: "half",
@@ -132,7 +127,7 @@ function intakeRequest(files: File[]): Request {
   for (const f of files) form.append("file", f);
   return new Request("http://localhost/api/public/intake", {
     method: "POST",
-    headers: { "x-forwarded-for": nextIp() },
+    headers: { "x-forwarded-for": uniqueClientIp() },
     body: form,
   });
 }
@@ -143,7 +138,7 @@ function followUpRequest(token: string, files: File[]): Request {
   for (const f of files) form.append("file", f);
   return new Request(`http://localhost/api/public/status/${token}/follow-up`, {
     method: "POST",
-    headers: { "x-forwarded-for": nextIp() },
+    headers: { "x-forwarded-for": uniqueClientIp() },
     body: form,
   });
 }

@@ -22,6 +22,7 @@ import {
   setReopenObserverForTests,
 } from "@/lib/tickets/reopen-on-reply";
 import { autoCloseHandler, closeResolvedTicketIfQuiet } from "@/lib/worker/jobs/auto-close";
+import { uniqueClientIp } from "../support/client-ip";
 import { seedOrgWithMembers, seedTicket, stateIdFor } from "../support/inbox-fixtures";
 import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
 
@@ -108,7 +109,7 @@ async function statusReply(ticketId: string) {
     select: { statusToken: true },
   });
   const body = `Follow-up ${randomUUID()}`;
-  const ip = `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
+  const ip = uniqueClientIp();
   return {
     body,
     run: async () => {

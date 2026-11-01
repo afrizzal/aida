@@ -12,6 +12,7 @@ import { prisma } from "@/lib/db";
 import { runTicketMutation } from "@/lib/tickets/mutations";
 import { setReopenObserverForTests } from "@/lib/tickets/reopen-on-reply";
 import { deleteTicketState } from "@/lib/tickets/ticket-state-admin";
+import { uniqueClientIp } from "../support/client-ip";
 import { seedOrgWithMembers, seedTicket, stateIdFor } from "../support/inbox-fixtures";
 import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
 
@@ -75,7 +76,7 @@ async function followUp(ticketId: string) {
   });
   const form = new FormData();
   form.set("message", `Follow-up ${randomUUID()}`);
-  const ip = `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
+  const ip = uniqueClientIp();
   const res = await followUpPost(
     new Request(`http://localhost/api/public/status/${statusToken}/follow-up`, {
       method: "POST",

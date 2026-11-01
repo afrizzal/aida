@@ -24,6 +24,7 @@ import {
 import { autoCloseHandler } from "@/lib/worker/jobs/auto-close";
 import { slaFlagHandler } from "@/lib/worker/jobs/sla-flag";
 import { snoozeWakeHandler, wakeDueTicket } from "@/lib/worker/jobs/snooze-wake";
+import { uniqueClientIp } from "../support/client-ip";
 import { seedOrgWithMembers, seedTicket, stateIdFor } from "../support/inbox-fixtures";
 import { seedContactTicket } from "../support/lifecycle-fixtures";
 
@@ -168,7 +169,7 @@ async function followUp(ticketId: string) {
   });
   const form = new FormData();
   form.set("message", `Follow-up ${randomUUID()}`);
-  const ip = `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
+  const ip = uniqueClientIp();
   const res = await followUpPost(
     new Request(`http://localhost/api/public/status/${statusToken}/follow-up`, {
       method: "POST",

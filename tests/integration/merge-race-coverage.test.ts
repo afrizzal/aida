@@ -24,6 +24,7 @@ import type { RelationLabel } from "@/lib/tickets/relation-pairs";
 import { removeRelation } from "@/lib/tickets/relations";
 import { setReopenObserverForTests } from "@/lib/tickets/reopen-on-reply";
 import { loadStatusPageData } from "@/lib/tickets/status-page-data";
+import { uniqueClientHeaders } from "../support/client-ip";
 import { seedContactTicket, seedOrgWithMembers, seedRelation } from "../support/lifecycle-fixtures";
 import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
 
@@ -206,7 +207,7 @@ function followUp(token: string, body: string, files: File[] = []): Promise<Resp
     new Request(`http://localhost/api/public/status/${token}/follow-up`, {
       method: "POST",
       body: form,
-      headers: { "x-forwarded-for": `coverage-${randomUUID()}` },
+      headers: uniqueClientHeaders(),
     }),
     { params: Promise.resolve({ token }) },
   );
@@ -330,9 +331,12 @@ async function pageIds(token: string): Promise<string[]> {
 }
 
 async function attachmentStatus(token: string, attachmentId: string): Promise<number> {
-  const response = await getAttachment(new Request("http://localhost/attachment"), {
-    params: Promise.resolve({ token, id: attachmentId }),
-  });
+  const response = await getAttachment(
+    new Request("http://localhost/attachment", { headers: uniqueClientHeaders() }),
+    {
+      params: Promise.resolve({ token, id: attachmentId }),
+    },
+  );
   return response.status;
 }
 

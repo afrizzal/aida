@@ -23,13 +23,6 @@ const uploads = await vi.hoisted(async () => {
   return { dir };
 });
 
-// A unique, valid client address per request. getClientIp maps a non-IP X-Forwarded-For to the
-// shared bucket (08-10), and IPv6 is keyed by its /64, so each call gets its own random /64.
-function uniqueClientIp(): string {
-  const hex = randomUUID().replace(/-/g, "");
-  return `fd00:${hex.slice(0, 4)}:${hex.slice(4, 8)}:${hex.slice(8, 12)}::1`;
-}
-
 import { GET as getAttachment } from "@/app/api/public/status/[token]/attachments/[id]/route";
 import { POST as followUpPost } from "@/app/api/public/status/[token]/follow-up/route";
 import type { Prisma } from "@/generated/prisma/client";
@@ -41,6 +34,7 @@ import {
   setReopenObserverForTests,
 } from "@/lib/tickets/reopen-on-reply";
 import { loadStatusPageData } from "@/lib/tickets/status-page-data";
+import { uniqueClientHeaders, uniqueClientIp } from "../support/client-ip";
 import { seedContactTicket, seedOrgWithMembers, stateIdFor } from "../support/lifecycle-fixtures";
 import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
 
@@ -225,9 +219,12 @@ async function pageIds(token: string): Promise<string[]> {
 }
 
 async function attachmentStatus(token: string, attachmentId: string): Promise<number> {
-  const response = await getAttachment(new Request("http://localhost/attachment"), {
-    params: Promise.resolve({ token, id: attachmentId }),
-  });
+  const response = await getAttachment(
+    new Request("http://localhost/attachment", { headers: uniqueClientHeaders() }),
+    {
+      params: Promise.resolve({ token, id: attachmentId }),
+    },
+  );
   return response.status;
 }
 

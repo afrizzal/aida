@@ -7,17 +7,15 @@ import { POST as intakePost } from "@/app/api/public/intake/route";
 import { GET as attachmentGet } from "@/app/api/public/status/[token]/attachments/[id]/route";
 import { POST as csatPost } from "@/app/api/public/status/[token]/csat/route";
 import { POST as followUpPost } from "@/app/api/public/status/[token]/follow-up/route";
-import { prisma } from "@/lib/db";
+import { uniqueClientIp } from "../support/client-ip";
 import { CONSOLE_METHODS, serializeLogArg } from "../support/console-capture";
 
-beforeAll(async () => {
+beforeAll(() => {
   process.env.RATE_LIMIT_PEPPER ||= `test-pepper-${randomUUID()}`;
-  await prisma.rateLimitHit.deleteMany({
-    where: {
-      scope: { in: ["status-attachment", "status-csat", "status-follow-up", "public-intake"] },
-    },
-  });
 });
+
+// Each case drives its own fresh client identity to the limit (review d-WR-d4), so this file
+// neither depends on nor deletes the limiter rows of other files.
 
 function expectRetryAfter(response: Response, windowSeconds: number): number {
   const value = response.headers.get("Retry-After");
@@ -32,10 +30,11 @@ describe("status attachment throttle (D-21)", () => {
   it("answers 404 for 120 requests and 429 with Retry-After on the 121st", async () => {
     const token = `tok-${randomUUID()}`;
     const id = randomUUID();
+    const ip = uniqueClientIp();
     const call = () =>
       attachmentGet(
         new Request(`http://localhost/api/public/status/${token}/attachments/${id}`, {
-          headers: { "x-forwarded-for": "203.0.113.30" },
+          headers: { "x-forwarded-for": ip },
         }),
         { params: Promise.resolve({ token, id }) },
       );
@@ -64,13 +63,14 @@ function statusPost(path: string, ip: string): Request {
 describe("limiter before token lookup and body parsing (D-22)", () => {
   it("csat: 404 five times, then 429 with Retry-After", async () => {
     const token = `tok-${randomUUID()}`;
+    const ip = uniqueClientIp();
     for (let i = 0; i < 5; i++) {
-      const r = await csatPost(statusPost(`/api/public/status/${token}/csat`, "203.0.113.40"), {
+      const r = await csatPost(statusPost(`/api/public/status/${token}/csat`, ip), {
         params: Promise.resolve({ token }),
       });
       expect(r.status).toBe(404);
     }
-    const limited = await csatPost(statusPost(`/api/public/status/${token}/csat`, "203.0.113.40"), {
+    const limited = await csatPost(statusPost(`/api/public/status/${token}/csat`, ip), {
       params: Promise.resolve({ token }),
     });
     expect(limited.status).toBe(429);
@@ -81,13 +81,14 @@ describe("limiter before token lookup and body parsing (D-22)", () => {
   it("follow-up: 404 five times, then 429 with Retry-After", async () => {
     const token = `tok-${randomUUID()}`;
     const path = `/api/public/status/${token}/follow-up`;
+    const ip = uniqueClientIp();
     for (let i = 0; i < 5; i++) {
-      const r = await followUpPost(statusPost(path, "203.0.113.41"), {
+      const r = await followUpPost(statusPost(path, ip), {
         params: Promise.resolve({ token }),
       });
       expect(r.status).toBe(404);
     }
-    const limited = await followUpPost(statusPost(path, "203.0.113.41"), {
+    const limited = await followUpPost(statusPost(path, ip), {
       params: Promise.resolve({ token }),
     });
     expect(limited.status).toBe(429);
@@ -95,11 +96,12 @@ describe("limiter before token lookup and body parsing (D-22)", () => {
   });
 
   it("intake: 400 invalid_form_data five times, then 429 before the body is parsed", async () => {
+    const ip = uniqueClientIp();
     const call = () =>
       intakePost(
         new Request("http://localhost/api/public/intake", {
           method: "POST",
-          headers: { "x-forwarded-for": "203.0.113.42", "content-type": "text/plain" },
+          headers: { "x-forwarded-for": ip, "content-type": "text/plain" },
           body: "not a form",
         }),
       );
@@ -128,15 +130,16 @@ describe("status token never reaches a log line", () => {
       });
     }
     const id = randomUUID();
-    await csatPost(statusPost(`/api/public/status/${token}/csat`, "203.0.113.50"), {
+    const ip = uniqueClientIp();
+    await csatPost(statusPost(`/api/public/status/${token}/csat`, ip), {
       params: Promise.resolve({ token }),
     });
-    await followUpPost(statusPost(`/api/public/status/${token}/follow-up`, "203.0.113.50"), {
+    await followUpPost(statusPost(`/api/public/status/${token}/follow-up`, ip), {
       params: Promise.resolve({ token }),
     });
     await attachmentGet(
       new Request(`http://localhost/api/public/status/${token}/attachments/${id}`, {
-        headers: { "x-forwarded-for": "203.0.113.50" },
+        headers: { "x-forwarded-for": ip },
       }),
       { params: Promise.resolve({ token, id }) },
     );
