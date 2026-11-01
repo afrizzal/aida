@@ -139,27 +139,72 @@ export function classifyPreflightFailure(message: string): Classification {
   return { state: "failed", cause: "harness" };
 }
 
-/** No mirror is ever configured: an external stall is reported, never worked around. */
-export function classifyBuildFailure(logTail: string, watchdogFired: boolean): Classification {
-  if (logTail.includes("no space left on device")) return { state: "blocked", cause: "space" };
-  if (
-    watchdogFired ||
-    hasAny(logTail, [
-      "binaries.prisma.sh",
-      "@prisma/engines",
-      "ETIMEDOUT",
-      "ENOTFOUND",
-      "EAI_AGAIN",
-      "i/o timeout",
-      "TLS handshake timeout",
-      "failed to resolve source metadata",
-      "toomanyrequests",
-      "pull access denied",
-    ])
-  ) {
-    return { state: "blocked", cause: "external" };
+/** A BuildKit error marker: `#12 ERROR: ...`, `ERROR: failed to solve: ...` or `error: ...`. */
+const STEP_ERROR = /^#(\d+) ERROR: /;
+const FINAL_ERROR = /^(?:ERROR|error): |failed to solve: /;
+/** A network failure word; it counts only on the same line as a registry or engine download. */
+const NET_FAILURE =
+  /ENOTFOUND|ETIMEDOUT|EAI_AGAIN|ECONNRESET|ECONNREFUSED|socket hang up|i\/o timeout|timed out|no such host/;
+/**
+ * The anchored external signatures (c-WR-05). Each names the download that failed: the base image
+ * pull, the npm registry through pnpm, or the Prisma engine download. A bare `@prisma/engines`,
+ * `ENOTFOUND` or `ETIMEDOUT` elsewhere (pnpm install output, app code during `next build`) is not
+ * one of them, so a genuine build error that mentions them stays `failed`.
+ */
+const EXTERNAL_SIGNATURES: ((line: string) => boolean)[] = [
+  (l) => /failed to resolve source metadata for /.test(l),
+  (l) => /\btoomanyrequests: /.test(l),
+  (l) => /\bTLS handshake timeout\b/.test(l),
+  (l) => /\bpull access denied for /.test(l),
+  (l) => /dial tcp(?: [^ :]+)?: lookup [^ :]+(?: on [^ ]+)?: /.test(l) && NET_FAILURE.test(l),
+  (l) => /\bERR_PNPM_(?:META_FETCH_FAIL|FETCH_\w+)\b/.test(l),
+  (l) => /\bbinaries\.prisma\.sh\b/.test(l) && NET_FAILURE.test(l),
+];
+
+/**
+ * The lines that describe the failing step: that step's last 20 output lines plus everything from
+ * its `#N ERROR:` marker to the end (BuildKit's context block and the final `failed to solve`). With
+ * no step marker, from the last final-error line; with no marker at all, the last 20 lines.
+ */
+export function failingStepLines(log: string): string[] {
+  const all = log.split(/\r?\n/);
+  let at = -1;
+  let step: string | null = null;
+  for (let i = all.length - 1; i >= 0; i--) {
+    const m = all[i].match(STEP_ERROR);
+    if (m) {
+      at = i;
+      step = m[1];
+      break;
+    }
   }
-  if (hasAny(logTail, DOCKER_DOWN)) return { state: "blocked", cause: "docker" };
+  if (at === -1) {
+    for (let i = all.length - 1; i >= 0; i--) {
+      if (FINAL_ERROR.test(all[i])) {
+        at = i;
+        break;
+      }
+    }
+  }
+  if (at === -1) return all.slice(-20);
+  const own =
+    step === null
+      ? []
+      : all
+          .slice(0, at)
+          .filter((l) => l.startsWith(`#${step} `))
+          .slice(-20);
+  return [...own, ...all.slice(at)];
+}
+
+/** No mirror is ever configured: an external stall is reported, never worked around. */
+export function classifyBuildFailure(log: string, watchdogFired: boolean): Classification {
+  const step = failingStepLines(log);
+  if (step.some((l) => l.includes("no space left on device")))
+    return { state: "blocked", cause: "space" };
+  if (watchdogFired || step.some((l) => EXTERNAL_SIGNATURES.some((sig) => sig(l))))
+    return { state: "blocked", cause: "external" };
+  if (step.some((l) => hasAny(l, DOCKER_DOWN))) return { state: "blocked", cause: "docker" };
   return { state: "failed", cause: "build" };
 }
 
@@ -298,12 +343,16 @@ function baseImageId(docker: Docker): string {
   return r.id ?? "absent";
 }
 
-function tail(file: string, lines: number): string {
+function readLog(file: string): string {
   try {
-    return fs.readFileSync(file, "utf8").split("\n").slice(-lines).join("\n");
+    return fs.readFileSync(file, "utf8");
   } catch {
     return "";
   }
+}
+
+function tail(file: string, lines: number): string {
+  return readLog(file).split("\n").slice(-lines).join("\n");
 }
 
 /** Builds, inspects and removes one target's image under rule J. Never throws. */
@@ -436,7 +485,7 @@ export async function runImageCheck(
     // (h) A failed or stalled build.
     if (outcome.code !== 0 || outcome.watchdogFired) {
       const logTail = tail(logFile, 80);
-      const c = classifyBuildFailure(logTail, outcome.watchdogFired);
+      const c = classifyBuildFailure(readLog(logFile), outcome.watchdogFired);
       const why = outcome.watchdogFired
         ? `watchdog: no build output for ${BUILD_QUIET_MS} ms; exit ${outcome.code}\n`
         : `build exit ${outcome.code}\n`;

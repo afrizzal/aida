@@ -191,6 +191,91 @@ describe("build classification", () => {
       classifyBuildFailure("Type error: Property 'x' does not exist on type 'Y'.", false),
     ).toEqual({ state: "failed", cause: "build" });
   });
+
+  // c-WR-05: BuildKit plain-progress logs. Only the failing step and the final error decide.
+  const installStep = [
+    "#9 [deps 4/5] RUN pnpm install --frozen-lockfile",
+    "#9 12.31 .../node_modules/@prisma/engines postinstall$ node scripts/postinstall.js",
+    "#9 14.02 .../node_modules/@prisma/engines postinstall: Done",
+    "#9 DONE 15.2s",
+  ];
+  const failingBuild = (stepLines: string[], context: string[]) =>
+    [
+      ...installStep,
+      "#12 [builder 5/7] RUN pnpm build",
+      ...stepLines.map((l, i) => `#12 ${(20 + i).toFixed(2)} ${l}`),
+      '#12 ERROR: process "/bin/sh -c pnpm build" did not complete successfully: exit code: 1',
+      "------",
+      " > [builder 5/7] RUN pnpm build:",
+      ...context.map((l) => `30.12 ${l}`),
+      "------",
+      "Dockerfile:40",
+      "--------------------",
+      "  40 | >>> RUN pnpm build",
+      "--------------------",
+      'ERROR: failed to solve: process "/bin/sh -c pnpm build" did not complete successfully: exit code: 1',
+    ].join("\n");
+
+  it("c-WR-05: a type error after an install step that printed @prisma/engines is failed/build", () => {
+    const log = failingBuild(
+      ["> next build", "Type error: Property 'x' does not exist on type 'Y'."],
+      ["Type error: Property 'x' does not exist on type 'Y'.", " ELIFECYCLE  Command failed."],
+    );
+    expect(classifyBuildFailure(log, false)).toEqual({ state: "failed", cause: "build" });
+  });
+  it("c-WR-05: getaddrinfo ENOTFOUND from app code during next build is failed/build", () => {
+    const line = "Error: getaddrinfo ENOTFOUND placeholder";
+    const log = failingBuild(["> next build", line], [line, " ELIFECYCLE  Command failed."]);
+    expect(classifyBuildFailure(log, false)).toEqual({ state: "failed", cause: "build" });
+  });
+  it("c-WR-05: ETIMEDOUT in an earlier step that succeeded does not relabel a later failure", () => {
+    const log = [
+      "#7 [deps 2/5] RUN pnpm fetch",
+      "#7 3.10  WARN  GET https://registry.npmjs.org/x error (ETIMEDOUT). Will retry in 10 seconds.",
+      "#7 DONE 20.0s",
+      failingBuild(["Error: Cannot find module './x'"], ["Error: Cannot find module './x'"]),
+    ].join("\n");
+    expect(classifyBuildFailure(log, false)).toEqual({ state: "failed", cause: "build" });
+  });
+  it("c-WR-05: a bare @prisma/engines line in the failing step is failed/build", () => {
+    const line = "Error: @prisma/engines: schema.prisma has an invalid model";
+    expect(classifyBuildFailure(failingBuild([line], [line]), false)).toEqual({
+      state: "failed",
+      cause: "build",
+    });
+  });
+  it("c-WR-05: a registry fetch failure in the failing step is blocked/external", () => {
+    const line =
+      " ERR_PNPM_META_FETCH_FAIL  GET https://registry.npmjs.org/next: request to https://registry.npmjs.org/next failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org";
+    expect(classifyBuildFailure(failingBuild([line], [line]), false)).toEqual({
+      state: "blocked",
+      cause: "external",
+    });
+  });
+  it("c-WR-05: a prisma engine download timeout in the failing step is blocked/external", () => {
+    const line =
+      "Error: request to https://binaries.prisma.sh/all_commits/x/libquery_engine.so.node.gz failed, reason: connect ETIMEDOUT 104.18.0.1:443";
+    expect(classifyBuildFailure(failingBuild([line], [line]), false)).toEqual({
+      state: "blocked",
+      cause: "external",
+    });
+  });
+  it("c-WR-05: a base image metadata failure in the final error is blocked/external", () => {
+    const log = [
+      "#2 [internal] load metadata for docker.io/library/node:22-alpine",
+      '#2 ERROR: failed to do request: Head "https://registry-1.docker.io/v2/library/node/manifests/22-alpine": dial tcp: lookup registry-1.docker.io: i/o timeout',
+      "------",
+      "ERROR: failed to solve: node:22-alpine: failed to resolve source metadata for docker.io/library/node:22-alpine: failed to do request: dial tcp: lookup registry-1.docker.io: i/o timeout",
+    ].join("\n");
+    expect(classifyBuildFailure(log, false)).toEqual({ state: "blocked", cause: "external" });
+  });
+  it("c-WR-05: no space left on device in the failing step is still blocked/space", () => {
+    const line = "ERROR: write /app/.next/cache/x: no space left on device";
+    expect(classifyBuildFailure(failingBuild([line], [line]), false)).toEqual({
+      state: "blocked",
+      cause: "space",
+    });
+  });
 });
 
 describe("inspect findings", () => {
