@@ -81,6 +81,7 @@ Rincian ada di `RUN-LOG.md` putaran 1 dan 2. Jawaban Codex disimpan di `codex/ro
 - Koreksi kejujuran: AIDA-10 di v1 tercatat selesai, padahal alur undangan tidak pernah ada (F-16). Centang v1 tidak diubah. Celahnya dicatat di `PROJECT.md` dan ditutup oleh AIDA-42.
 - Fase 8 Bagian A, langkah 7 (2026-11-11): code review empat bagian atas `a6a8499..HEAD` memberi 3 critical, 25 warning, 28 info (`08-REVIEW.md`, `-b`, `-c`, `-d`). Critical: nonce basi sesudah refresh memblokir style dialog dan ganti tema (K126); test koneksi IMAP masih membedakan port terbuka dan tertutup, sehingga AIDA-31 belum bisa ditutup walau gerbang menyebutnya bisa (K127); verifier gerbang tidak mencocokkan exit code cek image. Keputusan K127 sampai K130: satu aturan kategori untuk keempat probe (galat jaringan dan protokol menjadi `connection_failed`), batas jumlah berkas dan panjang teks di route publik, tunggu limiter dibatasi menjadi 429. Pendapat Codex menyusul di kritik diff. Delapan butir info ditunda dengan alasan.
 - Ruang host turun dari 26 GiB (pagi 2026-11-11) ke 16 GiB. Tujuh salinan `.next` kini ada di Trash dan tetap memakan disk; run tidak boleh menghapusnya. Mengosongkan Trash adalah keputusan owner.
+- Sisa berkas sementara (2026-11-11, F3): satu folder log eksekutor berawalan `aida-f3-` di bawah TMPDIR (228 KB) tidak terhapus karena izin `rm -rf` ditolak. Run tidak menghapusnya lewat jalan lain; owner boleh menghapusnya.
 
 ## 6. Hasil test dan audit
 
