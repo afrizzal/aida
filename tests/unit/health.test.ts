@@ -78,23 +78,30 @@ describe("GET /api/health throttle (D-20)", () => {
     expect((await GET(req())).status).toBe(200);
   });
 
-  it("healthcheck: one no-identity GET every 10 s for 10 minutes stays 200 under a 100/min flood", async () => {
+  // d-IN-d3: the flood is above the shared limit (200 a minute against 120), so the case fails if
+  // a flood from one address ever spends the no-identity bucket, for example a global cap that
+  // charges every request to it. At 100 a minute (the old case) such a cap still passed.
+  it("a flood from one address above the shared limit (200/min) never spends the no-identity bucket: one no-identity GET every 10 s for 10 minutes stays 200", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-11-11T00:00:00.000Z"));
     const probeStatuses: number[] = [];
     let flooderDenied = 0;
+    let flooded = 0;
     for (let tick = 0; tick < 60; tick++) {
-      // 100 requests per minute from the flooder, spread across the six probe ticks.
-      const floodThisTick = tick % 6 < 4 ? 17 : 16;
+      // 200 requests per minute from the flooder, spread across the six 10-second ticks.
+      const floodThisTick = tick % 6 < 2 ? 34 : 33;
       for (let i = 0; i < floodThisTick; i++) {
+        flooded++;
         if ((await GET(req("203.0.113.41"))).status === 429) flooderDenied++;
       }
       probeStatuses.push((await GET(req())).status);
       vi.advanceTimersByTime(10_000);
     }
+    expect(flooded).toBe(2000);
     expect(probeStatuses).toHaveLength(60);
     expect(probeStatuses.every((s) => s === 200)).toBe(true);
-    expect(flooderDenied).toBeGreaterThan(0);
+    // The flooder is held to its own 60 a minute: 140 of every 200 are refused.
+    expect(flooderDenied).toBe(1400);
   });
 
   it("shared bucket: 120 no-identity GETs in one window get 200, the 121st 429; loopback is not exempt", async () => {
