@@ -187,3 +187,40 @@ describe("GET /api/health cache and single-flight (D-20)", () => {
     expect(second.checkHealthThrottle("203.0.113.50").allowed).toBe(false); // 61st
   });
 });
+
+// Review b-IN-b4: a database read that never settles must not hang every health caller. The read
+// is raced against a 2-second timeout inside the single-flight path, so the 503 is cached for
+// the TTL like any other snapshot.
+describe("GET /api/health with a hung database read (b-IN-b4)", () => {
+  const findUnique = () => vi.mocked(prisma.systemSetting.findUnique);
+
+  it("answers 503 at 2 s, not before, from one read shared by concurrent callers, then serves the cached 503", async () => {
+    vi.useFakeTimers();
+    findUnique().mockReturnValue(new Promise(() => {}) as never);
+    const settled: number[] = [];
+    const first = GET(req()).then((r) => {
+      settled.push(r.status);
+      return r;
+    });
+    const second = GET(req("203.0.113.60")).then((r) => {
+      settled.push(r.status);
+      return r;
+    });
+
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(settled).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(settled).toEqual([503, 503]);
+    expect(await (await first).json()).toEqual({ status: "error", db: "unreachable" });
+    expect((await second).status).toBe(503);
+    expect(findUnique()).toHaveBeenCalledTimes(1);
+
+    // Cached like any snapshot: no new read inside the TTL, a fresh read after it.
+    expect((await GET(req())).status).toBe(503);
+    expect(findUnique()).toHaveBeenCalledTimes(1);
+    findUnique().mockResolvedValue(HEARTBEAT);
+    vi.advanceTimersByTime(3001);
+    expect((await GET(req())).status).toBe(200);
+    expect(findUnique()).toHaveBeenCalledTimes(2);
+  });
+});

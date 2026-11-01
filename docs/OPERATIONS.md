@@ -195,6 +195,7 @@ Anything that can reach `app:3000` directly can call the probe and read the bina
 The endpoint is public and unauthenticated, so it protects the database itself (D-20):
 
 - **3-second cache.** The database read is cached for 3 seconds, a 503 included, and concurrent requests share one in-flight read. The reported status can therefore lag reality by up to 3 seconds, for an outage and for a recovery alike.
+- **2-second read timeout.** A database read that has not answered after 2 seconds counts as unreachable: the endpoint answers 503, and that 503 is cached like any other, so a hung database gives a 503 rather than a request that never returns.
 - **In-memory throttle, per process.** Each client address may call the endpoint 60 times a minute. Callers without a usable client address share one bucket of 120 a minute. The container healthcheck does not count against either limit, because it calls the probe path above. Loopback is not exempt. The throttle lives in the app's memory, never in the database, and its keys (client addresses) are never logged or stored. Restarting the app resets it.
 - **Over the limit** the endpoint answers HTTP 429 with `{"error":"rate_limited"}` and an integer `Retry-After` header (seconds until the window resets). A monitor that polls more often than once a second from one address will see 429s; poll every 10 seconds or slower.
 

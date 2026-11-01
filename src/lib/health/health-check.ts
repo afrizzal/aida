@@ -17,6 +17,11 @@ export const HEALTH_THROTTLE = {
 // in both directions: an outage and a recovery each show after at most one TTL.
 export const HEALTH_CACHE_TTL_MS = 3000;
 
+// Review b-IN-b4: the longest one health read may take. A database that stops answering on an
+// open connection, or a pool with no free connection, then gives the cached 503 like any outage,
+// instead of every /api/health and probe caller hanging on the single in-flight read.
+export const HEALTH_READ_TIMEOUT_MS = 2000;
+
 export type HealthSnapshot = { status: number; body: Record<string, unknown> };
 
 type HealthState = {
@@ -81,10 +86,19 @@ export function readHealthSnapshot(): Promise<HealthSnapshot> {
 }
 
 async function queryHealth(): Promise<HealthSnapshot> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const hb = await prisma.systemSetting.findUnique({
-      where: { key: "heartbeat:lastRunAt" },
-    });
+    const hb = await Promise.race([
+      prisma.systemSetting.findUnique({
+        where: { key: "heartbeat:lastRunAt" },
+      }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("health read timed out")),
+          HEALTH_READ_TIMEOUT_MS,
+        );
+      }),
+    ]);
     return {
       status: 200,
       body: {
@@ -95,6 +109,8 @@ async function queryHealth(): Promise<HealthSnapshot> {
     };
   } catch {
     return { status: 503, body: { status: "error", db: "unreachable" } };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
