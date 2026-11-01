@@ -29,13 +29,17 @@ async function signInAndReadSessionIp(headers: Record<string, string>): Promise<
     headers: new Headers(headers),
   });
   expect(result.user.id).toBe(userId);
-  const session = await prisma.session.findFirst({
-    where: { userId },
-    orderBy: { createdAt: "desc" },
-  });
-  expect(session).not.toBeNull();
+  // The session this sign-in created, by its own token, not the latest of the user (d-IN-d1).
+  expect(result.token).toEqual(expect.any(String));
+  const session = await prisma.session.findUnique({ where: { token: result.token } });
+  expect(session?.userId).toBe(userId);
   return session?.ipAddress ?? null;
 }
+
+// Better Auth 1.4's getIp (dist/utils/get-request-ip.mjs) returns 127.0.0.1 when none of the
+// configured headers holds a valid address and NODE_ENV is test or development; in production it
+// returns null and the session stores "". Vitest runs with NODE_ENV=test.
+const BETTER_AUTH_TEST_FALLBACK_IP = "127.0.0.1";
 
 describe("Better Auth IP source (D-18)", () => {
   beforeAll(async () => {
@@ -75,7 +79,12 @@ describe("Better Auth IP source (D-18)", () => {
   });
 
   it("D-18: a raw X-Forwarded-For alone never becomes the session IP", async () => {
+    expect(process.env.NODE_ENV).toBe("test");
     const ip = await signInAndReadSessionIp({ "x-forwarded-for": "198.51.100.9" });
+    // Exactly Better Auth's no-header fallback: the X-Forwarded-For value was not read at all.
+    expect(ip).toBe(BETTER_AUTH_TEST_FALLBACK_IP);
     expect(ip).not.toBe("198.51.100.9");
+    // The same value as a sign-in with no address header at all.
+    expect(await signInAndReadSessionIp({})).toBe(BETTER_AUTH_TEST_FALLBACK_IP);
   });
 });
