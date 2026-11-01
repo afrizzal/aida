@@ -600,6 +600,52 @@ describe("part-a-gate-check: literal derivation cases", () => {
     expect(r.note).toContain("no output to evidence the check");
   });
 
+  it("c-WR-09: L19 an audit that returned advisories is failed even with a network word in it", () => {
+    const advisories = [
+      "┌─────────────────────┬────────────────────────────────────────────────────────┐",
+      "│ high                │ undici: ECONNRESET and socket hang up on a malformed   │",
+      "│                     │ chunked body after getaddrinfo ENOTFOUND retries       │",
+      "├─────────────────────┼────────────────────────────────────────────────────────┤",
+      "│ Package             │ undici                                                 │",
+      "├─────────────────────┼────────────────────────────────────────────────────────┤",
+      "│ More info           │ https://github.com/advisories/GHSA-aaaa-bbbb-cccc      │",
+      "└─────────────────────┴────────────────────────────────────────────────────────┘",
+      "1 vulnerabilities found",
+      "Severity: 1 high",
+    ].join("\n");
+    const r = result(
+      derive({ auditHighLog: `${advisories}\n` }).model,
+      "pnpm audit --prod --audit-level=high",
+    );
+    expect(r.word).toBe("failed");
+    expect(r.note).toContain('"Severity: 1 high"');
+    // An advisory table cut off before the summary still counts as advisory data.
+    const cut = advisories.split("\n").slice(0, 8).join("\n");
+    expect(
+      result(derive({ auditHighLog: `${cut}\n` }).model, "pnpm audit --prod --audit-level=high")
+        .word,
+    ).toBe("failed");
+  });
+
+  it("c-WR-09: L20 a network word outside an error line, with no advisories, is failed", () => {
+    const log = "Retrying after getaddrinfo ENOTFOUND in a progress line\n";
+    expect(
+      result(derive({ auditHighLog: log }).model, "pnpm audit --prod --audit-level=high").word,
+    ).toBe("failed");
+  });
+
+  it("c-WR-09: L21 an anchored network error with no advisories is blocked (with evidence)", () => {
+    const log =
+      " ERR_PNPM_META_FETCH_FAIL  GET https://registry.npmjs.org/-/npm/v1/security/audits: request failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org\n";
+    expect(
+      result(derive({ auditHighLog: log }).model, "pnpm audit --prod --audit-level=high").word,
+    ).toBe("blocked (with evidence)");
+    const err = "Error: socket hang up\n";
+    expect(
+      result(derive({ auditHighLog: err }).model, "pnpm audit --prod --audit-level=high").word,
+    ).toBe("blocked (with evidence)");
+  });
+
   it("J: worstOf and WORDS follow rule A-11's order", () => {
     expect(worstOf(["passed", "blocked (space)"])).toBe("blocked (space)");
     expect(worstOf(["blocked (space)", "blocked (with evidence)"])).toBe("blocked (with evidence)");

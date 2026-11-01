@@ -423,6 +423,11 @@ const ERROR_HEADER =
   /^\s*(?:[A-Za-z]+Error|Error)(?: \[[^\]]*\])?: |Unhandled Error|Unhandled Rejection/;
 const AUDIT_NETWORK =
   /ERR_PNPM_AUDIT_BAD_RESPONSE|ENOTFOUND|ETIMEDOUT|ECONNRESET|EAI_AGAIN|getaddrinfo|socket hang up/;
+/** c-WR-09: the registry answered with advisory data (a summary, a count, a table or a link). */
+const AUDIT_ADVISORY =
+  /^\s*Severity: |^\s*\d+ vulnerabilit(?:y|ies) found|│\s*(?:Package|Vulnerable versions|Patched versions|More info)\s*│|github\.com\/advisories\/GHSA-/;
+/** c-WR-09: a network failure counts only on pnpm's ` ERR_PNPM_<CODE>` or an `Error:` line. */
+const AUDIT_ERROR_LINE = /^\s*(?:ERR_PNPM_\w+|[A-Za-z]*Error(?: \[[^\]]*\])?:)/;
 const GOOGLE_FONTS = /fonts[.]googleapis[.]com|fonts[.]gstatic[.]com|Failed to fetch font/;
 const FOREIGN = /aida-dev-db|(-p|--project-name)[ =]aida( |$)|smartcv-/;
 const NAMED_TEXT_SIZE = /\btext-(xs|sm|base|lg|xl|[2-9]xl)\b/;
@@ -805,7 +810,10 @@ function hostRow(ev: Evidence, slug: string): ResultRow {
   if (slug === "audit" || slug === "audit-high") {
     const text = ev.need(`${slug}.log`);
     if (exit === 0) return { key: "", exit: "0", word: "passed", note: log };
-    const net = lines(text).find((l) => AUDIT_NETWORK.test(l));
+    const advisories = lines(text).some((l) => AUDIT_ADVISORY.test(l));
+    const net = advisories
+      ? undefined
+      : lines(text).find((l) => AUDIT_ERROR_LINE.test(l) && AUDIT_NETWORK.test(l));
     if (net && exit !== null)
       return {
         key: "",
