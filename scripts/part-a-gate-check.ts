@@ -790,9 +790,11 @@ function vitestRow(ev: Evidence, slug: string, json: string): ResultRow {
     };
   const raw = JSON.parse(ev.read(json) ?? "{}") as { numFailedTests?: number };
   const sum = (k: "passed" | "failed" | "other") => files.reduce((a, f) => a + f[k], 0);
+  // c-IN-05: a run where no test passed (every test skipped or none collected) is not passed.
   const ok =
     exit === 0 &&
     files.length > 0 &&
+    sum("passed") > 0 &&
     raw.numFailedTests === 0 &&
     files.every((f) => f.status === "passed");
   return {
@@ -1018,7 +1020,8 @@ export function deriveGate(
       const st = pw?.stats ?? {};
       const n = (k: string) => (typeof st[k] === "number" ? st[k] : 0);
       const leak = lines(log).some((l) => /taskkill.*not found/i.test(l));
-      const ok = exit === 0 && !!pw && n("unexpected") === 0 && !leak;
+      // c-IN-05: at least one test must have run as expected.
+      const ok = exit === 0 && !!pw && n("expected") > 0 && n("unexpected") === 0 && !leak;
       row = {
         key: "",
         exit: exitText(exit),

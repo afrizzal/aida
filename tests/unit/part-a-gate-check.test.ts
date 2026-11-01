@@ -646,6 +646,22 @@ describe("part-a-gate-check: literal derivation cases", () => {
     ).toBe("blocked (with evidence)");
   });
 
+  it("c-IN-05: L22 a vitest run where no test ran is failed, not passed", () => {
+    const m = derive({
+      testFiles: UNIT_FILES.map((p) => ({ path: p, asserts: ["skipped"], status: "passed" })),
+    }).model;
+    const r = result(m, "pnpm test");
+    expect(r.word).toBe("failed");
+    expect(r.note).toContain("passed=0");
+  });
+
+  it("c-IN-05: L23 a Playwright run where every test was skipped is failed, not passed", () => {
+    const m = derive({ e2eSpecs: [{ file: "csp.spec.ts", ok: true, status: "skipped" }] }).model;
+    const r = result(m, "pnpm test:e2e");
+    expect(r.word).toBe("failed");
+    expect(r.note).toContain("expected=0");
+  });
+
   it("J: worstOf and WORDS follow rule A-11's order", () => {
     expect(worstOf(["passed", "blocked (space)"])).toBe("blocked (space)");
     expect(worstOf(["blocked (space)", "blocked (with evidence)"])).toBe("blocked (with evidence)");
