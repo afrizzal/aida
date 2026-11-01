@@ -74,6 +74,70 @@ test.describe("Public status page", () => {
     await agentPage.close();
   });
 
+  test("the follow-up form refuses more than 10 files and an over-long message in plain English (K128, K129)", async ({
+    page,
+  }) => {
+    const ticket = await createTicket(orgId, {
+      subject: `E2E Public Status Limits ${ts}`,
+      priority: "NORMAL",
+      body: "Original request body.",
+      contact: { email: `status-limits-${ts}@example.com` },
+      direction: "INBOUND",
+    });
+    let posted = 0;
+    page.on("request", (request) => {
+      if (request.url().includes("/follow-up")) posted++;
+    });
+    await page.goto(`/status/${ticket.statusToken}`);
+    const tooMany = page.getByText("You can attach up to 10 files to one follow-up.");
+    const tooLong = page.getByText("Your message is too long. The limit is 50,000 characters.");
+    const gif = (i: number) => ({
+      name: `g${i}.gif`,
+      mimeType: "image/gif",
+      buffer: Buffer.from("GIF89a"),
+    });
+
+    await page
+      .locator('input[type="file"]')
+      .setInputFiles(Array.from({ length: 11 }, (_, i) => gif(i)));
+    await expect(tooMany).toBeVisible();
+
+    await page.getByPlaceholder("Write a follow-up…").fill("m".repeat(50_001));
+    await page.getByRole("button", { name: "Send Follow-up" }).click();
+    await expect(tooLong).toBeVisible();
+    expect(posted).toBe(0);
+
+    // The server's answers get the same sentences.
+    await page.locator('input[type="file"]').setInputFiles([gif(0)]);
+    await expect(tooMany).not.toBeVisible();
+    await page.getByPlaceholder("Write a follow-up…").fill("A short follow-up.");
+    await expect(tooLong).not.toBeVisible();
+    await page.route("**/follow-up", (route) =>
+      route.fulfill({ status: 413, json: { error: "too_many_files" } }),
+    );
+    await page.getByRole("button", { name: "Send Follow-up" }).click();
+    await expect(tooMany).toBeVisible();
+    await page.unroute("**/follow-up");
+    await page.route("**/follow-up", (route) =>
+      route.fulfill({
+        status: 400,
+        json: {
+          error: "validation_failed",
+          issues: [
+            {
+              code: "too_big",
+              path: ["message"],
+              message: "Message must be at most 50,000 characters.",
+            },
+          ],
+        },
+      }),
+    );
+    await page.getByRole("button", { name: "Send Follow-up" }).click();
+    await expect(tooLong).toBeVisible();
+    await expect(page.getByText("Couldn't send your follow-up. Try again.")).not.toBeVisible();
+  });
+
   test("an invalid token shows the dead-end state", async ({ page }) => {
     await page.goto("/status/this-token-does-not-exist");
     await expect(page.getByRole("heading", { name: "We couldn't find that ticket" })).toBeVisible();

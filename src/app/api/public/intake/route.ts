@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { z } from "zod/v4";
 import { MAX_REQUEST_BODY_BYTES } from "@/lib/attachments/constants";
 import {
   removeStoredUploads,
@@ -8,6 +7,7 @@ import {
 } from "@/lib/attachments/validate-uploads";
 import { prisma } from "@/lib/db";
 import { readBoundedFormData } from "@/lib/http/read-bounded-form-data";
+import { intakeSchema } from "@/lib/public-forms/limits";
 import { consumeRateLimit } from "@/lib/rate-limit/check-rate-limit";
 import { getRateLimitIdentity } from "@/lib/rate-limit/client-ip";
 import { PUBLIC_RATE_LIMITS, rateLimitedResponse } from "@/lib/rate-limit/public-limits";
@@ -15,13 +15,6 @@ import { createTicket } from "@/lib/tickets/create-ticket";
 
 // File-bearing endpoints must run on the Node.js runtime (Buffer/node:fs), never Edge.
 export const runtime = "nodejs";
-
-const intakeSchema = z.object({
-  name: z.string().min(1, "Name is required"),
-  email: z.string().email("Valid email address is required"),
-  subject: z.string().min(1, "Subject is required"),
-  message: z.string().min(1, "Message is required"),
-});
 
 export async function POST(request: Request) {
   // Limit first, before the size check and the body parse, so an over-quota client costs no
@@ -49,6 +42,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, token: null }, { status: 200 });
   }
 
+  // Length caps on every field (K129); a failure is a 400 with one issue per field.
   const parsed = intakeSchema.safeParse({
     name: form.get("name"),
     email: form.get("email"),

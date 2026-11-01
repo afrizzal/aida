@@ -301,3 +301,86 @@ describe("file count cap (K128, b-WR-b2)", () => {
     expect(saveSpy).not.toHaveBeenCalled();
   });
 });
+
+// K129 (review b-WR-b3): length caps on the public text fields, answered 400 with a field error.
+// No existing input limit covers these fields (see PUBLIC_TEXT_LIMITS), so the values are
+// K129's defaults. zod counts string length in UTF-16 code units, as the browser does.
+const TEXT_CAPS = { name: 200, email: 320, subject: 500, message: 50_000 } as const;
+
+/** An address of exactly `length` characters that zod's email check accepts. */
+function emailOfLength(length: number): string {
+  const domain = `${"b".repeat(63)}.${"c".repeat(63)}.example`;
+  return `${"a".repeat(length - domain.length - 1)}@${domain}`;
+}
+
+function textIntakeRequest(fields: Record<keyof typeof TEXT_CAPS, string>): Request {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(fields)) form.set(key, value);
+  return new Request("http://localhost/api/public/intake", {
+    method: "POST",
+    headers: { "x-forwarded-for": uniqueClientIp() },
+    body: form,
+  });
+}
+
+const atCaps = () => ({
+  name: "n".repeat(TEXT_CAPS.name),
+  email: emailOfLength(TEXT_CAPS.email),
+  subject: "s".repeat(TEXT_CAPS.subject),
+  message: "m".repeat(TEXT_CAPS.message),
+});
+
+type Issue = { path: (string | number)[]; message: string };
+
+describe("public text field caps (K129, b-WR-b3)", () => {
+  it("the caps are name 200, email 320, subject 500, message 50 000", () => {
+    expect((uploadConstants as Record<string, unknown>).PUBLIC_TEXT_LIMITS).toEqual(TEXT_CAPS);
+    expect(emailOfLength(TEXT_CAPS.email)).toHaveLength(TEXT_CAPS.email);
+  });
+
+  it("intake: every field at its cap is accepted", async () => {
+    const res = await intakePost(textIntakeRequest(atCaps()));
+    expect(res.status).toBe(200);
+    expect((await res.json()).ok).toBe(true);
+  });
+
+  for (const field of Object.keys(TEXT_CAPS) as (keyof typeof TEXT_CAPS)[]) {
+    it(`intake: ${field} at cap + 1 answers 400 with one field error on ${field}`, async () => {
+      const fields = atCaps();
+      fields[field] = field === "email" ? emailOfLength(TEXT_CAPS.email + 1) : `${fields[field]}x`;
+      expect(fields[field]).toHaveLength(TEXT_CAPS[field] + 1);
+      const res = await intakePost(textIntakeRequest(fields));
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string; issues: Issue[] };
+      expect(body.error).toBe("validation_failed");
+      expect(body.issues.map((i) => i.path)).toEqual([[field]]);
+      expect(body.issues[0].message).toMatch(/at most/);
+    });
+  }
+
+  it("follow-up: a message at the cap is accepted, at cap + 1 answers 400 with a field error on message", async () => {
+    const send = (message: string) => {
+      const form = new FormData();
+      form.set("message", message);
+      return followUpPost(
+        new Request(`http://localhost/api/public/status/${ticket.token}/follow-up`, {
+          method: "POST",
+          headers: { "x-forwarded-for": uniqueClientIp() },
+          body: form,
+        }),
+        { params: Promise.resolve({ token: ticket.token }) },
+      );
+    };
+    const messages = await messageCount();
+    const ok = await send("m".repeat(TEXT_CAPS.message));
+    expect(ok.status).toBe(200);
+    expect(await messageCount()).toBe(messages + 1);
+
+    const over = await send("m".repeat(TEXT_CAPS.message + 1));
+    expect(over.status).toBe(400);
+    const body = (await over.json()) as { error: string; issues: Issue[] };
+    expect(body.error).toBe("validation_failed");
+    expect(body.issues.map((i) => i.path)).toEqual([["message"]]);
+    expect(await messageCount()).toBe(messages + 1);
+  });
+});

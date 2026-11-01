@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { z } from "zod/v4";
 import { MAX_REQUEST_BODY_BYTES } from "@/lib/attachments/constants";
 import {
   removeStoredUploads,
@@ -9,6 +8,7 @@ import {
 import { prisma } from "@/lib/db";
 import { readBoundedFormData } from "@/lib/http/read-bounded-form-data";
 import { renderMarkdown } from "@/lib/markdown/render";
+import { followUpSchema } from "@/lib/public-forms/limits";
 import { consumeRateLimit } from "@/lib/rate-limit/check-rate-limit";
 import { getRateLimitIdentity } from "@/lib/rate-limit/client-ip";
 import { PUBLIC_RATE_LIMITS, rateLimitedResponse } from "@/lib/rate-limit/public-limits";
@@ -20,10 +20,6 @@ import {
 
 // File-bearing endpoints must run on the Node.js runtime (Buffer/node:fs), never Edge.
 export const runtime = "nodejs";
-
-const followUpSchema = z.object({
-  message: z.string().min(1, "Message is required"),
-});
 
 export async function POST(request: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
@@ -63,6 +59,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
     return NextResponse.json({ ok: true }, { status: 200 });
   }
 
+  // A length cap on the message (K129), checked before any file is read or stored.
   const parsed = followUpSchema.safeParse({ message: form.get("message") });
   if (!parsed.success) {
     return NextResponse.json(

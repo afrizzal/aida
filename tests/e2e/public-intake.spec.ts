@@ -7,6 +7,13 @@ const SAMPLE_ATTACHMENT = path.resolve(__dirname, "fixtures/sample.png");
 
 test.use({ storageState: path.resolve(__dirname, ".auth/admin.json") });
 
+/** A small file the browser reports as image/gif (only the count matters to these cases). */
+const gif = (i: number) => ({
+  name: `g${i}.gif`,
+  mimeType: "image/gif",
+  buffer: Buffer.from("GIF89a"),
+});
+
 test.describe("Public intake", () => {
   test("submitting the request form creates a ticket visible in the agent inbox", async ({
     page,
@@ -71,5 +78,65 @@ test.describe("Public intake", () => {
     await page.goto("/tickets");
     await page.getByPlaceholder("Search tickets…").fill(subject);
     await expect(page.getByText("Nothing here — no tickets match this view.")).toBeVisible();
+  });
+
+  test("more than 10 files: the form says so in plain English, before sending and from the server's answer (K128)", async ({
+    context,
+  }) => {
+    const publicPage = await requireBrowser(context).newPage();
+    await publicPage.goto("/request");
+    const tooMany = publicPage.getByText("You can attach up to 10 files to one request.");
+    const fileInput = publicPage.locator('input[type="file"]');
+
+    await fileInput.setInputFiles(Array.from({ length: 11 }, (_, i) => gif(i)));
+    await expect(tooMany).toBeVisible();
+    await fileInput.setInputFiles([gif(0)]);
+    await expect(tooMany).not.toBeVisible();
+
+    // The server's 413 too_many_files gets the same sentence.
+    await publicPage.route("**/api/public/intake", (route) =>
+      route.fulfill({ status: 413, json: { error: "too_many_files" } }),
+    );
+    await publicPage.getByLabel("Name").fill("Ada Requester");
+    await publicPage.getByLabel("Email").fill(`files-${Date.now()}@example.com`);
+    await publicPage.getByLabel("Subject").fill("Many files");
+    await publicPage.getByLabel("Message").fill("See the attachments.");
+    await publicPage.getByRole("button", { name: "Submit Request" }).click();
+    await expect(tooMany).toBeVisible();
+    await expect(publicPage.getByText("Something went wrong. Please try again.")).not.toBeVisible();
+    await publicPage.close();
+  });
+
+  test("a field over its length limit shows a field error and sends nothing; a server field error shows under its field (K129)", async ({
+    context,
+  }) => {
+    const publicPage = await requireBrowser(context).newPage();
+    let posted = 0;
+    publicPage.on("request", (request) => {
+      if (request.url().includes("/api/public/intake")) posted++;
+    });
+    await publicPage.goto("/request");
+    await publicPage.getByLabel("Name").fill("Ada Requester");
+    await publicPage.getByLabel("Email").fill(`long-${Date.now()}@example.com`);
+    await publicPage.getByLabel("Subject").fill("A long message");
+    await publicPage.getByLabel("Message").fill("m".repeat(50_001));
+    await publicPage.getByRole("button", { name: "Submit Request" }).click();
+    await expect(publicPage.getByText("Message must be at most 50,000 characters.")).toBeVisible();
+    expect(posted).toBe(0);
+
+    await publicPage.getByLabel("Message").fill("A short message.");
+    await publicPage.route("**/api/public/intake", (route) =>
+      route.fulfill({
+        status: 400,
+        json: {
+          error: "validation_failed",
+          issues: [{ path: ["subject"], message: "Subject must be at most 500 characters." }],
+        },
+      }),
+    );
+    await publicPage.getByRole("button", { name: "Submit Request" }).click();
+    await expect(publicPage.getByText("Subject must be at most 500 characters.")).toBeVisible();
+    await expect(publicPage.getByText("Something went wrong. Please try again.")).not.toBeVisible();
+    await publicPage.close();
   });
 });

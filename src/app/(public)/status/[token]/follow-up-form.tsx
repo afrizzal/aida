@@ -7,8 +7,17 @@ import { HoneypotField } from "@/components/public/honeypot-field";
 import { AttachmentChip, formatBytes } from "@/components/tickets/attachment-chip";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ALLOWED_MIME, MAX_BYTES, MAX_FILES_PER_REQUEST } from "@/lib/attachments/constants";
-import { tooManyFilesMessage } from "@/lib/public-forms/limits";
+import {
+  ALLOWED_MIME,
+  MAX_BYTES,
+  MAX_FILES_PER_REQUEST,
+  PUBLIC_TEXT_LIMITS,
+} from "@/lib/attachments/constants";
+import {
+  type FieldIssue,
+  followUpTooLongMessage,
+  tooManyFilesMessage,
+} from "@/lib/public-forms/limits";
 
 interface FollowUpFormProps {
   token: string;
@@ -22,6 +31,7 @@ export function FollowUpForm({ token }: FollowUpFormProps) {
   const [body, setBody] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [messageError, setMessageError] = useState<string | null>(null);
   const [rateLimited, setRateLimited] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
@@ -57,8 +67,14 @@ export function FollowUpForm({ token }: FollowUpFormProps) {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (fileError) return;
     if (!body.trim() && files.length === 0) return;
+    // The route's own cap (K129); the server checks it again. Checked before the file error
+    // returns, so both problems show at once.
+    if (body.length > PUBLIC_TEXT_LIMITS.message) {
+      setMessageError(followUpTooLongMessage);
+      return;
+    }
+    if (fileError) return;
 
     setIsSending(true);
     setRateLimited(false);
@@ -81,9 +97,19 @@ export function FollowUpForm({ token }: FollowUpFormProps) {
         return;
       }
       if (!res.ok) {
-        const failure = (await res.json().catch(() => null)) as { error?: unknown } | null;
+        const failure = (await res.json().catch(() => null)) as {
+          error?: unknown;
+          issues?: FieldIssue[];
+        } | null;
         if (res.status === 413 && failure?.error === "too_many_files") {
           setSendError(tooManyFilesMessage("follow-up"));
+          return;
+        }
+        const tooLong = (failure?.issues ?? []).some(
+          (issue) => issue.path?.[0] === "message" && issue.code === "too_big",
+        );
+        if (res.status === 400 && failure?.error === "validation_failed" && tooLong) {
+          setMessageError(followUpTooLongMessage);
           return;
         }
         setSendError("Couldn't send your follow-up. Try again.");
@@ -108,10 +134,21 @@ export function FollowUpForm({ token }: FollowUpFormProps) {
 
       <Textarea
         value={body}
-        onChange={(event) => setBody(event.target.value)}
+        onChange={(event) => {
+          setBody(event.target.value);
+          setMessageError(null);
+        }}
         placeholder="Write a follow-up…"
+        aria-label="Follow-up message"
+        aria-invalid={messageError ? true : undefined}
+        aria-describedby={messageError ? "follow-up-message-error" : undefined}
         className="min-h-[96px]"
       />
+      {messageError && (
+        <p id="follow-up-message-error" className="text-[12px] text-destructive">
+          {messageError}
+        </p>
+      )}
 
       {files.length > 0 && (
         <div className="flex flex-wrap gap-1.5">

@@ -4,7 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2 } from "lucide-react";
 import { type ChangeEvent, type DragEvent, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
-import { z } from "zod/v4";
+import type { z } from "zod/v4";
 import { HoneypotField } from "@/components/public/honeypot-field";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,22 +18,24 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ALLOWED_MIME, MAX_BYTES, MAX_FILES_PER_REQUEST } from "@/lib/attachments/constants";
-import { tooManyFilesMessage } from "@/lib/public-forms/limits";
+import {
+  type FieldIssue,
+  type IntakeField,
+  intakeSchema,
+  tooManyFilesMessage,
+} from "@/lib/public-forms/limits";
 
-const requestSchema = z.object({
-  name: z.string().min(1, "Name is required"),
-  email: z.string().email("Valid email address is required"),
-  subject: z.string().min(1, "Subject is required"),
-  message: z.string().min(1, "Message is required"),
-});
+// The intake route's own schema, length caps included (K129), so the form refuses what the
+// server would refuse, with the same words.
+type RequestFormValues = z.infer<typeof intakeSchema>;
 
-type RequestFormValues = z.infer<typeof requestSchema>;
+const INTAKE_FIELDS: readonly IntakeField[] = ["name", "email", "subject", "message"];
 
 type IntakeResult = { ok: boolean; token: string | null };
 
 export function RequestForm() {
   const form = useForm<RequestFormValues>({
-    resolver: zodResolver(requestSchema),
+    resolver: zodResolver(intakeSchema),
     defaultValues: { name: "", email: "", subject: "", message: "" },
   });
   const { isSubmitting } = form.formState;
@@ -100,10 +102,25 @@ export function RequestForm() {
       return;
     }
     if (!res.ok) {
-      const failure = (await res.json().catch(() => null)) as { error?: unknown } | null;
+      const failure = (await res.json().catch(() => null)) as {
+        error?: unknown;
+        issues?: FieldIssue[];
+      } | null;
       if (res.status === 413 && failure?.error === "too_many_files") {
         form.setError("root", { message: tooManyFilesMessage("request") });
         return;
+      }
+      // A server field error (K129) shows under its own field.
+      if (res.status === 400 && failure?.error === "validation_failed") {
+        let shown = false;
+        for (const issue of failure.issues ?? []) {
+          const field = issue.path?.[0];
+          if (INTAKE_FIELDS.includes(field as IntakeField) && typeof issue.message === "string") {
+            form.setError(field as IntakeField, { message: issue.message });
+            shown = true;
+          }
+        }
+        if (shown) return;
       }
       form.setError("root", { message: "Something went wrong. Please try again." });
       return;
