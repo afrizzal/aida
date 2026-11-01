@@ -4,7 +4,10 @@
 // it can be missing (chunked transfer), false (smaller than the body) or honest, so a value above
 // the limit is only an early reject that saves reading the body. Every other request is read
 // chunk by chunk, and the stream is cancelled as soon as the running total passes the limit, so
-// an oversized body is never buffered whole and never reaches the multipart parser.
+// the route never copies or parses more than `maxBytes`. That is a bound on the route, not on the
+// process: Next's proxy has already buffered the body before the route runs, up to
+// PROXY_BODY_LIMIT_BYTES (next.config.ts `proxyClientMaxBodySize`), and below the limit the
+// chunks, the Blob and the parsed FormData are further copies (review b-IN-b2).
 //
 // No project imports: usable from any route without pulling in app modules.
 
@@ -23,9 +26,10 @@ export async function readBoundedFormData(
 
   const chunks: Uint8Array[] = [];
   if (request.body) {
-    const reader = request.body.getReader();
     let received = 0;
     try {
+      // Inside the try: a body that is already locked or disturbed is "invalid", never a throw.
+      const reader = request.body.getReader();
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;

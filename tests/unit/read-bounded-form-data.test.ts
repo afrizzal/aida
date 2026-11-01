@@ -123,3 +123,21 @@ describe("readBoundedFormData", () => {
     expect(result).toEqual({ ok: false, reason: "invalid" });
   });
 });
+
+// Review b-IN-b2: getReader() sits inside the try, so a body that cannot be read (here, already
+// locked by another reader) is "invalid", answered 400 by the routes, never a thrown 500.
+describe("readBoundedFormData on an unreadable body (b-IN-b2)", () => {
+  it("a body that is already locked resolves to invalid instead of throwing", async () => {
+    const { body, type } = await multipart({ message: "hello" });
+    const request = new Request(URL_, {
+      method: "POST",
+      headers: { "content-type": type },
+      body,
+    });
+    request.body?.getReader();
+    await expect(readBoundedFormData(request, 1024)).resolves.toEqual({
+      ok: false,
+      reason: "invalid",
+    });
+  });
+});
