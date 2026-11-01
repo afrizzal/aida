@@ -1306,20 +1306,71 @@ export function splitRow(line: string): string[] {
   return cells;
 }
 
-function sectionLines(text: string, heading: string): string[] | null {
-  const all = text.split(/\r?\n/);
-  const i = all.indexOf(heading);
-  if (i === -1) return null;
-  let e = i + 1;
-  while (e < all.length && !all[e].startsWith("## ")) e++;
-  return all.slice(i + 1, e);
+/** An ATX heading as `## text`: up to 3 leading spaces, closing `#`s and spaces dropped. */
+function normHeading(line: string): string | null {
+  const m = line.match(/^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/);
+  return m ? `${m[1]} ${m[2]}` : null;
 }
 
-function tableRows(body: string[]): string[][] {
-  return body
-    .filter((l) => l.startsWith("| "))
-    .slice(2)
-    .map(splitRow);
+function headingCount(text: string, heading: string): number {
+  return text.split(/\r?\n/).filter((l) => normHeading(l) === heading).length;
+}
+
+/** The lines of the first section with this heading, up to the next `#` or `##` heading. */
+function sectionAt(text: string, heading: string): { start: number; body: string[] } | null {
+  const all = text.split(/\r?\n/);
+  const i = all.findIndex((l) => normHeading(l) === heading);
+  if (i === -1) return null;
+  let e = i + 1;
+  while (e < all.length && !/^#{1,2} /.test(normHeading(all[e]) ?? "")) e++;
+  return { start: i + 1, body: all.slice(i + 1, e) };
+}
+
+function sectionLines(text: string, heading: string): string[] | null {
+  return sectionAt(text, heading)?.body ?? null;
+}
+
+/**
+ * c-WR-07: a gated section holds one table and blank lines, nothing else. Every line that starts
+ * with `|` (after optional spaces) is a table line, with or without a space after the pipe; any
+ * other non-blank line, a second table, a bad delimiter row and a row of the wrong width fail.
+ */
+function parseTable(
+  start: number,
+  body: string[],
+  width: number,
+): { header: string[] | null; rows: string[][]; problems: string[] } {
+  const problems: string[] = [];
+  const table: { cells: string[]; n: number }[] = [];
+  let phase: "before" | "in" | "after" = "before";
+  body.forEach((l, i) => {
+    const n = start + i + 1;
+    if (l.trim() === "") {
+      if (phase === "in") phase = "after";
+      return;
+    }
+    if (!/^\s*\|/.test(l)) {
+      problems.push(`line ${n} is not a table row: ${JSON.stringify(l.slice(0, 80))}`);
+      return;
+    }
+    if (phase === "after") {
+      problems.push(`line ${n} starts a second table`);
+      return;
+    }
+    phase = "in";
+    table.push({ cells: splitRow(l), n });
+  });
+  const header = table[0]?.cells ?? null;
+  const delim = table[1];
+  if (delim && (delim.cells.length !== width || !delim.cells.every((c) => /^:?-{3,}:?$/.test(c))))
+    problems.push(`line ${delim.n} is not the delimiter row`);
+  const rows: string[][] = [];
+  for (const r of table.slice(2)) {
+    if (r.cells.length !== width)
+      problems.push(`line ${r.n} has ${r.cells.length} cells, expects ${width}`);
+    else rows.push(r.cells);
+  }
+  return { header, rows, problems };
 }
 
 // --- check ---------------------------------------------------------------------------------
@@ -1386,16 +1437,22 @@ export function checkGate(
       );
   }
 
+  const once = (s: Exclude<Section, "header">) => {
+    const n = headingCount(text, HEADINGS[s]);
+    if (n > 1) f(s, "section", `${HEADINGS[s]} occurs ${n} times`);
+  };
   const compare = (s: Exclude<Section, "header" | "human">, expRows: string[][]) => {
-    const body = sectionLines(text, HEADINGS[s]);
-    if (!body) {
+    once(s);
+    const sec = sectionAt(text, HEADINGS[s]);
+    if (!sec) {
       f(s, "section", `missing ${HEADINGS[s]}`);
       return;
     }
-    const hdr = body.find((l) => l.startsWith("| "));
-    if (!hdr || JSON.stringify(splitRow(hdr)) !== JSON.stringify(COLUMNS[s]))
+    const t = parseTable(sec.start, sec.body, COLUMNS[s].length);
+    for (const p of t.problems) f(s, "table", p);
+    if (!t.header || JSON.stringify(t.header) !== JSON.stringify(COLUMNS[s]))
       f(s, "columns", `expected ${COLUMNS[s].join(" | ")}`);
-    const got = tableRows(body);
+    const got = t.rows;
     for (let i = 0; i < Math.max(expRows.length, got.length); i++) {
       const e = expRows[i];
       const g = got[i];
@@ -1452,6 +1509,7 @@ export function checkGate(
       want.requirements.map((r) => [r.requirement, r.partAClosed, r.moved, r.closed]),
     );
   if (sections.includes("human")) {
+    once("human");
     const body = sectionLines(text, HEADINGS.human);
     if (!body) f("human", "section", `missing ${HEADINGS.human}`);
     else

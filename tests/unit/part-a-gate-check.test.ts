@@ -14,6 +14,7 @@ import {
   imageWordExit,
   main,
   SPEC,
+  splitRow,
   WORDS,
   worstOf,
 } from "../../scripts/part-a-gate-check";
@@ -831,6 +832,43 @@ describe("part-a-gate-check: check rejects single edits", () => {
       "results",
       "pnpm test:egress",
     );
+  });
+
+  it("c-WR-07: mutation M23 a contradicting row written without spaces after the pipes", () => {
+    const g = fullGate();
+    const lines = g.text.split("\n");
+    const i = lines.findIndex((l) => l.startsWith("| 7 | "));
+    const tight = `|${splitRow(lines[i]).slice(0, 8).join("|")}|yes|`;
+    expect(tight.startsWith("|7|")).toBe(true);
+    lines.splice(i + 1, 0, tight);
+    fs.writeFileSync(g.file, lines.join("\n"));
+    const r = runCheck(g.file);
+    expect(r.code).toBe(1);
+    expect(r.out.join("\n")).toContain("PART-A-GATE-CHECK FAILED: matrix: ");
+  });
+
+  it("c-WR-07: mutation M24 a second Evidence matrix section below Notes", () => {
+    const g = fullGate();
+    const second = `\n## Evidence matrix\n\n| # | x |\n| --- | --- |\n| 1 | closed |\n`;
+    expectRejected(g.file, `${g.text}${second}`, "matrix", "section");
+    const spaced = `\n##   Results  \n\nwhatever\n`;
+    expectRejected(g.file, `${g.text}${spaced}`, "results", "section");
+  });
+
+  it("c-WR-07: mutation M25 a pipe line without a leading pipe inside the Results table", () => {
+    const g = fullGate();
+    const lines = g.text.split("\n");
+    const i = lines.findIndex((l) => l.startsWith("| pnpm lint | "));
+    lines.splice(i + 1, 0, "pnpm audit --prod | 0 | passed | log x");
+    expectRejected(g.file, lines.join("\n"), "results", "table");
+  });
+
+  it("c-WR-07: mutation M26 a table line that does not parse into the section's columns", () => {
+    const g = fullGate();
+    const lines = g.text.split("\n");
+    const i = lines.findIndex((l) => l.startsWith("| AIDA-27 | "));
+    lines.splice(i + 1, 0, "|AIDA-27 closed|");
+    expectRejected(g.file, lines.join("\n"), "requirements", "table");
   });
 
   it("R3-4: mutation M22 a source flipped to failed after derive fails check on that row", () => {
