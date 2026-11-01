@@ -4,7 +4,17 @@
 // X-Forwarded-For identity (5 requests per hour per identity; tests/support/client-ip.ts).
 import { readdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  type MockInstance,
+  vi,
+} from "vitest";
 
 const uploads = await vi.hoisted(async () => {
   const { mkdtemp } = await import("node:fs/promises");
@@ -43,13 +53,24 @@ vi.mock("@/lib/markdown/render", async (importOriginal) => {
 import { POST as intakePost } from "@/app/api/public/intake/route";
 import { POST as followUpPost } from "@/app/api/public/status/[token]/follow-up/route";
 import { MAX_BYTES, MAX_REQUEST_BODY_BYTES } from "@/lib/attachments/constants";
+import { localFileStorage } from "@/lib/attachments/local-file-storage";
 import { prisma } from "@/lib/db";
 import { uniqueClientIp } from "../support/client-ip";
 import { seedContactTicket, seedOrgWithMembers } from "../support/lifecycle-fixtures";
 
+// Every storage write goes through localFileStorage.save (validate-uploads.ts, staged-files.ts).
+// Counting the calls tells "validate every file, then store" from "store, then remove on
+// failure", which leave the same files on disk afterwards (review d-WR-d8).
+let saveSpy: MockInstance<typeof localFileStorage.save>;
+
+beforeEach(() => {
+  saveSpy = vi.spyOn(localFileStorage, "save");
+});
+
 afterEach(() => {
   toggles.ticketThrows = false;
   toggles.renderThrows = false;
+  saveSpy.mockRestore();
 });
 
 afterAll(async () => {
@@ -168,6 +189,7 @@ describe("validate every file before storing any (D-24)", () => {
     expect(res.status).toBe(415);
     expect(await res.json()).toEqual({ error: "unsupported_file_type" });
     expect(await countStored()).toBe(before);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it("intake: two 10 MiB PNGs (20 MiB) are accepted and both stored", async () => {
@@ -178,6 +200,7 @@ describe("validate every file before storing any (D-24)", () => {
     expect(res.status).toBe(200);
     expect((await res.json()).ok).toBe(true);
     expect(await countStored()).toBe(before + 2);
+    expect(saveSpy).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -197,6 +220,7 @@ describe("follow-up combined cap and body limit (D-24, F-12)", () => {
     expect(await res.json()).toEqual({ error: "payload_too_large" });
     expect(await messageCount()).toBe(messages);
     expect(await countStored()).toBe(before);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it("answers 413 to a chunked body over MAX_REQUEST_BODY_BYTES", async () => {
