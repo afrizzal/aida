@@ -11,6 +11,12 @@
  * CLI runs `src/lib/worker/index.ts` in a second node process, so the worker is a two-process
  * tree, and signalling only the tsx parent can leave the real worker behind.
  *
+ * A child's pid is signalled only while its exit is not recorded (review d-WR-d7). Until Node has
+ * reaped the child, its pid (alive or a zombie), and so the group `-pid` it leads, cannot belong
+ * to anyone else. Once the exit is recorded the number can be reused by an unrelated process, so
+ * from then on nothing is sent to it: a group member that outlived its leader is reported by
+ * `stopProcessTree`, never signalled.
+ *
  * Only `node:child_process` is imported, so the vitest unit test can load this module without
  * Playwright.
  */
@@ -20,22 +26,39 @@ const POLL_MS = 200;
 const KILL_WAIT_MS = 5_000;
 
 /**
- * Sends `signal` to the process tree rooted at `pid`: on Windows a forced tree kill, elsewhere
- * the process group `-pid`. Never throws (the tree may already be gone).
+ * True once the child's own exit is recorded. Node writes `exitCode` or `signalCode` in the
+ * handler that emits the child's `exit` event, immediately before emitting it, and only after the
+ * pid has been reaped, so this reads that event's record synchronously, including for an exit
+ * that happened before the caller looked.
  */
-export function killTree(pid: number, signal: NodeJS.Signals = "SIGTERM"): void {
+function exitRecorded(child: ChildProcess): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+/**
+ * Sends `signal` to the process tree rooted at `child`: on Windows a forced tree kill, elsewhere
+ * the process group `-pid`. Does nothing once the child's exit is recorded, on both platforms, so
+ * a reused pid is never signalled (review d-WR-d7). Returns whether a signal or the tree kill was
+ * sent. Never throws.
+ */
+export function killTree(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM"): boolean {
+  const pid = child.pid;
+  if (!pid || exitRecorded(child)) return false;
   if (process.platform === "win32") {
     try {
       execSync(`taskkill /pid ${pid} /t /f`);
+      return true;
     } catch {
       // process already gone
+      return false;
     }
-    return;
   }
   try {
     process.kill(-pid, signal);
+    return true;
   } catch {
     // process group already gone
+    return false;
   }
 }
 
@@ -64,7 +87,8 @@ export interface StopResult {
   graceful: boolean;
   /**
    * No member of the tree was observed at the end. POSIX: the group probe answered ESRCH.
-   * Windows: the child's exit was seen.
+   * Windows: the child's exit was seen. If the child had already exited before the call, nothing
+   * is probed or signalled (its pid may belong to someone else by then) and this is true.
    */
   gone: boolean;
   /** SIGKILL was sent because the tree outlived SIGTERM by `timeoutMs`. */
@@ -86,28 +110,32 @@ export async function stopProcessTree(
   const pid = child.pid;
   if (!pid) return { graceful: true, gone: true, escalated: false };
 
+  // Already exited before the call: never touch the number again (review d-WR-d7).
+  if (exitRecorded(child)) return { graceful: true, gone: true, escalated: false };
+
   if (process.platform === "win32") {
-    if (child.exitCode !== null || child.signalCode !== null) {
-      return { graceful: true, gone: true, escalated: false };
-    }
     const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-    killTree(pid);
+    killTree(child);
     let timer: NodeJS.Timeout | undefined;
     const bound = new Promise<void>((resolve) => {
       timer = setTimeout(resolve, timeoutMs);
     });
     await Promise.race([exited, bound]);
     clearTimeout(timer);
-    const gone = child.exitCode !== null || child.signalCode !== null;
+    const gone = exitRecorded(child);
     return { graceful: gone, gone, escalated: false };
   }
 
-  // The group, not the leader, decides: a grandchild can outlive an already-exited parent.
-  if (!groupAlive(pid)) return { graceful: true, gone: true, escalated: false };
-  killTree(pid, "SIGTERM");
+  // The group, not the leader, decides when the tree is gone: a grandchild can outlive its
+  // parent. The group is only probed (signal 0, nothing is delivered) after the leader exits.
+  killTree(child, "SIGTERM");
   if (await waitForGroupExit(pid, timeoutMs))
     return { graceful: true, gone: true, escalated: false };
-  killTree(pid, "SIGKILL");
+  if (!killTree(child, "SIGKILL")) {
+    // The leader exited during the wait but the group still has members: report it, never
+    // signal a number whose owner is no longer known (review d-WR-d7).
+    return { graceful: false, gone: !groupAlive(pid), escalated: false };
+  }
   const gone = await waitForGroupExit(pid, opts.killWaitMs ?? KILL_WAIT_MS);
   return { graceful: false, gone, escalated: true };
 }

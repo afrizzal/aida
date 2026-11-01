@@ -17,6 +17,22 @@ function parentScript(ignoreSigterm: boolean): string {
   ].join("\n");
 }
 
+// Review d-WR-d7: a parent that dies on SIGTERM while its grandchild ignores SIGTERM. The
+// grandchild prints its own pid (through the parent's stdout) once its handler is installed.
+const STUBBORN_GRANDCHILD = [
+  'process.on("SIGTERM", () => {});',
+  'process.stdout.write(String(process.pid) + "\\n");',
+  "setInterval(() => {}, 1000);",
+].join("\n");
+
+function parentWithStubbornGrandchild(): string {
+  return [
+    'const { spawn } = require("node:child_process");',
+    `spawn(process.execPath, ["-e", ${JSON.stringify(STUBBORN_GRANDCHILD)}], { stdio: ["ignore", "inherit", "inherit"] });`,
+    "setInterval(() => {}, 1000);",
+  ].join("\n");
+}
+
 function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -26,16 +42,17 @@ function isAlive(pid: number): boolean {
   }
 }
 
-const started: number[] = [];
+const started: ChildProcess[] = [];
 
 async function startTree(
   ignoreSigterm: boolean,
+  script = parentScript(ignoreSigterm),
 ): Promise<{ parent: ChildProcess; grandchild: number }> {
-  const parent = spawn(process.execPath, ["-e", parentScript(ignoreSigterm)], {
+  const parent = spawn(process.execPath, ["-e", script], {
     detached: true,
     stdio: ["ignore", "pipe", "inherit"],
   });
-  if (parent.pid) started.push(parent.pid);
+  started.push(parent);
   const grandchild = await new Promise<number>((resolve, reject) => {
     let out = "";
     parent.stdout?.on("data", (chunk: Buffer) => {
@@ -49,8 +66,10 @@ async function startTree(
 }
 
 afterEach(() => {
-  // Safety net only: never leave a test tree behind if an assertion failed mid-case.
-  for (const pid of started.splice(0)) killTree(pid, "SIGKILL");
+  // Safety net only: never leave a test tree behind if an assertion failed mid-case. killTree
+  // skips every tree whose leader has exited, so a tree a case already saw gone is never
+  // signalled again, and neither is a pid that may have been reused since (review d-WR-d7).
+  for (const child of started.splice(0)) killTree(child, "SIGKILL");
 });
 
 describe("stopProcessTree", () => {
@@ -94,20 +113,20 @@ describe("stopProcessTree", () => {
     20_000,
   );
 
-  it("resolves for a child that already exited, and killTree ignores a missing pid", async () => {
+  it("resolves for a child that already exited, and killTree does not signal it", async () => {
     const child = spawn(process.execPath, ["-e", "process.exit(0)"], {
       detached: process.platform !== "win32",
       stdio: "ignore",
     });
     await new Promise<void>((resolve) => child.once("exit", () => resolve()));
-    const pid = child.pid as number;
 
     await expect(stopProcessTree(child)).resolves.toEqual({
       graceful: true,
       gone: true,
       escalated: false,
     });
-    expect(() => killTree(pid)).not.toThrow();
+    // On Windows this is the taskkill guard: false means no command was run.
+    expect(killTree(child)).toBe(false);
   });
 });
 
@@ -207,4 +226,71 @@ describe("assertTreeStopped (review d-WR-d6)", () => {
       }),
     ).not.toThrow();
   });
+});
+
+// Review d-WR-d7: once the leader's exit is recorded its pid may be reused, so neither the pid nor
+// the group -pid is signalled after that.
+describe("process-group teardown never signals an exited child (review d-WR-d7)", () => {
+  it.skipIf(process.platform === "win32")(
+    "a child that already exited is never passed to process.kill",
+    async () => {
+      const child = spawn(process.execPath, ["-e", "process.exit(0)"], {
+        detached: true,
+        stdio: "ignore",
+      });
+      await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+      const kill = vi.spyOn(process, "kill");
+      try {
+        await stopProcessTree(child, 200);
+        expect(killTree(child, "SIGTERM")).toBe(false);
+        expect(killTree(child, "SIGKILL")).toBe(false);
+        expect(kill).not.toHaveBeenCalled();
+      } finally {
+        kill.mockRestore();
+      }
+    },
+    20_000,
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "a running child is signalled while its exit is not recorded",
+    async () => {
+      const { parent } = await startTree(false);
+      const kill = vi.spyOn(process, "kill");
+      try {
+        expect(killTree(parent, "SIGTERM")).toBe(true);
+        expect(kill).toHaveBeenCalledWith(-(parent.pid as number), "SIGTERM");
+      } finally {
+        kill.mockRestore();
+      }
+      await expect(stopProcessTree(parent)).resolves.toMatchObject({ gone: true });
+    },
+    20_000,
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "after the leader exits on SIGTERM, a surviving grandchild is reported and no SIGKILL is sent",
+    async () => {
+      const { parent, grandchild } = await startTree(false, parentWithStubbornGrandchild());
+      const kill = vi.spyOn(process, "kill");
+      try {
+        const result = await stopProcessTree(parent, 1_000, { killWaitMs: 300 });
+        expect(parent.exitCode !== null || parent.signalCode !== null).toBe(true);
+        expect(result).toEqual({ graceful: false, gone: false, escalated: false });
+        const sent = kill.mock.calls.filter(([, signal]) => signal !== 0);
+        expect(sent).toEqual([[-(parent.pid as number), "SIGTERM"]]);
+        expect(isAlive(grandchild)).toBe(true);
+      } finally {
+        kill.mockRestore();
+        // The grandchild is this case's own process and ignores SIGTERM, so it is still alive
+        // here; stop it by its own pid.
+        if (isAlive(grandchild)) process.kill(grandchild, "SIGKILL");
+      }
+      await vi.waitFor(() => expect(isAlive(grandchild)).toBe(false), {
+        timeout: 5_000,
+        interval: 100,
+      });
+    },
+    20_000,
+  );
 });

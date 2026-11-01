@@ -106,7 +106,7 @@ export default async function globalSetup(_config: FullConfig) {
   server.stderr?.on("data", (chunk: Buffer) => process.stderr.write(`[e2e-server] ${chunk}`));
 
   const teardown = async () => {
-    if (server.pid) killTree(server.pid);
+    killTree(server);
     await container.stop();
     fs.rmSync(uploadsDir, { recursive: true, force: true });
   };
