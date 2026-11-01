@@ -26,18 +26,37 @@ function healthcheckWgetLines(file: string): string[] {
 }
 
 describe("health probe wiring (review C2)", () => {
-  it("C2: the Caddyfile refuses /api/health/probe* with 404 before reverse_proxy", () => {
+  // Review d-IN-d4: Caddy sorts the directives of a site block by its own built-in order
+  // (`respond` runs before `reverse_proxy` wherever it is written), so the line order in the file
+  // says nothing about what Caddy does, and is not asserted. What matters is that the matcher and
+  // the 404 sit directly in the site block, not inside a `route` or `handle` block, where the
+  // written order would apply. The real-Caddy refusal proof is plan 08-22's.
+  it("C2: the Caddyfile refuses /api/health/probe* with 404 in the site block that proxies to app:3000", () => {
     const lines = read("Caddyfile").split("\n");
+    // Brace depth before each line: 0 at top level, 1 directly inside the site block.
+    const depth: number[] = [];
+    let level = 0;
+    for (const line of lines) {
+      depth.push(level);
+      // Drop comments and placeholders such as {$DOMAIN:localhost} or {remote_host}; what is left
+      // are block braces.
+      const code = line.replace(/#.*$/, "").replace(/\{[^{}\s]*\}/g, "");
+      level += (code.match(/\{/g) ?? []).length - (code.match(/\}/g) ?? []).length;
+    }
+    const site = lines.findIndex((l) => /^\{\$DOMAIN:localhost\}\s*\{\s*$/.test(l));
     const matcher = lines.findIndex((l) =>
       /^\s*@healthprobe\s+path\s+\/api\/health\/probe\*\s*$/.test(l),
     );
     const refusal = lines.findIndex((l) => /^\s*respond\s+@healthprobe\s+404\s*$/.test(l));
     const proxy = lines.findIndex((l) => /^\s*reverse_proxy\s+app:3000\b/.test(l));
-    const site = lines.findIndex((l) => /^\{\$DOMAIN:localhost\}\s*\{\s*$/.test(l));
     expect(site).toBeGreaterThanOrEqual(0);
-    expect(matcher).toBeGreaterThan(site);
-    expect(refusal).toBeGreaterThan(matcher);
-    expect(proxy).toBeGreaterThan(refusal);
+    expect(depth[site]).toBe(0);
+    for (const index of [matcher, refusal, proxy]) {
+      expect(index).toBeGreaterThan(site);
+      expect(depth[index]).toBe(1);
+    }
+    expect(lines.filter((l) => /^\s*@healthprobe\b/.test(l))).toHaveLength(1);
+    expect(lines.some((l) => /^\s*(route|handle)\b/.test(l))).toBe(false);
   });
 
   for (const file of ["docker-compose.yml", "docker-compose.egress-test.yml"]) {
