@@ -9,7 +9,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
 import { PrismaClient } from "../../src/generated/prisma/client";
 import { startLabeledPostgres } from "../support/docker-test-resources";
-import { killTree } from "./support/process-tree";
+import { createGlobalTeardown } from "./support/global-teardown";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -105,11 +105,13 @@ export default async function globalSetup(_config: FullConfig) {
   server.stdout?.on("data", (chunk: Buffer) => process.stdout.write(`[e2e-server] ${chunk}`));
   server.stderr?.on("data", (chunk: Buffer) => process.stderr.write(`[e2e-server] ${chunk}`));
 
-  const teardown = async () => {
-    killTree(server);
-    await container.stop();
-    fs.rmSync(uploadsDir, { recursive: true, force: true });
-  };
+  // Stops the dev server tree (waiting, SIGKILL after a bounded wait) before the container
+  // (review d-WR-d5).
+  const teardown = createGlobalTeardown({
+    server,
+    stopContainer: () => container.stop(),
+    removeUploads: () => fs.rmSync(uploadsDir, { recursive: true, force: true }),
+  });
 
   // Anything below can throw after the server/container are already live — without this
   // try/catch a thrown error here would abort globalSetup before it returns teardown,
@@ -219,7 +221,11 @@ export default async function globalSetup(_config: FullConfig) {
     await prisma.$disconnect();
     await pool.end();
   } catch (err) {
-    await teardown();
+    // A teardown failure (a server tree that survived) is logged, not thrown, so the setup error
+    // stays the one Playwright reports.
+    await teardown().catch((teardownErr: unknown) => {
+      console.error("[e2e] teardown after a failed global setup also failed:", teardownErr);
+    });
     throw err;
   }
 
