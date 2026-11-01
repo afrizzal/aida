@@ -129,6 +129,65 @@ describe("getClientIp — TRUSTED_PROXY_HOPS (D-17)", () => {
   });
 });
 
+// Review b-WR-b4: a valid hop count above 0 that meets a chain too short for it, or a malformed
+// entry in the trusted part, is the sign of a misconfiguration (for example TRUSTED_PROXY_HOPS
+// set while the Caddyfile still overwrites X-Forwarded-For). It logs one line per process,
+// naming the setting and no address; hops 0 never logs.
+describe("getClientIp — short or malformed trusted chain logs once (b-WR-b4)", () => {
+  const ADDRESS = /\d+\.\d+\.\d+\.\d+|[0-9a-f]*:[0-9a-f]*:/i;
+
+  it("hops 1 on a one-entry chain: one line naming TRUSTED_PROXY_HOPS and no address, however many requests", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    withHops("1", () => {
+      for (const ip of ["203.0.113.5", "198.51.100.7", "2001:db8::1"]) {
+        expect(getClientIp(req(ip))).toBe(SHARED_CLIENT_BUCKET);
+      }
+      expect(getClientIp(req())).toBe(SHARED_CLIENT_BUCKET);
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+    const logged = spy.mock.calls[0].map(String).join(" ");
+    expect(logged).toContain("TRUSTED_PROXY_HOPS");
+    expect(logged).toContain("header_up X-Forwarded-For");
+    expect(logged).not.toMatch(ADDRESS);
+  });
+
+  it("hops 1 with a malformed trusted entry logs the same single line, and a later short chain adds none", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    withHops("1", () => {
+      expect(getClientIp(req("203.0.113.5, not-an-ip"))).toBe(SHARED_CLIENT_BUCKET);
+      expect(getClientIp(req("192.0.2.10"))).toBe(SHARED_CLIENT_BUCKET);
+    });
+    withHops("2", () => {
+      expect(getClientIp(req("203.0.113.5, 198.51.100.200"))).toBe(SHARED_CLIENT_BUCKET);
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0].map(String).join(" ")).toContain("TRUSTED_PROXY_HOPS");
+  });
+
+  it("a well-formed chain long enough for the hop count logs nothing", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    withHops("1", () => {
+      expect(getClientIp(req("203.0.113.5, 192.0.2.10"))).toBe("203.0.113.5");
+      expect(getClientIp(req("not-an-ip, 203.0.113.5, 192.0.2.10"))).toBe("203.0.113.5");
+    });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["absent", undefined],
+    ["empty", ""],
+    ["malformed rightmost", "not-an-ip"],
+    ["empty rightmost", "203.0.113.5, "],
+    ["port", "203.0.113.5:443"],
+  ])("hops 0 never logs: %s header", (_label, value) => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const hops of ["0", undefined, ""]) {
+      expect(withHops(hops, () => getClientIp(req(value)))).toBe(SHARED_CLIENT_BUCKET);
+    }
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
 describe("getClientIp — empty and malformed headers fail closed (D-16)", () => {
   it.each([
     ["absent", undefined],

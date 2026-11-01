@@ -238,6 +238,11 @@ Caddy, Caddy would otherwise see only the CDN's address. To key on real clients:
    X-Forwarded-For as the app receives it: `1` for a CDN plus Caddy. The maximum is
    `MAX_TRUSTED_PROXY_HOPS`, 10. The app then uses the entry that many places from the right.
 
+Do steps 2 and 3 together. Setting `TRUSTED_PROXY_HOPS` without removing the `header_up
+X-Forwarded-For {remote_host}` line sends every client to the shared bucket, because Caddy still
+writes a one-entry chain: sign-in and the public routes then share one small quota for the whole
+site.
+
 The CDN itself must keep its side of the contract:
 
 - It must overwrite the X-Forwarded-For a client sends, or sanitize it by appending the address it
@@ -253,6 +258,11 @@ from 0 to 10, written without a leading zero), a chain shorter than declared, or
 inside the trusted part of the chain puts every such request into one shared rate-limit bucket.
 An invalid value also logs one error line per process, naming the setting and no address:
 `TRUSTED_PROXY_HOPS must be an integer from 0 to 10; every request now uses the shared client bucket.`
+A valid value above 0 that meets a chain shorter than declared, or a malformed entry in the trusted
+part, logs one other line per process, again naming only the setting: it starts with
+`TRUSTED_PROXY_HOPS is <n>, but a request arrived whose X-Forwarded-For has fewer valid trusted
+entries than that` and points at the `header_up` line above. With `TRUSTED_PROXY_HOPS` blank or 0
+nothing is logged.
 A value that is too low keys every client behind the CDN on the CDN's address: coarse, but never
 the client-sent value. A value that is too high sends every request to the shared bucket. Entries
 further left than the trusted position are client-controlled and are ignored, never parsed or

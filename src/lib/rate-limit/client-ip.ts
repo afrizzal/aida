@@ -16,8 +16,11 @@
 // bucket with a bounded limit. Nothing is ever treated as loopback or exempt, and the header is
 // never trusted when the setting is invalid.
 //
-// Privacy: no address is ever logged. The only log line is the invalid-configuration message,
-// which names the setting and nothing else. The limiter stores only a peppered hash of the key.
+// Privacy: no address is ever logged. The only log lines are two configuration messages, each at
+// most once per process and naming the setting, never an address: an invalid TRUSTED_PROXY_HOPS,
+// and a valid count above 0 that meets a chain too short for it or a malformed trusted entry
+// (review b-WR-b4; the usual cause is setting TRUSTED_PROXY_HOPS while the Caddyfile still
+// overwrites X-Forwarded-For). The limiter stores only a peppered hash of the key.
 //
 // node:net only, no internal project imports: read by the proxy, the routes and Better Auth.
 import { isIP } from "node:net";
@@ -30,6 +33,17 @@ export const MAX_TRUSTED_PROXY_HOPS = 10;
 
 const HOPS_PATTERN = /^(?:[0-9]|10)$/;
 let invalidHopsLogged = false;
+let shortChainLogged = false;
+
+// Hops 0 never calls this: with hops 0 a malformed or missing header is the client's own doing,
+// not a configuration error. Once per process, so a flood cannot fill the log.
+function logShortChainOnce(hops: number): void {
+  if (shortChainLogged) return;
+  shortChainLogged = true;
+  console.error(
+    `TRUSTED_PROXY_HOPS is ${hops}, but a request arrived whose X-Forwarded-For has fewer valid trusted entries than that; such requests use the shared client bucket. If you set TRUSTED_PROXY_HOPS, also remove the Caddyfile line "header_up X-Forwarded-For {remote_host}" (docs/OPERATIONS.md, "Client IP and reverse proxies"). This message is logged once per process.`,
+  );
+}
 
 // Read per call with `||`: compose injects an unset variable as the empty string.
 export function readTrustedProxyHops(): number | null {
@@ -70,16 +84,25 @@ export function getClientIp(request: Request): string {
   }
 
   const header = request.headers.get("x-forwarded-for");
-  if (header === null) return SHARED_CLIENT_BUCKET;
+  if (header === null) {
+    if (hops > 0) logShortChainOnce(hops);
+    return SHARED_CLIENT_BUCKET;
+  }
   const entries = header.split(",").map((entry) => entry.trim());
   const index = entries.length - 1 - hops;
-  if (index < 0) return SHARED_CLIENT_BUCKET;
+  if (index < 0) {
+    if (hops > 0) logShortChainOnce(hops);
+    return SHARED_CLIENT_BUCKET;
+  }
 
   // The trusted part of the chain: the selected entry and every proxy entry right of it.
   let selected: string | null = null;
   for (let i = index; i < entries.length; i++) {
     const canonical = canonicalizeIp(entries[i]);
-    if (canonical === null) return SHARED_CLIENT_BUCKET;
+    if (canonical === null) {
+      if (hops > 0) logShortChainOnce(hops);
+      return SHARED_CLIENT_BUCKET;
+    }
     if (i === index) selected = canonical;
   }
   return selected ?? SHARED_CLIENT_BUCKET;
@@ -112,4 +135,5 @@ export function getRateLimitIdentity(request: Request): string {
 
 export function resetClientIpLogStateForTests(): void {
   invalidHopsLogged = false;
+  shortChainLogged = false;
 }
