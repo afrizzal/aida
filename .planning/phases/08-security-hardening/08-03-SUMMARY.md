@@ -135,3 +135,9 @@ None for this plan.
 - FOUND: tests/integration/support/isolated-database.ts, tests/integration/auth-upgrade.test.ts, tests/integration/auth-bootstrap.test.ts, tests/integration/auth-setup.test.ts
 - FOUND: 7d06455, b630886 (`git log`)
 - `git rev-list --count 2355bc4..HEAD` = 2 before this SUMMARY commit
+
+## Correction (2026-11-12, review d-WR-d1, fix batch F5)
+
+Two statements above overstate what ran. The first paragraph says the populated database was "then migrated to head with the real `prisma migrate deploy`", and the first test row says "every migration applied on top of the populated pre-upgrade database". At the time, `PRE_UPGRADE_MIGRATIONS` held all 14 folders, which was already head, so that deploy applied zero migrations. The row checked only that untouched rows were still there, and the starting schema was not the v1 schema D-02 names. That row is not migration proof. The session, login and membership rows were real.
+
+Since F5 the test starts from the v1 schema (the 7 folders up to `20260724171144_insight_aida`), inserts the same rows, and asserts that the deploy applies more than zero migrations, exactly these 7 by name: `20261108140000_inbox`, `20261109100000_ticket_lifecycle`, `20261110100000_ticket_states`, `20261110110000_ticket_state_fk_on_update_restrict`, `20261111100000_kb_proposals`, `20261112100000_kb_proposal_final_fence`, `20261113100000_projects_foundation`. Evidence is in the F5 section of `08-REVIEW-FIX.md`.

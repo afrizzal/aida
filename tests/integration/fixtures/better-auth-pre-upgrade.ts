@@ -15,8 +15,9 @@
 // account, organization and member row at capture time.
 //
 // Consumed by plan 08-03's regression tests: they migrate a fresh database to exactly
-// PRE_UPGRADE_MIGRATIONS, insert these rows, and prove that the upgraded Better Auth still
-// accepts the old signed cookie and the old password hash.
+// PRE_UPGRADE_MIGRATIONS (the v1 schema), insert these rows, deploy the later migrations, and
+// prove that the upgraded Better Auth still accepts the old signed cookie and the old password
+// hash.
 
 export const BA_PRE_UPGRADE_FIXTURE = {
   betterAuthVersion: "1.6.22",
@@ -85,7 +86,18 @@ export const BA_PRE_UPGRADE_FIXTURE = {
   },
 } as const;
 
-/** The migration directories the capture database had applied, in order (all of them at capture time). */
+/**
+ * The v1 schema: the migration directories of v1.0.0 (Phases 1 to 7), in order, ending at
+ * 20260724171144_insight_aida. Plan 08-03's upgrade test migrates a fresh database to exactly
+ * this list, inserts the rows above, then deploys every later migration on top (D-02, review
+ * d-WR-d1). Every column the rows above use already exists in 20260629020504_init, and no later
+ * migration adds, drops or changes a column of the user, account, session, organization or
+ * member tables.
+ *
+ * The capture database itself had all 14 directories of the time applied (up to
+ * 20261113100000_projects_foundation). Until review d-WR-d1 this list held those 14, so the
+ * test's deploy after the inserts applied zero migrations.
+ */
 export const PRE_UPGRADE_MIGRATIONS = [
   "20260629020504_init",
   "20260701234550_core_ticketing",
@@ -94,11 +106,4 @@ export const PRE_UPGRADE_MIGRATIONS = [
   "20260707053633_ai_foundation",
   "20260721154325_rag_kb",
   "20260724171144_insight_aida",
-  "20261108140000_inbox",
-  "20261109100000_ticket_lifecycle",
-  "20261110100000_ticket_states",
-  "20261110110000_ticket_state_fk_on_update_restrict",
-  "20261111100000_kb_proposals",
-  "20261112100000_kb_proposal_final_fence",
-  "20261113100000_projects_foundation",
 ] as const;
