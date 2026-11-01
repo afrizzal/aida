@@ -27,6 +27,11 @@ AIDA's promise is **privacy-first, self-hosted AI**. These controls are product 
 - Server-side authorization on every mutating route (admin vs agent); UI hiding is never the only control. Verified across all 35 Server Actions and all 8 route handlers in the Phase 7 security pass — one gap was found (a single Settings action missing its admin gate) and fixed the same day; see the security pass report for the full per-action/per-route audit.
 - All data access goes through `scopedDb(workspaceId)`; an integration test seeds two workspaces and asserts zero cross-tenant reads. `scopedDb` does **not** intercept raw SQL — every `$queryRaw`/`$executeRaw` call site in the codebase was individually audited and confirmed to filter `organizationId` explicitly (or an equivalent org-scoped join), except one system-cron job whose predicates are row-local and returns no rows to any tenant.
 
+## Settings connection tests
+- The four "Test connection" actions (AI provider, embedding provider, IMAP, SMTP) are admin-only. A failure returns one of four fixed categories and a correlation ID, never the probe's error text. The server log line under that ID holds the probe, the category and the error's name, code and HTTP status, each from a fixed list; never a message, host, port, URL, header or stack.
+- This removes the error-text oracle and puts every network and protocol failure into one category, `connection_failed`: a timeout, a refused or closed connection, a DNS or TLS failure, another service on the port, or an unexpected HTTP status.
+- **Residual:** an `authentication_failed` result still proves that a service of that protocol answered at the address; response timing still differs between outcomes; and the probe still connects to the address the admin typed, so SSRF itself is not removed, only narrowed to these signals.
+
 ## Auditability
 - `AuditEvent` is **append-only** — AI triage decisions, generated drafts, and approved sends are recorded with the model used and references to inputs/outputs. Audit rows are never mutated or deleted.
 

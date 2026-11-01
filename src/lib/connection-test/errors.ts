@@ -1,12 +1,17 @@
-// Connection-test error categories (D-25, F-08). The Settings "Test connection" actions (LLM,
+// Connection-test error categories (D-25, F-08, K127). The Settings "Test connection" actions (LLM,
 // embedding, IMAP, SMTP) used to return the probe's raw error text, which let an org admin map
 // the internal network through the Ollama base URL or the mail host fields ("ECONNREFUSED
 // 10.0.0.5:11434" versus "ENOTFOUND"). This module maps any thrown value to one of four fixed
-// categories, so the response and the server log carry a category and a correlation ID only.
+// categories. The response carries the category and a correlation ID; the server log line adds
+// only an allowlisted error name, code and HTTP status (connectionErrorLogShape).
 //
-// What it does NOT do: it does not stop SSRF (the probe still connects to the address the admin
-// typed) and it does not hide timing differences between categories. It only removes the
-// error-text oracle; docs/SECURITY.md states the residual.
+// What it removes: the error-text oracle, and the difference between network and protocol
+// failures. Every timeout, refusal, close, DNS or TLS failure and every reply that is not the
+// expected protocol or status falls into one category, connection_failed.
+//
+// What remains (docs/SECURITY.md states the same): authentication_failed still proves that a
+// service of that protocol answered at the address; timing still differs between outcomes; and
+// the probe still connects to the address the admin typed, so SSRF itself is not removed.
 //
 // No imports at all: client-safe (the buttons read CONNECTION_TEST_ERROR_MESSAGES) and
 // bundleable by both webpack and esbuild.
