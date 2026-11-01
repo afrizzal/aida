@@ -1,5 +1,8 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
+    // One log line, never a boot failure; the limiter keeps failing closed (review b-IN-b7).
+    const { warnIfRateLimitPepperUnsafe } = await import("@/lib/rate-limit/pepper-check");
+    warnIfRateLimitPepperUnsafe();
     const { bootstrapFromEnv } = await import("@/lib/bootstrap");
     await bootstrapFromEnv();
     // Demo mode is a no-op unless DEMO_MODE === "true"; imported lazily so the demo
