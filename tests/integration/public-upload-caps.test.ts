@@ -65,19 +65,33 @@ import { seedContactTicket, seedOrgWithMembers, stateIdFor } from "../support/li
 // failure", which leave the same files on disk afterwards (review d-WR-d8).
 let saveSpy: MockInstance<typeof localFileStorage.save>;
 
+// The intake route takes the first organization (single-org v1, findFirstOrThrow with no order).
+// On the shared test database that could be any file's organization, so this file pins it to its
+// own, seeded in beforeAll below (review d-IN-d5).
+let intakeOrg: Awaited<ReturnType<typeof prisma.organization.findUniqueOrThrow>>;
+
 beforeEach(() => {
   saveSpy = vi.spyOn(localFileStorage, "save");
+  vi.spyOn(prisma.organization, "findFirstOrThrow").mockResolvedValue(intakeOrg as never);
 });
 
 afterEach(() => {
   toggles.ticketThrows = false;
   toggles.renderThrows = false;
-  saveSpy.mockRestore();
+  vi.restoreAllMocks();
 });
 
 afterAll(async () => {
   await rm(uploads.dir, { recursive: true, force: true });
 });
+
+/** Counts the files in one organization's upload directory (0 when it does not exist yet). */
+async function countStoredIn(orgId: string): Promise<number> {
+  const entries = await readdir(path.join(uploads.dir, orgId), { withFileTypes: true }).catch(
+    () => [],
+  );
+  return entries.filter((e) => e.isFile()).length;
+}
 
 /** Counts every file under UPLOADS_DIR, across org directories. */
 async function countStored(): Promise<number> {
@@ -120,7 +134,6 @@ async function samplePng(): Promise<Buffer> {
 
 describe("intake body limit on received bytes (D-24)", () => {
   it("answers 413 payload_too_large to a chunked body of MAX_REQUEST_BODY_BYTES + 1 and stores nothing", async () => {
-    await samplePng();
     const before = await countStored();
     const res = await intakePost(
       chunkedRequest("http://localhost/api/public/intake", MAX_REQUEST_BODY_BYTES + 1),
@@ -169,10 +182,11 @@ function followUpRequest(token: string, files: File[]): Request {
 let ticket: { id: string; token: string };
 
 beforeAll(async () => {
-  if ((await prisma.organization.count()) === 0) {
-    await seedOrgWithMembers(prisma, ["owner"]);
-  }
+  // A decoy seeded first, as another file's organization would be on the shared database, so the
+  // own-organization checks below fail if intake ever falls back to "the first organization".
+  await seedOrgWithMembers(prisma, ["owner"]);
   const { orgId } = await seedOrgWithMembers(prisma, ["owner"]);
+  intakeOrg = await prisma.organization.findUniqueOrThrow({ where: { id: orgId } });
   const seeded = await seedContactTicket(orgId, { contactEmail: "follow-up-caps@example.test" });
   const row = await prisma.ticket.findUniqueOrThrow({
     where: { id: seeded.id },
@@ -182,6 +196,7 @@ beforeAll(async () => {
 });
 
 const messageCount = () => prisma.message.count({ where: { ticketId: ticket.id } });
+const ownTicketCount = () => prisma.ticket.count({ where: { organizationId: intakeOrg.id } });
 
 describe("validate every file before storing any (D-24)", () => {
   it("intake: a valid PNG then an unsupported file answers 415 and stores nothing", async () => {
@@ -196,6 +211,8 @@ describe("validate every file before storing any (D-24)", () => {
 
   it("intake: two 10 MiB PNGs (20 MiB) are accepted and both stored", async () => {
     const before = await countStored();
+    const tickets = await ownTicketCount();
+    const ownFiles = await countStoredIn(intakeOrg.id);
     const res = await intakePost(
       intakeRequest([await pngOfSize(MAX_BYTES, "a.png"), await pngOfSize(MAX_BYTES, "b.png")]),
     );
@@ -203,6 +220,9 @@ describe("validate every file before storing any (D-24)", () => {
     expect((await res.json()).ok).toBe(true);
     expect(await countStored()).toBe(before + 2);
     expect(saveSpy).toHaveBeenCalledTimes(2);
+    // The ticket and its files went to this file's own organization.
+    expect(await ownTicketCount()).toBe(tickets + 1);
+    expect(await countStoredIn(intakeOrg.id)).toBe(ownFiles + 2);
   });
 });
 
