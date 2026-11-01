@@ -7,6 +7,10 @@ import { POST as intakePost } from "@/app/api/public/intake/route";
 import { GET as attachmentGet } from "@/app/api/public/status/[token]/attachments/[id]/route";
 import { POST as csatPost } from "@/app/api/public/status/[token]/csat/route";
 import { POST as followUpPost } from "@/app/api/public/status/[token]/follow-up/route";
+import { prisma } from "@/lib/db";
+import { rateLimitLockKey } from "@/lib/rate-limit/check-rate-limit";
+import { rateLimitKeyForIp } from "@/lib/rate-limit/client-ip";
+import { PUBLIC_RATE_LIMITS } from "@/lib/rate-limit/public-limits";
 import { uniqueClientIp } from "../support/client-ip";
 import { CONSOLE_METHODS, serializeLogArg } from "../support/console-capture";
 
@@ -27,10 +31,22 @@ function expectRetryAfter(response: Response, windowSeconds: number): number {
 }
 
 describe("status attachment throttle (D-21)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("answers 404 for 120 requests and 429 with Retry-After on the 121st", async () => {
+    // d-IN-d6: the limiter's window start is Date.now() minus 60 s. Frozen at the first call, all
+    // 121 calls fall in one window however slow the host is; the stored rows keep real timestamps,
+    // never earlier than the frozen start, so each one counts. Without the freeze, a host that
+    // takes more than 60 s for the loop lets the 121st call through.
+    vi.spyOn(Date, "now").mockReturnValue(Date.now());
     const token = `tok-${randomUUID()}`;
     const id = randomUUID();
     const ip = uniqueClientIp();
+    const { scope } = PUBLIC_RATE_LIMITS.statusAttachment;
+    const lockKey = rateLimitLockKey(scope, rateLimitKeyForIp(ip));
+    const ipHash = lockKey.slice(scope.length + 1);
     const call = () =>
       attachmentGet(
         new Request(`http://localhost/api/public/status/${token}/attachments/${id}`, {
@@ -41,6 +57,8 @@ describe("status attachment throttle (D-21)", () => {
     for (let i = 0; i < 120; i++) {
       expect((await call()).status).toBe(404);
     }
+    // Counted directly: exactly 120 hits of this identity are inside the window.
+    expect(await prisma.rateLimitHit.count({ where: { scope, ipHash } })).toBe(120);
     const limited = await call();
     expect(limited.status).toBe(429);
     expect(await limited.json()).toEqual({ error: "rate_limited" });
