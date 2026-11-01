@@ -42,7 +42,10 @@ function callProbe(): Promise<Response> {
 
 const findUnique = () => vi.mocked(prisma.systemSetting.findUnique);
 
+// d-IN-d2: every case starts from TRUSTED_PROXY_HOPS blank (the shipped default), never from
+// the shell's value; cases that need another count set it themselves.
 beforeEach(() => {
+  vi.stubEnv("TRUSTED_PROXY_HOPS", "");
   resetHealthStateForTests();
   resetClientIpLogStateForTests();
   findUnique().mockReset();
@@ -51,6 +54,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
 });
 
 describe("GET /api/health/probe", () => {

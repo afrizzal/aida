@@ -37,8 +37,16 @@ function withHops<T>(hops: string | undefined, fn: () => T): T {
   }
 }
 
-beforeEach(() => resetClientIpLogStateForTests());
-afterEach(() => vi.restoreAllMocks());
+// d-IN-d2: every case starts from TRUSTED_PROXY_HOPS blank (the shipped default), never from
+// the shell's value; cases that need another count set it themselves.
+beforeEach(() => {
+  vi.stubEnv("TRUSTED_PROXY_HOPS", "");
+  resetClientIpLogStateForTests();
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
 
 describe("client-ip constants", () => {
   it("exports the values plan 08-18 documents", () => {

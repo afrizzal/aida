@@ -5,9 +5,18 @@
  * Node.js runtime in Next 16; this test still imports no Prisma.
  */
 import { NextRequest } from "next/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildCsp } from "@/lib/security/csp";
 import { proxy } from "@/proxy";
+
+// d-IN-d2: every case starts from TRUSTED_PROXY_HOPS blank (the shipped default), never from
+// the shell's value; cases that need another count set it themselves.
+beforeEach(() => {
+  vi.stubEnv("TRUSTED_PROXY_HOPS", "");
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 function cspNonce(csp: string): string | undefined {
   return /'nonce-([^']+)'/.exec(csp)?.[1];
