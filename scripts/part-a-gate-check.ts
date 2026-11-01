@@ -673,6 +673,11 @@ class Evidence {
     }
     return s;
   }
+  /** c-WR-08: a log a row cites as `log <path>` is required; when absent it is MISSING. */
+  cite(name: string): string {
+    this.need(name);
+    return `log ${this.path(name)}`;
+  }
   exit(slug: string, required: boolean): number | null {
     const s = required ? this.need(`${slug}.exit`) : this.read(`${slug}.exit`);
     if (s === null || !/^\s*-?\d+\s*$/.test(s)) return null;
@@ -770,7 +775,7 @@ function exitText(n: number | null): string {
 function vitestRow(ev: Evidence, slug: string, json: string): ResultRow {
   const exit = ev.exit(slug, true);
   const files = parseVitest(ev.read(json));
-  const log = `log ${ev.path(`${slug}.log`)}`;
+  const log = ev.cite(`${slug}.log`);
   if (!files)
     return {
       key: "",
@@ -794,11 +799,11 @@ function vitestRow(ev: Evidence, slug: string, json: string): ResultRow {
 }
 
 function hostRow(ev: Evidence, slug: string): ResultRow {
-  const exit = ev.exit(slug, true);
-  const log = `log ${ev.path(`${slug}.log`)}`;
   if (slug === "test") return vitestRow(ev, slug, "test.json");
+  const exit = ev.exit(slug, true);
+  const log = ev.cite(`${slug}.log`);
   if (slug === "audit" || slug === "audit-high") {
-    const text = ev.read(`${slug}.log`) ?? "";
+    const text = ev.need(`${slug}.log`);
     if (exit === 0) return { key: "", exit: "0", word: "passed", note: log };
     const net = lines(text).find((l) => AUDIT_NETWORK.test(l));
     if (net && exit !== null)
@@ -1001,7 +1006,7 @@ export function deriveGate(
     else if (r.slug === "e2e") {
       const exit = ev.exit("e2e", true);
       const pw = parsePlaywright(ev.read("e2e.json"));
-      const log = ev.read("e2e.log") ?? "";
+      const log = ev.need("e2e.log");
       const st = pw?.stats ?? {};
       const n = (k: string) => (typeof st[k] === "number" ? st[k] : 0);
       const leak = lines(log).some((l) => /taskkill.*not found/i.test(l));
@@ -1010,16 +1015,16 @@ export function deriveGate(
         key: "",
         exit: exitText(exit),
         word: ok ? "passed" : "failed",
-        note: `log ${ev.path("e2e.log")}; ${pw ? "" : "missing or unparsable: e2e.json; "}expected=${n("expected")} unexpected=${n("unexpected")} skipped=${n("skipped")} flaky=${n("flaky")}${leak ? "; taskkill not found in log" : ""}`,
+        note: `${ev.cite("e2e.log")}; ${pw ? "" : "missing or unparsable: e2e.json; "}expected=${n("expected")} unexpected=${n("unexpected")} skipped=${n("skipped")} flaky=${n("flaky")}${leak ? "; taskkill not found in log" : ""}`,
       };
     } else if (r.slug === "egress") {
       const exit = ev.exit("egress", true);
-      const e = classifyEgress(exit, ev.read("egress.json"), ev.read("egress.log") ?? "");
+      const e = classifyEgress(exit, ev.read("egress.json"), ev.need("egress.log"));
       row = {
         key: "",
         exit: exitText(exit),
         word: e.word,
-        note: `log ${ev.path("egress.log")}; ${e.note}`,
+        note: `${ev.cite("egress.log")}; ${e.note}`,
       };
     } else if (r.slug === "image-runner") row = imageRow(ev, "runner", runId);
     else if (r.slug === "image-builder") row = imageRow(ev, "builder", runId);
@@ -1034,11 +1039,14 @@ export function deriveGate(
     if (e.docker && !health.healthy) return { key: e.key, word: UNHEALTHY, note: health.note };
     if (e.slug) {
       const exit = ev.exit(e.slug, true);
-      const last = lastLine(ev.read(`${e.slug}.log`) ?? "");
+      const last = lastLine(ev.need(`${e.slug}.log`));
+      const cited = ev.cite(`${e.slug}.log`);
+      if (last === "")
+        return { key: e.key, word: "failed", note: `${cited}: no output to evidence the check` };
       return {
         key: e.key,
         word: exit === 0 ? "passed" : "failed",
-        note: `log ${ev.path(`${e.slug}.log`)}: ${quote(last)}`,
+        note: `${cited}: ${quote(last)}`,
       };
     }
     if (e.key === "pnpm audit --prod exit recorded") {

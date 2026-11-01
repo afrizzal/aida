@@ -117,6 +117,7 @@ interface Fixture {
   cleanupLog?: string;
   foreignAfter?: string;
   patch?: string;
+  opsVolumeLog?: string;
   skip?: string[];
 }
 
@@ -192,7 +193,7 @@ function makeDir(f: Fixture = {}): string {
   cmd("build", 0, "Compiled successfully\n");
   cmd("audit", 1, "10 vulnerabilities found\nSeverity: 3 moderate | 10 high\n");
   cmd("audit-high", f.auditHighExit ?? 1, f.auditHighLog ?? "10 vulnerabilities found\n");
-  cmd("ops-volume", 0, "volume upgrade procedure documented\n");
+  cmd("ops-volume", 0, f.opsVolumeLog ?? "volume upgrade procedure documented\n");
   cmd("ops-client-ip", 0, "client IP constraint documented\n");
   cmd("sla-flag-comment", 0, "sla-flag raw SQL comment present\n");
   w("part-a-src.patch", f.patch ?? "+++ b/src/app/layout.tsx\n+const x = 1;\n");
@@ -565,6 +566,40 @@ describe("part-a-gate-check: literal derivation cases", () => {
     expect(result(derive().model, "pnpm audit --prod --audit-level=high").word).toBe("failed");
   });
 
+  it("c-WR-08: L17 every log a row cites must exist, or derive lists it missing", () => {
+    const cited = [
+      "lint.log",
+      "typecheck.log",
+      "test.log",
+      "build.log",
+      "audit.log",
+      "audit-high.log",
+      "integration.log",
+      "e2e.log",
+      "egress.log",
+      "ops-volume.log",
+      "ops-client-ip.log",
+      "sla-flag-comment.log",
+    ];
+    const notes = derive().model;
+    for (const name of cited) {
+      const inNotes = [...notes.results, ...notes.evidence].some((r) =>
+        r.note.includes(`/${name}`),
+      );
+      expect(inNotes, `${name} is cited by a row`).toBe(true);
+      expect(derive({ skip: [name] }).missing, name).toContain(name);
+    }
+  });
+
+  it("c-WR-08: L18 an empty ops evidence log is failed, not passed with an empty quote", () => {
+    const r = evidence(
+      derive({ opsVolumeLog: "" }).model,
+      "OPERATIONS.md volume upgrade procedure",
+    );
+    expect(r.word).toBe("failed");
+    expect(r.note).toContain("no output to evidence the check");
+  });
+
   it("J: worstOf and WORDS follow rule A-11's order", () => {
     expect(worstOf(["passed", "blocked (space)"])).toBe("blocked (space)");
     expect(worstOf(["blocked (space)", "blocked (with evidence)"])).toBe("blocked (with evidence)");
@@ -869,6 +904,16 @@ describe("part-a-gate-check: check rejects single edits", () => {
     const i = lines.findIndex((l) => l.startsWith("| AIDA-27 | "));
     lines.splice(i + 1, 0, "|AIDA-27 closed|");
     expectRejected(g.file, lines.join("\n"), "requirements", "table");
+  });
+
+  it("c-WR-08: mutation M27 a cited log removed from the evidence directory fails check", () => {
+    const g = fullGate();
+    fs.rmSync(path.join(g.dir, "lint.log"));
+    const r = runCheck(g.file);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(
+      "PART-A-GATE-CHECK FAILED: header: Evidence dir: evidence file missing: lint.log",
+    );
   });
 
   it("R3-4: mutation M22 a source flipped to failed after derive fails check on that row", () => {
