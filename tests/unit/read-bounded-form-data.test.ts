@@ -163,14 +163,16 @@ describe("part count before the parse (K135)", () => {
   }
 
   const countFormParts = (bounded as Record<string, unknown>).countFormParts as
-    | ((bytes: Uint8Array, contentType: string) => number | null)
+    | ((bytes: Uint8Array, contentType: string, limit: number) => number | null)
     | undefined;
+  /** Far above every body these cases build, so the K137 early stop never applies here. */
+  const NO_STOP = 1000;
 
   it("counts exactly the parts of a multipart body; the closing delimiter is not a part", async () => {
     expect(typeof countFormParts).toBe("function");
     for (const n of [0, 1, 5, 40]) {
       const { body, type } = await partsBody(n);
-      expect(countFormParts?.(body, type), `n=${n}`).toBe(n);
+      expect(countFormParts?.(body, type, NO_STOP), `n=${n}`).toBe(n);
     }
   });
 
@@ -182,14 +184,16 @@ describe("part count before the parse (K135)", () => {
     const body = new Uint8Array(await req.arrayBuffer());
     const type = req.headers.get("content-type") ?? "";
     const boundary = type.split("boundary=")[1];
-    expect(countFormParts?.(body, type)).toBe(12);
-    expect(countFormParts?.(body, `multipart/form-data; boundary="${boundary}"`)).toBe(12);
+    expect(countFormParts?.(body, type, NO_STOP)).toBe(12);
+    expect(countFormParts?.(body, `multipart/form-data; boundary="${boundary}"`, NO_STOP)).toBe(12);
   });
 
   it("counts the fields of a url-encoded body", () => {
     const body = new TextEncoder().encode("a=1&b=2&a=3");
-    expect(countFormParts?.(body, "application/x-www-form-urlencoded")).toBe(3);
-    expect(countFormParts?.(new Uint8Array(), "application/x-www-form-urlencoded")).toBe(0);
+    expect(countFormParts?.(body, "application/x-www-form-urlencoded", NO_STOP)).toBe(3);
+    expect(countFormParts?.(new Uint8Array(), "application/x-www-form-urlencoded", NO_STOP)).toBe(
+      0,
+    );
   });
 
   it("over maxParts answers too_many_parts and never runs the parser", async () => {
@@ -238,5 +242,176 @@ describe("part count before the parse (K135)", () => {
       { maxParts: 10 },
     );
     expect(result).toEqual({ ok: false, reason: "too_many_parts" });
+  });
+});
+
+// K137 (Codex diff critique round 2, item 2, and the boundary charset finding): the count's work
+// is bounded, and only a boundary the count reads exactly as the parser does is accepted. Every
+// bound below is an assertion on work done (`examined`: the delimiter or `&` matches the scan
+// looked at), never on wall-clock time. Adversarial bodies are built in memory.
+describe("part count work is bounded (K137)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const LIMIT = 17;
+  const enc = (s: string) => new TextEncoder().encode(s);
+  const typeFor = (boundary: string) => `multipart/form-data; boundary=${boundary}`;
+
+  /** `n` text parts framed by hand with `boundary`, closed by `--boundary--` plus `tail`. */
+  function framed(boundary: string, n: number, tail = "\r\n"): string {
+    let s = "";
+    for (let i = 0; i < n; i++) {
+      s += `--${boundary}\r\nContent-Disposition: form-data; name="f${i}"\r\n\r\nv${i}\r\n`;
+    }
+    return `${s}--${boundary}--${tail}`;
+  }
+
+  /** What the platform's own multipart parser makes of a body: its entry count, or "failure". */
+  async function parserEntries(body: Uint8Array, type: string): Promise<number | "failure"> {
+    try {
+      const form = await new Response(new Blob([body as Uint8Array<ArrayBuffer>]), {
+        headers: { "content-type": type },
+      }).formData();
+      return [...form.keys()].length;
+    } catch {
+      return "failure";
+    }
+  }
+
+  const scan = (bytes: Uint8Array, type: string, limit = LIMIT) =>
+    bounded.scanFormParts(bytes, type, limit);
+
+  it("stops at the first closing delimiter: a million fake closing delimiters after a real close are never examined, and the body is refused unparsed", async () => {
+    const body = enc(framed("b", 2) + "--b--".repeat(1_000_000));
+    const result = scan(body, typeFor("b"));
+    // Two part delimiters and the real close: nothing after it is looked at.
+    expect(result.examined).toBe(3);
+    expect(result.parts).toBeNull();
+    const parse = vi.spyOn(Response.prototype, "formData");
+    expect(
+      await readBoundedFormData(post(body, { "content-type": typeFor("b") }), 1 << 30, {
+        maxParts: LIMIT,
+      }),
+    ).toEqual({ ok: false, reason: "invalid" });
+    expect(parse).not.toHaveBeenCalled();
+  });
+
+  it("a closing delimiter followed by nothing, or by one line break, ends an exact count", () => {
+    for (const tail of ["", "\r\n"]) {
+      const result = scan(enc(framed("b", 5, tail)), typeFor("b"));
+      expect(result, JSON.stringify(tail)).toEqual({ parts: 5, examined: 6 });
+    }
+  });
+
+  it("a closing delimiter inside a part's headers, with more parts after it, is refused, never counted short", async () => {
+    // The parser skips header lines, so it reads past this "--b--" and builds every later part.
+    const head = `--b\r\nContent-Disposition: form-data; name="a"\r\n--b--: x\r\n\r\nv\r\n`;
+    const body = enc(head + framed("b", 40));
+    expect(await parserEntries(body, typeFor("b"))).toBe(41);
+    const result = scan(body, typeFor("b"));
+    expect(result.parts).toBeNull();
+    expect(result.examined).toBe(2);
+    const parse = vi.spyOn(Response.prototype, "formData");
+    expect(
+      await readBoundedFormData(post(body, { "content-type": typeFor("b") }), 1 << 20, {
+        maxParts: LIMIT,
+      }),
+    ).toEqual({ ok: false, reason: "invalid" });
+    expect(parse).not.toHaveBeenCalled();
+  });
+
+  it("stops as soon as the count passes the limit", async () => {
+    const body = enc(framed("b", 10_000));
+    const result = scan(body, typeFor("b"));
+    expect(result).toEqual({ parts: LIMIT + 1, examined: LIMIT + 1 });
+    const parse = vi.spyOn(Response.prototype, "formData");
+    expect(
+      await readBoundedFormData(post(body, { "content-type": typeFor("b") }), 1 << 20, {
+        maxParts: LIMIT,
+      }),
+    ).toEqual({ ok: false, reason: "too_many_parts" });
+    expect(parse).not.toHaveBeenCalled();
+  });
+
+  it("url-encoded: four million `&` stop at the limit", async () => {
+    const body = new Uint8Array(4_000_000).fill(0x26);
+    const result = scan(body, "application/x-www-form-urlencoded");
+    expect(result).toEqual({ parts: LIMIT + 1, examined: LIMIT });
+    expect(
+      await readBoundedFormData(
+        post(body, { "content-type": "application/x-www-form-urlencoded" }),
+        1 << 30,
+        { maxParts: LIMIT },
+      ),
+    ).toEqual({ ok: false, reason: "too_many_parts" });
+  });
+
+  it("a non-ASCII boundary is refused unparsed, quoted or not (the parser reads it as UTF-8)", async () => {
+    const boundary = "ééé";
+    const body = enc(framed(boundary, 30));
+    // The parser accepts it and builds all 30 parts; a latin1 count would have found none.
+    expect(await parserEntries(body, `multipart/form-data; boundary="${boundary}"`)).toBe(30);
+    const parse = vi.spyOn(Response.prototype, "formData");
+    for (const type of [
+      `multipart/form-data; boundary="${boundary}"`,
+      `multipart/form-data; boundary=${boundary}`,
+      `multipart/form-data; boundary="ab${boundary}cd"`,
+    ]) {
+      expect(scan(body, type), type).toEqual({ parts: null, examined: 0 });
+      expect(
+        await readBoundedFormData(post(body, { "content-type": type }), 1 << 20, {
+          maxParts: LIMIT,
+        }),
+        type,
+      ).toEqual({ ok: false, reason: "invalid" });
+    }
+    expect(parse).not.toHaveBeenCalled();
+  });
+
+  it("a 71-character boundary is refused unparsed; 70 characters are counted", async () => {
+    const long = "a".repeat(71);
+    const body = enc(framed(long, 3));
+    expect(await parserEntries(body, typeFor(long))).toBe(3);
+    const parse = vi.spyOn(Response.prototype, "formData");
+    for (const type of [typeFor(long), `multipart/form-data; boundary="${long}"`]) {
+      expect(scan(body, type), type).toEqual({ parts: null, examined: 0 });
+      expect(
+        await readBoundedFormData(post(body, { "content-type": type }), 1 << 20, {
+          maxParts: LIMIT,
+        }),
+      ).toEqual({ ok: false, reason: "invalid" });
+    }
+    expect(parse).not.toHaveBeenCalled();
+    const max = "a".repeat(70);
+    expect(scan(enc(framed(max, 3)), typeFor(max))).toEqual({ parts: 3, examined: 4 });
+  });
+
+  it("boundary characters outside RFC 2046 are refused; a trailing space is refused", () => {
+    const body = enc(framed("x", 2));
+    for (const type of [
+      "multipart/form-data; boundary=a!b",
+      "multipart/form-data; boundary=a#b",
+      "multipart/form-data; boundary=a~b",
+      'multipart/form-data; boundary="a!b"',
+      'multipart/form-data; boundary="abc "',
+      'multipart/form-data; boundary=""',
+    ]) {
+      expect(scan(body, type), type).toEqual({ parts: null, examined: 0 });
+    }
+  });
+
+  it("a quoted boundary with RFC 2046 characters that need quoting is counted exactly and parsed", async () => {
+    for (const boundary of ["a:b=c? d", "(x),y/z.w'+_-", " leading-space"]) {
+      const type = `multipart/form-data; boundary="${boundary}"`;
+      const body = enc(framed(boundary, 6));
+      expect(await parserEntries(body, type), boundary).toBe(6);
+      expect(scan(body, type), boundary).toEqual({ parts: 6, examined: 7 });
+      const result = await readBoundedFormData(post(body, { "content-type": type }), 1 << 20, {
+        maxParts: 6,
+      });
+      expect(result.ok, boundary).toBe(true);
+      if (result.ok) expect(result.form.get("f5")).toBe("v5");
+    }
   });
 });
