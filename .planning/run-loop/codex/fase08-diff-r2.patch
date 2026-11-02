@@ -1,0 +1,2467 @@
+diff --git a/docs/OPERATIONS.md b/docs/OPERATIONS.md
+index 14eebde..5b63938 100644
+--- a/docs/OPERATIONS.md
++++ b/docs/OPERATIONS.md
+@@ -275,6 +275,22 @@ header on every request with the identity above, so a client-sent value never re
+ and a raw X-Forwarded-For is never read for sign-in either. Caddy also strips a client-sent
+ `x-aida-client-ip` (`header_up -X-Aida-Client-Ip`); keep that line if you change the proxy setup.
+ 
++### Public rate limits under load
++
++The public routes (request form, status-page follow-up, CSAT, status-page attachments) count each
++request in the database. That check runs in a short transaction on one of the app's 10 pool
++connections (`DB_POOL_MAX`). To keep a flood of requests from taking the whole pool, at most **3**
++of these checks run at once (`RATE_LIMIT_MAX_CONCURRENT` in
++`src/lib/rate-limit/check-rate-limit.ts`), and none starts while 3 or more requests are already
++waiting for a pool connection. A request over that answers HTTP 429 with `Retry-After: 1` at once,
++without touching the database, and is not counted. The other 7 connections stay with the rest of
++the app. The same 429 is given when the check waits longer than 500 ms for another request of the
++same client, or longer than 1 s for a pool connection.
++
++**The limit is per app process.** AIDA runs one app process: one server, one `app` container.
++Running several `app` replicas multiplies the limit, and with it the share of the database those
++checks can take, so it is not supported.
++
+ ## Environment variable reference
+ 
+ Every variable in `.env.example`, and nothing else. `Required` means the app will not function correctly (or will refuse to boot) without it.
+diff --git a/docs/SECURITY.md b/docs/SECURITY.md
+index 16baa48..2e593b1 100644
+--- a/docs/SECURITY.md
++++ b/docs/SECURITY.md
+@@ -29,8 +29,10 @@ AIDA's promise is **privacy-first, self-hosted AI**. These controls are product
+ 
+ ## Settings connection tests
+ - The four "Test connection" actions (AI provider, embedding provider, IMAP, SMTP) are admin-only. A failure returns one of four fixed categories and a correlation ID, never the probe's error text. The server log line under that ID holds the probe, the category and the error's name, code and HTTP status, each from a fixed list; never a message, host, port, URL, header or stack.
+-- This removes the error-text oracle and puts every network and protocol failure into one category, `connection_failed`: a timeout, a refused or closed connection, a DNS or TLS failure, another service on the port, or an unexpected HTTP status.
+-- **Residual:** an `authentication_failed` result still proves that a service of that protocol answered at the address; response timing still differs between outcomes; and the probe still connects to the address the admin typed, so SSRF itself is not removed, only narrowed to these signals.
++- This removes the error-text oracle and puts every network and protocol failure into one category, `connection_failed`: a timeout, a refused or closed connection, a DNS or TLS failure, another service on the port, an unexpected HTTP status, or a reply without the protocol's response shape.
++- `authentication_failed` is only given where AIDA sends a credential: the OpenAI and Anthropic API keys (their fixed vendor hosts) and the IMAP and SMTP logins. A credential rejection does not prove which service answered; any HTTP server can send a 401.
++- The Ollama probes send no credential and take an admin-typed URL. There an HTTP 401 or 403 is `connection_failed`, and a 200 passes only with Ollama's response shape: a `models` array from `/api/tags`, and an `embeddings` array of non-empty number arrays from `/api/embed`. Any other 200 is `connection_failed`.
++- **Residual:** a service at the typed address that imitates the protocol's replies (on the Ollama URL, Ollama's `/api/tags` or `/api/embed` shapes) still passes, so a pass proves only the shape, not the service; response timing still differs between outcomes; and the probe still connects to the address the admin typed, so SSRF itself is not removed, only narrowed to these signals.
+ 
+ ## Auditability
+ - `AuditEvent` is **append-only** — AI triage decisions, generated drafts, and approved sends are recorded with the model used and references to inputs/outputs. Audit rows are never mutated or deleted.
+diff --git a/scripts/image-check-verify.ts b/scripts/image-check-verify.ts
+new file mode 100644
+index 0000000..16cc5df
+--- /dev/null
++++ b/scripts/image-check-verify.ts
+@@ -0,0 +1,148 @@
++// ---------------------------------------------------------------------------
++// scripts/image-check-verify.ts: the pure --verify validation of the 08-09 image check (K133).
++//
++// test-image-check.ts prints one IMAGE-CHECK-TEARDOWN and one IMAGE-CHECK-RESULT line; this module
++// re-reads them with the exit code and refuses failed, inconsistent or unevidenced results. Both
++// scripts/test-image-check.ts (`--verify`) and scripts/part-a-gate-check.ts (the image rows, at
++// derive and at check time) import it, so the gate runs the same validation over the actual image
++// log and exit file instead of trusting a verify log's word. It reads strings only: no Docker, no
++// child process, no file system.
++// ---------------------------------------------------------------------------
++import { RUN_LABEL, TEST_LABEL } from "../tests/support/docker-test-labels";
++
++export const RESULT_PREFIX = "IMAGE-CHECK-RESULT ";
++export const TEARDOWN_PREFIX = "IMAGE-CHECK-TEARDOWN ";
++export const VERIFY_PREFIX = "IMAGE-CHECK-VERIFY ";
++
++export type CheckState = "passed" | "failed" | "blocked" | "not run";
++export const EXIT_CODES: Record<CheckState, number> = {
++  passed: 0,
++  failed: 1,
++  blocked: 3,
++  "not run": 4,
++};
++
++/** The text J1's assertEnoughSpace throws inside runBuildPreflight. */
++export const J1_SPACE_STOP =
++  /Free space on (the host|the Docker VM) is \d+\.\d GiB, below the 20\.0 GiB rule J requires before an image build\. Stopped; report to the owner\./;
++
++/** The base image the Dockerfile builds from; shared daemon state the check never touches. */
++export const BASE_IMAGE = "node:22-alpine";
++export const TELEMETRY_VARS = ["NEXT_TELEMETRY_DISABLED", "CHECKPOINT_DISABLE"] as const;
++
++export interface ImageCheckResult {
++  target: string;
++  tag: string;
++  runId: string;
++  state: CheckState;
++  cause: string;
++  evidence: string;
++  imageId: string | null;
++  user: string | null;
++  env: string[];
++  labels: Record<string, string>;
++  baseImageBefore: string | null;
++  baseImageAfter: string | null;
++  runDir: string;
++}
++
++export interface TeardownLine {
++  created: boolean;
++  removed: string[];
++  gone: string[];
++  skipped: string[];
++  notOurs: string[];
++  leftAlone: string[];
++  failed: string[];
++  remaining: string[];
++  runId: string;
++}
++
++export function summaryWord(state: CheckState, cause: string): string {
++  if (state === "passed") return "passed";
++  if (state === "blocked") return cause === "space" ? "blocked (space)" : "blocked (with evidence)";
++  if (state === "not run") return `not run (parked: ${cause})`;
++  return "failed";
++}
++
++/**
++ * c-WR-04: the base image is shared daemon state this run did not create (K109). When the build
++ * pulled it or moved its tag, the run cannot pass; the base image itself is never touched.
++ */
++export function baseImageProblem(before: string | null, after: string | null): string | null {
++  if (before !== null && after !== null && before === after && before.startsWith("sha256:"))
++    return null;
++  return `Base image ${BASE_IMAGE} was ${before ?? "not recorded"} before the build and ${after ?? "not recorded"} after it (a pull or a moved tag); it was not touched (K109)`;
++}
++
++const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
++
++function linesWith(log: string, prefix: string): string[] {
++  return log.split("\n").filter((line) => line.startsWith(prefix));
++}
++
++/** Re-reads a check's log; refuses failed, inconsistent or unevidenced results. */
++export function verifyImageCheckLog(
++  log: string,
++  exitCode: number,
++  target: string,
++): { ok: boolean; line: string } {
++  const refuse = (reason: string) => ({ ok: false, line: `${VERIFY_PREFIX}FAILED: ${reason}` });
++  const results = linesWith(log, RESULT_PREFIX);
++  const teardowns = linesWith(log, TEARDOWN_PREFIX);
++  if (results.length !== 1) return refuse(`expected one result line, found ${results.length}`);
++  if (teardowns.length !== 1)
++    return refuse(`expected one teardown line, found ${teardowns.length}`);
++  let r: ImageCheckResult;
++  let t: TeardownLine;
++  try {
++    r = JSON.parse(results[0].slice(RESULT_PREFIX.length)) as ImageCheckResult;
++    t = JSON.parse(teardowns[0].slice(TEARDOWN_PREFIX.length)) as TeardownLine;
++  } catch (err) {
++    return refuse(`unreadable line: ${messageOf(err)}`);
++  }
++  if (r.target !== target) return refuse(`target ${r.target}, expected ${target}`);
++  if (!(r.state in EXIT_CODES)) return refuse(`unknown state ${JSON.stringify(r.state)}`);
++  if (exitCode !== EXIT_CODES[r.state]) {
++    return refuse(`exit ${exitCode} disagrees with state ${r.state} (${EXIT_CODES[r.state]})`);
++  }
++  if (r.state === "failed") return refuse(`the check failed (${r.cause}): ${r.evidence}`);
++  if ((r.state === "blocked" || r.state === "not run") && !r.evidence?.trim()) {
++    return refuse(`${r.state} without evidence`);
++  }
++  if (r.state === "blocked" && !["space", "measure", "docker", "external"].includes(r.cause)) {
++    return refuse(`blocked cause ${r.cause} is not space, measure, docker or external`);
++  }
++  if (r.state === "not run" && !["lock", "foreign"].includes(r.cause)) {
++    return refuse(`not-run cause ${r.cause} is not lock or foreign`);
++  }
++  if (
++    r.cause === "space" &&
++    !J1_SPACE_STOP.test(r.evidence) &&
++    !r.evidence.includes("no space left on device")
++  ) {
++    return refuse("a space cause without J1's space text or no space left on device");
++  }
++  for (const key of ["failed", "notOurs", "leftAlone", "remaining"] as const) {
++    if ((t[key] ?? []).length > 0) return refuse(`teardown ${key}: ${t[key].join(", ")}`);
++  }
++  if (!t.created && (t.removed ?? []).length > 0)
++    return refuse("teardown removed something it did not create");
++  if (r.state === "passed") {
++    if (!r.imageId) return refuse("passed without an image ID");
++    if (r.user !== "node") return refuse(`passed with user ${JSON.stringify(r.user)}`);
++    for (const name of TELEMETRY_VARS) {
++      if (!r.env?.includes(`${name}=1`)) return refuse(`passed without ${name}=1`);
++    }
++    if (r.labels?.[TEST_LABEL] !== "1" || r.labels?.[RUN_LABEL] !== r.runId) {
++      return refuse("passed without the run labels");
++    }
++    if (!(t.removed ?? []).includes(r.tag)) return refuse(`passed but ${r.tag} was not removed`);
++    const base = baseImageProblem(r.baseImageBefore, r.baseImageAfter);
++    if (base !== null) return refuse(`passed but ${base}`);
++  }
++  return {
++    ok: true,
++    line: `${VERIFY_PREFIX}state=${r.state} cause=${r.cause} word="${summaryWord(r.state, r.cause)}" target=${target} tag=${r.tag} exit=${exitCode}`,
++  };
++}
+diff --git a/scripts/part-a-gate-check.ts b/scripts/part-a-gate-check.ts
+index a989b7d..92afae4 100644
+--- a/scripts/part-a-gate-check.ts
++++ b/scripts/part-a-gate-check.ts
+@@ -17,12 +17,15 @@
+ //   pnpm exec tsx scripts/part-a-gate-check.ts check <gate file> [--sections <list>]
+ //
+ // Section names: header, results, evidence, design, matrix, requirements, human. This script
+-// reads files only. It starts no process and touches no Docker resource.
++// reads files only. It starts no process and touches no Docker resource. The image rows re-run
++// the image check's --verify validation from scripts/image-check-verify.ts, a pure module with
++// no Docker or child-process code (K133).
+ // ---------------------------------------------------------------------------
+ import fs from "node:fs";
+ import os from "node:os";
+ import path from "node:path";
+ import { pathToFileURL } from "node:url";
++import { summaryWord, verifyImageCheckLog } from "./image-check-verify";
+ 
+ export type Required = "part-a" | "phase-8.1" | "both";
+ 
+@@ -351,13 +354,91 @@ const RESULT_ROWS: readonly { key: string; slug: string; kind: RowKind }[] = [
+   { key: "compose stack gate", slug: "none", kind: "fixed" },
+ ];
+ 
++/**
++ * K134: the foreign listing row says what it measures. 08-24's foreign-before and foreign-after
++ * steps list the containers of compose project `aida`, the `aida-dev-db` container and the
++ * volumes of project `aida`; nothing else, and not what is inside a volume.
++ */
++export const FOREIGN_ROW = "listed containers, and the volumes of project `aida`, unchanged";
++
++/**
++ * The three listings of the foreign-before/after step (08-24, revision 2026-11-12), each captured
++ * as `foreign-<when>-<name>.txt` with its exit code in `foreign-<when>-<name>.exit`. `header` is
++ * the first line `docker ... --format 'table ...'` prints; `row` is every other line.
++ */
++export const FOREIGN_LISTINGS: readonly { name: string; header: RegExp; row: RegExp }[] = [
++  {
++    name: "project-containers",
++    header: /^CONTAINER ID\s+NAMES\s+STATE\s*$/,
++    row: /^[0-9a-f]{12}\s+\S+\s+[a-z]+\s*$/,
++  },
++  {
++    name: "dev-db-container",
++    header: /^CONTAINER ID\s+NAMES\s+STATE\s*$/,
++    row: /^[0-9a-f]{12}\s+\S+\s+[a-z]+\s*$/,
++  },
++  { name: "project-volumes", header: /^VOLUME NAME\s*$/, row: /^\S+\s*$/ },
++];
++
++/** K134: one listing is evidence only with exit 0 and a well-formed table; else the problem. */
++function foreignListingProblem(
++  ev: Evidence,
++  when: string,
++  listing: (typeof FOREIGN_LISTINGS)[number],
++): string | null {
++  const base = `foreign-${when}-${listing.name}`;
++  const text = ev.read(`${base}.txt`);
++  const exit = ev.exit(base, false);
++  if (text === null) return `missing: ${base}.txt`;
++  if (exit === null) return `missing or unreadable: ${base}.exit`;
++  if (exit !== 0) return `${base}.exit is ${exit}, not 0`;
++  const ls = text.split(/\r?\n/);
++  if (ls.at(-1) === "") ls.pop();
++  if (ls.length === 0 || !listing.header.test(ls[0]))
++    return `${base}.txt has no header line: ${quote(ls[0] ?? "")}`;
++  const bad = ls.slice(1).find((l) => !listing.row.test(l));
++  if (bad !== undefined) return `${base}.txt has a line that is not a listing row: ${quote(bad)}`;
++  return null;
++}
++
++/** K134: every listing exits 0 and is well formed, before and after, and the two are identical. */
++function foreignRow(ev: Evidence): { word: string; note: string } {
++  const problems: string[] = [];
++  for (const when of ["before", "after"])
++    for (const listing of FOREIGN_LISTINGS) {
++      const p = foreignListingProblem(ev, when, listing);
++      if (p) problems.push(p);
++    }
++  if (problems.length > 0) return { word: "failed", note: problems.join("; ") };
++  let rows = 0;
++  for (const listing of FOREIGN_LISTINGS) {
++    const a = ev.read(`foreign-before-${listing.name}.txt`) ?? "";
++    const b = ev.read(`foreign-after-${listing.name}.txt`) ?? "";
++    if (a !== b) {
++      const al = a.split("\n");
++      const bl = b.split("\n");
++      let i = 0;
++      while (al[i] === bl[i]) i++;
++      return {
++        word: "failed",
++        note: `foreign-after-${listing.name}.txt first difference: ${quote(bl[i] ?? al[i] ?? "")}`,
++      };
++    }
++    rows += a.split("\n").filter((l) => l).length - 1;
++  }
++  return {
++    word: "passed",
++    note: `${FOREIGN_LISTINGS.length} listing(s) before and after, each exit 0 with its header line; ${rows} row(s), identical`,
++  };
++}
++
+ const EVIDENCE_ROWS: readonly { key: string; slug: string | null; docker: boolean }[] = [
+   { key: "pnpm audit --prod exit recorded", slug: null, docker: false },
+   { key: "build log has no Google Fonts host", slug: null, docker: false },
+   { key: "OPERATIONS.md volume upgrade procedure", slug: "ops-volume", docker: false },
+   { key: "OPERATIONS.md client IP section", slug: "ops-client-ip", docker: false },
+   { key: "sla-flag raw SQL comment", slug: "sla-flag-comment", docker: false },
+-  { key: "foreign resources unchanged", slug: null, docker: true },
++  { key: FOREIGN_ROW, slug: null, docker: true },
+   { key: "no foreign project named in gate logs", slug: null, docker: true },
+ ];
+ 
+@@ -858,12 +939,9 @@ export function imageWordExit(word: string): number | null {
+   return null;
+ }
+ 
+-/** test-image-check.ts summaryWord, restated so this script imports nothing that runs Docker. */
++/** test-image-check.ts summaryWord, from the pure module both scripts import (K133). */
+ function imageSummaryWord(state: unknown, cause: unknown): string {
+-  if (state === "passed") return "passed";
+-  if (state === "blocked") return cause === "space" ? "blocked (space)" : "blocked (with evidence)";
+-  if (state === "not run") return `not run (parked: ${String(cause)})`;
+-  return "failed";
++  return summaryWord(state as Parameters<typeof summaryWord>[0], String(cause));
+ }
+ 
+ /**
+@@ -933,6 +1011,12 @@ function imageRow(ev: Evidence, target: string, runId: string): ResultRow {
+     }
+     if (word !== "failed") {
+       const problems = imageDisagreements(word, exit, vlines[0], clog, target, runId);
++      // K133: the image check's own --verify validation, re-run here over the actual image log
++      // and exit file (at derive and so at check time), never the verify log's word alone.
++      const own = verifyImageCheckLog(clog, exit ?? Number.NaN, target);
++      if (!own.ok) problems.push(`image-${target}.log re-verified: ${own.line}`);
++      else if (!own.line.includes(` word="${word}" `))
++        problems.push(`image-${target}.log re-verified: ${own.line}, verify says ${word}`);
+       if (problems.length > 0) {
+         word = "failed";
+         note += `; ${problems.join("; ")}`;
+@@ -1092,31 +1176,7 @@ export function deriveGate(
+         ? { key: e.key, word: "failed", note: quote(hit) }
+         : { key: e.key, word: "passed", note: `log ${ev.path("build.log")}: no Google Fonts host` };
+     }
+-    if (e.key === "foreign resources unchanged") {
+-      const a = ev.read("foreign-before.txt");
+-      const b = ev.read("foreign-after.txt");
+-      if (a === null || b === null)
+-        return {
+-          key: e.key,
+-          word: "failed",
+-          note: `missing: ${a === null ? "foreign-before.txt" : "foreign-after.txt"}`,
+-        };
+-      if (a === b)
+-        return {
+-          key: e.key,
+-          word: "passed",
+-          note: `${a.split("\n").filter((l) => l).length} listed line(s), identical`,
+-        };
+-      const al = a.split("\n");
+-      const bl = b.split("\n");
+-      let i = 0;
+-      while (al[i] === bl[i]) i++;
+-      return {
+-        key: e.key,
+-        word: "failed",
+-        note: `first difference: ${quote(bl[i] ?? al[i] ?? "")}`,
+-      };
+-    }
++    if (e.key === FOREIGN_ROW) return { key: e.key, ...foreignRow(ev) };
+     // no foreign project named in gate logs
+     let names: string[] = [];
+     try {
+diff --git a/scripts/test-image-check.ts b/scripts/test-image-check.ts
+index a4f7e87..d5e43a4 100644
+--- a/scripts/test-image-check.ts
++++ b/scripts/test-image-check.ts
+@@ -45,6 +45,19 @@ import {
+   runDocker,
+   tagState,
+ } from "../tests/support/docker-test-preflight";
++import {
++  BASE_IMAGE,
++  baseImageProblem,
++  type CheckState,
++  EXIT_CODES,
++  type ImageCheckResult,
++  J1_SPACE_STOP,
++  RESULT_PREFIX,
++  TEARDOWN_PREFIX,
++  TELEMETRY_VARS,
++  type TeardownLine,
++  verifyImageCheckLog,
++} from "./image-check-verify";
+ import {
+   applyCleanup,
+   type DockerRunner,
+@@ -53,33 +66,32 @@ import {
+   teardownRefs,
+ } from "./test-docker-cleanup";
+ 
++// The validation lives in the pure module (K133); these names stay importable from here.
++export {
++  BASE_IMAGE,
++  baseImageProblem,
++  type CheckState,
++  EXIT_CODES,
++  type ImageCheckResult,
++  J1_SPACE_STOP,
++  RESULT_PREFIX,
++  summaryWord,
++  TEARDOWN_PREFIX,
++  TELEMETRY_VARS,
++  type TeardownLine,
++  VERIFY_PREFIX,
++  verifyImageCheckLog,
++} from "./image-check-verify";
++
+ export const IMAGE_CHECK_TARGETS = ["runner", "builder"] as const;
+ export type ImageCheckTarget = (typeof IMAGE_CHECK_TARGETS)[number];
+ 
+-export const RESULT_PREFIX = "IMAGE-CHECK-RESULT ";
+-export const TEARDOWN_PREFIX = "IMAGE-CHECK-TEARDOWN ";
+-export const VERIFY_PREFIX = "IMAGE-CHECK-VERIFY ";
+-
+-export type CheckState = "passed" | "failed" | "blocked" | "not run";
+-export const EXIT_CODES: Record<CheckState, number> = {
+-  passed: 0,
+-  failed: 1,
+-  blocked: 3,
+-  "not run": 4,
+-};
+-
+ /** Ten minutes without new build output ends the build (the binaries.prisma.sh stall, 2026-11-08). */
+ export const BUILD_QUIET_MS = 600_000;
+ 
+ /** After SIGTERM to the docker client (watchdog or interrupt), SIGKILL follows this much later. */
+ export const KILL_GRACE_MS = 10_000;
+ 
+-/** The text J1's assertEnoughSpace throws inside runBuildPreflight. */
+-export const J1_SPACE_STOP =
+-  /Free space on (the host|the Docker VM) is \d+\.\d GiB, below the 20\.0 GiB rule J requires before an image build\. Stopped; report to the owner\./;
+-
+-const BASE_IMAGE = "node:22-alpine";
+-const TELEMETRY_VARS = ["NEXT_TELEMETRY_DISABLED", "CHECKPOINT_DISABLE"] as const;
+ const EVIDENCE_MAX = 4000;
+ const DOCKER_DOWN = [
+   "failed to connect to the docker API",
+@@ -264,13 +276,6 @@ export function removableTags(
+   return { remove, leftAlone };
+ }
+ 
+-export function summaryWord(state: CheckState, cause: string): string {
+-  if (state === "passed") return "passed";
+-  if (state === "blocked") return cause === "space" ? "blocked (space)" : "blocked (with evidence)";
+-  if (state === "not run") return `not run (parked: ${cause})`;
+-  return "failed";
+-}
+-
+ export const DEFAULT_STEPS = {
+   preflight: runBuildPreflight,
+   lock: acquireLock,
+@@ -304,34 +309,6 @@ export interface ImageCheckDeps {
+   interrupts?: (onSignal: (signal: string) => void) => () => void;
+ }
+ 
+-export interface ImageCheckResult {
+-  target: string;
+-  tag: string;
+-  runId: string;
+-  state: CheckState;
+-  cause: string;
+-  evidence: string;
+-  imageId: string | null;
+-  user: string | null;
+-  env: string[];
+-  labels: Record<string, string>;
+-  baseImageBefore: string | null;
+-  baseImageAfter: string | null;
+-  runDir: string;
+-}
+-
+-export interface TeardownLine {
+-  created: boolean;
+-  removed: string[];
+-  gone: string[];
+-  skipped: string[];
+-  notOurs: string[];
+-  leftAlone: string[];
+-  failed: string[];
+-  remaining: string[];
+-  runId: string;
+-}
+-
+ class Stop extends Error {
+   constructor(
+     readonly state: CheckState,
+@@ -358,16 +335,6 @@ function baseImageId(docker: Docker): string {
+   return r.id ?? "absent";
+ }
+ 
+-/**
+- * c-WR-04: the base image is shared daemon state this run did not create (K109). When the build
+- * pulled it or moved its tag, the run cannot pass; the base image itself is never touched.
+- */
+-export function baseImageProblem(before: string | null, after: string | null): string | null {
+-  if (before !== null && after !== null && before === after && before.startsWith("sha256:"))
+-    return null;
+-  return `Base image ${BASE_IMAGE} was ${before ?? "not recorded"} before the build and ${after ?? "not recorded"} after it (a pull or a moved tag); it was not touched (K109)`;
+-}
+-
+ function readLog(file: string): string {
+   try {
+     return fs.readFileSync(file, "utf8");
+@@ -632,76 +599,6 @@ export async function runImageCheck(
+   return result;
+ }
+ 
+-function linesWith(log: string, prefix: string): string[] {
+-  return log.split("\n").filter((line) => line.startsWith(prefix));
+-}
+-
+-/** Re-reads a check's log; refuses failed, inconsistent or unevidenced results. */
+-export function verifyImageCheckLog(
+-  log: string,
+-  exitCode: number,
+-  target: string,
+-): { ok: boolean; line: string } {
+-  const refuse = (reason: string) => ({ ok: false, line: `${VERIFY_PREFIX}FAILED: ${reason}` });
+-  const results = linesWith(log, RESULT_PREFIX);
+-  const teardowns = linesWith(log, TEARDOWN_PREFIX);
+-  if (results.length !== 1) return refuse(`expected one result line, found ${results.length}`);
+-  if (teardowns.length !== 1)
+-    return refuse(`expected one teardown line, found ${teardowns.length}`);
+-  let r: ImageCheckResult;
+-  let t: TeardownLine;
+-  try {
+-    r = JSON.parse(results[0].slice(RESULT_PREFIX.length)) as ImageCheckResult;
+-    t = JSON.parse(teardowns[0].slice(TEARDOWN_PREFIX.length)) as TeardownLine;
+-  } catch (err) {
+-    return refuse(`unreadable line: ${messageOf(err)}`);
+-  }
+-  if (r.target !== target) return refuse(`target ${r.target}, expected ${target}`);
+-  if (!(r.state in EXIT_CODES)) return refuse(`unknown state ${JSON.stringify(r.state)}`);
+-  if (exitCode !== EXIT_CODES[r.state]) {
+-    return refuse(`exit ${exitCode} disagrees with state ${r.state} (${EXIT_CODES[r.state]})`);
+-  }
+-  if (r.state === "failed") return refuse(`the check failed (${r.cause}): ${r.evidence}`);
+-  if ((r.state === "blocked" || r.state === "not run") && !r.evidence?.trim()) {
+-    return refuse(`${r.state} without evidence`);
+-  }
+-  if (r.state === "blocked" && !["space", "measure", "docker", "external"].includes(r.cause)) {
+-    return refuse(`blocked cause ${r.cause} is not space, measure, docker or external`);
+-  }
+-  if (r.state === "not run" && !["lock", "foreign"].includes(r.cause)) {
+-    return refuse(`not-run cause ${r.cause} is not lock or foreign`);
+-  }
+-  if (
+-    r.cause === "space" &&
+-    !J1_SPACE_STOP.test(r.evidence) &&
+-    !r.evidence.includes("no space left on device")
+-  ) {
+-    return refuse("a space cause without J1's space text or no space left on device");
+-  }
+-  for (const key of ["failed", "notOurs", "leftAlone", "remaining"] as const) {
+-    if ((t[key] ?? []).length > 0) return refuse(`teardown ${key}: ${t[key].join(", ")}`);
+-  }
+-  if (!t.created && (t.removed ?? []).length > 0)
+-    return refuse("teardown removed something it did not create");
+-  if (r.state === "passed") {
+-    if (!r.imageId) return refuse("passed without an image ID");
+-    if (r.user !== "node") return refuse(`passed with user ${JSON.stringify(r.user)}`);
+-    for (const name of TELEMETRY_VARS) {
+-      if (!r.env?.includes(`${name}=1`)) return refuse(`passed without ${name}=1`);
+-    }
+-    if (r.labels?.[TEST_LABEL] !== "1" || r.labels?.[RUN_LABEL] !== r.runId) {
+-      return refuse("passed without the run labels");
+-    }
+-    if (!(t.removed ?? []).includes(r.tag)) return refuse(`passed but ${r.tag} was not removed`);
+-    const base = baseImageProblem(r.baseImageBefore, r.baseImageAfter);
+-    if (base !== null) return refuse(`passed but ${base}`);
+-  }
+-  return {
+-    ok: true,
+-    line: `${VERIFY_PREFIX}state=${r.state} cause=${r.cause} word="${summaryWord(r.state, r.cause)}" target=${target} tag=${r.tag} exit=${exitCode}`,
+-  };
+-}
+-
+ const DOCKER_CLIENT_VARS = [
+   "DOCKER_HOST",
+   "DOCKER_CONTEXT",
+diff --git a/src/app/(public)/request/request-form.tsx b/src/app/(public)/request/request-form.tsx
+index 382fabd..7e6f6b1 100644
+--- a/src/app/(public)/request/request-form.tsx
++++ b/src/app/(public)/request/request-form.tsx
+@@ -23,6 +23,7 @@ import {
+   type IntakeField,
+   intakeSchema,
+   tooManyFilesMessage,
++  tooManyPartsMessage,
+ } from "@/lib/public-forms/limits";
+ 
+ // The intake route's own schema, length caps included (K129), so the form refuses what the
+@@ -110,6 +111,10 @@ export function RequestForm() {
+         form.setError("root", { message: tooManyFilesMessage("request") });
+         return;
+       }
++      if (res.status === 413 && failure?.error === "too_many_parts") {
++        form.setError("root", { message: tooManyPartsMessage("request") });
++        return;
++      }
+       // A server field error (K129) shows under its own field.
+       if (res.status === 400 && failure?.error === "validation_failed") {
+         let shown = false;
+diff --git a/src/app/(public)/status/[token]/follow-up-form.tsx b/src/app/(public)/status/[token]/follow-up-form.tsx
+index 2f669be..4e03ceb 100644
+--- a/src/app/(public)/status/[token]/follow-up-form.tsx
++++ b/src/app/(public)/status/[token]/follow-up-form.tsx
+@@ -17,6 +17,7 @@ import {
+   type FieldIssue,
+   followUpTooLongMessage,
+   tooManyFilesMessage,
++  tooManyPartsMessage,
+ } from "@/lib/public-forms/limits";
+ 
+ interface FollowUpFormProps {
+@@ -105,6 +106,10 @@ export function FollowUpForm({ token }: FollowUpFormProps) {
+           setSendError(tooManyFilesMessage("follow-up"));
+           return;
+         }
++        if (res.status === 413 && failure?.error === "too_many_parts") {
++          setSendError(tooManyPartsMessage("follow-up"));
++          return;
++        }
+         const tooLong = (failure?.issues ?? []).some(
+           (issue) => issue.path?.[0] === "message" && issue.code === "too_big",
+         );
+diff --git a/src/app/api/public/intake/route.ts b/src/app/api/public/intake/route.ts
+index a7530ad..8fe81d2 100644
+--- a/src/app/api/public/intake/route.ts
++++ b/src/app/api/public/intake/route.ts
+@@ -1,5 +1,9 @@
+ import { NextResponse } from "next/server";
+-import { MAX_REQUEST_BODY_BYTES } from "@/lib/attachments/constants";
++import {
++  INTAKE_MAX_PARTS,
++  MAX_FILES_PER_REQUEST,
++  MAX_REQUEST_BODY_BYTES,
++} from "@/lib/attachments/constants";
+ import {
+   removeStoredUploads,
+   storeValidatedUploads,
+@@ -26,12 +30,17 @@ export async function POST(request: Request) {
+   }
+ 
+   // The body limit holds on the bytes actually received, however the body is framed; a
+-  // Content-Length above the cap is only an early reject (D-24).
+-  const body = await readBoundedFormData(request, MAX_REQUEST_BODY_BYTES);
++  // Content-Length above the cap is only an early reject (D-24). The parts are counted on those
++  // bytes before the parse, so many small parts are refused unparsed (K135).
++  const body = await readBoundedFormData(request, MAX_REQUEST_BODY_BYTES, {
++    maxParts: INTAKE_MAX_PARTS,
++  });
+   if (!body.ok) {
+-    return body.reason === "too_large"
+-      ? NextResponse.json({ error: "payload_too_large" }, { status: 413 })
+-      : NextResponse.json({ error: "invalid_form_data" }, { status: 400 });
++    if (body.reason === "too_large")
++      return NextResponse.json({ error: "payload_too_large" }, { status: 413 });
++    if (body.reason === "too_many_parts")
++      return NextResponse.json({ error: "too_many_parts" }, { status: 413 });
++    return NextResponse.json({ error: "invalid_form_data" }, { status: 400 });
+   }
+   const form = body.form;
+ 
+@@ -58,7 +67,13 @@ export async function POST(request: Request) {
+   const { name, email, subject, message } = parsed.data;
+ 
+   // Every file is validated (size, running total, content sniff) before any is stored (D-24).
+-  const files = form.getAll("file").filter((f): f is File => f instanceof File && f.size > 0);
++  // Every `file` part counts toward the cap, empty ones included (K135); only non-empty files
++  // are then read and stored.
++  const fileParts = form.getAll("file");
++  if (fileParts.length > MAX_FILES_PER_REQUEST) {
++    return NextResponse.json({ error: "too_many_files" }, { status: 413 });
++  }
++  const files = fileParts.filter((f): f is File => f instanceof File && f.size > 0);
+   const validated = await validateUploadFiles(files);
+   if (!validated.ok) {
+     return NextResponse.json({ error: validated.error }, { status: validated.status });
+diff --git a/src/app/api/public/status/[token]/follow-up/route.ts b/src/app/api/public/status/[token]/follow-up/route.ts
+index 9cedcb2..ce9d6f2 100644
+--- a/src/app/api/public/status/[token]/follow-up/route.ts
++++ b/src/app/api/public/status/[token]/follow-up/route.ts
+@@ -1,5 +1,9 @@
+ import { NextResponse } from "next/server";
+-import { MAX_REQUEST_BODY_BYTES } from "@/lib/attachments/constants";
++import {
++  FOLLOW_UP_MAX_PARTS,
++  MAX_FILES_PER_REQUEST,
++  MAX_REQUEST_BODY_BYTES,
++} from "@/lib/attachments/constants";
+ import {
+   removeStoredUploads,
+   storeValidatedUploads,
+@@ -43,12 +47,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
+   }
+ 
+   // The body limit holds on the bytes actually received, however the body is framed; a
+-  // Content-Length above the cap is only an early reject (D-24).
+-  const body = await readBoundedFormData(request, MAX_REQUEST_BODY_BYTES);
++  // Content-Length above the cap is only an early reject (D-24). The parts are counted on those
++  // bytes before the parse, so many small parts are refused unparsed (K135).
++  const body = await readBoundedFormData(request, MAX_REQUEST_BODY_BYTES, {
++    maxParts: FOLLOW_UP_MAX_PARTS,
++  });
+   if (!body.ok) {
+-    return body.reason === "too_large"
+-      ? NextResponse.json({ error: "payload_too_large" }, { status: 413 })
+-      : NextResponse.json({ error: "invalid_form_data" }, { status: 400 });
++    if (body.reason === "too_large")
++      return NextResponse.json({ error: "payload_too_large" }, { status: 413 });
++    if (body.reason === "too_many_parts")
++      return NextResponse.json({ error: "too_many_parts" }, { status: 413 });
++    return NextResponse.json({ error: "invalid_form_data" }, { status: 400 });
+   }
+   const form = body.form;
+ 
+@@ -69,7 +78,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
+   }
+   const { message } = parsed.data;
+ 
+-  const files = form.getAll("file").filter((f): f is File => f instanceof File && f.size > 0);
++  // Every `file` part counts toward the cap, empty ones included (K135); only non-empty files
++  // are then read and stored.
++  const fileParts = form.getAll("file");
++  if (fileParts.length > MAX_FILES_PER_REQUEST) {
++    return NextResponse.json({ error: "too_many_files" }, { status: 413 });
++  }
++  const files = fileParts.filter((f): f is File => f instanceof File && f.size > 0);
+ 
+   // Every file is validated (size, the combined cap shared with intake, sniffed type) before
+   // any is stored, so a 413/415 leaves no file behind (D-24, F-12).
+diff --git a/src/lib/attachments/constants.ts b/src/lib/attachments/constants.ts
+index 93f6ed6..707dcc8 100644
+--- a/src/lib/attachments/constants.ts
++++ b/src/lib/attachments/constants.ts
+@@ -23,6 +23,15 @@ export const CSAT_MAX_BODY_BYTES = 16 * 1024;
+ // is read (validateUploadFiles). Neither shipped public form sets a count, so this is K128's
+ // default. The forms check it too, as a convenience; the server check is the bound.
+ export const MAX_FILES_PER_REQUEST = 10;
++// K135 (Codex diff critique 1, item 5): parts per public request, counted on the raw body by its
++// boundary delimiter before the multipart parser runs (readBoundedFormData); over it the route
++// answers 413 too_many_parts. Each route allows MAX_FILES_PER_REQUEST file parts, the text fields
++// its form sends, and PUBLIC_FORM_PART_SLACK more. Intake: name, email, subject, message and the
++// company_website honeypot, so 10 + 5 + 2 = 17. Follow-up: message and company_website, so
++// 10 + 2 + 2 = 14. Every `file` part counts toward the 10, empty ones included.
++export const PUBLIC_FORM_PART_SLACK = 2;
++export const INTAKE_MAX_PARTS = MAX_FILES_PER_REQUEST + 5 + PUBLIC_FORM_PART_SLACK;
++export const FOLLOW_UP_MAX_PARTS = MAX_FILES_PER_REQUEST + 2 + PUBLIC_FORM_PART_SLACK;
+ // K129 (review b-WR-b3): character limits on the public text fields of intake (all four) and
+ // follow-up (message), answered 400 with a field error. No existing input limit covers these
+ // fields: the agent composer (api/tickets/[id]/messages) checks only that a reply is not empty,
+diff --git a/src/lib/connection-test/errors.ts b/src/lib/connection-test/errors.ts
+index 9b6b648..d93cfec 100644
+--- a/src/lib/connection-test/errors.ts
++++ b/src/lib/connection-test/errors.ts
+@@ -7,11 +7,19 @@
+ //
+ // What it removes: the error-text oracle, and the difference between network and protocol
+ // failures. Every timeout, refusal, close, DNS or TLS failure and every reply that is not the
+-// expected protocol or status falls into one category, connection_failed.
++// expected protocol, status or response shape falls into one category, connection_failed.
+ //
+-// What remains (docs/SECURITY.md states the same): authentication_failed still proves that a
+-// service of that protocol answered at the address; timing still differs between outcomes; and
+-// the probe still connects to the address the admin typed, so SSRF itself is not removed.
++// Credentials (K131): authentication_failed is given only where AIDA sends a credential, so that a
++// rejection can be a rejection of it (OpenAI and Anthropic API keys, IMAP and SMTP logins). The
++// Ollama probes send none and take an admin-typed URL; they wrap every failure in
++// UncredentialedProbeError, so an HTTP 401 or 403 there is connection_failed, and a 200 counts only
++// with Ollama's response shape (UnexpectedResponseError otherwise). A credential rejection proves
++// nothing about the protocol: any service can answer 401.
++//
++// What remains (docs/SECURITY.md states the same): a service that imitates the protocol's replies
++// (on the Ollama URL, Ollama's /api/tags or /api/embed shapes) still passes; timing still differs
++// between outcomes; and the probe still connects to the address the admin typed, so SSRF itself
++// is not removed.
+ //
+ // No imports at all: client-safe (the buttons read CONNECTION_TEST_ERROR_MESSAGES) and
+ // bundleable by both webpack and esbuild.
+@@ -41,6 +49,30 @@ export class ConnectionTestConfigError extends Error {
+   }
+ }
+ 
++/**
++ * Thrown by a probe when the server answered 200 but not with the protocol's response shape (an
++ * Ollama /api/tags without a `models` array, K131). Always connection_failed.
++ */
++export class UnexpectedResponseError extends Error {
++  constructor(message: string) {
++    super(message);
++    this.name = "UnexpectedResponseError";
++  }
++}
++
++/**
++ * Wraps every failure of a probe that sends no credential (the Ollama probes, K131). A credential
++ * signal on its cause chain (HTTP 401 or 403, an auth error name) cannot be a rejection of AIDA's
++ * credentials, so the wrapped failure is never authentication_failed. Its other categories are
++ * kept, and the log shape reads the wrapped failure, not this wrapper.
++ */
++export class UncredentialedProbeError extends Error {
++  constructor(cause: unknown) {
++    super("connection test without credentials failed", { cause });
++    this.name = "UncredentialedProbeError";
++  }
++}
++
+ /** Fixed human text per category; the only failure text a button may render. */
+ export const CONNECTION_TEST_ERROR_MESSAGES: Record<ConnectionTestErrorCategory, string> = {
+   invalid_configuration:
+@@ -128,6 +160,8 @@ const CONNECTION_NAMES = new Set([
+   "BodyTimeoutError",
+   // A body that is not JSON where the probe expects JSON (K127).
+   "SyntaxError",
++  // A 200 without the protocol's response shape (K131).
++  "UnexpectedResponseError",
+ ]);
+ 
+ type ErrorLike = Record<string, unknown>;
+@@ -248,13 +282,16 @@ function isConnection(e: ErrorLike): boolean {
+  * Maps any thrown value to one of the four categories. Precedence is fixed and applies across
+  * the whole cause chain: invalid_configuration, then authentication_failed, then
+  * connection_failed, then unknown. So `{ status: 401, code: "ECONNREFUSED" }` is
+- * authentication_failed. The raw message is read only to recognise the probes' own
+- * "Unsupported provider" errors; no part of it ever leaves this function.
++ * authentication_failed. A chain that holds an UncredentialedProbeError skips the
++ * authentication_failed step (K131), so its 401 or 403 is connection_failed. The raw message is
++ * read only to recognise the probes' own "Unsupported provider" errors; no part of it ever leaves
++ * this function.
+  */
+ export function classifyConnectionError(e: unknown): ConnectionTestErrorCategory {
+   const chain = causeChain(e);
+   if (chain.some(isConfig)) return "invalid_configuration";
+-  if (chain.some(isAuth)) return "authentication_failed";
++  const credentialed = !chain.some((link) => link instanceof UncredentialedProbeError);
++  if (credentialed && chain.some(isAuth)) return "authentication_failed";
+   if (chain.some(isConnection)) return "connection_failed";
+   return "unknown";
+ }
+@@ -274,6 +311,7 @@ const LOG_NAMES = new Set([
+   "AbortError",
+   "TimeoutError",
+   "ConnectionTestConfigError",
++  "UnexpectedResponseError",
+   // imapflow
+   "AuthenticationFailure",
+   // ollama
+@@ -358,7 +396,8 @@ function logName(e: ErrorLike | undefined): string {
+  * chain, each from a fixed set (otherwise "other", or "none" when absent). Never a message.
+  */
+ export function connectionErrorLogShape(e: unknown): ConnectionErrorLogShape {
+-  const chain = causeChain(e);
++  // The K131 wrapper says only that the probe sent no credential; log what it wraps.
++  const chain = causeChain(e).filter((link) => !(link instanceof UncredentialedProbeError));
+   let code: string | undefined;
+   let status: number | undefined;
+   for (const link of chain) {
+diff --git a/src/lib/db.ts b/src/lib/db.ts
+index 79b44f3..5afa6db 100644
+--- a/src/lib/db.ts
++++ b/src/lib/db.ts
+@@ -2,13 +2,28 @@ import { PrismaPg } from "@prisma/adapter-pg";
+ import pg from "pg";
+ import { PrismaClient } from "@/generated/prisma/client";
+ 
+-const pool = new pg.Pool({
+-  connectionString: process.env.DATABASE_URL,
+-  // Sized so app_pool + worker_pool < Postgres max_connections (default 100)
+-  // Compose sets DB_POOL_MAX=10 for app and DB_POOL_MAX=5 for worker (total 15)
+-  max: Number(process.env.DB_POOL_MAX) || 10,
+-});
++const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient; pgPool?: pg.Pool };
++// Kept with the cached client in development, so dbPoolWaitingCount reads the pool that client
++// actually uses after a hot reload.
++const pool =
++  globalForPrisma.pgPool ??
++  new pg.Pool({
++    connectionString: process.env.DATABASE_URL,
++    // Sized so app_pool + worker_pool < Postgres max_connections (default 100)
++    // Compose sets DB_POOL_MAX=10 for app and DB_POOL_MAX=5 for worker (total 15)
++    max: Number(process.env.DB_POOL_MAX) || 10,
++  });
+ const adapter = new PrismaPg(pool);
+-const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
+ export const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter });
+-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
++if (process.env.NODE_ENV !== "production") {
++  globalForPrisma.prisma = prisma;
++  globalForPrisma.pgPool = pool;
++}
++
++/**
++ * Connect requests queued in this process's pool, waiting for a free connection. Read by the
++ * rate limiter's admission check (K132) so it does not add to an already queued pool.
++ */
++export function dbPoolWaitingCount(): number {
++  return pool.waitingCount;
++}
+diff --git a/src/lib/http/read-bounded-form-data.ts b/src/lib/http/read-bounded-form-data.ts
+index b9d1189..28a51a7 100644
+--- a/src/lib/http/read-bounded-form-data.ts
++++ b/src/lib/http/read-bounded-form-data.ts
+@@ -1,4 +1,4 @@
+-// Bounded multipart reader (plan 08-13, D-24, AIDA-30).
++// Bounded multipart reader (plan 08-13, D-24, AIDA-30; part count K135).
+ //
+ // The body limit is enforced on the bytes actually received. Content-Length is client-supplied:
+ // it can be missing (chunked transfer), false (smaller than the body) or honest, so a value above
+@@ -9,15 +9,69 @@
+ // PROXY_BODY_LIMIT_BYTES (next.config.ts `proxyClientMaxBodySize`), and below the limit the
+ // chunks, the Blob and the parsed FormData are further copies (review b-IN-b2).
+ //
++// Part count (K135, Codex diff critique 1 item 5): with `maxParts`, the received bytes are scanned
++// for the boundary delimiter before the parser runs, and a body with more parts is answered
++// "too_many_parts" without being parsed, so many small parts (foreign field names included)
++// cannot make the parser build an unbounded number of entries. A url-encoded body is counted by
++// its `&`-separated fields. A content type the count cannot read exactly (a second boundary, an
++// odd parameter) is answered "invalid" without parsing, so the parser never uses a boundary other
++// than the counted one. The count never undercounts a body the parser accepts; it can overcount
++// one that carries the delimiter inside a part without a line break before it, which a real
++// client's random boundary never does.
++//
+ // No project imports: usable from any route without pulling in app modules.
+ 
+ export type BoundedFormDataResult =
+   | { ok: true; form: FormData }
+-  | { ok: false; reason: "too_large" | "invalid" };
++  | { ok: false; reason: "too_large" | "invalid" | "too_many_parts" };
++
++const MULTIPART = /^\s*multipart\/form-data\s*(;|$)/i;
++const URLENCODED = /^\s*application\/x-www-form-urlencoded\s*(;|$)/i;
++/**
++ * The only multipart content type the count accepts: one `boundary` parameter, a token or a
++ * plain quoted string, as browsers and fetch send it. Anything looser (a second boundary, spaces
++ * around `=`, escapes) could make the parser pick a boundary other than the one counted, so it is
++ * refused as invalid before the parse.
++ */
++const STRICT_MULTIPART =
++  /^\s*multipart\/form-data\s*;\s*boundary=(?:([!#$%&'*+.^_`|~0-9A-Za-z-]+)|"([^"\\\r\n]+)")\s*$/i;
++const URLENCODED_PARAMS =
++  /^\s*application\/x-www-form-urlencoded\s*(;\s*charset=[A-Za-z0-9._-]+\s*)?$/i;
++
++const DASH = 0x2d;
++const AMP = 0x26;
++
++/**
++ * The number of parts in a form body, counted on the raw bytes (K135): for multipart, every
++ * `--boundary` delimiter that is not the closing `--boundary--`; for url-encoded, the
++ * `&`-separated fields. Null when the content type is not one the count can read exactly (see
++ * STRICT_MULTIPART); readBoundedFormData then refuses the body as invalid without parsing it.
++ */
++export function countFormParts(bytes: Uint8Array, contentType: string): number | null {
++  const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
++  if (URLENCODED_PARAMS.test(contentType)) {
++    if (buf.byteLength === 0) return 0;
++    let fields = 1;
++    for (let i = buf.indexOf(AMP); i !== -1; i = buf.indexOf(AMP, i + 1)) fields++;
++    return fields;
++  }
++  const m = contentType.match(STRICT_MULTIPART);
++  const boundary = m ? (m[1] ?? m[2]) : undefined;
++  if (!boundary) return null;
++  const delimiter = Buffer.from(`--${boundary}`, "latin1");
++  let parts = 0;
++  for (let i = buf.indexOf(delimiter); i !== -1; i = buf.indexOf(delimiter, i + delimiter.length)) {
++    const end = i + delimiter.length;
++    const closing = buf[end] === DASH && buf[end + 1] === DASH;
++    if (!closing) parts++;
++  }
++  return parts;
++}
+ 
+ export async function readBoundedFormData(
+   request: Request,
+   maxBytes: number,
++  opts?: { maxParts?: number },
+ ): Promise<BoundedFormDataResult> {
+   const header = request.headers.get("content-length");
+   if (header !== null && /^\d+$/.test(header.trim()) && Number(header.trim()) > maxBytes) {
+@@ -45,9 +99,23 @@ export async function readBoundedFormData(
+     }
+   }
+ 
++  const contentType = request.headers.get("content-type") ?? "";
++  // One contiguous copy for the scan; the chunks are dropped before the Blob copy is made.
++  const bytes = Buffer.concat(chunks);
++  chunks.length = 0;
++  if (opts?.maxParts !== undefined) {
++    // Only the two form types are parsed at all; one the count cannot read exactly is invalid.
++    if (!MULTIPART.test(contentType) && !URLENCODED.test(contentType)) {
++      return { ok: false, reason: "invalid" };
++    }
++    const parts = countFormParts(bytes, contentType);
++    if (parts === null) return { ok: false, reason: "invalid" };
++    if (parts > opts.maxParts) return { ok: false, reason: "too_many_parts" };
++  }
++
+   try {
+-    const form = await new Response(new Blob(chunks as BlobPart[]), {
+-      headers: { "content-type": request.headers.get("content-type") ?? "" },
++    const form = await new Response(new Blob([bytes]), {
++      headers: { "content-type": contentType },
+     }).formData();
+     return { ok: true, form };
+   } catch {
+diff --git a/src/lib/llm/test-connection.ts b/src/lib/llm/test-connection.ts
+index 0c5bcc2..f7dc96c 100644
+--- a/src/lib/llm/test-connection.ts
++++ b/src/lib/llm/test-connection.ts
+@@ -6,6 +6,7 @@ import Anthropic from "@anthropic-ai/sdk";
+ import { Ollama } from "ollama";
+ import OpenAI from "openai";
+ import { fetchWithDeadline } from "../connection-test/deadline-fetch";
++import { UncredentialedProbeError, UnexpectedResponseError } from "../connection-test/errors";
+ import type { LlmProviderName } from "./types";
+ 
+ /** The Settings action's probe budget; the tests pass a shorter one through the same option. */
+@@ -40,14 +41,34 @@ export async function testProviderConnection(
+       return;
+     }
+     case "ollama": {
+-      const client = new Ollama({
+-        host: config.ollamaBaseUrl,
+-        fetch: fetchWithDeadline(timeoutMs),
+-      });
+-      await client.list();
++      // AIDA sends Ollama no credential, so every failure is wrapped: a 401 or 403 from that URL
++      // is connection_failed, never authentication_failed (K131).
++      try {
++        const client = new Ollama({
++          host: config.ollamaBaseUrl,
++          fetch: fetchWithDeadline(timeoutMs),
++        });
++        assertOllamaTagsShape(await client.list());
++      } catch (e) {
++        throw new UncredentialedProbeError(e);
++      }
+       return;
+     }
+     default:
+       throw new Error(`Unsupported provider: ${config.provider}`);
+   }
+ }
++
++/**
++ * Passes only when the /api/tags reply has Ollama's shape: an object with a `models` array (empty
++ * when nothing is pulled). Any other 200 is some other service at the URL (K131).
++ */
++export function assertOllamaTagsShape(reply: unknown): void {
++  const models =
++    reply !== null && typeof reply === "object"
++      ? (reply as { models?: unknown }).models
++      : undefined;
++  if (!Array.isArray(models)) {
++    throw new UnexpectedResponseError("the /api/tags reply has no models array");
++  }
++}
+diff --git a/src/lib/public-forms/limits.ts b/src/lib/public-forms/limits.ts
+index 703db5f..a0aa691 100644
+--- a/src/lib/public-forms/limits.ts
++++ b/src/lib/public-forms/limits.ts
+@@ -12,6 +12,11 @@ export function tooManyFilesMessage(kind: PublicFormKind): string {
+   return `You can attach up to ${MAX_FILES_PER_REQUEST} files to one ${kind}.`;
+ }
+ 
++/** Shown for a 413 too_many_parts: the request had more form parts than the route accepts (K135). */
++export function tooManyPartsMessage(kind: PublicFormKind): string {
++  return `Your ${kind} has too many parts to send. Attach at most ${MAX_FILES_PER_REQUEST} files and try again.`;
++}
++
+ function atMost(label: string, max: number): string {
+   return `${label} must be at most ${max.toLocaleString("en-US")} characters.`;
+ }
+diff --git a/src/lib/rag/embed-test-connection.ts b/src/lib/rag/embed-test-connection.ts
+index 4129ee0..7f755c4 100644
+--- a/src/lib/rag/embed-test-connection.ts
++++ b/src/lib/rag/embed-test-connection.ts
+@@ -1,10 +1,12 @@
+ // Connectivity probe for the embedding provider (mirrors src/lib/llm/test-connection.ts) — a
+ // trivial real embed() call (not just a models.list()) so a not-pulled Ollama model fails at
+ // "Test Connection" time (category connection_failed, K127) instead of later during chunk
+-// embedding (Pitfall 8).
++// embedding (Pitfall 8). The Ollama reply must have Ollama's embed shape, and a 401 or 403 from the
++// Ollama URL is connection_failed (K131).
+ import { Ollama } from "ollama";
+ import OpenAI from "openai";
+ import { fetchWithDeadline } from "../connection-test/deadline-fetch";
++import { UncredentialedProbeError, UnexpectedResponseError } from "../connection-test/errors";
+ import type { EmbeddingProviderName } from "./types";
+ 
+ /** The Settings action's probe budget; the tests pass a shorter one through the same option. */
+@@ -34,14 +36,45 @@ export async function testEmbeddingConnection(
+       return;
+     }
+     case "ollama": {
+-      const client = new Ollama({
+-        host: config.ollamaBaseUrl,
+-        fetch: fetchWithDeadline(timeoutMs),
+-      });
+-      await client.embed({ model: config.model, input: ["ping"] });
++      // AIDA sends Ollama no credential, so every failure is wrapped: a 401 or 403 from that URL
++      // is connection_failed, never authentication_failed (K131).
++      try {
++        const client = new Ollama({
++          host: config.ollamaBaseUrl,
++          fetch: fetchWithDeadline(timeoutMs),
++        });
++        const input = ["ping"];
++        assertOllamaEmbedShape(await client.embed({ model: config.model, input }), input.length);
++      } catch (e) {
++        throw new UncredentialedProbeError(e);
++      }
+       return;
+     }
+     default:
+       throw new Error(`Unsupported embedding provider: ${config.provider}`);
+   }
+ }
++
++/**
++ * Passes only when the /api/embed reply has Ollama's shape: an `embeddings` array with one
++ * non-empty array of finite numbers per input. Any other 200 is some other service at the URL
++ * (K131).
++ */
++export function assertOllamaEmbedShape(reply: unknown, inputs: number): void {
++  const embeddings =
++    reply !== null && typeof reply === "object"
++      ? (reply as { embeddings?: unknown }).embeddings
++      : undefined;
++  const valid =
++    Array.isArray(embeddings) &&
++    embeddings.length === inputs &&
++    embeddings.every(
++      (vector) =>
++        Array.isArray(vector) &&
++        vector.length > 0 &&
++        vector.every((x) => typeof x === "number" && Number.isFinite(x)),
++    );
++  if (!valid) {
++    throw new UnexpectedResponseError("the /api/embed reply has no embeddings of numbers");
++  }
++}
+diff --git a/src/lib/rate-limit/check-rate-limit.ts b/src/lib/rate-limit/check-rate-limit.ts
+index 3bbb453..084fadd 100644
+--- a/src/lib/rate-limit/check-rate-limit.ts
++++ b/src/lib/rate-limit/check-rate-limit.ts
+@@ -1,6 +1,6 @@
+ import { createHash } from "node:crypto";
+ import type { Prisma } from "@/generated/prisma/client";
+-import { prisma } from "@/lib/db";
++import { dbPoolWaitingCount, prisma } from "@/lib/db";
+ 
+ /**
+  * Reads the pepper lazily, on every hash — not once at module load — so importing this module
+@@ -45,8 +45,10 @@ export function rateLimitLockKey(scope: string, ip: string): string {
+   return `${scope}:${hashIp(ip)}`;
+ }
+ 
+-/** Test-only hook into the limiter transaction (lock-wait proofs). */
++/** Test-only hook into the limiter transaction (lock-wait and admission proofs). */
+ export interface RateLimitLockObserver {
++  /** Called once per admitted call, right before it asks the pool for a transaction. */
++  beforeTransaction?(): void;
+   /** Awaited inside the transaction right before the advisory lock is requested. */
+   beforeLock?(tx: Prisma.TransactionClient): Promise<void> | void;
+ }
+@@ -77,6 +79,51 @@ export const RATE_LIMIT_LOCK_TIMEOUT_MS = 500;
+ export const RATE_LIMIT_POOL_WAIT_MS = 1000;
+ export const RATE_LIMIT_BUSY_RETRY_AFTER_SECONDS = 1;
+ 
++/**
++ * Admission control in front of the pool (K132, Codex diff critique 1 item 2). The app's pool has
++ * 10 connections (DB_POOL_MAX). At most RATE_LIMIT_MAX_CONCURRENT limiter transactions run at
++ * once in this process, and none starts while that many connect requests are already queued in
++ * the pool (dbPoolWaitingCount: a call that passed maxWait leaves its connect queued until a
++ * connection frees). A call over either limit is answered "not allowed" with
++ * RATE_LIMIT_BUSY_RETRY_AFTER_SECONDS at once (429 with Retry-After at the routes) and never asks
++ * the pool for a connection. So a flood of public requests can hold at most 3 connections and add
++ * fewer than 6 queued connects through the limiter, and the other 7 connections stay with the
++ * rest of the app.
++ *
++ * Why 3: a limiter transaction holds its connection for a count, a lookup and an insert (a few
++ * milliseconds), so 3 slots serve hundreds of limiter checks per second, far above what the public
++ * form, status page, CSAT and attachment routes see on one server. Only a held advisory lock (one
++ * identity flooding, bounded by RATE_LIMIT_LOCK_TIMEOUT_MS) or a saturated pool keeps a slot busy
++ * long, and that is exactly when the limiter should answer 429 instead of queueing.
++ *
++ * The count is per app process. AIDA runs one app process (one server, one `app` container;
++ * docs/OPERATIONS.md), which this limit relies on: N processes would admit N times as many.
++ */
++export const RATE_LIMIT_MAX_CONCURRENT = 3;
++let admissionLimit = RATE_LIMIT_MAX_CONCURRENT;
++let inFlight = 0;
++
++/**
++ * Test seam only: the atomicity proof runs 20 limiter transactions at once, which the admission
++ * limit would otherwise refuse before they could race. `null` restores the shipped limit.
++ */
++export function setRateLimitAdmissionLimitForTests(limit: number | null): void {
++  admissionLimit = limit ?? RATE_LIMIT_MAX_CONCURRENT;
++}
++
++/** Limiter transactions running in this process now. */
++export function rateLimitTransactionsInFlight(): number {
++  return inFlight;
++}
++
++/** Takes a slot when one is free and the pool is not already queued; never waits. */
++function tryAdmit(): boolean {
++  if (inFlight >= admissionLimit) return false;
++  if (dbPoolWaitingCount() >= admissionLimit) return false;
++  inFlight += 1;
++  return true;
++}
++
+ // Postgres SQLSTATE 55P03 (lock_not_available): the lock wait passed `lock_timeout`. Prisma wraps a
+ // raw-query failure as P2010 and keeps the driver adapter's error, with the SQLSTATE as
+ // `originalCode`, in `meta.driverAdapterError.cause`.
+@@ -102,7 +149,8 @@ function isTransactionStartTimeout(err: unknown): boolean {
+  * transaction-scoped advisory lock on scope plus IP hash serializes the count and the insert for
+  * one identity only; Postgres releases it at commit or rollback, so nothing can leak a lock.
+  * `pg_advisory_xact_lock` returns `void`, which Prisma's `$queryRaw` cannot deserialize, so it
+- * runs through `$executeRaw`. Both waits are bounded (K130, above).
++ * runs through `$executeRaw`. Both waits are bounded (K130, above), and admission in front of the
++ * pool is limited (K132, above).
+  */
+ export async function consumeRateLimit(
+   scope: string,
+@@ -121,7 +169,11 @@ export async function consumeRateLimit(
+   }
+   const ipHash = hashIp(ip);
+   const lockKey = `${scope}:${ipHash}`;
++  if (!tryAdmit()) {
++    return { allowed: false, retryAfterSeconds: RATE_LIMIT_BUSY_RETRY_AFTER_SECONDS };
++  }
+   try {
++    lockObserver?.beforeTransaction?.();
+     return await prisma.$transaction(
+       async (tx) => {
+         // Transaction-local (`true`): the setting ends with this transaction and never leaks to
+@@ -156,6 +208,9 @@ export async function consumeRateLimit(
+       return { allowed: false, retryAfterSeconds: RATE_LIMIT_BUSY_RETRY_AFTER_SECONDS };
+     }
+     throw err;
++  } finally {
++    // Every path out of the transaction, including a throw, frees the slot.
++    inFlight -= 1;
+   }
+ }
+ 
+diff --git a/tests/e2e/public-intake.spec.ts b/tests/e2e/public-intake.spec.ts
+index 6869c51..d42465b 100644
+--- a/tests/e2e/public-intake.spec.ts
++++ b/tests/e2e/public-intake.spec.ts
+@@ -107,6 +107,28 @@ test.describe("Public intake", () => {
+     await publicPage.close();
+   });
+ 
++  test("a server 413 too_many_parts gets its own plain-English sentence (K135)", async ({
++    context,
++  }) => {
++    const publicPage = await requireBrowser(context).newPage();
++    await publicPage.goto("/request");
++    await publicPage.route("**/api/public/intake", (route) =>
++      route.fulfill({ status: 413, json: { error: "too_many_parts" } }),
++    );
++    await publicPage.getByLabel("Name").fill("Ada Requester");
++    await publicPage.getByLabel("Email").fill(`parts-${Date.now()}@example.com`);
++    await publicPage.getByLabel("Subject").fill("Many parts");
++    await publicPage.getByLabel("Message").fill("A request.");
++    await publicPage.getByRole("button", { name: "Submit Request" }).click();
++    await expect(
++      publicPage.getByText(
++        "Your request has too many parts to send. Attach at most 10 files and try again.",
++      ),
++    ).toBeVisible();
++    await expect(publicPage.getByText("Something went wrong. Please try again.")).not.toBeVisible();
++    await publicPage.close();
++  });
++
+   test("a field over its length limit shows a field error and sends nothing; a server field error shows under its field (K129)", async ({
+     context,
+   }) => {
+diff --git a/tests/e2e/public-status.spec.ts b/tests/e2e/public-status.spec.ts
+index e978e2a..169e35a 100644
+--- a/tests/e2e/public-status.spec.ts
++++ b/tests/e2e/public-status.spec.ts
+@@ -138,6 +138,30 @@ test.describe("Public status page", () => {
+     await expect(page.getByText("Couldn't send your follow-up. Try again.")).not.toBeVisible();
+   });
+ 
++  test("a server 413 too_many_parts gets its own plain-English sentence on the follow-up form (K135)", async ({
++    page,
++  }) => {
++    const ticket = await createTicket(orgId, {
++      subject: `E2E Public Status Parts ${ts}`,
++      priority: "NORMAL",
++      body: "Original request body.",
++      contact: { email: `status-parts-${ts}@example.com` },
++      direction: "INBOUND",
++    });
++    await page.goto(`/status/${ticket.statusToken}`);
++    await page.route("**/follow-up", (route) =>
++      route.fulfill({ status: 413, json: { error: "too_many_parts" } }),
++    );
++    await page.getByPlaceholder("Write a follow-up…").fill("A short follow-up.");
++    await page.getByRole("button", { name: "Send Follow-up" }).click();
++    await expect(
++      page.getByText(
++        "Your follow-up has too many parts to send. Attach at most 10 files and try again.",
++      ),
++    ).toBeVisible();
++    await expect(page.getByText("Couldn't send your follow-up. Try again.")).not.toBeVisible();
++  });
++
+   test("an invalid token shows the dead-end state", async ({ page }) => {
+     await page.goto("/status/this-token-does-not-exist");
+     await expect(page.getByRole("heading", { name: "We couldn't find that ticket" })).toBeVisible();
+diff --git a/tests/integration/public-upload-caps.test.ts b/tests/integration/public-upload-caps.test.ts
+index 94efd74..592fac4 100644
+--- a/tests/integration/public-upload-caps.test.ts
++++ b/tests/integration/public-upload-caps.test.ts
+@@ -449,3 +449,158 @@ describe("csat body limit (b-IN-b3)", () => {
+     expect(await rows()).toBe(1);
+   });
+ });
++
++// K135 (Codex diff critique 1, item 5): a part-count cap before the multipart parse, and every
++// `file` part counts toward the 10-file cap, empty ones included. The limits: intake 17 parts
++// (10 files, name, email, subject, message, company_website, 2 slack), follow-up 14 (10 files,
++// message, company_website, 2 slack). Read through the module namespace so a red run fails on
++// the assertion, not on an import error.
++const PART_CAPS = { intake: 17, followUp: 14 } as const;
++
++/** Adds `n` small text parts named `name` (default: a field neither route reads). */
++function withParts(request: Request, form: FormData, n: number, name = "note"): Request {
++  for (let i = 0; i < n; i++) form.append(name, `x${i}`);
++  return new Request(request.url, {
++    method: "POST",
++    headers: { "x-forwarded-for": uniqueClientIp() },
++    body: form,
++  });
++}
++
++function intakeForm(files: File[] = []): FormData {
++  const form = new FormData();
++  form.set("name", "Part Tester");
++  form.set("email", "parts@example.test");
++  form.set("subject", "Part caps");
++  form.set("message", "Many parts");
++  for (const f of files) form.append("file", f);
++  return form;
++}
++
++function followUpForm(files: File[] = []): FormData {
++  const form = new FormData();
++  form.set("message", "Follow-up with many parts");
++  for (const f of files) form.append("file", f);
++  return form;
++}
++
++const INTAKE_URL = "http://localhost/api/public/intake";
++const followUpUrl = () => `http://localhost/api/public/status/${ticket.token}/follow-up`;
++const emptyFiles = (n: number) => Array.from({ length: n }, () => new File([], ""));
++
++describe("part count cap before the parse (K135, Codex 5)", () => {
++  it("the caps are 17 parts for intake and 14 for follow-up", () => {
++    const c = uploadConstants as Record<string, unknown>;
++    expect(c.INTAKE_MAX_PARTS).toBe(PART_CAPS.intake);
++    expect(c.FOLLOW_UP_MAX_PARTS).toBe(PART_CAPS.followUp);
++  });
++
++  it("intake: 500 small parts answer 413 too_many_parts without parsing, create no ticket and store nothing", async () => {
++    const tickets = await ownTicketCount();
++    const before = await countStored();
++    const parse = vi.spyOn(Response.prototype, "formData");
++    const res = await intakePost(withParts(new Request(INTAKE_URL), intakeForm(), 500));
++    expect(res.status).toBe(413);
++    expect(await res.json()).toEqual({ error: "too_many_parts" });
++    expect(parse).not.toHaveBeenCalled();
++    expect(await ownTicketCount()).toBe(tickets);
++    expect(await countStored()).toBe(before);
++    expect(saveSpy).not.toHaveBeenCalled();
++  });
++
++  it("intake: foreign field names count; 17 parts pass the count, 18 are refused", async () => {
++    // 4 text fields + 10 one-byte GIFs + 3 foreign parts = 17: counted, parsed, then each GIF
++    // fails the sniff as before.
++    const atCap = await intakePost(
++      withParts(new Request(INTAKE_URL), intakeForm(oneByteGifs(10)), 3, "zz_foreign"),
++    );
++    expect(atCap.status).toBe(415);
++    expect(await atCap.json()).toEqual({ error: "unsupported_file_type" });
++    const parse = vi.spyOn(Response.prototype, "formData");
++    const over = await intakePost(
++      withParts(new Request(INTAKE_URL), intakeForm(oneByteGifs(10)), 4, "zz_foreign"),
++    );
++    expect(over.status).toBe(413);
++    expect(await over.json()).toEqual({ error: "too_many_parts" });
++    expect(parse).not.toHaveBeenCalled();
++  });
++
++  it("intake: a url-encoded body with many fields answers 413 too_many_parts and creates no ticket", async () => {
++    const tickets = await ownTicketCount();
++    const fields = new URLSearchParams({
++      name: "Part Tester",
++      email: "parts@example.test",
++      subject: "Url-encoded",
++      message: "Many fields",
++    });
++    for (let i = 0; i < 100; i++) fields.append("note", String(i));
++    const res = await intakePost(
++      new Request(INTAKE_URL, {
++        method: "POST",
++        headers: {
++          "x-forwarded-for": uniqueClientIp(),
++          "content-type": "application/x-www-form-urlencoded",
++        },
++        body: fields.toString(),
++      }),
++    );
++    expect(res.status).toBe(413);
++    expect(await res.json()).toEqual({ error: "too_many_parts" });
++    expect(await ownTicketCount()).toBe(tickets);
++  });
++
++  it("intake: 11 empty file parts answer 413 too_many_files and create no ticket", async () => {
++    const tickets = await ownTicketCount();
++    const res = await intakePost(withParts(new Request(INTAKE_URL), intakeForm(emptyFiles(11)), 0));
++    expect(res.status).toBe(413);
++    expect(await res.json()).toEqual({ error: "too_many_files" });
++    expect(await ownTicketCount()).toBe(tickets);
++    expect(saveSpy).not.toHaveBeenCalled();
++  });
++
++  it("intake: the one empty file part a browser sends when no file is chosen still creates the ticket", async () => {
++    const tickets = await ownTicketCount();
++    const res = await intakePost(withParts(new Request(INTAKE_URL), intakeForm(emptyFiles(1)), 0));
++    expect(res.status).toBe(200);
++    expect(await ownTicketCount()).toBe(tickets + 1);
++    expect(saveSpy).not.toHaveBeenCalled();
++  });
++
++  it("follow-up: 500 small parts answer 413 too_many_parts without parsing and create no message", async () => {
++    const messages = await messageCount();
++    const parse = vi.spyOn(Response.prototype, "formData");
++    const res = await followUpPost(withParts(new Request(followUpUrl()), followUpForm(), 500), {
++      params: Promise.resolve({ token: ticket.token }),
++    });
++    expect(res.status).toBe(413);
++    expect(await res.json()).toEqual({ error: "too_many_parts" });
++    expect(parse).not.toHaveBeenCalled();
++    expect(await messageCount()).toBe(messages);
++  });
++
++  it("follow-up: foreign field names count; 14 parts pass the count, 15 are refused", async () => {
++    // message + 10 one-byte GIFs + 3 foreign parts = 14: counted, parsed, then each GIF fails.
++    const atCap = await followUpPost(
++      withParts(new Request(followUpUrl()), followUpForm(oneByteGifs(10)), 3, "zz_foreign"),
++      { params: Promise.resolve({ token: ticket.token }) },
++    );
++    expect(atCap.status).toBe(415);
++    const over = await followUpPost(
++      withParts(new Request(followUpUrl()), followUpForm(oneByteGifs(10)), 4, "zz_foreign"),
++      { params: Promise.resolve({ token: ticket.token }) },
++    );
++    expect(over.status).toBe(413);
++    expect(await over.json()).toEqual({ error: "too_many_parts" });
++  });
++
++  it("follow-up: 11 empty file parts answer 413 too_many_files and create no message", async () => {
++    const messages = await messageCount();
++    const res = await followUpPost(
++      withParts(new Request(followUpUrl()), followUpForm(emptyFiles(11)), 0),
++      { params: Promise.resolve({ token: ticket.token }) },
++    );
++    expect(res.status).toBe(413);
++    expect(await res.json()).toEqual({ error: "too_many_files" });
++    expect(await messageCount()).toBe(messages);
++  });
++});
+diff --git a/tests/integration/rate-limit-atomic.test.ts b/tests/integration/rate-limit-atomic.test.ts
+index 58175fd..5c7e89f 100644
+--- a/tests/integration/rate-limit-atomic.test.ts
++++ b/tests/integration/rate-limit-atomic.test.ts
+@@ -2,12 +2,15 @@
+ import { randomUUID } from "node:crypto";
+ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+ import { GET as attachmentGet } from "@/app/api/public/status/[token]/attachments/[id]/route";
+-import { prisma } from "@/lib/db";
++import { dbPoolWaitingCount, prisma } from "@/lib/db";
+ import {
+   checkRateLimit,
+   consumeRateLimit,
++  RATE_LIMIT_MAX_CONCURRENT,
+   RATE_LIMIT_MAX_WINDOW_MS,
+   rateLimitLockKey,
++  rateLimitTransactionsInFlight,
++  setRateLimitAdmissionLimitForTests,
+   setRateLimitLockObserverForTests,
+ } from "@/lib/rate-limit/check-rate-limit";
+ import { PUBLIC_RATE_LIMITS } from "@/lib/rate-limit/public-limits";
+@@ -20,7 +23,14 @@ beforeAll(() => {
+ const scopeFor = (label: string) => `test-${label}-${randomUUID()}`;
+ 
+ describe("consumeRateLimit (D-23)", () => {
++  afterEach(() => {
++    setRateLimitAdmissionLimitForTests(null);
++  });
++
++  // The atomicity proof needs 20 transactions to race, so it lifts the K132 admission limit (which
++  // would refuse 17 of them before they start); the assertion is the one it always had.
+   it("allows exactly max of 20 parallel calls and stores exactly max rows", async () => {
++    setRateLimitAdmissionLimitForTests(20);
+     const scope = scopeFor("parallel");
+     const results = await Promise.all(
+       Array.from({ length: 20 }, () =>
+@@ -31,6 +41,20 @@ describe("consumeRateLimit (D-23)", () => {
+     expect(await prisma.rateLimitHit.count({ where: { scope } })).toBe(5);
+   });
+ 
++  it("with the shipped admission limit, 20 parallel calls admit at most the limit and store one row per allowed call", async () => {
++    const scope = scopeFor("parallel-admission");
++    const results = await Promise.all(
++      Array.from({ length: 20 }, () =>
++        consumeRateLimit(scope, "203.0.113.30", { max: 5, windowMs: 60_000 }),
++      ),
++    );
++    const allowed = results.filter((r) => r.allowed);
++    expect(allowed.length).toBeGreaterThanOrEqual(1);
++    expect(allowed.length).toBeLessThanOrEqual(RATE_LIMIT_MAX_CONCURRENT);
++    for (const r of results.filter((r) => !r.allowed)) expect(r.retryAfterSeconds).toBe(1);
++    expect(await prisma.rateLimitHit.count({ where: { scope } })).toBe(allowed.length);
++  });
++
+   it("denies the 6th sequential call with an integer Retry-After from 1 to the window", async () => {
+     const scope = scopeFor("sequential");
+     for (let i = 0; i < 5; i++) {
+@@ -191,3 +215,199 @@ describe("bounded wait (K130, b-WR-b1)", () => {
+     expect(await prisma.rateLimitHit.count({ where: { scope } })).toBe(1);
+   });
+ });
++
++// K132 (Codex 1 diff critique, item 2): admission control in front of the pool. At most
++// RATE_LIMIT_MAX_CONCURRENT limiter transactions run at once in this process; a call over that is
++// answered "busy" (429 with Retry-After) at once and never asks the pool for a connection. A
++// flood therefore cannot fill the pool or its waiter queue through the limiter, and the rest of
++// the app keeps its connections.
++describe("admission limit in front of the pool (K132)", () => {
++  afterEach(() => {
++    setRateLimitLockObserverForTests(null);
++  });
++
++  /** Fast enough that the call cannot have waited on the 500 ms lock or the 1 s pool limit. */
++  const AT_ONCE_MS = 200;
++
++  it("is a small fixed share of the 10-connection pool", () => {
++    expect(RATE_LIMIT_MAX_CONCURRENT).toBe(3);
++    expect(RATE_LIMIT_MAX_CONCURRENT).toBeLessThan((Number(process.env.DB_POOL_MAX) || 10) / 2);
++  });
++
++  it("a flood while another backend holds the advisory lock: only the limit reaches the pool, the rest get 429 with Retry-After at once, an unrelated query stays prompt, then it recovers", async () => {
++    const ip = "203.0.113.27";
++    const { scope } = PUBLIC_RATE_LIMITS.statusAttachment;
++    const lockKey = rateLimitLockKey(scope, ip);
++    const ipHash = lockKey.slice(scope.length + 1);
++    const hits = () => prisma.rateLimitHit.count({ where: { scope, ipHash } });
++    const token = `tok-${randomUUID()}`;
++    const id = randomUUID();
++    const call = () =>
++      attachmentGet(
++        new Request(`http://localhost/api/public/status/${token}/attachments/${id}`, {
++          headers: { "x-forwarded-for": ip },
++        }),
++        { params: Promise.resolve({ token, id }) },
++      );
++    const FLOOD = 30;
++
++    const before = await hits();
++    const holder = await holdTransaction(async (tx) => {
++      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}::text))`;
++    });
++    let reachedPool = 0;
++    const waiterPids: number[] = [];
++    setRateLimitLockObserverForTests({
++      beforeTransaction: () => {
++        reachedPool += 1;
++      },
++      beforeLock: async (tx) => {
++        waiterPids.push(await backendPid(tx));
++      },
++    });
++    try {
++      const timed = Array.from({ length: FLOOD }, () => {
++        const startedAt = Date.now();
++        return call().then((res) => ({ res, ms: Date.now() - startedAt }));
++      });
++      for (const t of timed) t.catch(() => {});
++
++      // The admitted calls really wait on this holder (bound by PID), so they hold their slots.
++      await vi.waitFor(() => expect(waiterPids).toHaveLength(RATE_LIMIT_MAX_CONCURRENT), {
++        timeout: 2000,
++        interval: 10,
++      });
++      await waitForBlockedBy(prisma, holder.pid, waiterPids, { timeoutMs: 2000 });
++      expect(rateLimitTransactionsInFlight()).toBe(RATE_LIMIT_MAX_CONCURRENT);
++
++      // An unrelated query on the same pool, while the admitted calls still wait on the lock.
++      const queryStartedAt = Date.now();
++      await prisma.$queryRaw`SELECT 1`;
++      const queryMs = Date.now() - queryStartedAt;
++      expect(queryMs).toBeLessThan(300);
++
++      const results = await withinBound(Promise.all(timed));
++      expect(reachedPool).toBe(RATE_LIMIT_MAX_CONCURRENT);
++      expect(new Set(waiterPids).size).toBe(RATE_LIMIT_MAX_CONCURRENT);
++      for (const { res } of results) {
++        expect(res.status).toBe(429);
++        expect(res.headers.get("Retry-After")).toMatch(/^[1-9]\d*$/);
++      }
++      const atOnce = results.filter(({ ms }) => ms < AT_ONCE_MS);
++      expect(atOnce.length).toBeGreaterThanOrEqual(FLOOD - RATE_LIMIT_MAX_CONCURRENT);
++      expect(await hits()).toBe(before);
++      console.info(
++        `[08-F6] flood of ${FLOOD}: ${reachedPool} reached the pool, ${atOnce.length} answered under ${AT_ONCE_MS} ms, unrelated query ${queryMs} ms`,
++      );
++    } finally {
++      setRateLimitLockObserverForTests(null);
++      await holder.release();
++    }
++
++    // Recovery: every slot is free again and the same call takes the normal path.
++    expect(rateLimitTransactionsInFlight()).toBe(0);
++    const ok = await call();
++    expect(ok.status).toBe(404);
++    expect(await hits()).toBe(before + 1);
++  });
++
++  it("does not queue behind abandoned pool waiters: with the limit's worth of waiters already queued, a call is refused at once without asking the pool", async () => {
++    const poolSize = Number(process.env.DB_POOL_MAX) || 10;
++    const scope = scopeFor("pool-waiters");
++    let reachedPool = 0;
++    setRateLimitLockObserverForTests({
++      beforeTransaction: () => {
++        reachedPool += 1;
++      },
++    });
++    const holders = await Promise.all(Array.from({ length: poolSize }, () => holdTransaction()));
++    try {
++      // Each of these gives up after maxWait; its pool connect stays queued in pg-pool.
++      const timedOut = await withinBound(
++        Promise.all(
++          Array.from({ length: RATE_LIMIT_MAX_CONCURRENT }, () =>
++            consumeRateLimit(scope, "203.0.113.28", { max: 5, windowMs: 60_000 }),
++          ),
++        ),
++      );
++      for (const r of timedOut) expect(r.allowed).toBe(false);
++      expect(reachedPool).toBe(RATE_LIMIT_MAX_CONCURRENT);
++      expect(rateLimitTransactionsInFlight()).toBe(0);
++      expect(dbPoolWaitingCount()).toBeGreaterThanOrEqual(RATE_LIMIT_MAX_CONCURRENT);
++
++      const startedAt = Date.now();
++      const refused = await consumeRateLimit(scope, "203.0.113.28", { max: 5, windowMs: 60_000 });
++      const elapsed = Date.now() - startedAt;
++      expect(refused).toEqual({ allowed: false, retryAfterSeconds: 1 });
++      expect(elapsed).toBeLessThan(AT_ONCE_MS);
++      expect(reachedPool).toBe(RATE_LIMIT_MAX_CONCURRENT);
++    } finally {
++      setRateLimitLockObserverForTests(null);
++      await Promise.all(holders.map((h) => h.release()));
++    }
++
++    // Recovery: the abandoned connects are served (and rolled back), then the limiter counts.
++    await vi.waitFor(() => expect(dbPoolWaitingCount()).toBe(0), { timeout: 3000, interval: 20 });
++    expect(await consumeRateLimit(scope, "203.0.113.28", { max: 5, windowMs: 60_000 })).toEqual({
++      allowed: true,
++      retryAfterSeconds: 0,
++    });
++    expect(await prisma.rateLimitHit.count({ where: { scope } })).toBe(1);
++  });
++
++  it("releases the slot on every error path", async () => {
++    const scope = scopeFor("release");
++    const ip = "203.0.113.29";
++    // An error inside the transaction (not a lock or pool timeout) still propagates as before.
++    setRateLimitLockObserverForTests({
++      beforeLock: () => {
++        throw new Error("boom inside the transaction");
++      },
++    });
++    const inside = await Promise.allSettled(
++      Array.from({ length: RATE_LIMIT_MAX_CONCURRENT * 2 }, () =>
++        consumeRateLimit(scope, ip, { max: 5, windowMs: 60_000 }),
++      ),
++    );
++    expect(inside.filter((r) => r.status === "rejected")).toHaveLength(RATE_LIMIT_MAX_CONCURRENT);
++    expect(rateLimitTransactionsInFlight()).toBe(0);
++
++    // An error before the transaction starts.
++    setRateLimitLockObserverForTests({
++      beforeTransaction: () => {
++        throw new Error("boom before the transaction");
++      },
++    });
++    for (let i = 0; i < RATE_LIMIT_MAX_CONCURRENT + 1; i++) {
++      await expect(consumeRateLimit(scope, ip, { max: 5, windowMs: 60_000 })).rejects.toThrow(
++        "boom before the transaction",
++      );
++    }
++    expect(rateLimitTransactionsInFlight()).toBe(0);
++    setRateLimitLockObserverForTests(null);
++
++    // A lock timeout (55P03), handled as busy.
++    const lockKey = rateLimitLockKey(scope, ip);
++    const holder = await holdTransaction(async (tx) => {
++      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}::text))`;
++    });
++    try {
++      expect(await consumeRateLimit(scope, ip, { max: 5, windowMs: 60_000 })).toEqual({
++        allowed: false,
++        retryAfterSeconds: 1,
++      });
++    } finally {
++      await holder.release();
++    }
++    expect(rateLimitTransactionsInFlight()).toBe(0);
++
++    // Every slot is free: the limit's worth of parallel calls are all admitted and counted.
++    const results = await Promise.all(
++      Array.from({ length: RATE_LIMIT_MAX_CONCURRENT }, () =>
++        consumeRateLimit(scope, ip, { max: 5, windowMs: 60_000 }),
++      ),
++    );
++    expect(results.every((r) => r.allowed)).toBe(true);
++    expect(await prisma.rateLimitHit.count({ where: { scope } })).toBe(RATE_LIMIT_MAX_CONCURRENT);
++  });
++});
+diff --git a/tests/unit/connection-test-errors.test.ts b/tests/unit/connection-test-errors.test.ts
+index 6b9dc0a..a579d64 100644
+--- a/tests/unit/connection-test-errors.test.ts
++++ b/tests/unit/connection-test-errors.test.ts
+@@ -5,6 +5,8 @@ import {
+   ConnectionTestConfigError,
+   classifyConnectionError,
+   connectionErrorLogShape,
++  UncredentialedProbeError,
++  UnexpectedResponseError,
+ } from "../../src/lib/connection-test/errors";
+ 
+ function withProps(message: string, props: Record<string, unknown>): Error {
+@@ -402,3 +404,72 @@ describe("connectionErrorLogShape (K127, c-WR-02)", () => {
+     expect(connectionErrorLogShape(a)).toEqual({ name: "Error", code: "none", status: "none" });
+   });
+ });
++
++describe("probes that send no credential (K131, Codex 1)", () => {
++  const ollamaResponseError = (status_code: number) =>
++    Object.assign(new Error("denied"), { name: "ResponseError", status_code });
++
++  it("maps a wrapped HTTP 401 or 403 to connection_failed, never authentication_failed", () => {
++    for (const status of [401, 403]) {
++      expect(
++        classifyConnectionError(new UncredentialedProbeError(ollamaResponseError(status))),
++        String(status),
++      ).toBe("connection_failed");
++      expect(
++        classifyConnectionError(new UncredentialedProbeError(withProps("x", { status }))),
++      ).toBe("connection_failed");
++    }
++  });
++
++  it("ignores every credential signal on the chain, not only the HTTP status", () => {
++    for (const inner of [
++      named("AuthenticationError"),
++      named("PermissionDeniedError"),
++      withProps("x", { code: "EAUTH" }),
++      withProps("x", { responseCode: 535 }),
++      withProps("x", { authenticationFailed: true }),
++    ]) {
++      expect(classifyConnectionError(new UncredentialedProbeError(inner))).not.toBe(
++        "authentication_failed",
++      );
++    }
++  });
++
++  it("keeps the other categories of the wrapped failure", () => {
++    expect(
++      classifyConnectionError(
++        new UncredentialedProbeError(
++          new TypeError("fetch failed", { cause: withProps("x", { code: "ECONNREFUSED" }) }),
++        ),
++      ),
++    ).toBe("connection_failed");
++    expect(
++      classifyConnectionError(
++        new UncredentialedProbeError(withProps("x", { code: "ERR_INVALID_URL", status: 401 })),
++      ),
++    ).toBe("invalid_configuration");
++    expect(classifyConnectionError(new UncredentialedProbeError(new Error("odd")))).toBe("unknown");
++  });
++
++  it("still maps an unwrapped 401 or 403 (the OpenAI and Anthropic probes) to authentication_failed", () => {
++    expect(classifyConnectionError({ status: 401 })).toBe("authentication_failed");
++    expect(classifyConnectionError(withProps("x", { status: 403 }))).toBe("authentication_failed");
++  });
++
++  it("maps a reply without the protocol's response shape to connection_failed", () => {
++    const shape = new UnexpectedResponseError("no models array");
++    expect(classifyConnectionError(shape)).toBe("connection_failed");
++    expect(classifyConnectionError(new UncredentialedProbeError(shape))).toBe("connection_failed");
++  });
++
++  it("logs the wrapped failure's name, code and status, not the wrapper's", () => {
++    expect(connectionErrorLogShape(new UncredentialedProbeError(ollamaResponseError(401)))).toEqual(
++      { name: "ResponseError", code: "none", status: 401 },
++    );
++    expect(
++      connectionErrorLogShape(
++        new UncredentialedProbeError(new UnexpectedResponseError("no models array")),
++      ),
++    ).toEqual({ name: "UnexpectedResponseError", code: "none", status: "none" });
++  });
++});
+diff --git a/tests/unit/connection-test-probes.test.ts b/tests/unit/connection-test-probes.test.ts
+index 544587b..11c40cc 100644
+--- a/tests/unit/connection-test-probes.test.ts
++++ b/tests/unit/connection-test-probes.test.ts
+@@ -18,6 +18,8 @@ import {
+ // Every network or protocol failure (closed port, a port that never greets, a port running some
+ // other service) gives the same category, so the category cannot tell an open port from a closed
+ // one. Only a server of the probed protocol rejecting the credentials gives authentication_failed.
++// The Ollama probes send no credential, so for them an HTTP 401 or 403 is connection_failed too,
++// and a 200 passes only with the Ollama response shape (K131).
+ // No test here connects anywhere but 127.0.0.1.
+ 
+ /** Short per-phase budget for the tests, passed through the same option the actions use. */
+@@ -286,10 +288,32 @@ describe.each(
+     expect(await ollamaCategory(await start())).toBe("connection_failed");
+   });
+ 
+-  it.each([[401], [403]])("gives authentication_failed for an HTTP %i", async (status) => {
+-    expect(
+-      await ollamaCategory(await httpAnswer(status, "application/json", '{"error":"denied"}')),
+-    ).toBe("authentication_failed");
++  // K131: AIDA sends Ollama no credential, so a 401 or 403 there cannot be a rejection of AIDA's
++  // credentials. It is some other service (or a proxy) at the address: connection_failed. This
++  // case used to pin authentication_failed (K127), which was the oracle Codex 1 names.
++  it.each([
++    [401, "application/json", '{"error":"denied"}'],
++    [403, "application/json", '{"error":"denied"}'],
++    [401, "text/html", "<html>Unauthorized</html>"],
++    [403, "text/plain", "Forbidden"],
++  ])("gives connection_failed for a foreign HTTP %i (%s)", async (status, type, body) => {
++    expect(await ollamaCategory(await httpAnswer(status, type, body))).toBe("connection_failed");
++  });
++
++  it.each([
++    ["an empty JSON object", "{}"],
++    ["a foreign status object", '{"status":"ok","version":"1.2.3"}'],
++    ["a JSON array", "[]"],
++    ["JSON null", "null"],
++    ["a models field that is not an array", '{"models":"llama3"}'],
++    ["an embeddings field that is not an array", '{"embeddings":{"0":[0.1]}}'],
++    ["an empty embedding vector", '{"embeddings":[[]]}'],
++    ["an embedding vector of strings", '{"embeddings":[["0.1","0.2"]]}'],
++    ["an embedding vector with a null", '{"embeddings":[[0.1,null]]}'],
++  ])("gives connection_failed for a foreign 200 JSON body: %s", async (_label, body) => {
++    expect(await ollamaCategory(await httpAnswer(200, "application/json", body))).toBe(
++      "connection_failed",
++    );
+   });
+ 
+   it("collapses closed, other web servers and other services into one category", async () => {
+@@ -297,12 +321,54 @@ describe.each(
+       await ollamaCategory(await closedPort()),
+       await ollamaCategory(await httpAnswer(404, "text/plain", "404 page not found")),
+       await ollamaCategory(await httpAnswer(200, "text/html", "<html>hi</html>")),
++      await ollamaCategory(await httpAnswer(200, "application/json", '{"status":"ok"}')),
++      await ollamaCategory(await httpAnswer(401, "application/json", '{"error":"denied"}')),
++      await ollamaCategory(await httpAnswer(403, "text/plain", "Forbidden")),
+       await ollamaCategory(await bannerAndClose("SSH-2.0-OpenSSH_9.6\r\n")),
+     ]);
+     expect([...categories]).toEqual(["connection_failed"]);
+   });
+ });
+ 
++/** A fake Ollama on 127.0.0.1: the /api/tags and /api/embed shapes a real Ollama returns. */
++const fakeOllama = (models: unknown[] = []) =>
++  httpServer((req, res) => {
++    if (req.method === "GET" && req.url?.startsWith("/api/tags")) {
++      res.writeHead(200, { "content-type": "application/json" });
++      res.end(JSON.stringify({ models }));
++      return;
++    }
++    if (req.method === "POST" && req.url?.startsWith("/api/embed")) {
++      req.resume();
++      req.on("end", () => {
++        res.writeHead(200, { "content-type": "application/json" });
++        res.end(JSON.stringify({ model: "nomic-embed-text", embeddings: [[0.12, -0.5, 3]] }));
++      });
++      return;
++    }
++    res.writeHead(404, { "content-type": "text/plain" });
++    res.end("404 page not found");
++  });
++
++describe("Ollama probes pass only on the Ollama response shape (K131)", () => {
++  it("the LLM probe passes on /api/tags with a models array, empty or not", async () => {
++    await expect(ollamaProbes.llm(await fakeOllama())).resolves.toBeUndefined();
++    await expect(
++      ollamaProbes.llm(await fakeOllama([{ name: "llama3", model: "llama3" }])),
++    ).resolves.toBeUndefined();
++  });
++
++  it("the embedding probe passes on /api/embed with an embeddings array of number arrays", async () => {
++    await expect(ollamaProbes.embedding(await fakeOllama())).resolves.toBeUndefined();
++  });
++
++  it("a closed port still fails both probes as connection_failed", async () => {
++    const port = await closedPort();
++    expect(await categoryOf(ollamaProbes.llm(port))).toBe("connection_failed");
++    expect(await categoryOf(ollamaProbes.embedding(port))).toBe("connection_failed");
++  });
++});
++
+ describe("Ollama probe deadline (c-WR-03)", () => {
+   it("defaults to the documented 10 s budget for the Settings actions", () => {
+     expect(PROBE_TIMEOUT_MS).toBe(10_000);
+diff --git a/tests/unit/part-a-gate-check.test.ts b/tests/unit/part-a-gate-check.test.ts
+index a9a03bb..e2a84f4 100644
+--- a/tests/unit/part-a-gate-check.test.ts
++++ b/tests/unit/part-a-gate-check.test.ts
+@@ -6,6 +6,8 @@ import fs from "node:fs";
+ import os from "node:os";
+ import path from "node:path";
+ import { afterEach, describe, expect, it } from "vitest";
++import * as pureVerify from "../../scripts/image-check-verify";
++import { verifyImageCheckLog } from "../../scripts/image-check-verify";
+ import {
+   checkGate,
+   classifyEgress,
+@@ -19,6 +21,7 @@ import {
+   WORDS,
+   worstOf,
+ } from "../../scripts/part-a-gate-check";
++import * as imageCheck from "../../scripts/test-image-check";
+ import { type CheckState, EXIT_CODES, summaryWord } from "../../scripts/test-image-check";
+ import { assertEnoughSpace } from "../support/docker-test-preflight";
+ 
+@@ -116,7 +119,10 @@ interface Fixture {
+   imageLog?: string | ((target: string) => string);
+   imageExit?: number;
+   cleanupLog?: string;
++  /** The after listing of the aida-dev-db container (K134 capture shape). */
+   foreignAfter?: string;
++  /** K134: per-file overrides of the foreign listings; `null` leaves the file out. */
++  foreign?: Record<string, string | null>;
+   patch?: string;
+   opsVolumeLog?: string;
+   skip?: string[];
+@@ -124,6 +130,9 @@ interface Fixture {
+ 
+ const EGRESS = "tests/integration/egress-isolation.test.ts";
+ 
++/** K134: the evidence row says what it measures, not "foreign resources unchanged". */
++const FOREIGN_ROW = "listed containers, and the volumes of project `aida`, unchanged";
++
+ /** The two lines test-image-check.ts prints, in its own JSON shape (c-CR-02). */
+ function imageLog(
+   t: string,
+@@ -159,6 +168,48 @@ function imageLog(
+   return `IMAGE-CHECK-TEARDOWN ${JSON.stringify(teardown)}\nIMAGE-CHECK-RESULT ${JSON.stringify(result)}\n`;
+ }
+ 
++/**
++ * K133: an image log that test-image-check.ts --verify itself accepts as passed (user node, both
++ * telemetry variables, an image ID, the run labels, its own tag removed, the base image unmoved).
++ * `mutate` edits the parsed result and teardown lines; `dropTeardown` leaves the teardown line out.
++ */
++function passingImageLog(
++  t: string,
++  mutate?: (r: Record<string, unknown>, td: Record<string, unknown>) => void,
++  { dropTeardown = false }: { dropTeardown?: boolean } = {},
++): string {
++  const tag = `aida-test-nonroot-${t}:${RUN}`;
++  const teardown: Record<string, unknown> = {
++    created: true,
++    removed: [tag],
++    gone: [],
++    skipped: [],
++    notOurs: [],
++    leftAlone: [],
++    failed: [],
++    remaining: [],
++    runId: RUN,
++  };
++  const result: Record<string, unknown> = {
++    target: t,
++    tag,
++    runId: RUN,
++    state: "passed",
++    cause: "none",
++    evidence: "",
++    imageId: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
++    user: "node",
++    env: ["PATH=/usr/local/bin", "NEXT_TELEMETRY_DISABLED=1", "CHECKPOINT_DISABLE=1"],
++    labels: { "aida.test": "1", "aida.test.run": RUN },
++    baseImageBefore: "sha256:base",
++    baseImageAfter: "sha256:base",
++    runDir: "/tmp/aida-image-check-x",
++  };
++  mutate?.(result, teardown);
++  const td = dropTeardown ? "" : `IMAGE-CHECK-TEARDOWN ${JSON.stringify(teardown)}\n`;
++  return `${td}IMAGE-CHECK-RESULT ${JSON.stringify(result)}\n`;
++}
++
+ function verifyLine(t: string, state: string, cause: string, word: string, extra = ""): string {
+   return `IMAGE-CHECK-VERIFY state=${state} cause=${cause} word="${word}" target=${t} tag=aida-test-nonroot-${t}:${RUN}${extra}\n`;
+ }
+@@ -166,10 +217,43 @@ function verifyLine(t: string, state: string, cause: string, word: string, extra
+ /** A consistent passed image check for both targets; `exit` is what image-<t>.exit records. */
+ const passedImages = (exit: number): Fixture => ({
+   imageExit: exit,
+-  imageLog: (t) => imageLog(t, { state: "passed", cause: "none", evidence: "" }),
++  imageLog: (t) => passingImageLog(t),
+   imageVerify: (t) => verifyLine(t, "passed", "none", "passed"),
+ });
+ 
++/** The three read-only listings of 08-24's foreign-before/after step, as `docker ... table` prints them. */
++const FOREIGN_LISTINGS = ["project-containers", "dev-db-container", "project-volumes"] as const;
++const FOREIGN_DEFAULT: Record<(typeof FOREIGN_LISTINGS)[number], string> = {
++  "project-containers": "CONTAINER ID   NAMES     STATE\n",
++  "dev-db-container": "CONTAINER ID   NAMES         STATE\n0123456789ab   aida-dev-db   running\n",
++  "project-volumes": "VOLUME NAME\naida_pgdata\naida_uploads_data\n",
++};
++
++/**
++ * Writes foreign-<when>-<listing>.txt and .exit (K134). It also writes the old capture's
++ * foreign-<when>.txt (the listings concatenated, without exit codes), which the old verifier
++ * compared byte for byte; the K134 verifier must not read them.
++ */
++function writeForeign(w: (name: string, body: string) => void, f: Fixture) {
++  const legacy: Record<string, string> = { before: "", after: "" };
++  for (const when of ["before", "after"]) {
++    for (const l of FOREIGN_LISTINGS) {
++      const name = `foreign-${when}-${l}`;
++      let text = FOREIGN_DEFAULT[l];
++      if (when === "after" && l === "dev-db-container" && f.foreignAfter !== undefined)
++        text = f.foreignAfter;
++      const over = f.foreign?.[`${name}.txt`];
++      if (over !== undefined) text = over ?? "";
++      if (over !== null) w(`${name}.txt`, text);
++      const exitOver = f.foreign?.[`${name}.exit`];
++      if (exitOver !== null) w(`${name}.exit`, exitOver ?? "0\n");
++      legacy[when] += text;
++    }
++  }
++  w("foreign-before.txt", legacy.before);
++  w("foreign-after.txt", legacy.after);
++}
++
+ function makeDir(f: Fixture = {}): string {
+   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aida-gate-a-test-"));
+   dirs.push(dir);
+@@ -200,8 +284,7 @@ function makeDir(f: Fixture = {}): string {
+   w("part-a-src.patch", f.patch ?? "+++ b/src/app/layout.tsx\n+const x = 1;\n");
+   cmd("docker-health.colima", f.colimaExit ?? 0, "colima is running\n");
+   cmd("docker-health.info", 0, "Server Version: 28\n");
+-  w("foreign-before.txt", "abc aida-dev-db running\n");
+-  w("foreign-after.txt", f.foreignAfter ?? "abc aida-dev-db running\n");
++  writeForeign(w, f);
+   cmd("integration", 0, "Test Files  94 passed\n");
+   w(
+     "integration.json",
+@@ -411,6 +494,19 @@ describe("part-a-gate-check: literal derivation cases", () => {
+     expect(result(derive(fx).model, "image check runner").word).toBe("passed");
+   });
+ 
++  it("K133: the gate re-runs the image check's own --verify validation over the image log and exit file", () => {
++    // The verify log still says passed; the image log underneath it does not back that.
++    const fx = passedImages(0);
++    fx.imageLog = (t) =>
++      passingImageLog(t, (r) => {
++        r.user = "root";
++      });
++    const r = result(derive(fx).model, "image check runner");
++    expect(r.word).toBe("failed");
++    expect(r.note).toContain('passed with user "root"');
++    expect(verifyImageCheckLog(passingImageLog("runner"), 0, "runner").ok).toBe(true);
++  });
++
+   it("c-CR-02: the gate's word-to-exit table matches the image check's own exit codes", () => {
+     const cases: [CheckState, string][] = [
+       ["passed", "none"],
+@@ -488,7 +584,7 @@ describe("part-a-gate-check: literal derivation cases", () => {
+       expect(result(m, k).word).toBe("blocked (docker unhealthy)");
+     expect(result(m, "pnpm lint").word).toBe("passed");
+     expect(result(m, "pnpm audit --prod").word).toBe("failed");
+-    expect(evidence(m, "foreign resources unchanged").word).toBe("blocked (docker unhealthy)");
++    expect(evidence(m, FOREIGN_ROW).word).toBe("blocked (docker unhealthy)");
+     expect(evidence(m, "no foreign project named in gate logs").word).toBe(
+       "blocked (docker unhealthy)",
+     );
+@@ -710,7 +806,7 @@ describe("part-a-gate-check: literal derivation cases", () => {
+ 
+ function fullGate(): { dir: string; file: string; text: string } {
+   const dir = makeDir({
+-    foreignAfter: "abc aida-dev-db exited\n",
++    foreignAfter: "CONTAINER ID   NAMES         STATE\n0123456789ab   aida-dev-db   exited\n",
+     cleanupLog: `2 resource(s) of run ${RUN}; dry run, nothing removed.\n`,
+   });
+   const res = deriveGate(dir);
+@@ -938,7 +1034,7 @@ describe("part-a-gate-check: check rejects single edits", () => {
+ 
+   it("R3-4: mutation M19 an Evidence checks word failed changed to passed", () => {
+     const g = fullGate();
+-    const k = "foreign resources unchanged";
++    const k = FOREIGN_ROW;
+     expect(cellOf(g.text, EV, k, 1)).toBe("failed");
+     expectRejected(g.file, editCell(g.text, EV, k, 1, "passed"), "evidence", k);
+   });
+@@ -1028,3 +1124,218 @@ describe("part-a-gate-check: check rejects single edits", () => {
+     expect(r.out.join("\n")).toContain("PART-A-GATE-CHECK FAILED: matrix: 29:");
+   });
+ });
++
++// K133 (Codex diff critique 1, item 3): after a passing verify log, any change to the image log's
++// validated fields, or a missing teardown line, must make `check` fail on that row. The gate
++// re-runs test-image-check.ts's --verify validation (one pure module both scripts import) over the
++// actual image log and exit file at derive and at check time, instead of trusting the verify log.
++describe("part-a-gate-check: the image row re-verifies its own evidence (K133)", () => {
++  function passingGate(): { dir: string; file: string } {
++    const dir = makeDir({
++      ...passedImages(0),
++      foreignAfter: "CONTAINER ID   NAMES         STATE\n0123456789ab   aida-dev-db   exited\n",
++      cleanupLog: `2 resource(s) of run ${RUN}; dry run, nothing removed.\n`,
++    });
++    const res = deriveGate(dir);
++    expect(res.missing).toEqual([]);
++    expect(result(res.model, "image check runner").word).toBe("passed");
++    const file = path.join(dir, "gate.md");
++    fs.writeFileSync(file, `${res.text}\n## Notes\n\n- free text\n`);
++    expect(runCheck(file).code).toBe(0);
++    return { dir, file };
++  }
++
++  const mutations: [string, string][] = [
++    [
++      "user",
++      passingImageLog("runner", (r) => {
++        r.user = "root";
++      }),
++    ],
++    [
++      "env NEXT_TELEMETRY_DISABLED",
++      passingImageLog("runner", (r) => {
++        r.env = ["PATH=/usr/local/bin", "CHECKPOINT_DISABLE=1"];
++      }),
++    ],
++    [
++      "env CHECKPOINT_DISABLE",
++      passingImageLog("runner", (r) => {
++        r.env = ["NEXT_TELEMETRY_DISABLED=1"];
++      }),
++    ],
++    [
++      "image ID",
++      passingImageLog("runner", (r) => {
++        r.imageId = null;
++      }),
++    ],
++    [
++      "tag",
++      passingImageLog("runner", (r) => {
++        r.tag = "aida-test-nonroot-runner:mwc6vmbv-0000000000000000";
++      }),
++    ],
++    [
++      "run id",
++      passingImageLog("runner", (r) => {
++        r.runId = "mwc6vmbv-0000000000000000";
++      }),
++    ],
++    [
++      "run label",
++      passingImageLog("runner", (r) => {
++        r.labels = { "aida.test": "1" };
++      }),
++    ],
++    [
++      "state",
++      passingImageLog("runner", (r) => {
++        r.state = "failed";
++        r.cause = "build";
++      }),
++    ],
++    [
++      "tag not removed",
++      passingImageLog("runner", (_r, td) => {
++        td.removed = [];
++      }),
++    ],
++    [
++      "base image moved",
++      passingImageLog("runner", (r) => {
++        r.baseImageAfter = "sha256:other";
++      }),
++    ],
++    ["teardown line removed", passingImageLog("runner", undefined, { dropTeardown: true })],
++  ];
++
++  it.each(
++    mutations,
++  )("changing the image log's %s after a passing verify fails check", (_f, log) => {
++    const g = passingGate();
++    fs.writeFileSync(path.join(g.dir, "image-runner.log"), log);
++    const r = runCheck(g.file);
++    expect(r.code).toBe(1);
++    expect(r.out.join("\n")).toContain("PART-A-GATE-CHECK FAILED: results: image check runner:");
++  });
++
++  it("changing the image exit file after a passing verify fails check", () => {
++    const g = passingGate();
++    fs.writeFileSync(path.join(g.dir, "image-runner.exit"), "1\n");
++    const r = runCheck(g.file);
++    expect(r.code).toBe(1);
++    expect(r.out.join("\n")).toContain("PART-A-GATE-CHECK FAILED: results: image check runner:");
++  });
++
++  it("one pure validation module, imported by both scripts, with no Docker or child-process code", () => {
++    expect(imageCheck.verifyImageCheckLog).toBe(pureVerify.verifyImageCheckLog);
++    const src = fs.readFileSync(path.join("scripts", "image-check-verify.ts"), "utf8");
++    const imports = [...src.matchAll(/^import[^;]*?from\s+"([^"]+)"/gms)].map((m) => m[1]);
++    for (const spec of imports) {
++      expect(spec).not.toMatch(
++        /child_process|docker-test-preflight|test-docker-cleanup|test-image-check/,
++      );
++    }
++    expect(src).not.toMatch(/\bspawn\(|\bexecFile|\bexecSync|runDocker/);
++    const gate = fs.readFileSync(path.join("scripts", "part-a-gate-check.ts"), "utf8");
++    expect(gate).toMatch(/from "\.\/image-check-verify"/);
++    expect(gate).not.toMatch(/from "\.\/test-image-check"/);
++    const check = fs.readFileSync(path.join("scripts", "test-image-check.ts"), "utf8");
++    expect(check).toMatch(/from "\.\/image-check-verify"/);
++  });
++});
++
++// K134 (Codex diff critique 1, item 4): the foreign listing row records each listing's exit code
++// and passes only when every listing exits 0 and is a well-formed table (header line present,
++// every other line a container or volume row), before and after, and the two are identical.
++describe("part-a-gate-check: the foreign listing row (K134)", () => {
++  /** The row under either name, so the old verifier's answer is visible in a red run. */
++  const foreignRow = (f: Fixture) => {
++    const r = derive(f).model.evidence.find((e) => e.key.endsWith("unchanged"));
++    if (!r) throw new Error("no foreign listing row");
++    return r;
++  };
++  const files = (text: string, exit = "0\n") => {
++    const out: Record<string, string> = {};
++    for (const when of ["before", "after"])
++      for (const l of FOREIGN_LISTINGS) {
++        out[`foreign-${when}-${l}.txt`] = text;
++        out[`foreign-${when}-${l}.exit`] = exit;
++      }
++    return out;
++  };
++
++  it("is named for what it measures", () => {
++    const keys = derive().model.evidence.map((e) => e.key);
++    expect(keys).toContain(FOREIGN_ROW);
++    expect(keys).not.toContain("foreign resources unchanged");
++  });
++
++  it("well-formed identical listings with exit 0 pass", () => {
++    const r = foreignRow({});
++    expect(r.word).toBe("passed");
++    expect(r.note).toContain("3 listing(s) before and after, each exit 0");
++  });
++
++  it("two empty identical files fail", () => {
++    expect(foreignRow({ foreign: files("") }).word).toBe("failed");
++  });
++
++  it("identical listings without a header line fail", () => {
++    const r = foreignRow({ foreign: files("0123456789ab   aida-dev-db   running\n") });
++    expect(r.word).toBe("failed");
++    expect(r.note).toContain("header");
++  });
++
++  it("an identical listing whose command failed (exit 1) fails, before or after", () => {
++    for (const when of ["before", "after"]) {
++      const r = foreignRow({ foreign: { [`foreign-${when}-project-volumes.exit`]: "1\n" } });
++      expect(r.word, when).toBe("failed");
++      expect(r.note).toContain(`foreign-${when}-project-volumes.exit`);
++    }
++  });
++
++  it("a missing listing or exit file fails", () => {
++    expect(foreignRow({ foreign: { "foreign-after-dev-db-container.exit": null } }).word).toBe(
++      "failed",
++    );
++    expect(foreignRow({ foreign: { "foreign-before-project-containers.txt": null } }).word).toBe(
++      "failed",
++    );
++  });
++
++  it("an error text in place of a listing fails even when identical", () => {
++    const err = "Cannot connect to the Docker daemon at unix:///var/run/docker.sock.\n";
++    expect(foreignRow({ foreign: files(err) }).word).toBe("failed");
++    const mixed = `${FOREIGN_DEFAULT["dev-db-container"]}${err}`;
++    expect(
++      foreignRow({
++        foreign: {
++          "foreign-before-dev-db-container.txt": mixed,
++          "foreign-after-dev-db-container.txt": mixed,
++        },
++      }).word,
++    ).toBe("failed");
++  });
++
++  it("a changed listing fails with the first difference quoted", () => {
++    const r = foreignRow({
++      foreignAfter: "CONTAINER ID   NAMES         STATE\n0123456789ab   aida-dev-db   exited\n",
++    });
++    expect(r.word).toBe("failed");
++    expect(r.note).toContain("aida-dev-db   exited");
++  });
++
++  it("check fails when a listing's exit file changes after derive", () => {
++    const dir = makeDir({});
++    const res = deriveGate(dir);
++    const file = path.join(dir, "gate.md");
++    fs.writeFileSync(file, `${res.text}\n## Notes\n\n- free text\n`);
++    expect(runCheck(file).code).toBe(0);
++    fs.writeFileSync(path.join(dir, "foreign-after-project-containers.exit"), "1\n");
++    const r = runCheck(file);
++    expect(r.code).toBe(1);
++    expect(r.out.join("\n")).toContain(`PART-A-GATE-CHECK FAILED: evidence: ${FOREIGN_ROW}:`);
++  });
++});
+diff --git a/tests/unit/read-bounded-form-data.test.ts b/tests/unit/read-bounded-form-data.test.ts
+index 4d126cb..250268f 100644
+--- a/tests/unit/read-bounded-form-data.test.ts
++++ b/tests/unit/read-bounded-form-data.test.ts
+@@ -1,5 +1,6 @@
+ // readBoundedFormData counts the bytes actually received (plan 08-13, D-24, AIDA-30).
+-import { describe, expect, it } from "vitest";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import * as bounded from "@/lib/http/read-bounded-form-data";
+ import { readBoundedFormData } from "@/lib/http/read-bounded-form-data";
+ 
+ const URL_ = "http://localhost/upload";
+@@ -141,3 +142,101 @@ describe("readBoundedFormData on an unreadable body (b-IN-b2)", () => {
+     });
+   });
+ });
++
++// K135 (Codex diff critique 1, item 5): the parts are counted on the raw bytes, by the boundary
++// delimiter, before the multipart parser runs. A body over `maxParts` is "too_many_parts" and is
++// never parsed.
++describe("part count before the parse (K135)", () => {
++  afterEach(() => {
++    vi.restoreAllMocks();
++  });
++
++  /** A multipart body with `n` text parts, serialized by the platform's own FormData encoder. */
++  async function partsBody(n: number, name = (i: number) => `f${i}`) {
++    const form = new FormData();
++    for (let i = 0; i < n; i++) form.append(name(i), `v${i}`);
++    const req = new Request(URL_, { method: "POST", body: form });
++    return {
++      body: new Uint8Array(await req.arrayBuffer()),
++      type: req.headers.get("content-type") ?? "",
++    };
++  }
++
++  const countFormParts = (bounded as Record<string, unknown>).countFormParts as
++    | ((bytes: Uint8Array, contentType: string) => number | null)
++    | undefined;
++
++  it("counts exactly the parts of a multipart body; the closing delimiter is not a part", async () => {
++    expect(typeof countFormParts).toBe("function");
++    for (const n of [0, 1, 5, 40]) {
++      const { body, type } = await partsBody(n);
++      expect(countFormParts?.(body, type), `n=${n}`).toBe(n);
++    }
++  });
++
++  it("reads a quoted boundary and counts file parts, empty ones included", async () => {
++    const form = new FormData();
++    form.set("message", "m");
++    for (let i = 0; i < 11; i++) form.append("file", new File([], ""));
++    const req = new Request(URL_, { method: "POST", body: form });
++    const body = new Uint8Array(await req.arrayBuffer());
++    const type = req.headers.get("content-type") ?? "";
++    const boundary = type.split("boundary=")[1];
++    expect(countFormParts?.(body, type)).toBe(12);
++    expect(countFormParts?.(body, `multipart/form-data; boundary="${boundary}"`)).toBe(12);
++  });
++
++  it("counts the fields of a url-encoded body", () => {
++    const body = new TextEncoder().encode("a=1&b=2&a=3");
++    expect(countFormParts?.(body, "application/x-www-form-urlencoded")).toBe(3);
++    expect(countFormParts?.(new Uint8Array(), "application/x-www-form-urlencoded")).toBe(0);
++  });
++
++  it("over maxParts answers too_many_parts and never runs the parser", async () => {
++    const { body, type } = await partsBody(30);
++    const parse = vi.spyOn(Response.prototype, "formData");
++    const result = await readBoundedFormData(post(body, { "content-type": type }), 1 << 20, {
++      maxParts: 29,
++    });
++    expect(result).toEqual({ ok: false, reason: "too_many_parts" });
++    expect(parse).not.toHaveBeenCalled();
++  });
++
++  it("at maxParts the body is parsed as before", async () => {
++    const { body, type } = await partsBody(29);
++    const result = await readBoundedFormData(post(body, { "content-type": type }), 1 << 20, {
++      maxParts: 29,
++    });
++    expect(result.ok).toBe(true);
++    if (result.ok) expect(result.form.get("f28")).toBe("v28");
++  });
++
++  it("with maxParts, a content type the count cannot read exactly is invalid and never parsed", async () => {
++    const { body, type } = await partsBody(3);
++    const boundary = type.split("boundary=")[1];
++    const parse = vi.spyOn(Response.prototype, "formData");
++    for (const odd of [
++      `multipart/form-data; boundary=zzz; boundary=${boundary}`,
++      `multipart/form-data; boundary= ${boundary}`,
++      `multipart/form-data; charset=utf-8; boundary=${boundary}`,
++      "multipart/form-data",
++      "text/plain",
++    ]) {
++      const result = await readBoundedFormData(post(body, { "content-type": odd }), 1 << 20, {
++        maxParts: 100,
++      });
++      expect(result, odd).toEqual({ ok: false, reason: "invalid" });
++    }
++    expect(parse).not.toHaveBeenCalled();
++  });
++
++  it("over maxParts in a url-encoded body is too_many_parts", async () => {
++    const fields = Array.from({ length: 50 }, (_, i) => `x${i}=1`).join("&");
++    const result = await readBoundedFormData(
++      post(fields, { "content-type": "application/x-www-form-urlencoded" }),
++      1 << 20,
++      { maxParts: 10 },
++    );
++    expect(result).toEqual({ ok: false, reason: "too_many_parts" });
++  });
++});
