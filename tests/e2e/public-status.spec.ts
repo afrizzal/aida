@@ -138,6 +138,30 @@ test.describe("Public status page", () => {
     await expect(page.getByText("Couldn't send your follow-up. Try again.")).not.toBeVisible();
   });
 
+  test("a server 413 too_many_parts gets its own plain-English sentence on the follow-up form (K135)", async ({
+    page,
+  }) => {
+    const ticket = await createTicket(orgId, {
+      subject: `E2E Public Status Parts ${ts}`,
+      priority: "NORMAL",
+      body: "Original request body.",
+      contact: { email: `status-parts-${ts}@example.com` },
+      direction: "INBOUND",
+    });
+    await page.goto(`/status/${ticket.statusToken}`);
+    await page.route("**/follow-up", (route) =>
+      route.fulfill({ status: 413, json: { error: "too_many_parts" } }),
+    );
+    await page.getByPlaceholder("Write a follow-up…").fill("A short follow-up.");
+    await page.getByRole("button", { name: "Send Follow-up" }).click();
+    await expect(
+      page.getByText(
+        "Your follow-up has too many parts to send. Attach at most 10 files and try again.",
+      ),
+    ).toBeVisible();
+    await expect(page.getByText("Couldn't send your follow-up. Try again.")).not.toBeVisible();
+  });
+
   test("an invalid token shows the dead-end state", async ({ page }) => {
     await page.goto("/status/this-token-does-not-exist");
     await expect(page.getByRole("heading", { name: "We couldn't find that ticket" })).toBeVisible();

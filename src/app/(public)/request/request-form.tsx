@@ -23,6 +23,7 @@ import {
   type IntakeField,
   intakeSchema,
   tooManyFilesMessage,
+  tooManyPartsMessage,
 } from "@/lib/public-forms/limits";
 
 // The intake route's own schema, length caps included (K129), so the form refuses what the
@@ -108,6 +109,10 @@ export function RequestForm() {
       } | null;
       if (res.status === 413 && failure?.error === "too_many_files") {
         form.setError("root", { message: tooManyFilesMessage("request") });
+        return;
+      }
+      if (res.status === 413 && failure?.error === "too_many_parts") {
+        form.setError("root", { message: tooManyPartsMessage("request") });
         return;
       }
       // A server field error (K129) shows under its own field.

@@ -12,6 +12,11 @@ export function tooManyFilesMessage(kind: PublicFormKind): string {
   return `You can attach up to ${MAX_FILES_PER_REQUEST} files to one ${kind}.`;
 }
 
+/** Shown for a 413 too_many_parts: the request had more form parts than the route accepts (K135). */
+export function tooManyPartsMessage(kind: PublicFormKind): string {
+  return `Your ${kind} has too many parts to send. Attach at most ${MAX_FILES_PER_REQUEST} files and try again.`;
+}
+
 function atMost(label: string, max: number): string {
   return `${label} must be at most ${max.toLocaleString("en-US")} characters.`;
 }

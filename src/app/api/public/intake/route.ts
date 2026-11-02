@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { MAX_REQUEST_BODY_BYTES } from "@/lib/attachments/constants";
+import {
+  INTAKE_MAX_PARTS,
+  MAX_FILES_PER_REQUEST,
+  MAX_REQUEST_BODY_BYTES,
+} from "@/lib/attachments/constants";
 import {
   removeStoredUploads,
   storeValidatedUploads,
@@ -26,12 +30,17 @@ export async function POST(request: Request) {
   }
 
   // The body limit holds on the bytes actually received, however the body is framed; a
-  // Content-Length above the cap is only an early reject (D-24).
-  const body = await readBoundedFormData(request, MAX_REQUEST_BODY_BYTES);
+  // Content-Length above the cap is only an early reject (D-24). The parts are counted on those
+  // bytes before the parse, so many small parts are refused unparsed (K135).
+  const body = await readBoundedFormData(request, MAX_REQUEST_BODY_BYTES, {
+    maxParts: INTAKE_MAX_PARTS,
+  });
   if (!body.ok) {
-    return body.reason === "too_large"
-      ? NextResponse.json({ error: "payload_too_large" }, { status: 413 })
-      : NextResponse.json({ error: "invalid_form_data" }, { status: 400 });
+    if (body.reason === "too_large")
+      return NextResponse.json({ error: "payload_too_large" }, { status: 413 });
+    if (body.reason === "too_many_parts")
+      return NextResponse.json({ error: "too_many_parts" }, { status: 413 });
+    return NextResponse.json({ error: "invalid_form_data" }, { status: 400 });
   }
   const form = body.form;
 
@@ -58,7 +67,13 @@ export async function POST(request: Request) {
   const { name, email, subject, message } = parsed.data;
 
   // Every file is validated (size, running total, content sniff) before any is stored (D-24).
-  const files = form.getAll("file").filter((f): f is File => f instanceof File && f.size > 0);
+  // Every `file` part counts toward the cap, empty ones included (K135); only non-empty files
+  // are then read and stored.
+  const fileParts = form.getAll("file");
+  if (fileParts.length > MAX_FILES_PER_REQUEST) {
+    return NextResponse.json({ error: "too_many_files" }, { status: 413 });
+  }
+  const files = fileParts.filter((f): f is File => f instanceof File && f.size > 0);
   const validated = await validateUploadFiles(files);
   if (!validated.ok) {
     return NextResponse.json({ error: validated.error }, { status: validated.status });

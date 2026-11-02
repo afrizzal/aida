@@ -17,6 +17,7 @@ import {
   type FieldIssue,
   followUpTooLongMessage,
   tooManyFilesMessage,
+  tooManyPartsMessage,
 } from "@/lib/public-forms/limits";
 
 interface FollowUpFormProps {
@@ -103,6 +104,10 @@ export function FollowUpForm({ token }: FollowUpFormProps) {
         } | null;
         if (res.status === 413 && failure?.error === "too_many_files") {
           setSendError(tooManyFilesMessage("follow-up"));
+          return;
+        }
+        if (res.status === 413 && failure?.error === "too_many_parts") {
+          setSendError(tooManyPartsMessage("follow-up"));
           return;
         }
         const tooLong = (failure?.issues ?? []).some(

@@ -107,6 +107,28 @@ test.describe("Public intake", () => {
     await publicPage.close();
   });
 
+  test("a server 413 too_many_parts gets its own plain-English sentence (K135)", async ({
+    context,
+  }) => {
+    const publicPage = await requireBrowser(context).newPage();
+    await publicPage.goto("/request");
+    await publicPage.route("**/api/public/intake", (route) =>
+      route.fulfill({ status: 413, json: { error: "too_many_parts" } }),
+    );
+    await publicPage.getByLabel("Name").fill("Ada Requester");
+    await publicPage.getByLabel("Email").fill(`parts-${Date.now()}@example.com`);
+    await publicPage.getByLabel("Subject").fill("Many parts");
+    await publicPage.getByLabel("Message").fill("A request.");
+    await publicPage.getByRole("button", { name: "Submit Request" }).click();
+    await expect(
+      publicPage.getByText(
+        "Your request has too many parts to send. Attach at most 10 files and try again.",
+      ),
+    ).toBeVisible();
+    await expect(publicPage.getByText("Something went wrong. Please try again.")).not.toBeVisible();
+    await publicPage.close();
+  });
+
   test("a field over its length limit shows a field error and sends nothing; a server field error shows under its field (K129)", async ({
     context,
   }) => {

@@ -449,3 +449,158 @@ describe("csat body limit (b-IN-b3)", () => {
     expect(await rows()).toBe(1);
   });
 });
+
+// K135 (Codex diff critique 1, item 5): a part-count cap before the multipart parse, and every
+// `file` part counts toward the 10-file cap, empty ones included. The limits: intake 17 parts
+// (10 files, name, email, subject, message, company_website, 2 slack), follow-up 14 (10 files,
+// message, company_website, 2 slack). Read through the module namespace so a red run fails on
+// the assertion, not on an import error.
+const PART_CAPS = { intake: 17, followUp: 14 } as const;
+
+/** Adds `n` small text parts named `name` (default: a field neither route reads). */
+function withParts(request: Request, form: FormData, n: number, name = "note"): Request {
+  for (let i = 0; i < n; i++) form.append(name, `x${i}`);
+  return new Request(request.url, {
+    method: "POST",
+    headers: { "x-forwarded-for": uniqueClientIp() },
+    body: form,
+  });
+}
+
+function intakeForm(files: File[] = []): FormData {
+  const form = new FormData();
+  form.set("name", "Part Tester");
+  form.set("email", "parts@example.test");
+  form.set("subject", "Part caps");
+  form.set("message", "Many parts");
+  for (const f of files) form.append("file", f);
+  return form;
+}
+
+function followUpForm(files: File[] = []): FormData {
+  const form = new FormData();
+  form.set("message", "Follow-up with many parts");
+  for (const f of files) form.append("file", f);
+  return form;
+}
+
+const INTAKE_URL = "http://localhost/api/public/intake";
+const followUpUrl = () => `http://localhost/api/public/status/${ticket.token}/follow-up`;
+const emptyFiles = (n: number) => Array.from({ length: n }, () => new File([], ""));
+
+describe("part count cap before the parse (K135, Codex 5)", () => {
+  it("the caps are 17 parts for intake and 14 for follow-up", () => {
+    const c = uploadConstants as Record<string, unknown>;
+    expect(c.INTAKE_MAX_PARTS).toBe(PART_CAPS.intake);
+    expect(c.FOLLOW_UP_MAX_PARTS).toBe(PART_CAPS.followUp);
+  });
+
+  it("intake: 500 small parts answer 413 too_many_parts without parsing, create no ticket and store nothing", async () => {
+    const tickets = await ownTicketCount();
+    const before = await countStored();
+    const parse = vi.spyOn(Response.prototype, "formData");
+    const res = await intakePost(withParts(new Request(INTAKE_URL), intakeForm(), 500));
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: "too_many_parts" });
+    expect(parse).not.toHaveBeenCalled();
+    expect(await ownTicketCount()).toBe(tickets);
+    expect(await countStored()).toBe(before);
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  it("intake: foreign field names count; 17 parts pass the count, 18 are refused", async () => {
+    // 4 text fields + 10 one-byte GIFs + 3 foreign parts = 17: counted, parsed, then each GIF
+    // fails the sniff as before.
+    const atCap = await intakePost(
+      withParts(new Request(INTAKE_URL), intakeForm(oneByteGifs(10)), 3, "zz_foreign"),
+    );
+    expect(atCap.status).toBe(415);
+    expect(await atCap.json()).toEqual({ error: "unsupported_file_type" });
+    const parse = vi.spyOn(Response.prototype, "formData");
+    const over = await intakePost(
+      withParts(new Request(INTAKE_URL), intakeForm(oneByteGifs(10)), 4, "zz_foreign"),
+    );
+    expect(over.status).toBe(413);
+    expect(await over.json()).toEqual({ error: "too_many_parts" });
+    expect(parse).not.toHaveBeenCalled();
+  });
+
+  it("intake: a url-encoded body with many fields answers 413 too_many_parts and creates no ticket", async () => {
+    const tickets = await ownTicketCount();
+    const fields = new URLSearchParams({
+      name: "Part Tester",
+      email: "parts@example.test",
+      subject: "Url-encoded",
+      message: "Many fields",
+    });
+    for (let i = 0; i < 100; i++) fields.append("note", String(i));
+    const res = await intakePost(
+      new Request(INTAKE_URL, {
+        method: "POST",
+        headers: {
+          "x-forwarded-for": uniqueClientIp(),
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: fields.toString(),
+      }),
+    );
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: "too_many_parts" });
+    expect(await ownTicketCount()).toBe(tickets);
+  });
+
+  it("intake: 11 empty file parts answer 413 too_many_files and create no ticket", async () => {
+    const tickets = await ownTicketCount();
+    const res = await intakePost(withParts(new Request(INTAKE_URL), intakeForm(emptyFiles(11)), 0));
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: "too_many_files" });
+    expect(await ownTicketCount()).toBe(tickets);
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  it("intake: the one empty file part a browser sends when no file is chosen still creates the ticket", async () => {
+    const tickets = await ownTicketCount();
+    const res = await intakePost(withParts(new Request(INTAKE_URL), intakeForm(emptyFiles(1)), 0));
+    expect(res.status).toBe(200);
+    expect(await ownTicketCount()).toBe(tickets + 1);
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  it("follow-up: 500 small parts answer 413 too_many_parts without parsing and create no message", async () => {
+    const messages = await messageCount();
+    const parse = vi.spyOn(Response.prototype, "formData");
+    const res = await followUpPost(withParts(new Request(followUpUrl()), followUpForm(), 500), {
+      params: Promise.resolve({ token: ticket.token }),
+    });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: "too_many_parts" });
+    expect(parse).not.toHaveBeenCalled();
+    expect(await messageCount()).toBe(messages);
+  });
+
+  it("follow-up: foreign field names count; 14 parts pass the count, 15 are refused", async () => {
+    // message + 10 one-byte GIFs + 3 foreign parts = 14: counted, parsed, then each GIF fails.
+    const atCap = await followUpPost(
+      withParts(new Request(followUpUrl()), followUpForm(oneByteGifs(10)), 3, "zz_foreign"),
+      { params: Promise.resolve({ token: ticket.token }) },
+    );
+    expect(atCap.status).toBe(415);
+    const over = await followUpPost(
+      withParts(new Request(followUpUrl()), followUpForm(oneByteGifs(10)), 4, "zz_foreign"),
+      { params: Promise.resolve({ token: ticket.token }) },
+    );
+    expect(over.status).toBe(413);
+    expect(await over.json()).toEqual({ error: "too_many_parts" });
+  });
+
+  it("follow-up: 11 empty file parts answer 413 too_many_files and create no message", async () => {
+    const messages = await messageCount();
+    const res = await followUpPost(
+      withParts(new Request(followUpUrl()), followUpForm(emptyFiles(11)), 0),
+      { params: Promise.resolve({ token: ticket.token }) },
+    );
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: "too_many_files" });
+    expect(await messageCount()).toBe(messages);
+  });
+});

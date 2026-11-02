@@ -23,6 +23,15 @@ export const CSAT_MAX_BODY_BYTES = 16 * 1024;
 // is read (validateUploadFiles). Neither shipped public form sets a count, so this is K128's
 // default. The forms check it too, as a convenience; the server check is the bound.
 export const MAX_FILES_PER_REQUEST = 10;
+// K135 (Codex diff critique 1, item 5): parts per public request, counted on the raw body by its
+// boundary delimiter before the multipart parser runs (readBoundedFormData); over it the route
+// answers 413 too_many_parts. Each route allows MAX_FILES_PER_REQUEST file parts, the text fields
+// its form sends, and PUBLIC_FORM_PART_SLACK more. Intake: name, email, subject, message and the
+// company_website honeypot, so 10 + 5 + 2 = 17. Follow-up: message and company_website, so
+// 10 + 2 + 2 = 14. Every `file` part counts toward the 10, empty ones included.
+export const PUBLIC_FORM_PART_SLACK = 2;
+export const INTAKE_MAX_PARTS = MAX_FILES_PER_REQUEST + 5 + PUBLIC_FORM_PART_SLACK;
+export const FOLLOW_UP_MAX_PARTS = MAX_FILES_PER_REQUEST + 2 + PUBLIC_FORM_PART_SLACK;
 // K129 (review b-WR-b3): character limits on the public text fields of intake (all four) and
 // follow-up (message), answered 400 with a field error. No existing input limit covers these
 // fields: the agent composer (api/tickets/[id]/messages) checks only that a reply is not empty,
