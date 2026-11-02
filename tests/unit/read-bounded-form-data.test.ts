@@ -415,3 +415,157 @@ describe("part count work is bounded (K137)", () => {
     }
   });
 });
+
+// K140 (Codex diff critique round 3, item 2): a delimiter counts only at the start of the body or
+// right after a line feed, where the parser looks for it, so `--b--` in the middle of a line (in a
+// value or a file) is content, not a closing delimiter. Differential check: for every body of the
+// corpus the runtime's own parser accepts, the scanner either refuses it or counts at least the
+// parser's entries, and with the limit one below the entry count it never lets the body through.
+describe("delimiters are recognised only at the start of a line (K140)", () => {
+  const LIMIT = 17;
+  /** Far above every body below, so the count is never cut off by the limit. */
+  const NO_STOP = 1000;
+  const TYPE = "multipart/form-data; boundary=b";
+
+  const part = (name: string, value: string, eol = "\r\n") =>
+    `--b${eol}Content-Disposition: form-data; name="${name}"${eol}${eol}${value}${eol}`;
+  const filePart = (name: string, content: string) =>
+    `--b\r\nContent-Disposition: form-data; name="${name}"; filename="x.txt"\r\nContent-Type: text/plain\r\n\r\n${content}\r\n`;
+  const parts = (n: number, eol = "\r\n") =>
+    Array.from({ length: n }, (_, i) => part(`f${i}`, `v${i}`, eol)).join("");
+  const CLOSE = "--b--\r\n";
+
+  /** Each body, and the scanner's count with NO_STOP: a number, or null for a refused body. */
+  const corpus: { name: string; body: string; count: number | null }[] = [
+    {
+      name: "mid-line --b-- in a value",
+      body: part("a", "hello--b--world") + part("c", "x") + CLOSE,
+      count: 2,
+    },
+    {
+      name: "mid-line --b-- and --b in a file",
+      body: filePart("f", "abc--b--def--b ghi") + CLOSE,
+      count: 1,
+    },
+    { name: "CRLF framing", body: parts(5) + CLOSE, count: 5 },
+    { name: "CRLF framing, no line break after the close", body: `${parts(5)}--b--`, count: 5 },
+    { name: "bare-LF framing", body: `${parts(5, "\n")}--b--\n`, count: 5 },
+    { name: "leading line breaks", body: `\r\n\r\n${parts(3)}${CLOSE}`, count: 3 },
+    { name: "a preamble", body: `This is a preamble.\r\n${parts(3)}${CLOSE}`, count: 3 },
+    { name: "an epilogue", body: `${parts(3)}${CLOSE}This is an epilogue.\r\n`, count: null },
+    {
+      name: "a closing delimiter in part headers, followed by more parts",
+      body: `--b\r\nContent-Disposition: form-data; name="a"\r\n--b--: x\r\n\r\nv\r\n${parts(40)}${CLOSE}`,
+      count: null,
+    },
+    {
+      name: "a closing delimiter at line start in content, followed by more parts",
+      body: part("a", "x\r\n--b--\r\ny") + parts(3) + CLOSE,
+      count: null,
+    },
+    {
+      name: "a closing delimiter after a bare LF in content, followed by more parts",
+      body: part("a", "x\n--b--\ny") + parts(3) + CLOSE,
+      count: null,
+    },
+    {
+      name: "an opening-like line in content (counted, an overcount)",
+      body: part("a", "x\r\n--bogus") + CLOSE,
+      count: 2,
+    },
+    {
+      name: "many mid-line fake closings in a value",
+      body: part("a", `v${"--b--".repeat(100_000)}`) + CLOSE,
+      count: 1,
+    },
+    {
+      name: "many fake closings at line start in a value",
+      body: part("a", "\r\n--b--".repeat(100_000)) + parts(3) + CLOSE,
+      count: null,
+    },
+    {
+      name: "many fake closings after the real close",
+      body: parts(2) + "--b--\r\n".repeat(100_000),
+      count: null,
+    },
+    { name: "more parts than the limit", body: parts(40) + CLOSE, count: 40 },
+  ];
+
+  const enc = (s: string) => new TextEncoder().encode(s);
+
+  /** The runtime parser's entry count for a body, or "failure". */
+  async function runtimeEntries(body: Uint8Array, type: string): Promise<number | "failure"> {
+    try {
+      const form = await new Request(URL_, {
+        method: "POST",
+        headers: { "content-type": type },
+        body: body as Uint8Array<ArrayBuffer>,
+      }).formData();
+      return [...form.keys()].length;
+    } catch {
+      return "failure";
+    }
+  }
+
+  it("a mid-line --b-- in a value is content, not a closing delimiter", () => {
+    const body = enc(part("a", "hello--b--world") + part("c", "x") + CLOSE);
+    expect(bounded.scanFormParts(body, TYPE, LIMIT)).toEqual({ parts: 2, examined: 3 });
+  });
+
+  it("a mid-line --b-- in a file is content, not a closing delimiter", () => {
+    const body = enc(filePart("f", "abc--b--def") + part("c", "x") + CLOSE);
+    expect(bounded.scanFormParts(body, TYPE, LIMIT)).toEqual({ parts: 2, examined: 3 });
+  });
+
+  it("counts each corpus body as expected", () => {
+    for (const { name, body, count } of corpus) {
+      expect(bounded.scanFormParts(enc(body), TYPE, NO_STOP).parts, name).toBe(count);
+    }
+  });
+
+  it("never counts below the runtime parser's entries, and never lets a body over the limit through", async () => {
+    // Bodies the platform's own encoder writes, with delimiter-like text inside the values.
+    const encoded: { name: string; body: Uint8Array; type: string }[] = [];
+    for (const value of ["hello--b--world", "x\r\n--y--\r\n", "--", ""]) {
+      const form = new FormData();
+      form.append("a", value);
+      form.append("file", new File([value], "f.txt", { type: "text/plain" }));
+      form.append("c", "z");
+      const req = new Request(URL_, { method: "POST", body: form });
+      encoded.push({
+        name: `encoded ${JSON.stringify(value)}`,
+        body: new Uint8Array(await req.arrayBuffer()),
+        type: req.headers.get("content-type") ?? "",
+      });
+    }
+    const all = [
+      ...corpus.map(({ name, body }) => ({ name, body: enc(body), type: TYPE })),
+      ...encoded,
+    ];
+    let accepted = 0;
+    for (const { name, body, type } of all) {
+      const entries = await runtimeEntries(body, type);
+      if (entries === "failure") continue;
+      accepted++;
+      const full = bounded.scanFormParts(body, type, NO_STOP).parts;
+      expect(full === null || full >= entries, `${name}: ${full} < ${entries}`).toBe(true);
+      if (entries > 0) {
+        const tight = bounded.scanFormParts(body, type, entries - 1).parts;
+        expect(tight === null || tight > entries - 1, `${name} at limit ${entries - 1}`).toBe(true);
+      }
+    }
+    // The comparison is not vacuous: the runtime parser accepts a good share of the corpus.
+    expect(accepted).toBeGreaterThanOrEqual(8);
+  });
+
+  it("many fake closings stay bounded work, by examined count", () => {
+    for (const { name, body } of corpus) {
+      const { examined } = bounded.scanFormParts(enc(body), TYPE, LIMIT);
+      expect(examined, name).toBeLessThanOrEqual(LIMIT + 2);
+    }
+    const midLine = enc(part("a", `v${"--b--".repeat(100_000)}`) + CLOSE);
+    expect(bounded.scanFormParts(midLine, TYPE, LIMIT)).toEqual({ parts: 1, examined: 2 });
+    const lineStart = enc(part("a", "\r\n--b--".repeat(100_000)) + CLOSE);
+    expect(bounded.scanFormParts(lineStart, TYPE, LIMIT)).toEqual({ parts: null, examined: 2 });
+  });
+});

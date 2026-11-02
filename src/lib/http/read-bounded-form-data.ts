@@ -16,17 +16,23 @@
 // its `&`-separated fields. A content type the count cannot read exactly (a second boundary, an
 // odd parameter, a boundary outside RFC 2046) is answered "invalid" without parsing, so the
 // parser never uses a boundary other than the counted one. The count never undercounts a body
-// the parser accepts; it can overcount one that carries the delimiter inside a part without a
-// line break before it, which a real client's random boundary never does.
+// the parser accepts; it can overcount one that carries a delimiter-like line inside a part,
+// which a real client's random boundary never does.
 //
-// Bounded work (K137, Codex diff critique 2 item 2): the scan stops as soon as the count passes
-// the limit, and at the first closing delimiter, so it looks at no more than `maxParts + 1`
-// delimiters (or `maxParts` ampersands) whatever the body holds. A closing delimiter ends the
-// count only at the end of the body (nothing after it but one line break). Anything after it
-// makes the body "invalid": the parser either ignores it as an epilogue (newer undici) or fails
-// (Node 22's undici), and a "closing delimiter" that sits inside a part's headers is skipped by
-// the parser, which then reads on and builds every later part. Stopping there and accepting the
-// count would undercount, so such a body is refused unparsed instead.
+// Line start (K140, Codex diff critique 3 item 2): a delimiter is recognised only at the start of
+// the body or right after a line feed (`\n--boundary`, which covers CRLF and bare LF), where the
+// parser looks for it. `--boundary--` in the middle of a line, in a value or a file, is content.
+//
+// Bounded work (K137, K140): every line-start occurrence is examined, closing ones included. The
+// scan stops as soon as the count passes the limit, and at the first closing delimiter, so it
+// looks at no more than `maxParts + 1` occurrences (or `maxParts` ampersands) whatever the body
+// holds, and it refuses outright past `maxParts + 2`. A closing delimiter ends the count only
+// when it is the last occurrence, at the end of the body (nothing after it but one line break).
+// Anything after it, a later delimiter or an epilogue, makes the body "invalid": the parser
+// either ignores an epilogue (newer undici) or fails (Node 22's undici), and a "closing
+// delimiter" that sits inside a part's headers is skipped by the parser, which then reads on and
+// builds every later part. Stopping there and accepting the count would undercount, so such a
+// body is refused unparsed instead.
 //
 // No project imports: usable from any route without pulling in app modules.
 
@@ -99,26 +105,34 @@ export function scanFormParts(bytes: Uint8Array, contentType: string, limit: num
   if (!boundary) return { parts: null, examined };
   // ASCII only, so these are exactly the bytes the parser looks for.
   const delimiter = Buffer.from(`--${boundary}`, "utf8");
+  // K140: a delimiter only at the start of the body or right after a line feed (CRLF or bare LF).
+  const lineDelimiter = Buffer.from(`\n--${boundary}`, "utf8");
+  const nextAfterLineFeed = (from: number) => {
+    const lf = buf.indexOf(lineDelimiter, from);
+    return lf === -1 ? -1 : lf + 1;
+  };
   let parts = 0;
-  let from = 0;
+  let at = buf.subarray(0, delimiter.length).equals(delimiter) ? 0 : nextAfterLineFeed(0);
   for (;;) {
-    const at = buf.indexOf(delimiter, from);
     if (at === -1) return { parts, examined };
     examined++;
+    if (examined > limit + 2) return { parts: null, examined };
     const end = at + delimiter.length;
     if (buf[end] === DASH && buf[end + 1] === DASH) {
-      // The first closing delimiter ends the scan; it ends the count only at the end of the body.
+      // A closing delimiter followed by at most one line break is the last occurrence (no room
+      // for another). Anything else after it, a later delimiter or an epilogue, is refused.
       return { parts: onlyLineBreakAfter(buf, end + 2) ? parts : null, examined };
     }
     parts++;
     if (parts > limit) return { parts, examined };
-    from = end;
+    at = nextAfterLineFeed(end);
   }
 }
 
 /**
  * The number of parts in a form body, counted on the raw bytes (K135): for multipart, every
- * `--boundary` delimiter before the closing `--boundary--`; for url-encoded, the `&`-separated
+ * `--boundary` delimiter at the start of a line (K140) before the closing `--boundary--`; for
+ * url-encoded, the `&`-separated
  * fields. The count stops once it passes `limit` and then returns `limit + 1` (K137). Null when
  * the content type is not one the count can read exactly (see STRICT_MULTIPART), or when
  * anything but one line break follows the first closing delimiter; readBoundedFormData then
