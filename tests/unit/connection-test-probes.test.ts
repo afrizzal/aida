@@ -18,6 +18,8 @@ import {
 // Every network or protocol failure (closed port, a port that never greets, a port running some
 // other service) gives the same category, so the category cannot tell an open port from a closed
 // one. Only a server of the probed protocol rejecting the credentials gives authentication_failed.
+// The Ollama probes send no credential, so for them an HTTP 401 or 403 is connection_failed too,
+// and a 200 passes only with the Ollama response shape (K131).
 // No test here connects anywhere but 127.0.0.1.
 
 /** Short per-phase budget for the tests, passed through the same option the actions use. */
@@ -286,10 +288,32 @@ describe.each(
     expect(await ollamaCategory(await start())).toBe("connection_failed");
   });
 
-  it.each([[401], [403]])("gives authentication_failed for an HTTP %i", async (status) => {
-    expect(
-      await ollamaCategory(await httpAnswer(status, "application/json", '{"error":"denied"}')),
-    ).toBe("authentication_failed");
+  // K131: AIDA sends Ollama no credential, so a 401 or 403 there cannot be a rejection of AIDA's
+  // credentials. It is some other service (or a proxy) at the address: connection_failed. This
+  // case used to pin authentication_failed (K127), which was the oracle Codex 1 names.
+  it.each([
+    [401, "application/json", '{"error":"denied"}'],
+    [403, "application/json", '{"error":"denied"}'],
+    [401, "text/html", "<html>Unauthorized</html>"],
+    [403, "text/plain", "Forbidden"],
+  ])("gives connection_failed for a foreign HTTP %i (%s)", async (status, type, body) => {
+    expect(await ollamaCategory(await httpAnswer(status, type, body))).toBe("connection_failed");
+  });
+
+  it.each([
+    ["an empty JSON object", "{}"],
+    ["a foreign status object", '{"status":"ok","version":"1.2.3"}'],
+    ["a JSON array", "[]"],
+    ["JSON null", "null"],
+    ["a models field that is not an array", '{"models":"llama3"}'],
+    ["an embeddings field that is not an array", '{"embeddings":{"0":[0.1]}}'],
+    ["an empty embedding vector", '{"embeddings":[[]]}'],
+    ["an embedding vector of strings", '{"embeddings":[["0.1","0.2"]]}'],
+    ["an embedding vector with a null", '{"embeddings":[[0.1,null]]}'],
+  ])("gives connection_failed for a foreign 200 JSON body: %s", async (_label, body) => {
+    expect(await ollamaCategory(await httpAnswer(200, "application/json", body))).toBe(
+      "connection_failed",
+    );
   });
 
   it("collapses closed, other web servers and other services into one category", async () => {
@@ -297,9 +321,51 @@ describe.each(
       await ollamaCategory(await closedPort()),
       await ollamaCategory(await httpAnswer(404, "text/plain", "404 page not found")),
       await ollamaCategory(await httpAnswer(200, "text/html", "<html>hi</html>")),
+      await ollamaCategory(await httpAnswer(200, "application/json", '{"status":"ok"}')),
+      await ollamaCategory(await httpAnswer(401, "application/json", '{"error":"denied"}')),
+      await ollamaCategory(await httpAnswer(403, "text/plain", "Forbidden")),
       await ollamaCategory(await bannerAndClose("SSH-2.0-OpenSSH_9.6\r\n")),
     ]);
     expect([...categories]).toEqual(["connection_failed"]);
+  });
+});
+
+/** A fake Ollama on 127.0.0.1: the /api/tags and /api/embed shapes a real Ollama returns. */
+const fakeOllama = (models: unknown[] = []) =>
+  httpServer((req, res) => {
+    if (req.method === "GET" && req.url?.startsWith("/api/tags")) {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ models }));
+      return;
+    }
+    if (req.method === "POST" && req.url?.startsWith("/api/embed")) {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ model: "nomic-embed-text", embeddings: [[0.12, -0.5, 3]] }));
+      });
+      return;
+    }
+    res.writeHead(404, { "content-type": "text/plain" });
+    res.end("404 page not found");
+  });
+
+describe("Ollama probes pass only on the Ollama response shape (K131)", () => {
+  it("the LLM probe passes on /api/tags with a models array, empty or not", async () => {
+    await expect(ollamaProbes.llm(await fakeOllama())).resolves.toBeUndefined();
+    await expect(
+      ollamaProbes.llm(await fakeOllama([{ name: "llama3", model: "llama3" }])),
+    ).resolves.toBeUndefined();
+  });
+
+  it("the embedding probe passes on /api/embed with an embeddings array of number arrays", async () => {
+    await expect(ollamaProbes.embedding(await fakeOllama())).resolves.toBeUndefined();
+  });
+
+  it("a closed port still fails both probes as connection_failed", async () => {
+    const port = await closedPort();
+    expect(await categoryOf(ollamaProbes.llm(port))).toBe("connection_failed");
+    expect(await categoryOf(ollamaProbes.embedding(port))).toBe("connection_failed");
   });
 });
 

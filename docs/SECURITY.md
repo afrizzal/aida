@@ -29,8 +29,10 @@ AIDA's promise is **privacy-first, self-hosted AI**. These controls are product 
 
 ## Settings connection tests
 - The four "Test connection" actions (AI provider, embedding provider, IMAP, SMTP) are admin-only. A failure returns one of four fixed categories and a correlation ID, never the probe's error text. The server log line under that ID holds the probe, the category and the error's name, code and HTTP status, each from a fixed list; never a message, host, port, URL, header or stack.
-- This removes the error-text oracle and puts every network and protocol failure into one category, `connection_failed`: a timeout, a refused or closed connection, a DNS or TLS failure, another service on the port, or an unexpected HTTP status.
-- **Residual:** an `authentication_failed` result still proves that a service of that protocol answered at the address; response timing still differs between outcomes; and the probe still connects to the address the admin typed, so SSRF itself is not removed, only narrowed to these signals.
+- This removes the error-text oracle and puts every network and protocol failure into one category, `connection_failed`: a timeout, a refused or closed connection, a DNS or TLS failure, another service on the port, an unexpected HTTP status, or a reply without the protocol's response shape.
+- `authentication_failed` is only given where AIDA sends a credential: the OpenAI and Anthropic API keys (their fixed vendor hosts) and the IMAP and SMTP logins. A credential rejection does not prove which service answered; any HTTP server can send a 401.
+- The Ollama probes send no credential and take an admin-typed URL. There an HTTP 401 or 403 is `connection_failed`, and a 200 passes only with Ollama's response shape: a `models` array from `/api/tags`, and an `embeddings` array of non-empty number arrays from `/api/embed`. Any other 200 is `connection_failed`.
+- **Residual:** a service at the typed address that imitates the protocol's replies (on the Ollama URL, Ollama's `/api/tags` or `/api/embed` shapes) still passes, so a pass proves only the shape, not the service; response timing still differs between outcomes; and the probe still connects to the address the admin typed, so SSRF itself is not removed, only narrowed to these signals.
 
 ## Auditability
 - `AuditEvent` is **append-only** — AI triage decisions, generated drafts, and approved sends are recorded with the model used and references to inputs/outputs. Audit rows are never mutated or deleted.

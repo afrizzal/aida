@@ -6,6 +6,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { Ollama } from "ollama";
 import OpenAI from "openai";
 import { fetchWithDeadline } from "../connection-test/deadline-fetch";
+import { UncredentialedProbeError, UnexpectedResponseError } from "../connection-test/errors";
 import type { LlmProviderName } from "./types";
 
 /** The Settings action's probe budget; the tests pass a shorter one through the same option. */
@@ -40,14 +41,34 @@ export async function testProviderConnection(
       return;
     }
     case "ollama": {
-      const client = new Ollama({
-        host: config.ollamaBaseUrl,
-        fetch: fetchWithDeadline(timeoutMs),
-      });
-      await client.list();
+      // AIDA sends Ollama no credential, so every failure is wrapped: a 401 or 403 from that URL
+      // is connection_failed, never authentication_failed (K131).
+      try {
+        const client = new Ollama({
+          host: config.ollamaBaseUrl,
+          fetch: fetchWithDeadline(timeoutMs),
+        });
+        assertOllamaTagsShape(await client.list());
+      } catch (e) {
+        throw new UncredentialedProbeError(e);
+      }
       return;
     }
     default:
       throw new Error(`Unsupported provider: ${config.provider}`);
+  }
+}
+
+/**
+ * Passes only when the /api/tags reply has Ollama's shape: an object with a `models` array (empty
+ * when nothing is pulled). Any other 200 is some other service at the URL (K131).
+ */
+export function assertOllamaTagsShape(reply: unknown): void {
+  const models =
+    reply !== null && typeof reply === "object"
+      ? (reply as { models?: unknown }).models
+      : undefined;
+  if (!Array.isArray(models)) {
+    throw new UnexpectedResponseError("the /api/tags reply has no models array");
   }
 }

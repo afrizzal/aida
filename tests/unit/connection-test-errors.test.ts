@@ -5,6 +5,8 @@ import {
   ConnectionTestConfigError,
   classifyConnectionError,
   connectionErrorLogShape,
+  UncredentialedProbeError,
+  UnexpectedResponseError,
 } from "../../src/lib/connection-test/errors";
 
 function withProps(message: string, props: Record<string, unknown>): Error {
@@ -400,5 +402,74 @@ describe("connectionErrorLogShape (K127, c-WR-02)", () => {
     const a = new Error("a") as Error & { cause?: unknown };
     a.cause = a;
     expect(connectionErrorLogShape(a)).toEqual({ name: "Error", code: "none", status: "none" });
+  });
+});
+
+describe("probes that send no credential (K131, Codex 1)", () => {
+  const ollamaResponseError = (status_code: number) =>
+    Object.assign(new Error("denied"), { name: "ResponseError", status_code });
+
+  it("maps a wrapped HTTP 401 or 403 to connection_failed, never authentication_failed", () => {
+    for (const status of [401, 403]) {
+      expect(
+        classifyConnectionError(new UncredentialedProbeError(ollamaResponseError(status))),
+        String(status),
+      ).toBe("connection_failed");
+      expect(
+        classifyConnectionError(new UncredentialedProbeError(withProps("x", { status }))),
+      ).toBe("connection_failed");
+    }
+  });
+
+  it("ignores every credential signal on the chain, not only the HTTP status", () => {
+    for (const inner of [
+      named("AuthenticationError"),
+      named("PermissionDeniedError"),
+      withProps("x", { code: "EAUTH" }),
+      withProps("x", { responseCode: 535 }),
+      withProps("x", { authenticationFailed: true }),
+    ]) {
+      expect(classifyConnectionError(new UncredentialedProbeError(inner))).not.toBe(
+        "authentication_failed",
+      );
+    }
+  });
+
+  it("keeps the other categories of the wrapped failure", () => {
+    expect(
+      classifyConnectionError(
+        new UncredentialedProbeError(
+          new TypeError("fetch failed", { cause: withProps("x", { code: "ECONNREFUSED" }) }),
+        ),
+      ),
+    ).toBe("connection_failed");
+    expect(
+      classifyConnectionError(
+        new UncredentialedProbeError(withProps("x", { code: "ERR_INVALID_URL", status: 401 })),
+      ),
+    ).toBe("invalid_configuration");
+    expect(classifyConnectionError(new UncredentialedProbeError(new Error("odd")))).toBe("unknown");
+  });
+
+  it("still maps an unwrapped 401 or 403 (the OpenAI and Anthropic probes) to authentication_failed", () => {
+    expect(classifyConnectionError({ status: 401 })).toBe("authentication_failed");
+    expect(classifyConnectionError(withProps("x", { status: 403 }))).toBe("authentication_failed");
+  });
+
+  it("maps a reply without the protocol's response shape to connection_failed", () => {
+    const shape = new UnexpectedResponseError("no models array");
+    expect(classifyConnectionError(shape)).toBe("connection_failed");
+    expect(classifyConnectionError(new UncredentialedProbeError(shape))).toBe("connection_failed");
+  });
+
+  it("logs the wrapped failure's name, code and status, not the wrapper's", () => {
+    expect(connectionErrorLogShape(new UncredentialedProbeError(ollamaResponseError(401)))).toEqual(
+      { name: "ResponseError", code: "none", status: 401 },
+    );
+    expect(
+      connectionErrorLogShape(
+        new UncredentialedProbeError(new UnexpectedResponseError("no models array")),
+      ),
+    ).toEqual({ name: "UnexpectedResponseError", code: "none", status: "none" });
   });
 });

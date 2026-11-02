@@ -7,11 +7,19 @@
 //
 // What it removes: the error-text oracle, and the difference between network and protocol
 // failures. Every timeout, refusal, close, DNS or TLS failure and every reply that is not the
-// expected protocol or status falls into one category, connection_failed.
+// expected protocol, status or response shape falls into one category, connection_failed.
 //
-// What remains (docs/SECURITY.md states the same): authentication_failed still proves that a
-// service of that protocol answered at the address; timing still differs between outcomes; and
-// the probe still connects to the address the admin typed, so SSRF itself is not removed.
+// Credentials (K131): authentication_failed is given only where AIDA sends a credential, so that a
+// rejection can be a rejection of it (OpenAI and Anthropic API keys, IMAP and SMTP logins). The
+// Ollama probes send none and take an admin-typed URL; they wrap every failure in
+// UncredentialedProbeError, so an HTTP 401 or 403 there is connection_failed, and a 200 counts only
+// with Ollama's response shape (UnexpectedResponseError otherwise). A credential rejection proves
+// nothing about the protocol: any service can answer 401.
+//
+// What remains (docs/SECURITY.md states the same): a service that imitates the protocol's replies
+// (on the Ollama URL, Ollama's /api/tags or /api/embed shapes) still passes; timing still differs
+// between outcomes; and the probe still connects to the address the admin typed, so SSRF itself
+// is not removed.
 //
 // No imports at all: client-safe (the buttons read CONNECTION_TEST_ERROR_MESSAGES) and
 // bundleable by both webpack and esbuild.
@@ -38,6 +46,30 @@ export class ConnectionTestConfigError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ConnectionTestConfigError";
+  }
+}
+
+/**
+ * Thrown by a probe when the server answered 200 but not with the protocol's response shape (an
+ * Ollama /api/tags without a `models` array, K131). Always connection_failed.
+ */
+export class UnexpectedResponseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UnexpectedResponseError";
+  }
+}
+
+/**
+ * Wraps every failure of a probe that sends no credential (the Ollama probes, K131). A credential
+ * signal on its cause chain (HTTP 401 or 403, an auth error name) cannot be a rejection of AIDA's
+ * credentials, so the wrapped failure is never authentication_failed. Its other categories are
+ * kept, and the log shape reads the wrapped failure, not this wrapper.
+ */
+export class UncredentialedProbeError extends Error {
+  constructor(cause: unknown) {
+    super("connection test without credentials failed", { cause });
+    this.name = "UncredentialedProbeError";
   }
 }
 
@@ -128,6 +160,8 @@ const CONNECTION_NAMES = new Set([
   "BodyTimeoutError",
   // A body that is not JSON where the probe expects JSON (K127).
   "SyntaxError",
+  // A 200 without the protocol's response shape (K131).
+  "UnexpectedResponseError",
 ]);
 
 type ErrorLike = Record<string, unknown>;
@@ -248,13 +282,16 @@ function isConnection(e: ErrorLike): boolean {
  * Maps any thrown value to one of the four categories. Precedence is fixed and applies across
  * the whole cause chain: invalid_configuration, then authentication_failed, then
  * connection_failed, then unknown. So `{ status: 401, code: "ECONNREFUSED" }` is
- * authentication_failed. The raw message is read only to recognise the probes' own
- * "Unsupported provider" errors; no part of it ever leaves this function.
+ * authentication_failed. A chain that holds an UncredentialedProbeError skips the
+ * authentication_failed step (K131), so its 401 or 403 is connection_failed. The raw message is
+ * read only to recognise the probes' own "Unsupported provider" errors; no part of it ever leaves
+ * this function.
  */
 export function classifyConnectionError(e: unknown): ConnectionTestErrorCategory {
   const chain = causeChain(e);
   if (chain.some(isConfig)) return "invalid_configuration";
-  if (chain.some(isAuth)) return "authentication_failed";
+  const credentialed = !chain.some((link) => link instanceof UncredentialedProbeError);
+  if (credentialed && chain.some(isAuth)) return "authentication_failed";
   if (chain.some(isConnection)) return "connection_failed";
   return "unknown";
 }
@@ -274,6 +311,7 @@ const LOG_NAMES = new Set([
   "AbortError",
   "TimeoutError",
   "ConnectionTestConfigError",
+  "UnexpectedResponseError",
   // imapflow
   "AuthenticationFailure",
   // ollama
@@ -358,7 +396,8 @@ function logName(e: ErrorLike | undefined): string {
  * chain, each from a fixed set (otherwise "other", or "none" when absent). Never a message.
  */
 export function connectionErrorLogShape(e: unknown): ConnectionErrorLogShape {
-  const chain = causeChain(e);
+  // The K131 wrapper says only that the probe sent no credential; log what it wraps.
+  const chain = causeChain(e).filter((link) => !(link instanceof UncredentialedProbeError));
   let code: string | undefined;
   let status: number | undefined;
   for (const link of chain) {
