@@ -275,6 +275,22 @@ header on every request with the identity above, so a client-sent value never re
 and a raw X-Forwarded-For is never read for sign-in either. Caddy also strips a client-sent
 `x-aida-client-ip` (`header_up -X-Aida-Client-Ip`); keep that line if you change the proxy setup.
 
+### Public rate limits under load
+
+The public routes (request form, status-page follow-up, CSAT, status-page attachments) count each
+request in the database. That check runs in a short transaction on one of the app's 10 pool
+connections (`DB_POOL_MAX`). To keep a flood of requests from taking the whole pool, at most **3**
+of these checks run at once (`RATE_LIMIT_MAX_CONCURRENT` in
+`src/lib/rate-limit/check-rate-limit.ts`), and none starts while 3 or more requests are already
+waiting for a pool connection. A request over that answers HTTP 429 with `Retry-After: 1` at once,
+without touching the database, and is not counted. The other 7 connections stay with the rest of
+the app. The same 429 is given when the check waits longer than 500 ms for another request of the
+same client, or longer than 1 s for a pool connection.
+
+**The limit is per app process.** AIDA runs one app process: one server, one `app` container.
+Running several `app` replicas multiplies the limit, and with it the share of the database those
+checks can take, so it is not supported.
+
 ## Environment variable reference
 
 Every variable in `.env.example`, and nothing else. `Required` means the app will not function correctly (or will refuse to boot) without it.

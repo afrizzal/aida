@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Prisma } from "@/generated/prisma/client";
-import { prisma } from "@/lib/db";
+import { dbPoolWaitingCount, prisma } from "@/lib/db";
 
 /**
  * Reads the pepper lazily, on every hash — not once at module load — so importing this module
@@ -45,8 +45,10 @@ export function rateLimitLockKey(scope: string, ip: string): string {
   return `${scope}:${hashIp(ip)}`;
 }
 
-/** Test-only hook into the limiter transaction (lock-wait proofs). */
+/** Test-only hook into the limiter transaction (lock-wait and admission proofs). */
 export interface RateLimitLockObserver {
+  /** Called once per admitted call, right before it asks the pool for a transaction. */
+  beforeTransaction?(): void;
   /** Awaited inside the transaction right before the advisory lock is requested. */
   beforeLock?(tx: Prisma.TransactionClient): Promise<void> | void;
 }
@@ -77,6 +79,51 @@ export const RATE_LIMIT_LOCK_TIMEOUT_MS = 500;
 export const RATE_LIMIT_POOL_WAIT_MS = 1000;
 export const RATE_LIMIT_BUSY_RETRY_AFTER_SECONDS = 1;
 
+/**
+ * Admission control in front of the pool (K132, Codex diff critique 1 item 2). The app's pool has
+ * 10 connections (DB_POOL_MAX). At most RATE_LIMIT_MAX_CONCURRENT limiter transactions run at
+ * once in this process, and none starts while that many connect requests are already queued in
+ * the pool (dbPoolWaitingCount: a call that passed maxWait leaves its connect queued until a
+ * connection frees). A call over either limit is answered "not allowed" with
+ * RATE_LIMIT_BUSY_RETRY_AFTER_SECONDS at once (429 with Retry-After at the routes) and never asks
+ * the pool for a connection. So a flood of public requests can hold at most 3 connections and add
+ * fewer than 6 queued connects through the limiter, and the other 7 connections stay with the
+ * rest of the app.
+ *
+ * Why 3: a limiter transaction holds its connection for a count, a lookup and an insert (a few
+ * milliseconds), so 3 slots serve hundreds of limiter checks per second, far above what the public
+ * form, status page, CSAT and attachment routes see on one server. Only a held advisory lock (one
+ * identity flooding, bounded by RATE_LIMIT_LOCK_TIMEOUT_MS) or a saturated pool keeps a slot busy
+ * long, and that is exactly when the limiter should answer 429 instead of queueing.
+ *
+ * The count is per app process. AIDA runs one app process (one server, one `app` container;
+ * docs/OPERATIONS.md), which this limit relies on: N processes would admit N times as many.
+ */
+export const RATE_LIMIT_MAX_CONCURRENT = 3;
+let admissionLimit = RATE_LIMIT_MAX_CONCURRENT;
+let inFlight = 0;
+
+/**
+ * Test seam only: the atomicity proof runs 20 limiter transactions at once, which the admission
+ * limit would otherwise refuse before they could race. `null` restores the shipped limit.
+ */
+export function setRateLimitAdmissionLimitForTests(limit: number | null): void {
+  admissionLimit = limit ?? RATE_LIMIT_MAX_CONCURRENT;
+}
+
+/** Limiter transactions running in this process now. */
+export function rateLimitTransactionsInFlight(): number {
+  return inFlight;
+}
+
+/** Takes a slot when one is free and the pool is not already queued; never waits. */
+function tryAdmit(): boolean {
+  if (inFlight >= admissionLimit) return false;
+  if (dbPoolWaitingCount() >= admissionLimit) return false;
+  inFlight += 1;
+  return true;
+}
+
 // Postgres SQLSTATE 55P03 (lock_not_available): the lock wait passed `lock_timeout`. Prisma wraps a
 // raw-query failure as P2010 and keeps the driver adapter's error, with the SQLSTATE as
 // `originalCode`, in `meta.driverAdapterError.cause`.
@@ -102,7 +149,8 @@ function isTransactionStartTimeout(err: unknown): boolean {
  * transaction-scoped advisory lock on scope plus IP hash serializes the count and the insert for
  * one identity only; Postgres releases it at commit or rollback, so nothing can leak a lock.
  * `pg_advisory_xact_lock` returns `void`, which Prisma's `$queryRaw` cannot deserialize, so it
- * runs through `$executeRaw`. Both waits are bounded (K130, above).
+ * runs through `$executeRaw`. Both waits are bounded (K130, above), and admission in front of the
+ * pool is limited (K132, above).
  */
 export async function consumeRateLimit(
   scope: string,
@@ -121,7 +169,11 @@ export async function consumeRateLimit(
   }
   const ipHash = hashIp(ip);
   const lockKey = `${scope}:${ipHash}`;
+  if (!tryAdmit()) {
+    return { allowed: false, retryAfterSeconds: RATE_LIMIT_BUSY_RETRY_AFTER_SECONDS };
+  }
   try {
+    lockObserver?.beforeTransaction?.();
     return await prisma.$transaction(
       async (tx) => {
         // Transaction-local (`true`): the setting ends with this transaction and never leaks to
@@ -156,6 +208,9 @@ export async function consumeRateLimit(
       return { allowed: false, retryAfterSeconds: RATE_LIMIT_BUSY_RETRY_AFTER_SECONDS };
     }
     throw err;
+  } finally {
+    // Every path out of the transaction, including a throw, frees the slot.
+    inFlight -= 1;
   }
 }
 
