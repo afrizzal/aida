@@ -90,6 +90,10 @@ export default async function globalSetup(_config: FullConfig) {
     BETTER_AUTH_SECRET: `${randomUUID()}${randomUUID()}`,
     RATE_LIMIT_PEPPER: randomUUID(),
     UPLOADS_DIR: uploadsDir,
+    // No Caddy here: the identity is the rightmost X-Forwarded-For entry, a client-sent one if
+    // the request carries it (uat-gaps.spec.ts, K139), else the socket address Next fills in.
+    // Set explicitly so a local .env cannot change it.
+    TRUSTED_PROXY_HOPS: "0",
     ADMIN_EMAIL: "",
     ADMIN_PASSWORD: "",
     ADMIN_NAME: "",

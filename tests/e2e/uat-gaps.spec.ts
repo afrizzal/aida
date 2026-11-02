@@ -199,20 +199,31 @@ test("intake API rejects oversized files and content-sniffed disallowed types", 
 });
 
 // ── UAT #3 — public intake rate limit: 5 per IP per hour, 6th rejected ──────
-// Keep this last: it deliberately exhausts the shared IP bucket. The fixture
-// resets rateLimitHit between tests, but since K136 the server also remembers
-// the denial in memory until Retry-After (up to an hour for intake), so an
-// intake test after this one in the same server run would get 429.
+// The case runs as its own client (K139): an address from TEST-NET-2 (RFC 5737), used by no
+// other spec and different on each attempt (testInfo.retry), sent as X-Forwarded-For on every
+// API request and on the browser page. The E2E server is `next dev` without Caddy and with
+// TRUSTED_PROXY_HOPS 0 (global-setup.ts), so the identity is the rightmost X-Forwarded-For
+// entry: this address. Next keeps a client-sent X-Forwarded-For and fills in the socket address
+// only when none is sent, which is the identity every other spec uses. The fixture deletes the
+// limiter rows between tests, but since K136 the server also remembers a denial in memory until
+// Retry-After, per identity; a retry therefore starts with a fresh identity and the other specs
+// never meet this case's denial. The subjects carry the attempt, so the ticket count is per
+// attempt as well.
 test("6th intake submission within the window is rate-limited with a message", async ({
   page,
   request,
-}) => {
+}, testInfo) => {
+  const asClient = { "x-forwarded-for": `198.51.100.${10 + testInfo.retry}` };
+  await page.setExtraHTTPHeaders(asClient);
+  const subject = `UAT ratelimit r${testInfo.retry} `;
+
   for (let i = 1; i <= 5; i++) {
     const res = await request.post("/api/public/intake", {
+      headers: asClient,
       multipart: {
         name: "UAT Limiter",
         email: "uat-limit@example.com",
-        subject: `UAT ratelimit ${i}`,
+        subject: `${subject}${i}`,
         message: "Submission inside the allowed window.",
       },
     });
@@ -220,21 +231,34 @@ test("6th intake submission within the window is rate-limited with a message", a
   }
 
   const sixth = await request.post("/api/public/intake", {
+    headers: asClient,
     multipart: {
       name: "UAT Limiter",
       email: "uat-limit@example.com",
-      subject: "UAT ratelimit 6-api",
+      subject: `${subject}6-api`,
       message: "This one must be rejected.",
     },
   });
   expect(sixth.status()).toBe(429);
   expect((await sixth.json()).error).toBe("rate_limited");
 
+  // The identity is the header's address: another address is still admitted.
+  const other = await request.post("/api/public/intake", {
+    headers: { "x-forwarded-for": `198.51.100.${110 + testInfo.retry}` },
+    multipart: {
+      name: "UAT Other Client",
+      email: "uat-other-client@example.com",
+      subject: `UAT other client r${testInfo.retry}`,
+      message: "Another client inside its own window.",
+    },
+  });
+  expect(other.status(), "another X-Forwarded-For address has its own quota").toBe(200);
+
   // The real form surfaces the rate-limit message instead of a confirmation
   await page.goto("/request");
   await page.getByLabel("Name").fill("UAT Limiter");
   await page.getByLabel("Email").fill("uat-limit@example.com");
-  await page.getByLabel("Subject").fill("UAT ratelimit UI");
+  await page.getByLabel("Subject").fill(`${subject}UI`);
   await page.getByLabel("Message").fill("Blocked submission through the form.");
   await page.getByRole("button", { name: "Submit Request" }).click();
   await expect(
@@ -244,7 +268,7 @@ test("6th intake submission within the window is rate-limited with a message", a
   ).toBeVisible();
 
   const allowed = await prisma.ticket.count({
-    where: { organizationId: orgId, subject: { startsWith: "UAT ratelimit " } },
+    where: { organizationId: orgId, subject: { startsWith: subject } },
   });
   expect(allowed).toBe(5);
 });
