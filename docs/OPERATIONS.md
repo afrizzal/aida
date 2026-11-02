@@ -257,6 +257,9 @@ The CDN itself must keep its side of the contract:
 **Wrong settings fail closed.** An invalid `TRUSTED_PROXY_HOPS` (anything other than an integer
 from 0 to 10, written without a leading zero), a chain shorter than declared, or a malformed entry
 inside the trusted part of the chain puts every such request into one shared rate-limit bucket.
+That shared identity also admits only one limiter check at a time ("One check at a time per
+client" below), so a proxy misconfiguration limits how many requests run at once as well as how
+many are allowed; the same holds for many clients behind one large NAT, which share one address.
 An invalid value also logs one error line per process, naming the setting and no address:
 `TRUSTED_PROXY_HOPS must be an integer from 0 to 10; every request now uses the shared client bucket.`
 A valid value above 0 that meets a chain shorter than declared, or a malformed entry in the trusted
