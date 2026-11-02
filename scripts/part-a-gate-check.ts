@@ -354,13 +354,91 @@ const RESULT_ROWS: readonly { key: string; slug: string; kind: RowKind }[] = [
   { key: "compose stack gate", slug: "none", kind: "fixed" },
 ];
 
+/**
+ * K134: the foreign listing row says what it measures. 08-24's foreign-before and foreign-after
+ * steps list the containers of compose project `aida`, the `aida-dev-db` container and the
+ * volumes of project `aida`; nothing else, and not what is inside a volume.
+ */
+export const FOREIGN_ROW = "listed containers, and the volumes of project `aida`, unchanged";
+
+/**
+ * The three listings of the foreign-before/after step (08-24, revision 2026-11-12), each captured
+ * as `foreign-<when>-<name>.txt` with its exit code in `foreign-<when>-<name>.exit`. `header` is
+ * the first line `docker ... --format 'table ...'` prints; `row` is every other line.
+ */
+export const FOREIGN_LISTINGS: readonly { name: string; header: RegExp; row: RegExp }[] = [
+  {
+    name: "project-containers",
+    header: /^CONTAINER ID\s+NAMES\s+STATE\s*$/,
+    row: /^[0-9a-f]{12}\s+\S+\s+[a-z]+\s*$/,
+  },
+  {
+    name: "dev-db-container",
+    header: /^CONTAINER ID\s+NAMES\s+STATE\s*$/,
+    row: /^[0-9a-f]{12}\s+\S+\s+[a-z]+\s*$/,
+  },
+  { name: "project-volumes", header: /^VOLUME NAME\s*$/, row: /^\S+\s*$/ },
+];
+
+/** K134: one listing is evidence only with exit 0 and a well-formed table; else the problem. */
+function foreignListingProblem(
+  ev: Evidence,
+  when: string,
+  listing: (typeof FOREIGN_LISTINGS)[number],
+): string | null {
+  const base = `foreign-${when}-${listing.name}`;
+  const text = ev.read(`${base}.txt`);
+  const exit = ev.exit(base, false);
+  if (text === null) return `missing: ${base}.txt`;
+  if (exit === null) return `missing or unreadable: ${base}.exit`;
+  if (exit !== 0) return `${base}.exit is ${exit}, not 0`;
+  const ls = text.split(/\r?\n/);
+  if (ls.at(-1) === "") ls.pop();
+  if (ls.length === 0 || !listing.header.test(ls[0]))
+    return `${base}.txt has no header line: ${quote(ls[0] ?? "")}`;
+  const bad = ls.slice(1).find((l) => !listing.row.test(l));
+  if (bad !== undefined) return `${base}.txt has a line that is not a listing row: ${quote(bad)}`;
+  return null;
+}
+
+/** K134: every listing exits 0 and is well formed, before and after, and the two are identical. */
+function foreignRow(ev: Evidence): { word: string; note: string } {
+  const problems: string[] = [];
+  for (const when of ["before", "after"])
+    for (const listing of FOREIGN_LISTINGS) {
+      const p = foreignListingProblem(ev, when, listing);
+      if (p) problems.push(p);
+    }
+  if (problems.length > 0) return { word: "failed", note: problems.join("; ") };
+  let rows = 0;
+  for (const listing of FOREIGN_LISTINGS) {
+    const a = ev.read(`foreign-before-${listing.name}.txt`) ?? "";
+    const b = ev.read(`foreign-after-${listing.name}.txt`) ?? "";
+    if (a !== b) {
+      const al = a.split("\n");
+      const bl = b.split("\n");
+      let i = 0;
+      while (al[i] === bl[i]) i++;
+      return {
+        word: "failed",
+        note: `foreign-after-${listing.name}.txt first difference: ${quote(bl[i] ?? al[i] ?? "")}`,
+      };
+    }
+    rows += a.split("\n").filter((l) => l).length - 1;
+  }
+  return {
+    word: "passed",
+    note: `${FOREIGN_LISTINGS.length} listing(s) before and after, each exit 0 with its header line; ${rows} row(s), identical`,
+  };
+}
+
 const EVIDENCE_ROWS: readonly { key: string; slug: string | null; docker: boolean }[] = [
   { key: "pnpm audit --prod exit recorded", slug: null, docker: false },
   { key: "build log has no Google Fonts host", slug: null, docker: false },
   { key: "OPERATIONS.md volume upgrade procedure", slug: "ops-volume", docker: false },
   { key: "OPERATIONS.md client IP section", slug: "ops-client-ip", docker: false },
   { key: "sla-flag raw SQL comment", slug: "sla-flag-comment", docker: false },
-  { key: "foreign resources unchanged", slug: null, docker: true },
+  { key: FOREIGN_ROW, slug: null, docker: true },
   { key: "no foreign project named in gate logs", slug: null, docker: true },
 ];
 
@@ -1098,31 +1176,7 @@ export function deriveGate(
         ? { key: e.key, word: "failed", note: quote(hit) }
         : { key: e.key, word: "passed", note: `log ${ev.path("build.log")}: no Google Fonts host` };
     }
-    if (e.key === "foreign resources unchanged") {
-      const a = ev.read("foreign-before.txt");
-      const b = ev.read("foreign-after.txt");
-      if (a === null || b === null)
-        return {
-          key: e.key,
-          word: "failed",
-          note: `missing: ${a === null ? "foreign-before.txt" : "foreign-after.txt"}`,
-        };
-      if (a === b)
-        return {
-          key: e.key,
-          word: "passed",
-          note: `${a.split("\n").filter((l) => l).length} listed line(s), identical`,
-        };
-      const al = a.split("\n");
-      const bl = b.split("\n");
-      let i = 0;
-      while (al[i] === bl[i]) i++;
-      return {
-        key: e.key,
-        word: "failed",
-        note: `first difference: ${quote(bl[i] ?? al[i] ?? "")}`,
-      };
-    }
+    if (e.key === FOREIGN_ROW) return { key: e.key, ...foreignRow(ev) };
     // no foreign project named in gate logs
     let names: string[] = [];
     try {

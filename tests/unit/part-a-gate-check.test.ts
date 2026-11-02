@@ -119,13 +119,19 @@ interface Fixture {
   imageLog?: string | ((target: string) => string);
   imageExit?: number;
   cleanupLog?: string;
+  /** The after listing of the aida-dev-db container (K134 capture shape). */
   foreignAfter?: string;
+  /** K134: per-file overrides of the foreign listings; `null` leaves the file out. */
+  foreign?: Record<string, string | null>;
   patch?: string;
   opsVolumeLog?: string;
   skip?: string[];
 }
 
 const EGRESS = "tests/integration/egress-isolation.test.ts";
+
+/** K134: the evidence row says what it measures, not "foreign resources unchanged". */
+const FOREIGN_ROW = "listed containers, and the volumes of project `aida`, unchanged";
 
 /** The two lines test-image-check.ts prints, in its own JSON shape (c-CR-02). */
 function imageLog(
@@ -215,6 +221,39 @@ const passedImages = (exit: number): Fixture => ({
   imageVerify: (t) => verifyLine(t, "passed", "none", "passed"),
 });
 
+/** The three read-only listings of 08-24's foreign-before/after step, as `docker ... table` prints them. */
+const FOREIGN_LISTINGS = ["project-containers", "dev-db-container", "project-volumes"] as const;
+const FOREIGN_DEFAULT: Record<(typeof FOREIGN_LISTINGS)[number], string> = {
+  "project-containers": "CONTAINER ID   NAMES     STATE\n",
+  "dev-db-container": "CONTAINER ID   NAMES         STATE\n0123456789ab   aida-dev-db   running\n",
+  "project-volumes": "VOLUME NAME\naida_pgdata\naida_uploads_data\n",
+};
+
+/**
+ * Writes foreign-<when>-<listing>.txt and .exit (K134). It also writes the old capture's
+ * foreign-<when>.txt (the listings concatenated, without exit codes), which the old verifier
+ * compared byte for byte; the K134 verifier must not read them.
+ */
+function writeForeign(w: (name: string, body: string) => void, f: Fixture) {
+  const legacy: Record<string, string> = { before: "", after: "" };
+  for (const when of ["before", "after"]) {
+    for (const l of FOREIGN_LISTINGS) {
+      const name = `foreign-${when}-${l}`;
+      let text = FOREIGN_DEFAULT[l];
+      if (when === "after" && l === "dev-db-container" && f.foreignAfter !== undefined)
+        text = f.foreignAfter;
+      const over = f.foreign?.[`${name}.txt`];
+      if (over !== undefined) text = over ?? "";
+      if (over !== null) w(`${name}.txt`, text);
+      const exitOver = f.foreign?.[`${name}.exit`];
+      if (exitOver !== null) w(`${name}.exit`, exitOver ?? "0\n");
+      legacy[when] += text;
+    }
+  }
+  w("foreign-before.txt", legacy.before);
+  w("foreign-after.txt", legacy.after);
+}
+
 function makeDir(f: Fixture = {}): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aida-gate-a-test-"));
   dirs.push(dir);
@@ -245,8 +284,7 @@ function makeDir(f: Fixture = {}): string {
   w("part-a-src.patch", f.patch ?? "+++ b/src/app/layout.tsx\n+const x = 1;\n");
   cmd("docker-health.colima", f.colimaExit ?? 0, "colima is running\n");
   cmd("docker-health.info", 0, "Server Version: 28\n");
-  w("foreign-before.txt", "abc aida-dev-db running\n");
-  w("foreign-after.txt", f.foreignAfter ?? "abc aida-dev-db running\n");
+  writeForeign(w, f);
   cmd("integration", 0, "Test Files  94 passed\n");
   w(
     "integration.json",
@@ -546,7 +584,7 @@ describe("part-a-gate-check: literal derivation cases", () => {
       expect(result(m, k).word).toBe("blocked (docker unhealthy)");
     expect(result(m, "pnpm lint").word).toBe("passed");
     expect(result(m, "pnpm audit --prod").word).toBe("failed");
-    expect(evidence(m, "foreign resources unchanged").word).toBe("blocked (docker unhealthy)");
+    expect(evidence(m, FOREIGN_ROW).word).toBe("blocked (docker unhealthy)");
     expect(evidence(m, "no foreign project named in gate logs").word).toBe(
       "blocked (docker unhealthy)",
     );
@@ -768,7 +806,7 @@ describe("part-a-gate-check: literal derivation cases", () => {
 
 function fullGate(): { dir: string; file: string; text: string } {
   const dir = makeDir({
-    foreignAfter: "abc aida-dev-db exited\n",
+    foreignAfter: "CONTAINER ID   NAMES         STATE\n0123456789ab   aida-dev-db   exited\n",
     cleanupLog: `2 resource(s) of run ${RUN}; dry run, nothing removed.\n`,
   });
   const res = deriveGate(dir);
@@ -996,7 +1034,7 @@ describe("part-a-gate-check: check rejects single edits", () => {
 
   it("R3-4: mutation M19 an Evidence checks word failed changed to passed", () => {
     const g = fullGate();
-    const k = "foreign resources unchanged";
+    const k = FOREIGN_ROW;
     expect(cellOf(g.text, EV, k, 1)).toBe("failed");
     expectRejected(g.file, editCell(g.text, EV, k, 1, "passed"), "evidence", k);
   });
@@ -1095,7 +1133,7 @@ describe("part-a-gate-check: the image row re-verifies its own evidence (K133)",
   function passingGate(): { dir: string; file: string } {
     const dir = makeDir({
       ...passedImages(0),
-      foreignAfter: "abc aida-dev-db exited\n",
+      foreignAfter: "CONTAINER ID   NAMES         STATE\n0123456789ab   aida-dev-db   exited\n",
       cleanupLog: `2 resource(s) of run ${RUN}; dry run, nothing removed.\n`,
     });
     const res = deriveGate(dir);
@@ -1205,5 +1243,99 @@ describe("part-a-gate-check: the image row re-verifies its own evidence (K133)",
     expect(gate).not.toMatch(/from "\.\/test-image-check"/);
     const check = fs.readFileSync(path.join("scripts", "test-image-check.ts"), "utf8");
     expect(check).toMatch(/from "\.\/image-check-verify"/);
+  });
+});
+
+// K134 (Codex diff critique 1, item 4): the foreign listing row records each listing's exit code
+// and passes only when every listing exits 0 and is a well-formed table (header line present,
+// every other line a container or volume row), before and after, and the two are identical.
+describe("part-a-gate-check: the foreign listing row (K134)", () => {
+  /** The row under either name, so the old verifier's answer is visible in a red run. */
+  const foreignRow = (f: Fixture) => {
+    const r = derive(f).model.evidence.find((e) => e.key.endsWith("unchanged"));
+    if (!r) throw new Error("no foreign listing row");
+    return r;
+  };
+  const files = (text: string, exit = "0\n") => {
+    const out: Record<string, string> = {};
+    for (const when of ["before", "after"])
+      for (const l of FOREIGN_LISTINGS) {
+        out[`foreign-${when}-${l}.txt`] = text;
+        out[`foreign-${when}-${l}.exit`] = exit;
+      }
+    return out;
+  };
+
+  it("is named for what it measures", () => {
+    const keys = derive().model.evidence.map((e) => e.key);
+    expect(keys).toContain(FOREIGN_ROW);
+    expect(keys).not.toContain("foreign resources unchanged");
+  });
+
+  it("well-formed identical listings with exit 0 pass", () => {
+    const r = foreignRow({});
+    expect(r.word).toBe("passed");
+    expect(r.note).toContain("3 listing(s) before and after, each exit 0");
+  });
+
+  it("two empty identical files fail", () => {
+    expect(foreignRow({ foreign: files("") }).word).toBe("failed");
+  });
+
+  it("identical listings without a header line fail", () => {
+    const r = foreignRow({ foreign: files("0123456789ab   aida-dev-db   running\n") });
+    expect(r.word).toBe("failed");
+    expect(r.note).toContain("header");
+  });
+
+  it("an identical listing whose command failed (exit 1) fails, before or after", () => {
+    for (const when of ["before", "after"]) {
+      const r = foreignRow({ foreign: { [`foreign-${when}-project-volumes.exit`]: "1\n" } });
+      expect(r.word, when).toBe("failed");
+      expect(r.note).toContain(`foreign-${when}-project-volumes.exit`);
+    }
+  });
+
+  it("a missing listing or exit file fails", () => {
+    expect(foreignRow({ foreign: { "foreign-after-dev-db-container.exit": null } }).word).toBe(
+      "failed",
+    );
+    expect(foreignRow({ foreign: { "foreign-before-project-containers.txt": null } }).word).toBe(
+      "failed",
+    );
+  });
+
+  it("an error text in place of a listing fails even when identical", () => {
+    const err = "Cannot connect to the Docker daemon at unix:///var/run/docker.sock.\n";
+    expect(foreignRow({ foreign: files(err) }).word).toBe("failed");
+    const mixed = `${FOREIGN_DEFAULT["dev-db-container"]}${err}`;
+    expect(
+      foreignRow({
+        foreign: {
+          "foreign-before-dev-db-container.txt": mixed,
+          "foreign-after-dev-db-container.txt": mixed,
+        },
+      }).word,
+    ).toBe("failed");
+  });
+
+  it("a changed listing fails with the first difference quoted", () => {
+    const r = foreignRow({
+      foreignAfter: "CONTAINER ID   NAMES         STATE\n0123456789ab   aida-dev-db   exited\n",
+    });
+    expect(r.word).toBe("failed");
+    expect(r.note).toContain("aida-dev-db   exited");
+  });
+
+  it("check fails when a listing's exit file changes after derive", () => {
+    const dir = makeDir({});
+    const res = deriveGate(dir);
+    const file = path.join(dir, "gate.md");
+    fs.writeFileSync(file, `${res.text}\n## Notes\n\n- free text\n`);
+    expect(runCheck(file).code).toBe(0);
+    fs.writeFileSync(path.join(dir, "foreign-after-project-containers.exit"), "1\n");
+    const r = runCheck(file);
+    expect(r.code).toBe(1);
+    expect(r.out.join("\n")).toContain(`PART-A-GATE-CHECK FAILED: evidence: ${FOREIGN_ROW}:`);
   });
 });
