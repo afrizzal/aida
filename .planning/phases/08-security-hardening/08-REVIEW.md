@@ -284,3 +284,19 @@ Source: `.planning/run-loop/codex/fase08-diff-r2-jawab.md` (no HIGH; 3 MEDIUM, 1
 | Batch | Rows | Area |
 |---|---|---|
 | F7 | codex-r2-1 (K136), codex-r2-2 (K137), codex-r2-3 (K138), boundary charset (K137) | limiter fairness, part counter, process singletons |
+
+## Codex diff critique round 3 (last) dispositions (2026-11-12)
+
+Source: `.planning/run-loop/codex/fase08-diff-r3-jawab.md` (no HIGH; 2 MEDIUM, 1 LOW). Checked against the code: `tests/e2e/uat-gaps.spec.ts` drives six intake posts from one identity, and the fixture only deletes database rows, so a CI retry (`retries: process.env.CI ? 1 : 0`) meets the denial the running server remembers (K136); `countFormParts` treats `--boundary--` at any byte position as the closing delimiter, so a value such as `hello--b--world` makes a legitimate body `invalid`. Both MEDIUM are fixed in batch F8. This was the last Codex round on the topic (charter: at most 3), so F8 gets no further Codex review; it is kept small, test-first and conservative, and the final gate and the verifier check it.
+
+### Run decisions
+
+- **K139 (Codex r3-1):** the rate-limit E2E case uses its own client address per attempt (derived from `testInfo.retry`), sent as `X-Forwarded-For` on both the API requests and the browser page, so a retry starts with a fresh identity and the case no longer has to be last. Test-only; product behaviour unchanged. The E2E server's hop setting is checked to pick that address.
+- **K140 (Codex r3-2):** a delimiter is recognised only at the start of the body or right after a line feed (`\n--boundary`, which covers CRLF and bare LF), as the parser does. Every such occurrence is examined, closing ones included, and the scan refuses once the examined count passes `maxParts + 2`, so many fake closings stay bounded. A closing delimiter that is not the last delimiter occurrence is refused as `invalid`, which keeps the round-2 protection (a `--b--` in part headers followed by more parts). The epilogue rule from F7 stays. Proof: a differential test over a corpus of adversarial and legitimate bodies (mid-line delimiters, CRLF and LF framing, a closing delimiter in headers and in content, preamble, epilogue, many fake closings) asserting the scanner's count is never below the entry count of the runtime's own `Request.formData()`, and that the bodies with mid-line `--b--` in a value or a file are accepted.
+- **Codex r3-3 (LOW, accepted as a limit):** with one slot per identity, the shared "no usable address" identity admits one check at a time, so a proxy misconfiguration or a large NAT also limits concurrency, not only quota. `docs/OPERATIONS.md` gets one sentence saying so next to the shared-bucket warning.
+
+### Batch
+
+| Batch | Rows | Area |
+|---|---|---|
+| F8 | codex-r3-1 (K139), codex-r3-2 (K140), codex-r3-3 (docs sentence) | E2E retry isolation, delimiter recognition |
