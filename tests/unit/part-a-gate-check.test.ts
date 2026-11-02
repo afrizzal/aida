@@ -6,6 +6,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import * as pureVerify from "../../scripts/image-check-verify";
+import { verifyImageCheckLog } from "../../scripts/image-check-verify";
 import {
   checkGate,
   classifyEgress,
@@ -19,6 +21,7 @@ import {
   WORDS,
   worstOf,
 } from "../../scripts/part-a-gate-check";
+import * as imageCheck from "../../scripts/test-image-check";
 import { type CheckState, EXIT_CODES, summaryWord } from "../../scripts/test-image-check";
 import { assertEnoughSpace } from "../support/docker-test-preflight";
 
@@ -159,6 +162,48 @@ function imageLog(
   return `IMAGE-CHECK-TEARDOWN ${JSON.stringify(teardown)}\nIMAGE-CHECK-RESULT ${JSON.stringify(result)}\n`;
 }
 
+/**
+ * K133: an image log that test-image-check.ts --verify itself accepts as passed (user node, both
+ * telemetry variables, an image ID, the run labels, its own tag removed, the base image unmoved).
+ * `mutate` edits the parsed result and teardown lines; `dropTeardown` leaves the teardown line out.
+ */
+function passingImageLog(
+  t: string,
+  mutate?: (r: Record<string, unknown>, td: Record<string, unknown>) => void,
+  { dropTeardown = false }: { dropTeardown?: boolean } = {},
+): string {
+  const tag = `aida-test-nonroot-${t}:${RUN}`;
+  const teardown: Record<string, unknown> = {
+    created: true,
+    removed: [tag],
+    gone: [],
+    skipped: [],
+    notOurs: [],
+    leftAlone: [],
+    failed: [],
+    remaining: [],
+    runId: RUN,
+  };
+  const result: Record<string, unknown> = {
+    target: t,
+    tag,
+    runId: RUN,
+    state: "passed",
+    cause: "none",
+    evidence: "",
+    imageId: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    user: "node",
+    env: ["PATH=/usr/local/bin", "NEXT_TELEMETRY_DISABLED=1", "CHECKPOINT_DISABLE=1"],
+    labels: { "aida.test": "1", "aida.test.run": RUN },
+    baseImageBefore: "sha256:base",
+    baseImageAfter: "sha256:base",
+    runDir: "/tmp/aida-image-check-x",
+  };
+  mutate?.(result, teardown);
+  const td = dropTeardown ? "" : `IMAGE-CHECK-TEARDOWN ${JSON.stringify(teardown)}\n`;
+  return `${td}IMAGE-CHECK-RESULT ${JSON.stringify(result)}\n`;
+}
+
 function verifyLine(t: string, state: string, cause: string, word: string, extra = ""): string {
   return `IMAGE-CHECK-VERIFY state=${state} cause=${cause} word="${word}" target=${t} tag=aida-test-nonroot-${t}:${RUN}${extra}\n`;
 }
@@ -166,7 +211,7 @@ function verifyLine(t: string, state: string, cause: string, word: string, extra
 /** A consistent passed image check for both targets; `exit` is what image-<t>.exit records. */
 const passedImages = (exit: number): Fixture => ({
   imageExit: exit,
-  imageLog: (t) => imageLog(t, { state: "passed", cause: "none", evidence: "" }),
+  imageLog: (t) => passingImageLog(t),
   imageVerify: (t) => verifyLine(t, "passed", "none", "passed"),
 });
 
@@ -409,6 +454,19 @@ describe("part-a-gate-check: literal derivation cases", () => {
     expect(result(derive(fx).model, "image check runner").word).toBe("failed");
     fx.imageVerify = (t) => verifyLine(t, "passed", "none", "passed", " exit=0");
     expect(result(derive(fx).model, "image check runner").word).toBe("passed");
+  });
+
+  it("K133: the gate re-runs the image check's own --verify validation over the image log and exit file", () => {
+    // The verify log still says passed; the image log underneath it does not back that.
+    const fx = passedImages(0);
+    fx.imageLog = (t) =>
+      passingImageLog(t, (r) => {
+        r.user = "root";
+      });
+    const r = result(derive(fx).model, "image check runner");
+    expect(r.word).toBe("failed");
+    expect(r.note).toContain('passed with user "root"');
+    expect(verifyImageCheckLog(passingImageLog("runner"), 0, "runner").ok).toBe(true);
   });
 
   it("c-CR-02: the gate's word-to-exit table matches the image check's own exit codes", () => {
@@ -1026,5 +1084,126 @@ describe("part-a-gate-check: check rejects single edits", () => {
     const r = runCheck(g.file);
     expect(r.code).toBe(1);
     expect(r.out.join("\n")).toContain("PART-A-GATE-CHECK FAILED: matrix: 29:");
+  });
+});
+
+// K133 (Codex diff critique 1, item 3): after a passing verify log, any change to the image log's
+// validated fields, or a missing teardown line, must make `check` fail on that row. The gate
+// re-runs test-image-check.ts's --verify validation (one pure module both scripts import) over the
+// actual image log and exit file at derive and at check time, instead of trusting the verify log.
+describe("part-a-gate-check: the image row re-verifies its own evidence (K133)", () => {
+  function passingGate(): { dir: string; file: string } {
+    const dir = makeDir({
+      ...passedImages(0),
+      foreignAfter: "abc aida-dev-db exited\n",
+      cleanupLog: `2 resource(s) of run ${RUN}; dry run, nothing removed.\n`,
+    });
+    const res = deriveGate(dir);
+    expect(res.missing).toEqual([]);
+    expect(result(res.model, "image check runner").word).toBe("passed");
+    const file = path.join(dir, "gate.md");
+    fs.writeFileSync(file, `${res.text}\n## Notes\n\n- free text\n`);
+    expect(runCheck(file).code).toBe(0);
+    return { dir, file };
+  }
+
+  const mutations: [string, string][] = [
+    [
+      "user",
+      passingImageLog("runner", (r) => {
+        r.user = "root";
+      }),
+    ],
+    [
+      "env NEXT_TELEMETRY_DISABLED",
+      passingImageLog("runner", (r) => {
+        r.env = ["PATH=/usr/local/bin", "CHECKPOINT_DISABLE=1"];
+      }),
+    ],
+    [
+      "env CHECKPOINT_DISABLE",
+      passingImageLog("runner", (r) => {
+        r.env = ["NEXT_TELEMETRY_DISABLED=1"];
+      }),
+    ],
+    [
+      "image ID",
+      passingImageLog("runner", (r) => {
+        r.imageId = null;
+      }),
+    ],
+    [
+      "tag",
+      passingImageLog("runner", (r) => {
+        r.tag = "aida-test-nonroot-runner:mwc6vmbv-0000000000000000";
+      }),
+    ],
+    [
+      "run id",
+      passingImageLog("runner", (r) => {
+        r.runId = "mwc6vmbv-0000000000000000";
+      }),
+    ],
+    [
+      "run label",
+      passingImageLog("runner", (r) => {
+        r.labels = { "aida.test": "1" };
+      }),
+    ],
+    [
+      "state",
+      passingImageLog("runner", (r) => {
+        r.state = "failed";
+        r.cause = "build";
+      }),
+    ],
+    [
+      "tag not removed",
+      passingImageLog("runner", (_r, td) => {
+        td.removed = [];
+      }),
+    ],
+    [
+      "base image moved",
+      passingImageLog("runner", (r) => {
+        r.baseImageAfter = "sha256:other";
+      }),
+    ],
+    ["teardown line removed", passingImageLog("runner", undefined, { dropTeardown: true })],
+  ];
+
+  it.each(
+    mutations,
+  )("changing the image log's %s after a passing verify fails check", (_f, log) => {
+    const g = passingGate();
+    fs.writeFileSync(path.join(g.dir, "image-runner.log"), log);
+    const r = runCheck(g.file);
+    expect(r.code).toBe(1);
+    expect(r.out.join("\n")).toContain("PART-A-GATE-CHECK FAILED: results: image check runner:");
+  });
+
+  it("changing the image exit file after a passing verify fails check", () => {
+    const g = passingGate();
+    fs.writeFileSync(path.join(g.dir, "image-runner.exit"), "1\n");
+    const r = runCheck(g.file);
+    expect(r.code).toBe(1);
+    expect(r.out.join("\n")).toContain("PART-A-GATE-CHECK FAILED: results: image check runner:");
+  });
+
+  it("one pure validation module, imported by both scripts, with no Docker or child-process code", () => {
+    expect(imageCheck.verifyImageCheckLog).toBe(pureVerify.verifyImageCheckLog);
+    const src = fs.readFileSync(path.join("scripts", "image-check-verify.ts"), "utf8");
+    const imports = [...src.matchAll(/^import[^;]*?from\s+"([^"]+)"/gms)].map((m) => m[1]);
+    for (const spec of imports) {
+      expect(spec).not.toMatch(
+        /child_process|docker-test-preflight|test-docker-cleanup|test-image-check/,
+      );
+    }
+    expect(src).not.toMatch(/\bspawn\(|\bexecFile|\bexecSync|runDocker/);
+    const gate = fs.readFileSync(path.join("scripts", "part-a-gate-check.ts"), "utf8");
+    expect(gate).toMatch(/from "\.\/image-check-verify"/);
+    expect(gate).not.toMatch(/from "\.\/test-image-check"/);
+    const check = fs.readFileSync(path.join("scripts", "test-image-check.ts"), "utf8");
+    expect(check).toMatch(/from "\.\/image-check-verify"/);
   });
 });

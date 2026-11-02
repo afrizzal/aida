@@ -17,12 +17,15 @@
 //   pnpm exec tsx scripts/part-a-gate-check.ts check <gate file> [--sections <list>]
 //
 // Section names: header, results, evidence, design, matrix, requirements, human. This script
-// reads files only. It starts no process and touches no Docker resource.
+// reads files only. It starts no process and touches no Docker resource. The image rows re-run
+// the image check's --verify validation from scripts/image-check-verify.ts, a pure module with
+// no Docker or child-process code (K133).
 // ---------------------------------------------------------------------------
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { summaryWord, verifyImageCheckLog } from "./image-check-verify";
 
 export type Required = "part-a" | "phase-8.1" | "both";
 
@@ -858,12 +861,9 @@ export function imageWordExit(word: string): number | null {
   return null;
 }
 
-/** test-image-check.ts summaryWord, restated so this script imports nothing that runs Docker. */
+/** test-image-check.ts summaryWord, from the pure module both scripts import (K133). */
 function imageSummaryWord(state: unknown, cause: unknown): string {
-  if (state === "passed") return "passed";
-  if (state === "blocked") return cause === "space" ? "blocked (space)" : "blocked (with evidence)";
-  if (state === "not run") return `not run (parked: ${String(cause)})`;
-  return "failed";
+  return summaryWord(state as Parameters<typeof summaryWord>[0], String(cause));
 }
 
 /**
@@ -933,6 +933,12 @@ function imageRow(ev: Evidence, target: string, runId: string): ResultRow {
     }
     if (word !== "failed") {
       const problems = imageDisagreements(word, exit, vlines[0], clog, target, runId);
+      // K133: the image check's own --verify validation, re-run here over the actual image log
+      // and exit file (at derive and so at check time), never the verify log's word alone.
+      const own = verifyImageCheckLog(clog, exit ?? Number.NaN, target);
+      if (!own.ok) problems.push(`image-${target}.log re-verified: ${own.line}`);
+      else if (!own.line.includes(` word="${word}" `))
+        problems.push(`image-${target}.log re-verified: ${own.line}, verify says ${word}`);
       if (problems.length > 0) {
         word = "failed";
         note += `; ${problems.join("; ")}`;
