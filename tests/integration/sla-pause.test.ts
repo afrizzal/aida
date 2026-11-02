@@ -198,16 +198,24 @@ describe("SLA pause with the real sla-flag handler (AIDA-57)", () => {
     await moveTo(actor, id, "PENDING", pauseAt);
 
     // The worker restarts: new module instances, a new pg pool and Prisma client. The pause
-    // state lives only in the database (D-16).
-    const g = globalThis as unknown as { prisma?: typeof prisma };
-    const saved = g.prisma;
+    // state lives only in the database (D-16). Since K138, src/lib/db.ts keeps one pool and one
+    // client per process on globalThis under registered symbols, so a restart is simulated by
+    // setting both aside (and restoring them afterwards), not by re-importing alone.
+    const POOL_KEY = Symbol.for("aida.db.pool");
+    const PRISMA_KEY = Symbol.for("aida.db.prisma");
+    const g = globalThis as unknown as Record<symbol, unknown>;
+    const savedPool = g[POOL_KEY];
+    const savedPrisma = g[PRISMA_KEY];
     vi.resetModules();
-    delete g.prisma;
+    delete g[POOL_KEY];
+    delete g[PRISMA_KEY];
     const freshDb = await import("@/lib/db");
+    const freshPool = g[POOL_KEY] as { end(): Promise<void> } | undefined;
     const freshMutations = await import("@/lib/tickets/mutations");
     const freshFlag = await import("@/lib/worker/jobs/sla-flag");
     try {
       expect(freshDb.prisma).not.toBe(prisma);
+      expect(freshPool !== undefined && freshPool !== savedPool, "a new pool").toBe(true);
       await moveTo(actor, id, "OPEN", at(pauseAt, 40 * MIN), {}, freshMutations.runTicketMutation);
       const resumed = await read(id);
       expect(resumed.firstResponseDueAt.getTime() - original.firstResponseDueAt.getTime()).toBe(
@@ -223,8 +231,14 @@ describe("SLA pause with the real sla-flag handler (AIDA-57)", () => {
       await freshFlag.slaFlagHandler(undefined, { now: at(resumed.firstResponseDueAt, 1) });
       expect((await read(id)).isBreached).toBe(true);
     } finally {
-      g.prisma = saved;
+      g[POOL_KEY] = savedPool;
+      g[PRISMA_KEY] = savedPrisma;
       await freshDb.prisma.$disconnect();
+      // Prisma's $disconnect leaves a caller-supplied pool open; end the fresh one here.
+      await freshPool?.end();
+      // Later dynamic imports must not reach the restarted graph and its ended pool: a new graph
+      // picks the restored pool and client up from globalThis.
+      vi.resetModules();
     }
   });
 

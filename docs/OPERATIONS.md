@@ -299,7 +299,10 @@ and restarting the app does.
 
 **The limit is per app process.** AIDA runs one app process: one server, one `app` container.
 Running several `app` replicas multiplies the limit, and with it the share of the database those
-checks can take, so it is not supported.
+checks can take, so it is not supported. Within the process, every route shares one database pool
+and one copy of these limits, also when the production build loads the code once per route: both
+are kept process-wide (`src/lib/db.ts`, `src/lib/rate-limit/check-rate-limit.ts`). The `worker`
+container is a separate process with its own pool (`DB_POOL_MAX=5`).
 
 ## Environment variable reference
 

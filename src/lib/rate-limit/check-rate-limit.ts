@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Prisma } from "@/generated/prisma/client";
 import { dbPoolWaitingCount, prisma } from "@/lib/db";
-import { createDenialMemory } from "@/lib/rate-limit/denial-memory";
+import { createDenialMemory, type DenialMemory } from "@/lib/rate-limit/denial-memory";
 
 /**
  * Reads the pepper lazily, on every hash — not once at module load — so importing this module
@@ -126,21 +126,45 @@ export const RATE_LIMIT_MAX_PER_IDENTITY = 1;
 export const RATE_LIMIT_DENIED_MAX_KEYS = 10_000;
 export const RATE_LIMIT_DENIED_SWEEP_MS = 1000;
 
-const denials = createDenialMemory({
-  maxKeys: RATE_LIMIT_DENIED_MAX_KEYS,
-  sweepIntervalMs: RATE_LIMIT_DENIED_SWEEP_MS,
-});
-let admissionLimit = RATE_LIMIT_MAX_CONCURRENT;
-let perIdentityLimit = RATE_LIMIT_MAX_PER_IDENTITY;
-let inFlight = 0;
-const identitiesInFlight = new Map<string, number>();
+type AdmissionState = {
+  admissionLimit: number;
+  perIdentityLimit: number;
+  inFlight: number;
+  identitiesInFlight: Map<string, number>;
+  denials: DenialMemory;
+};
+
+// One admission state per process (K138, Codex diff critique 2 item 3). A production build may
+// instantiate this module once per route bundle; keeping the slot counter, the per-identity
+// entries, the denial memory and the test limits on globalThis under a registered symbol (as the
+// health state does) makes the limits above hold for the whole process, not per bundle.
+const ADMISSION_KEY = Symbol.for("aida.rate-limit.admission");
+
+function admission(): AdmissionState {
+  const g = globalThis as typeof globalThis & { [ADMISSION_KEY]?: AdmissionState };
+  let state = g[ADMISSION_KEY];
+  if (!state) {
+    state = {
+      admissionLimit: RATE_LIMIT_MAX_CONCURRENT,
+      perIdentityLimit: RATE_LIMIT_MAX_PER_IDENTITY,
+      inFlight: 0,
+      identitiesInFlight: new Map(),
+      denials: createDenialMemory({
+        maxKeys: RATE_LIMIT_DENIED_MAX_KEYS,
+        sweepIntervalMs: RATE_LIMIT_DENIED_SWEEP_MS,
+      }),
+    };
+    g[ADMISSION_KEY] = state;
+  }
+  return state;
+}
 
 /**
  * Test seam only: the atomicity proof runs 20 limiter transactions at once, which the admission
  * limit would otherwise refuse before they could race. `null` restores the shipped limit.
  */
 export function setRateLimitAdmissionLimitForTests(limit: number | null): void {
-  admissionLimit = limit ?? RATE_LIMIT_MAX_CONCURRENT;
+  admission().admissionLimit = limit ?? RATE_LIMIT_MAX_CONCURRENT;
 }
 
 /**
@@ -148,43 +172,43 @@ export function setRateLimitAdmissionLimitForTests(limit: number | null): void {
  * per-identity limit would otherwise refuse. `null` restores the shipped limit.
  */
 export function setRateLimitPerIdentityLimitForTests(limit: number | null): void {
-  perIdentityLimit = limit ?? RATE_LIMIT_MAX_PER_IDENTITY;
+  admission().perIdentityLimit = limit ?? RATE_LIMIT_MAX_PER_IDENTITY;
 }
 
 /** Limiter transactions running in this process now. */
 export function rateLimitTransactionsInFlight(): number {
-  return inFlight;
+  return admission().inFlight;
 }
 
 /** Identities holding a limiter slot in this process now. */
 export function rateLimitIdentitiesInFlight(): number {
-  return identitiesInFlight.size;
+  return admission().identitiesInFlight.size;
 }
 
 /** Identities whose denial this process remembers now. */
 export function rateLimitDenialsRemembered(): number {
-  return denials.size();
+  return admission().denials.size();
 }
 
 /**
  * Takes a slot when this identity holds none, one is free and the pool is not already queued;
  * never waits. Synchronous, so no other call can interleave between the checks and the take.
  */
-function tryAdmit(lockKey: string): boolean {
-  const held = identitiesInFlight.get(lockKey) ?? 0;
-  if (held >= perIdentityLimit) return false;
-  if (inFlight >= admissionLimit) return false;
-  if (dbPoolWaitingCount() >= admissionLimit) return false;
-  inFlight += 1;
-  identitiesInFlight.set(lockKey, held + 1);
+function tryAdmit(state: AdmissionState, lockKey: string): boolean {
+  const held = state.identitiesInFlight.get(lockKey) ?? 0;
+  if (held >= state.perIdentityLimit) return false;
+  if (state.inFlight >= state.admissionLimit) return false;
+  if (dbPoolWaitingCount() >= state.admissionLimit) return false;
+  state.inFlight += 1;
+  state.identitiesInFlight.set(lockKey, held + 1);
   return true;
 }
 
-function release(lockKey: string): void {
-  inFlight -= 1;
-  const held = (identitiesInFlight.get(lockKey) ?? 1) - 1;
-  if (held > 0) identitiesInFlight.set(lockKey, held);
-  else identitiesInFlight.delete(lockKey);
+function release(state: AdmissionState, lockKey: string): void {
+  state.inFlight -= 1;
+  const held = (state.identitiesInFlight.get(lockKey) ?? 1) - 1;
+  if (held > 0) state.identitiesInFlight.set(lockKey, held);
+  else state.identitiesInFlight.delete(lockKey);
 }
 
 function retryAfterFor(untilMs: number, now: number, windowMs: number): number {
@@ -236,11 +260,12 @@ export async function consumeRateLimit(
   }
   const ipHash = hashIp(ip);
   const lockKey = `${scope}:${ipHash}`;
-  const remembered = denials.deniedUntil(lockKey, max, windowMs, Date.now());
+  const state = admission();
+  const remembered = state.denials.deniedUntil(lockKey, max, windowMs, Date.now());
   if (remembered !== null) {
     return { allowed: false, retryAfterSeconds: retryAfterFor(remembered, Date.now(), windowMs) };
   }
-  if (!tryAdmit(lockKey)) {
+  if (!tryAdmit(state, lockKey)) {
     return { allowed: false, retryAfterSeconds: RATE_LIMIT_BUSY_RETRY_AFTER_SECONDS };
   }
   try {
@@ -275,7 +300,7 @@ export async function consumeRateLimit(
       { maxWait: RATE_LIMIT_POOL_WAIT_MS, timeout: 5000 },
     );
     if (result.deniedUntilMs !== null) {
-      denials.record(lockKey, max, windowMs, result.deniedUntilMs, Date.now());
+      state.denials.record(lockKey, max, windowMs, result.deniedUntilMs, Date.now());
     }
     return { allowed: result.allowed, retryAfterSeconds: result.retryAfterSeconds };
   } catch (err) {
@@ -286,7 +311,7 @@ export async function consumeRateLimit(
     throw err;
   } finally {
     // Every path out of the transaction, including a throw, frees the slot and the identity entry.
-    release(lockKey);
+    release(state, lockKey);
   }
 }
 
