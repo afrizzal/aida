@@ -267,3 +267,20 @@ Source: `.planning/run-loop/codex/fase08-diff-jawab.md` (4 HIGH, 1 MEDIUM, 1 LOW
 ### Deferred
 
 - codex-6 (LOW): responses Caddy makes itself (the probe's 404, the body-size 413) carry no security headers. Adding a global `header` block in Caddy would duplicate the app's CSP on proxied responses, and the real Caddy behaviour can only be proven by plan 08-22 (Phase 8.1). Deferred to Phase 8.1 and recorded in `deferred-items.md`.
+
+## Codex diff critique round 2 dispositions (2026-11-12)
+
+Source: `.planning/run-loop/codex/fase08-diff-r2-jawab.md` (no HIGH; 3 MEDIUM, 1 LOW). Checked against the code before triage: the three admission slots in `src/lib/rate-limit/check-rate-limit.ts` are shared by every identity and route; `countFormParts` in `src/lib/http/read-bounded-form-data.ts` keeps scanning after the closing delimiter and after the limit, and the url-encoded branch loops once per `&` over up to 31 MiB; the boundary is encoded as latin1, so a non-ASCII boundary that the parser reads as UTF-8 would not be counted (the orchestrator found this one while checking, it is not in the critique); `src/lib/db.ts` caches the pool and client on `globalThis` only outside production, and the admission counter is a module variable. The three MEDIUM are fixed in batch F7. The LOW is accepted as a written limit.
+
+### Run decisions
+
+- **K136 (Codex r2-1):** fairness in front of the shared slots. One identity (scope plus client-IP hash) holds at most one admission slot; a second concurrent call from the same identity gets 429 at once. A check that denies records an in-memory "denied until" time for that scope and identity, and later calls before that time get 429 without a transaction (the database would deny them too, because Retry-After is the window reset). Both maps are bounded in size and swept, like the health throttle.
+- **K137 (Codex r2-2 and the boundary finding):** the part counter stops as soon as the count passes the limit, stops at the first closing delimiter (the parser ignores the epilogue), and the url-encoded branch stops the same way. A multipart boundary must be 1 to 70 RFC 2046 boundary characters (ASCII only), quoted or not; any other boundary is refused unparsed. Tests: an adversarial body with many fake closing delimiters, a body with millions of `&`, a non-ASCII and an over-long boundary, a quoted boundary; all bounded by assertions on work done (counts or early returns), not on wall-clock time.
+- **K138 (Codex r2-3):** one pool, one Prisma client and one admission state per process in production too. The pool, the client and the limiter's admission state live on `globalThis` under fixed `Symbol.for` keys in every environment, as the health store does (`Symbol.for("aida.health.state")`). A unit test re-imports the modules after `vi.resetModules()` and shows both copies share the same pool and the same counters.
+- **Codex r2-4 (LOW, accepted as a limit):** the K134 row accepts a header-only listing when exit 0 and identical, because an empty listing is legitimate. It does not prove when or with which filter the listing was taken, nor that volume contents are unchanged. The row name already says what it measures; the gate's note for the row states this limit.
+
+### Batch
+
+| Batch | Rows | Area |
+|---|---|---|
+| F7 | codex-r2-1 (K136), codex-r2-2 (K137), codex-r2-3 (K138), boundary charset (K137) | limiter fairness, part counter, process singletons |
