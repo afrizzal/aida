@@ -1,0 +1,1359 @@
+diff --git a/docs/OPERATIONS.md b/docs/OPERATIONS.md
+index 5b63938..dacdbf9 100644
+--- a/docs/OPERATIONS.md
++++ b/docs/OPERATIONS.md
+@@ -287,9 +287,22 @@ without touching the database, and is not counted. The other 7 connections stay
+ the app. The same 429 is given when the check waits longer than 500 ms for another request of the
+ same client, or longer than 1 s for a pool connection.
+ 
++**One check at a time per client.** One client (the client address, per route) runs at most one
++of these checks at once, so a flood from one address cannot take the 3 slots other clients need.
++Its second simultaneous request answers 429 with `Retry-After: 1` at once. Clients without a usable
++address share one bucket, and so share that one check; under the supported topology Caddy always
++supplies the address. When a client is over its quota, the app remembers until when (at most
++10,000 clients, expired entries swept every second), and answers that client's requests before
++then with 429 and the same `Retry-After` without asking the database. This memory lives in the app
++process: deleting rate-limit rows from the database does not lift a denial it already remembers,
++and restarting the app does.
++
+ **The limit is per app process.** AIDA runs one app process: one server, one `app` container.
+ Running several `app` replicas multiplies the limit, and with it the share of the database those
+-checks can take, so it is not supported.
++checks can take, so it is not supported. Within the process, every route shares one database pool
++and one copy of these limits, also when the production build loads the code once per route: both
++are kept process-wide (`src/lib/db.ts`, `src/lib/rate-limit/check-rate-limit.ts`). The `worker`
++container is a separate process with its own pool (`DB_POOL_MAX=5`).
+ 
+ ## Environment variable reference
+ 
+diff --git a/src/lib/db.ts b/src/lib/db.ts
+index 5afa6db..2e40311 100644
+--- a/src/lib/db.ts
++++ b/src/lib/db.ts
+@@ -2,28 +2,42 @@ import { PrismaPg } from "@prisma/adapter-pg";
+ import pg from "pg";
+ import { PrismaClient } from "@/generated/prisma/client";
+ 
+-const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient; pgPool?: pg.Pool };
+-// Kept with the cached client in development, so dbPoolWaitingCount reads the pool that client
+-// actually uses after a hot reload.
+-const pool =
+-  globalForPrisma.pgPool ??
+-  new pg.Pool({
++// One pool and one Prisma client per process, in every environment (K138, Codex diff critique 2
++// item 3). A production build may instantiate this module once per route bundle, and a dev hot
++// reload re-evaluates it; both then reuse the pool and the client kept on globalThis under these
++// registered symbols, as the health state does. So DB_POOL_MAX bounds the whole process, and
++// dbPoolWaitingCount (K132) reads the pool every route really uses. The worker is its own
++// process and so builds its own pool, with its own DB_POOL_MAX.
++const POOL_KEY = Symbol.for("aida.db.pool");
++const PRISMA_KEY = Symbol.for("aida.db.prisma");
++const g = globalThis as typeof globalThis & {
++  [POOL_KEY]?: pg.Pool;
++  [PRISMA_KEY]?: PrismaClient;
++};
++
++let pool = g[POOL_KEY];
++if (!pool) {
++  pool = new pg.Pool({
+     connectionString: process.env.DATABASE_URL,
+     // Sized so app_pool + worker_pool < Postgres max_connections (default 100)
+     // Compose sets DB_POOL_MAX=10 for app and DB_POOL_MAX=5 for worker (total 15)
+     max: Number(process.env.DB_POOL_MAX) || 10,
+   });
+-const adapter = new PrismaPg(pool);
+-export const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter });
+-if (process.env.NODE_ENV !== "production") {
+-  globalForPrisma.prisma = prisma;
+-  globalForPrisma.pgPool = pool;
++  g[POOL_KEY] = pool;
++}
++const sharedPool: pg.Pool = pool;
++
++let client = g[PRISMA_KEY];
++if (!client) {
++  client = new PrismaClient({ adapter: new PrismaPg(sharedPool) });
++  g[PRISMA_KEY] = client;
+ }
++export const prisma: PrismaClient = client;
+ 
+ /**
+  * Connect requests queued in this process's pool, waiting for a free connection. Read by the
+  * rate limiter's admission check (K132) so it does not add to an already queued pool.
+  */
+ export function dbPoolWaitingCount(): number {
+-  return pool.waitingCount;
++  return sharedPool.waitingCount;
+ }
+diff --git a/src/lib/http/read-bounded-form-data.ts b/src/lib/http/read-bounded-form-data.ts
+index 28a51a7..c0b22ac 100644
+--- a/src/lib/http/read-bounded-form-data.ts
++++ b/src/lib/http/read-bounded-form-data.ts
+@@ -1,4 +1,4 @@
+-// Bounded multipart reader (plan 08-13, D-24, AIDA-30; part count K135).
++// Bounded multipart reader (plan 08-13, D-24, AIDA-30; part count K135, K137).
+ //
+ // The body limit is enforced on the bytes actually received. Content-Length is client-supplied:
+ // it can be missing (chunked transfer), false (smaller than the body) or honest, so a value above
+@@ -14,10 +14,19 @@
+ // "too_many_parts" without being parsed, so many small parts (foreign field names included)
+ // cannot make the parser build an unbounded number of entries. A url-encoded body is counted by
+ // its `&`-separated fields. A content type the count cannot read exactly (a second boundary, an
+-// odd parameter) is answered "invalid" without parsing, so the parser never uses a boundary other
+-// than the counted one. The count never undercounts a body the parser accepts; it can overcount
+-// one that carries the delimiter inside a part without a line break before it, which a real
+-// client's random boundary never does.
++// odd parameter, a boundary outside RFC 2046) is answered "invalid" without parsing, so the
++// parser never uses a boundary other than the counted one. The count never undercounts a body
++// the parser accepts; it can overcount one that carries the delimiter inside a part without a
++// line break before it, which a real client's random boundary never does.
++//
++// Bounded work (K137, Codex diff critique 2 item 2): the scan stops as soon as the count passes
++// the limit, and at the first closing delimiter, so it looks at no more than `maxParts + 1`
++// delimiters (or `maxParts` ampersands) whatever the body holds. A closing delimiter ends the
++// count only at the end of the body (nothing after it but one line break). Anything after it
++// makes the body "invalid": the parser either ignores it as an epilogue (newer undici) or fails
++// (Node 22's undici), and a "closing delimiter" that sits inside a part's headers is skipped by
++// the parser, which then reads on and builds every later part. Stopping there and accepting the
++// count would undercount, so such a body is refused unparsed instead.
+ //
+ // No project imports: usable from any route without pulling in app modules.
+ 
+@@ -28,44 +37,99 @@ export type BoundedFormDataResult =
+ const MULTIPART = /^\s*multipart\/form-data\s*(;|$)/i;
+ const URLENCODED = /^\s*application\/x-www-form-urlencoded\s*(;|$)/i;
+ /**
+- * The only multipart content type the count accepts: one `boundary` parameter, a token or a
+- * plain quoted string, as browsers and fetch send it. Anything looser (a second boundary, spaces
+- * around `=`, escapes) could make the parser pick a boundary other than the one counted, so it is
+- * refused as invalid before the parse.
++ * The only multipart content type the count accepts: one `boundary` parameter, as browsers and
++ * fetch send it. The boundary is 1 to 70 RFC 2046 boundary characters, ASCII only (K137): digits,
++ * letters and `'()+_,-./:=?` and space, the last one not a space. Unquoted, only those that are
++ * also HTTP token characters (`'+_-.`, digits, letters); quoted, all of them, with no escapes.
++ * Anything else (a second boundary, spaces around `=`, escapes, a non-ASCII or over-long
++ * boundary) could make the parser use a boundary other than the one counted: the parser reads
++ * the boundary as UTF-8, so a non-ASCII one would not match the counted bytes. Such a content
++ * type is refused as invalid before the parse. Only space and tab count as whitespace, as in the
++ * parser.
+  */
+ const STRICT_MULTIPART =
+-  /^\s*multipart\/form-data\s*;\s*boundary=(?:([!#$%&'*+.^_`|~0-9A-Za-z-]+)|"([^"\\\r\n]+)")\s*$/i;
++  /^[ \t]*multipart\/form-data[ \t]*;[ \t]*boundary=(?:([0-9A-Za-z'+_.-]{1,70})|"([0-9A-Za-z'()+_,./:=? -]{0,69}[0-9A-Za-z'()+_,./:=?-])")[ \t]*$/i;
+ const URLENCODED_PARAMS =
+   /^\s*application\/x-www-form-urlencoded\s*(;\s*charset=[A-Za-z0-9._-]+\s*)?$/i;
+ 
+ const DASH = 0x2d;
+ const AMP = 0x26;
++const CR = 0x0d;
++const LF = 0x0a;
++/** After the closing delimiter, at most one line break may follow. */
++const MAX_CLOSE_TAIL_BYTES = 2;
++
++/** The parts of a form body (see countFormParts) and the work the scan did to count them. */
++export type FormPartScan = {
++  /** The count, `limit + 1` once it passed the limit, or null when the body is refused. */
++  parts: number | null;
++  /** Delimiter matches (multipart) or `&` matches (url-encoded) the scan looked at. */
++  examined: number;
++};
++
++function onlyLineBreakAfter(buf: Buffer, from: number): boolean {
++  if (buf.byteLength - from > MAX_CLOSE_TAIL_BYTES) return false;
++  for (let i = from; i < buf.byteLength; i++) {
++    if (buf[i] !== CR && buf[i] !== LF) return false;
++  }
++  return true;
++}
+ 
+ /**
+- * The number of parts in a form body, counted on the raw bytes (K135): for multipart, every
+- * `--boundary` delimiter that is not the closing `--boundary--`; for url-encoded, the
+- * `&`-separated fields. Null when the content type is not one the count can read exactly (see
+- * STRICT_MULTIPART); readBoundedFormData then refuses the body as invalid without parsing it.
++ * countFormParts with the work it did (K137). Exported for the tests, which bound the scan by
++ * `examined`, never by time.
+  */
+-export function countFormParts(bytes: Uint8Array, contentType: string): number | null {
++export function scanFormParts(bytes: Uint8Array, contentType: string, limit: number): FormPartScan {
+   const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
++  let examined = 0;
+   if (URLENCODED_PARAMS.test(contentType)) {
+-    if (buf.byteLength === 0) return 0;
++    if (buf.byteLength === 0) return { parts: 0, examined };
+     let fields = 1;
+-    for (let i = buf.indexOf(AMP); i !== -1; i = buf.indexOf(AMP, i + 1)) fields++;
+-    return fields;
++    let at = -1;
++    while (fields <= limit) {
++      at = buf.indexOf(AMP, at + 1);
++      if (at === -1) break;
++      examined++;
++      fields++;
++    }
++    return { parts: fields, examined };
+   }
+   const m = contentType.match(STRICT_MULTIPART);
+   const boundary = m ? (m[1] ?? m[2]) : undefined;
+-  if (!boundary) return null;
+-  const delimiter = Buffer.from(`--${boundary}`, "latin1");
++  if (!boundary) return { parts: null, examined };
++  // ASCII only, so these are exactly the bytes the parser looks for.
++  const delimiter = Buffer.from(`--${boundary}`, "utf8");
+   let parts = 0;
+-  for (let i = buf.indexOf(delimiter); i !== -1; i = buf.indexOf(delimiter, i + delimiter.length)) {
+-    const end = i + delimiter.length;
+-    const closing = buf[end] === DASH && buf[end + 1] === DASH;
+-    if (!closing) parts++;
++  let from = 0;
++  for (;;) {
++    const at = buf.indexOf(delimiter, from);
++    if (at === -1) return { parts, examined };
++    examined++;
++    const end = at + delimiter.length;
++    if (buf[end] === DASH && buf[end + 1] === DASH) {
++      // The first closing delimiter ends the scan; it ends the count only at the end of the body.
++      return { parts: onlyLineBreakAfter(buf, end + 2) ? parts : null, examined };
++    }
++    parts++;
++    if (parts > limit) return { parts, examined };
++    from = end;
+   }
+-  return parts;
++}
++
++/**
++ * The number of parts in a form body, counted on the raw bytes (K135): for multipart, every
++ * `--boundary` delimiter before the closing `--boundary--`; for url-encoded, the `&`-separated
++ * fields. The count stops once it passes `limit` and then returns `limit + 1` (K137). Null when
++ * the content type is not one the count can read exactly (see STRICT_MULTIPART), or when
++ * anything but one line break follows the first closing delimiter; readBoundedFormData then
++ * refuses the body as invalid without parsing it.
++ */
++export function countFormParts(
++  bytes: Uint8Array,
++  contentType: string,
++  limit: number,
++): number | null {
++  return scanFormParts(bytes, contentType, limit).parts;
+ }
+ 
+ export async function readBoundedFormData(
+@@ -108,7 +172,7 @@ export async function readBoundedFormData(
+     if (!MULTIPART.test(contentType) && !URLENCODED.test(contentType)) {
+       return { ok: false, reason: "invalid" };
+     }
+-    const parts = countFormParts(bytes, contentType);
++    const parts = countFormParts(bytes, contentType, opts.maxParts);
+     if (parts === null) return { ok: false, reason: "invalid" };
+     if (parts > opts.maxParts) return { ok: false, reason: "too_many_parts" };
+   }
+diff --git a/src/lib/rate-limit/check-rate-limit.ts b/src/lib/rate-limit/check-rate-limit.ts
+index 084fadd..d2798cb 100644
+--- a/src/lib/rate-limit/check-rate-limit.ts
++++ b/src/lib/rate-limit/check-rate-limit.ts
+@@ -1,6 +1,7 @@
+ import { createHash } from "node:crypto";
+ import type { Prisma } from "@/generated/prisma/client";
+ import { dbPoolWaitingCount, prisma } from "@/lib/db";
++import { createDenialMemory, type DenialMemory } from "@/lib/rate-limit/denial-memory";
+ 
+ /**
+  * Reads the pepper lazily, on every hash — not once at module load — so importing this module
+@@ -100,30 +101,120 @@ export const RATE_LIMIT_BUSY_RETRY_AFTER_SECONDS = 1;
+  * docs/OPERATIONS.md), which this limit relies on: N processes would admit N times as many.
+  */
+ export const RATE_LIMIT_MAX_CONCURRENT = 3;
+-let admissionLimit = RATE_LIMIT_MAX_CONCURRENT;
+-let inFlight = 0;
++
++/**
++ * Fairness in front of the shared slots (K136, Codex diff critique 2 item 1). One identity (scope
++ * plus client-IP hash, the advisory-lock key) holds at most RATE_LIMIT_MAX_PER_IDENTITY slots, so
++ * a flood from one identity cannot take the slots every other identity needs: its second
++ * concurrent call is answered busy at once, without a transaction. One identity's calls queue on
++ * its advisory lock anyway, so a second slot would only add a second waiter, never throughput.
++ * The per-identity entries exist only while a call holds a slot, so there are never more of them
++ * than RATE_LIMIT_MAX_CONCURRENT, and each is removed on every path out (`finally`).
++ */
++export const RATE_LIMIT_MAX_PER_IDENTITY = 1;
++
++/**
++ * Denial memory (K136). A check that denies remembers the time the identity's oldest hit leaves
++ * the window; until then the database would deny again, so later calls with the same limits are
++ * answered 429 from memory, with the same Retry-After, without a transaction. At most
++ * RATE_LIMIT_DENIED_MAX_KEYS identities are remembered; expired entries are swept at most once
++ * per RATE_LIMIT_DENIED_SWEEP_MS, and at capacity the oldest-inserted entry is evicted first
++ * (denial-memory.ts). Forgetting a denial early only sends that identity back to the database.
++ * The memory lives in the process, so rows deleted from RateLimitHit by hand (the E2E fixture)
++ * do not lift a denial it already remembers; a restart does.
++ */
++export const RATE_LIMIT_DENIED_MAX_KEYS = 10_000;
++export const RATE_LIMIT_DENIED_SWEEP_MS = 1000;
++
++type AdmissionState = {
++  admissionLimit: number;
++  perIdentityLimit: number;
++  inFlight: number;
++  identitiesInFlight: Map<string, number>;
++  denials: DenialMemory;
++};
++
++// One admission state per process (K138, Codex diff critique 2 item 3). A production build may
++// instantiate this module once per route bundle; keeping the slot counter, the per-identity
++// entries, the denial memory and the test limits on globalThis under a registered symbol (as the
++// health state does) makes the limits above hold for the whole process, not per bundle.
++const ADMISSION_KEY = Symbol.for("aida.rate-limit.admission");
++
++function admission(): AdmissionState {
++  const g = globalThis as typeof globalThis & { [ADMISSION_KEY]?: AdmissionState };
++  let state = g[ADMISSION_KEY];
++  if (!state) {
++    state = {
++      admissionLimit: RATE_LIMIT_MAX_CONCURRENT,
++      perIdentityLimit: RATE_LIMIT_MAX_PER_IDENTITY,
++      inFlight: 0,
++      identitiesInFlight: new Map(),
++      denials: createDenialMemory({
++        maxKeys: RATE_LIMIT_DENIED_MAX_KEYS,
++        sweepIntervalMs: RATE_LIMIT_DENIED_SWEEP_MS,
++      }),
++    };
++    g[ADMISSION_KEY] = state;
++  }
++  return state;
++}
+ 
+ /**
+  * Test seam only: the atomicity proof runs 20 limiter transactions at once, which the admission
+  * limit would otherwise refuse before they could race. `null` restores the shipped limit.
+  */
+ export function setRateLimitAdmissionLimitForTests(limit: number | null): void {
+-  admissionLimit = limit ?? RATE_LIMIT_MAX_CONCURRENT;
++  admission().admissionLimit = limit ?? RATE_LIMIT_MAX_CONCURRENT;
++}
++
++/**
++ * Test seam only: the atomicity proof races 20 transactions of one identity, which the
++ * per-identity limit would otherwise refuse. `null` restores the shipped limit.
++ */
++export function setRateLimitPerIdentityLimitForTests(limit: number | null): void {
++  admission().perIdentityLimit = limit ?? RATE_LIMIT_MAX_PER_IDENTITY;
+ }
+ 
+ /** Limiter transactions running in this process now. */
+ export function rateLimitTransactionsInFlight(): number {
+-  return inFlight;
++  return admission().inFlight;
++}
++
++/** Identities holding a limiter slot in this process now. */
++export function rateLimitIdentitiesInFlight(): number {
++  return admission().identitiesInFlight.size;
+ }
+ 
+-/** Takes a slot when one is free and the pool is not already queued; never waits. */
+-function tryAdmit(): boolean {
+-  if (inFlight >= admissionLimit) return false;
+-  if (dbPoolWaitingCount() >= admissionLimit) return false;
+-  inFlight += 1;
++/** Identities whose denial this process remembers now. */
++export function rateLimitDenialsRemembered(): number {
++  return admission().denials.size();
++}
++
++/**
++ * Takes a slot when this identity holds none, one is free and the pool is not already queued;
++ * never waits. Synchronous, so no other call can interleave between the checks and the take.
++ */
++function tryAdmit(state: AdmissionState, lockKey: string): boolean {
++  const held = state.identitiesInFlight.get(lockKey) ?? 0;
++  if (held >= state.perIdentityLimit) return false;
++  if (state.inFlight >= state.admissionLimit) return false;
++  if (dbPoolWaitingCount() >= state.admissionLimit) return false;
++  state.inFlight += 1;
++  state.identitiesInFlight.set(lockKey, held + 1);
+   return true;
+ }
+ 
++function release(state: AdmissionState, lockKey: string): void {
++  state.inFlight -= 1;
++  const held = (state.identitiesInFlight.get(lockKey) ?? 1) - 1;
++  if (held > 0) state.identitiesInFlight.set(lockKey, held);
++  else state.identitiesInFlight.delete(lockKey);
++}
++
++function retryAfterFor(untilMs: number, now: number, windowMs: number): number {
++  return Math.min(Math.ceil(windowMs / 1000), Math.max(1, Math.ceil((untilMs - now) / 1000)));
++}
++
+ // Postgres SQLSTATE 55P03 (lock_not_available): the lock wait passed `lock_timeout`. Prisma wraps a
+ // raw-query failure as P2010 and keeps the driver adapter's error, with the SQLSTATE as
+ // `originalCode`, in `meta.driverAdapterError.cause`.
+@@ -149,8 +240,8 @@ function isTransactionStartTimeout(err: unknown): boolean {
+  * transaction-scoped advisory lock on scope plus IP hash serializes the count and the insert for
+  * one identity only; Postgres releases it at commit or rollback, so nothing can leak a lock.
+  * `pg_advisory_xact_lock` returns `void`, which Prisma's `$queryRaw` cannot deserialize, so it
+- * runs through `$executeRaw`. Both waits are bounded (K130, above), and admission in front of the
+- * pool is limited (K132, above).
++ * runs through `$executeRaw`. Both waits are bounded (K130, above), admission in front of the
++ * pool is limited (K132, above), and fair per identity, with denials remembered (K136, above).
+  */
+ export async function consumeRateLimit(
+   scope: string,
+@@ -169,12 +260,17 @@ export async function consumeRateLimit(
+   }
+   const ipHash = hashIp(ip);
+   const lockKey = `${scope}:${ipHash}`;
+-  if (!tryAdmit()) {
++  const state = admission();
++  const remembered = state.denials.deniedUntil(lockKey, max, windowMs, Date.now());
++  if (remembered !== null) {
++    return { allowed: false, retryAfterSeconds: retryAfterFor(remembered, Date.now(), windowMs) };
++  }
++  if (!tryAdmit(state, lockKey)) {
+     return { allowed: false, retryAfterSeconds: RATE_LIMIT_BUSY_RETRY_AFTER_SECONDS };
+   }
+   try {
+     lockObserver?.beforeTransaction?.();
+-    return await prisma.$transaction(
++    const result = await prisma.$transaction(
+       async (tx) => {
+         // Transaction-local (`true`): the setting ends with this transaction and never leaks to
+         // the next user of the pooled connection.
+@@ -192,25 +288,30 @@ export async function consumeRateLimit(
+             select: { createdAt: true },
+           });
+           const oldestMs = oldest?.createdAt.getTime() ?? now;
+-          const retryAfterSeconds = Math.min(
+-            Math.ceil(windowMs / 1000),
+-            Math.max(1, Math.ceil((oldestMs + windowMs - now) / 1000)),
+-          );
+-          return { allowed: false, retryAfterSeconds };
++          return {
++            allowed: false,
++            retryAfterSeconds: retryAfterFor(oldestMs + windowMs, now, windowMs),
++            deniedUntilMs: oldest ? oldestMs + windowMs : null,
++          };
+         }
+         await tx.rateLimitHit.create({ data: { scope, ipHash } });
+-        return { allowed: true, retryAfterSeconds: 0 };
++        return { allowed: true, retryAfterSeconds: 0, deniedUntilMs: null };
+       },
+       { maxWait: RATE_LIMIT_POOL_WAIT_MS, timeout: 5000 },
+     );
++    if (result.deniedUntilMs !== null) {
++      state.denials.record(lockKey, max, windowMs, result.deniedUntilMs, Date.now());
++    }
++    return { allowed: result.allowed, retryAfterSeconds: result.retryAfterSeconds };
+   } catch (err) {
++    // A busy answer is not a quota denial, so nothing is remembered for it.
+     if (isLockTimeout(err) || isTransactionStartTimeout(err)) {
+       return { allowed: false, retryAfterSeconds: RATE_LIMIT_BUSY_RETRY_AFTER_SECONDS };
+     }
+     throw err;
+   } finally {
+-    // Every path out of the transaction, including a throw, frees the slot.
+-    inFlight -= 1;
++    // Every path out of the transaction, including a throw, frees the slot and the identity entry.
++    release(state, lockKey);
+   }
+ }
+ 
+diff --git a/src/lib/rate-limit/denial-memory.ts b/src/lib/rate-limit/denial-memory.ts
+new file mode 100644
+index 0000000..7a6fbbe
+--- /dev/null
++++ b/src/lib/rate-limit/denial-memory.ts
+@@ -0,0 +1,70 @@
++// Bounded in-memory "denied until" times for the database-backed limiter (K136).
++//
++// When the limiter's transaction denies an identity, the database would keep denying it until
++// its oldest hit leaves the window, so the limiter remembers that time and answers later calls
++// before it with 429 and no transaction. Memory is bounded by `maxKeys`, like the health throttle
++// (memory-throttle.ts): an expired entry is dropped when it is read, a sweep drops every expired
++// entry at most once per `sweepIntervalMs`, and a new key at capacity evicts the oldest-inserted
++// key. Forgetting a denial early is safe: that identity's next call simply asks the database
++// again. Keys are a scope plus a peppered address hash; this module never logs or persists them.
++//
++// No imports: bundleable by both webpack and esbuild.
++
++export type DenialMemory = {
++  /** The time the denial ends, or null when there is none for this key, max and window. */
++  deniedUntil(key: string, max: number, windowMs: number, now: number): number | null;
++  /** Remembers a denial that ends at `until`; one in the past is not stored. */
++  record(key: string, max: number, windowMs: number, until: number, now: number): void;
++  size(): number;
++  reset(): void;
++};
++
++type Entry = { until: number; max: number; windowMs: number };
++
++export function createDenialMemory(opts: {
++  maxKeys: number;
++  sweepIntervalMs: number;
++}): DenialMemory {
++  const entries = new Map<string, Entry>();
++  let lastSweep = Number.NEGATIVE_INFINITY;
++
++  function sweep(now: number): void {
++    lastSweep = now;
++    for (const [key, entry] of entries) {
++      if (entry.until <= now) entries.delete(key);
++    }
++  }
++
++  return {
++    deniedUntil(key, max, windowMs, now) {
++      const entry = entries.get(key);
++      if (!entry) return null;
++      if (entry.until <= now) {
++        entries.delete(key);
++        return null;
++      }
++      // A call with other limits for the same key is decided by the database.
++      if (entry.max !== max || entry.windowMs !== windowMs) return null;
++      return entry.until;
++    },
++    record(key, max, windowMs, until, now) {
++      // Re-inserted at the end, so eviction stays oldest-first.
++      entries.delete(key);
++      if (until <= now) return;
++      if (now - lastSweep >= opts.sweepIntervalMs) sweep(now);
++      while (entries.size >= opts.maxKeys) {
++        const oldest = entries.keys().next().value;
++        if (oldest === undefined) break;
++        entries.delete(oldest);
++      }
++      entries.set(key, { until, max, windowMs });
++    },
++    size() {
++      return entries.size;
++    },
++    reset() {
++      entries.clear();
++      lastSweep = Number.NEGATIVE_INFINITY;
++    },
++  };
++}
+diff --git a/tests/e2e/uat-gaps.spec.ts b/tests/e2e/uat-gaps.spec.ts
+index f13f73e..eae30a5 100644
+--- a/tests/e2e/uat-gaps.spec.ts
++++ b/tests/e2e/uat-gaps.spec.ts
+@@ -199,8 +199,10 @@ test("intake API rejects oversized files and content-sniffed disallowed types",
+ });
+ 
+ // ── UAT #3 — public intake rate limit: 5 per IP per hour, 6th rejected ──────
+-// Keep this last: it deliberately exhausts the shared IP bucket (the fixture
+-// resets rateLimitHit between tests, so it can't leak into other tests anyway).
++// Keep this last: it deliberately exhausts the shared IP bucket. The fixture
++// resets rateLimitHit between tests, but since K136 the server also remembers
++// the denial in memory until Retry-After (up to an hour for intake), so an
++// intake test after this one in the same server run would get 429.
+ test("6th intake submission within the window is rate-limited with a message", async ({
+   page,
+   request,
+diff --git a/tests/integration/rate-limit-atomic.test.ts b/tests/integration/rate-limit-atomic.test.ts
+index 5c7e89f..30a7b79 100644
+--- a/tests/integration/rate-limit-atomic.test.ts
++++ b/tests/integration/rate-limit-atomic.test.ts
+@@ -8,12 +8,16 @@ import {
+   consumeRateLimit,
+   RATE_LIMIT_MAX_CONCURRENT,
+   RATE_LIMIT_MAX_WINDOW_MS,
++  rateLimitIdentitiesInFlight,
+   rateLimitLockKey,
+   rateLimitTransactionsInFlight,
+   setRateLimitAdmissionLimitForTests,
+   setRateLimitLockObserverForTests,
++  setRateLimitPerIdentityLimitForTests,
+ } from "@/lib/rate-limit/check-rate-limit";
++import { rateLimitKeyForIp } from "@/lib/rate-limit/client-ip";
+ import { PUBLIC_RATE_LIMITS } from "@/lib/rate-limit/public-limits";
++import { uniqueClientIp } from "../support/client-ip";
+ import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
+ 
+ beforeAll(() => {
+@@ -25,12 +29,15 @@ const scopeFor = (label: string) => `test-${label}-${randomUUID()}`;
+ describe("consumeRateLimit (D-23)", () => {
+   afterEach(() => {
+     setRateLimitAdmissionLimitForTests(null);
++    setRateLimitPerIdentityLimitForTests(null);
+   });
+ 
+-  // The atomicity proof needs 20 transactions to race, so it lifts the K132 admission limit (which
+-  // would refuse 17 of them before they start); the assertion is the one it always had.
++  // The atomicity proof needs 20 transactions of one identity to race, so it lifts the K132
++  // admission limit (which would refuse 17 of them before they start) and the K136 one-slot-per-
++  // identity limit (which would refuse 19); the assertion is the one it always had.
+   it("allows exactly max of 20 parallel calls and stores exactly max rows", async () => {
+     setRateLimitAdmissionLimitForTests(20);
++    setRateLimitPerIdentityLimitForTests(20);
+     const scope = scopeFor("parallel");
+     const results = await Promise.all(
+       Array.from({ length: 20 }, () =>
+@@ -234,26 +241,31 @@ describe("admission limit in front of the pool (K132)", () => {
+     expect(RATE_LIMIT_MAX_CONCURRENT).toBeLessThan((Number(process.env.DB_POOL_MAX) || 10) / 2);
+   });
+ 
++  // Since K136 one identity holds at most one slot, so the flood comes from FLOOD identities, each
++  // with its advisory lock held by the same backend (before K136 this case used one identity,
++  // which then took all three slots).
+   it("a flood while another backend holds the advisory lock: only the limit reaches the pool, the rest get 429 with Retry-After at once, an unrelated query stays prompt, then it recovers", async () => {
+-    const ip = "203.0.113.27";
++    const FLOOD = 30;
++    const ips = Array.from({ length: FLOOD }, () => uniqueClientIp());
+     const { scope } = PUBLIC_RATE_LIMITS.statusAttachment;
+-    const lockKey = rateLimitLockKey(scope, ip);
+-    const ipHash = lockKey.slice(scope.length + 1);
+-    const hits = () => prisma.rateLimitHit.count({ where: { scope, ipHash } });
++    const lockKeys = ips.map((ip) => rateLimitLockKey(scope, rateLimitKeyForIp(ip)));
++    const ipHashes = lockKeys.map((key) => key.slice(scope.length + 1));
++    const hits = () => prisma.rateLimitHit.count({ where: { scope, ipHash: { in: ipHashes } } });
+     const token = `tok-${randomUUID()}`;
+     const id = randomUUID();
+-    const call = () =>
++    const call = (ip: string) =>
+       attachmentGet(
+         new Request(`http://localhost/api/public/status/${token}/attachments/${id}`, {
+           headers: { "x-forwarded-for": ip },
+         }),
+         { params: Promise.resolve({ token, id }) },
+       );
+-    const FLOOD = 30;
+ 
+     const before = await hits();
+     const holder = await holdTransaction(async (tx) => {
+-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}::text))`;
++      for (const lockKey of lockKeys) {
++        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}::text))`;
++      }
+     });
+     let reachedPool = 0;
+     const waiterPids: number[] = [];
+@@ -266,9 +278,9 @@ describe("admission limit in front of the pool (K132)", () => {
+       },
+     });
+     try {
+-      const timed = Array.from({ length: FLOOD }, () => {
++      const timed = ips.map((ip) => {
+         const startedAt = Date.now();
+-        return call().then((res) => ({ res, ms: Date.now() - startedAt }));
++        return call(ip).then((res) => ({ res, ms: Date.now() - startedAt }));
+       });
+       for (const t of timed) t.catch(() => {});
+ 
+@@ -279,6 +291,7 @@ describe("admission limit in front of the pool (K132)", () => {
+       });
+       await waitForBlockedBy(prisma, holder.pid, waiterPids, { timeoutMs: 2000 });
+       expect(rateLimitTransactionsInFlight()).toBe(RATE_LIMIT_MAX_CONCURRENT);
++      expect(rateLimitIdentitiesInFlight()).toBe(RATE_LIMIT_MAX_CONCURRENT);
+ 
+       // An unrelated query on the same pool, while the admitted calls still wait on the lock.
+       const queryStartedAt = Date.now();
+@@ -306,7 +319,8 @@ describe("admission limit in front of the pool (K132)", () => {
+ 
+     // Recovery: every slot is free again and the same call takes the normal path.
+     expect(rateLimitTransactionsInFlight()).toBe(0);
+-    const ok = await call();
++    expect(rateLimitIdentitiesInFlight()).toBe(0);
++    const ok = await call(ips[0]);
+     expect(ok.status).toBe(404);
+     expect(await hits()).toBe(before + 1);
+   });
+@@ -322,11 +336,15 @@ describe("admission limit in front of the pool (K132)", () => {
+     });
+     const holders = await Promise.all(Array.from({ length: poolSize }, () => holdTransaction()));
+     try {
+-      // Each of these gives up after maxWait; its pool connect stays queued in pg-pool.
++      // Each of these gives up after maxWait; its pool connect stays queued in pg-pool. One
++      // identity each, since K136 lets one identity hold only one slot.
+       const timedOut = await withinBound(
+         Promise.all(
+           Array.from({ length: RATE_LIMIT_MAX_CONCURRENT }, () =>
+-            consumeRateLimit(scope, "203.0.113.28", { max: 5, windowMs: 60_000 }),
++            consumeRateLimit(scope, rateLimitKeyForIp(uniqueClientIp()), {
++              max: 5,
++              windowMs: 60_000,
++            }),
+           ),
+         ),
+       );
+@@ -364,13 +382,15 @@ describe("admission limit in front of the pool (K132)", () => {
+         throw new Error("boom inside the transaction");
+       },
+     });
++    // One identity each (K136 lets one identity hold only one slot).
+     const inside = await Promise.allSettled(
+       Array.from({ length: RATE_LIMIT_MAX_CONCURRENT * 2 }, () =>
+-        consumeRateLimit(scope, ip, { max: 5, windowMs: 60_000 }),
++        consumeRateLimit(scope, rateLimitKeyForIp(uniqueClientIp()), { max: 5, windowMs: 60_000 }),
+       ),
+     );
+     expect(inside.filter((r) => r.status === "rejected")).toHaveLength(RATE_LIMIT_MAX_CONCURRENT);
+     expect(rateLimitTransactionsInFlight()).toBe(0);
++    expect(rateLimitIdentitiesInFlight()).toBe(0);
+ 
+     // An error before the transaction starts.
+     setRateLimitLockObserverForTests({
+@@ -384,6 +404,7 @@ describe("admission limit in front of the pool (K132)", () => {
+       );
+     }
+     expect(rateLimitTransactionsInFlight()).toBe(0);
++    expect(rateLimitIdentitiesInFlight()).toBe(0);
+     setRateLimitLockObserverForTests(null);
+ 
+     // A lock timeout (55P03), handled as busy.
+@@ -400,14 +421,175 @@ describe("admission limit in front of the pool (K132)", () => {
+       await holder.release();
+     }
+     expect(rateLimitTransactionsInFlight()).toBe(0);
++    expect(rateLimitIdentitiesInFlight()).toBe(0);
++
++    // The identity that went through every error path is admitted and counted again (K136).
++    expect(await consumeRateLimit(scope, ip, { max: 5, windowMs: 60_000 })).toEqual({
++      allowed: true,
++      retryAfterSeconds: 0,
++    });
+ 
+-    // Every slot is free: the limit's worth of parallel calls are all admitted and counted.
++    // Every slot is free: the limit's worth of parallel calls (one identity each) are all
++    // admitted and counted.
+     const results = await Promise.all(
+       Array.from({ length: RATE_LIMIT_MAX_CONCURRENT }, () =>
+-        consumeRateLimit(scope, ip, { max: 5, windowMs: 60_000 }),
++        consumeRateLimit(scope, rateLimitKeyForIp(uniqueClientIp()), { max: 5, windowMs: 60_000 }),
+       ),
+     );
+     expect(results.every((r) => r.allowed)).toBe(true);
+-    expect(await prisma.rateLimitHit.count({ where: { scope } })).toBe(RATE_LIMIT_MAX_CONCURRENT);
++    expect(await prisma.rateLimitHit.count({ where: { scope } })).toBe(
++      RATE_LIMIT_MAX_CONCURRENT + 1,
++    );
++    expect(rateLimitIdentitiesInFlight()).toBe(0);
++  });
++});
++
++// K136 (Codex diff critique round 2, item 1): fairness in front of the shared slots. One identity
++// (scope plus client-IP hash) holds at most one admission slot, so a flood from one identity
++// cannot take the slots another identity needs. A check that denies remembers until when, and
++// that identity's later calls before then are answered 429 without a transaction.
++describe("fairness per identity (K136)", () => {
++  afterEach(() => {
++    setRateLimitLockObserverForTests(null);
++  });
++
++  /** Fast enough that the call cannot have waited on the 500 ms lock or the 1 s pool limit. */
++  const AT_ONCE_MS = 200;
++
++  it("one identity flooding while another backend holds its advisory lock holds one slot; a second identity is still admitted and counted", async () => {
++    const { scope } = PUBLIC_RATE_LIMITS.statusAttachment;
++    const ipA = uniqueClientIp();
++    const ipB = uniqueClientIp();
++    const lockKeyOf = (ip: string) => rateLimitLockKey(scope, rateLimitKeyForIp(ip));
++    const hits = (ip: string) =>
++      prisma.rateLimitHit.count({
++        where: { scope, ipHash: lockKeyOf(ip).slice(scope.length + 1) },
++      });
++    const token = `tok-${randomUUID()}`;
++    const id = randomUUID();
++    const call = (ip: string) =>
++      attachmentGet(
++        new Request(`http://localhost/api/public/status/${token}/attachments/${id}`, {
++          headers: { "x-forwarded-for": ip },
++        }),
++        { params: Promise.resolve({ token, id }) },
++      );
++    const FLOOD = 30;
++    const lockKeyA = lockKeyOf(ipA);
++
++    const holder = await holdTransaction(async (tx) => {
++      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKeyA}::text))`;
++    });
++    let reachedPool = 0;
++    const waiterPids: number[] = [];
++    setRateLimitLockObserverForTests({
++      beforeTransaction: () => {
++        reachedPool += 1;
++      },
++      beforeLock: async (tx) => {
++        waiterPids.push(await backendPid(tx));
++      },
++    });
++    try {
++      const timed = Array.from({ length: FLOOD }, () => {
++        const startedAt = Date.now();
++        return call(ipA).then((res) => ({ res, ms: Date.now() - startedAt }));
++      });
++      for (const t of timed) t.catch(() => {});
++
++      // A's one admitted call really waits on the holder (bound by PID), so it holds its slot.
++      await vi.waitFor(() => expect(waiterPids).toHaveLength(1), { timeout: 2000, interval: 10 });
++      await waitForBlockedBy(prisma, holder.pid, waiterPids, { timeoutMs: 2000 });
++      expect(reachedPool).toBe(1);
++      expect(rateLimitTransactionsInFlight()).toBe(1);
++      expect(rateLimitIdentitiesInFlight()).toBe(1);
++
++      // B, while A's call still waits on the lock: admitted at once and counted.
++      const startedAt = Date.now();
++      const b = await withinBound(call(ipB));
++      const bMs = Date.now() - startedAt;
++      expect(b.status).toBe(404);
++      expect(bMs).toBeLessThan(AT_ONCE_MS);
++      expect(await hits(ipB)).toBe(1);
++      expect(reachedPool).toBe(2);
++
++      const results = await withinBound(Promise.all(timed));
++      for (const { res } of results) {
++        expect(res.status).toBe(429);
++        expect(res.headers.get("Retry-After")).toMatch(/^[1-9]\d*$/);
++      }
++      const atOnce = results.filter(({ ms }) => ms < AT_ONCE_MS);
++      expect(atOnce.length).toBeGreaterThanOrEqual(FLOOD - 1);
++      expect(reachedPool).toBe(2);
++      expect(await hits(ipA)).toBe(0);
++      console.info(
++        `[08-F7] one-identity flood of ${FLOOD}: ${atOnce.length} answered under ${AT_ONCE_MS} ms; second identity admitted in ${bMs} ms`,
++      );
++    } finally {
++      setRateLimitLockObserverForTests(null);
++      await holder.release();
++    }
++
++    // Recovery: every slot and identity entry is free again, and A counts on the normal path.
++    expect(rateLimitTransactionsInFlight()).toBe(0);
++    expect(rateLimitIdentitiesInFlight()).toBe(0);
++    expect((await call(ipA)).status).toBe(404);
++    expect(await hits(ipA)).toBe(1);
++  });
++
++  it("a denied identity's next calls inside Retry-After make no transaction; another identity still reaches the database; after Retry-After the database decides again", async () => {
++    const scope = scopeFor("denied-until");
++    const key = rateLimitKeyForIp(uniqueClientIp());
++    const otherKey = rateLimitKeyForIp(uniqueClientIp());
++    const opts = { max: 1, windowMs: 2000 };
++    const rows = (k: string) =>
++      prisma.rateLimitHit.count({
++        where: { scope, ipHash: rateLimitLockKey(scope, k).slice(scope.length + 1) },
++      });
++    let transactions = 0;
++    setRateLimitLockObserverForTests({
++      beforeTransaction: () => {
++        transactions += 1;
++      },
++    });
++
++    expect(await consumeRateLimit(scope, key, opts)).toEqual({
++      allowed: true,
++      retryAfterSeconds: 0,
++    });
++    const denied = await consumeRateLimit(scope, key, opts);
++    expect(denied.allowed).toBe(false);
++    expect(transactions).toBe(2);
++
++    // Inside Retry-After: sequential and concurrent calls are all denied without a transaction.
++    for (let i = 0; i < 10; i++) {
++      const r = await consumeRateLimit(scope, key, opts);
++      expect(r.allowed).toBe(false);
++      expect(r.retryAfterSeconds).toBeGreaterThanOrEqual(1);
++      expect(r.retryAfterSeconds).toBeLessThanOrEqual(2);
++    }
++    const concurrent = await Promise.all(
++      Array.from({ length: 10 }, () => consumeRateLimit(scope, key, opts)),
++    );
++    expect(concurrent.every((r) => !r.allowed && r.retryAfterSeconds >= 1)).toBe(true);
++    expect(transactions).toBe(2);
++    expect(await rows(key)).toBe(1);
++
++    // The memory is per identity: another identity in the same scope is decided by the database.
++    expect(await consumeRateLimit(scope, otherKey, opts)).toEqual({
++      allowed: true,
++      retryAfterSeconds: 0,
++    });
++    expect(transactions).toBe(3);
++
++    // After Retry-After the database decides again: a call reaches a transaction and is allowed.
++    await vi.waitFor(
++      async () => {
++        expect((await consumeRateLimit(scope, key, opts)).allowed).toBe(true);
++      },
++      { timeout: 8000, interval: 100 },
++    );
++    expect(transactions).toBeGreaterThan(3);
++    expect(await rows(key)).toBe(2);
+   });
+ });
+diff --git a/tests/integration/sla-pause.test.ts b/tests/integration/sla-pause.test.ts
+index 7607229..87ab666 100644
+--- a/tests/integration/sla-pause.test.ts
++++ b/tests/integration/sla-pause.test.ts
+@@ -198,16 +198,24 @@ describe("SLA pause with the real sla-flag handler (AIDA-57)", () => {
+     await moveTo(actor, id, "PENDING", pauseAt);
+ 
+     // The worker restarts: new module instances, a new pg pool and Prisma client. The pause
+-    // state lives only in the database (D-16).
+-    const g = globalThis as unknown as { prisma?: typeof prisma };
+-    const saved = g.prisma;
++    // state lives only in the database (D-16). Since K138, src/lib/db.ts keeps one pool and one
++    // client per process on globalThis under registered symbols, so a restart is simulated by
++    // setting both aside (and restoring them afterwards), not by re-importing alone.
++    const POOL_KEY = Symbol.for("aida.db.pool");
++    const PRISMA_KEY = Symbol.for("aida.db.prisma");
++    const g = globalThis as unknown as Record<symbol, unknown>;
++    const savedPool = g[POOL_KEY];
++    const savedPrisma = g[PRISMA_KEY];
+     vi.resetModules();
+-    delete g.prisma;
++    delete g[POOL_KEY];
++    delete g[PRISMA_KEY];
+     const freshDb = await import("@/lib/db");
++    const freshPool = g[POOL_KEY] as { end(): Promise<void> } | undefined;
+     const freshMutations = await import("@/lib/tickets/mutations");
+     const freshFlag = await import("@/lib/worker/jobs/sla-flag");
+     try {
+       expect(freshDb.prisma).not.toBe(prisma);
++      expect(freshPool !== undefined && freshPool !== savedPool, "a new pool").toBe(true);
+       await moveTo(actor, id, "OPEN", at(pauseAt, 40 * MIN), {}, freshMutations.runTicketMutation);
+       const resumed = await read(id);
+       expect(resumed.firstResponseDueAt.getTime() - original.firstResponseDueAt.getTime()).toBe(
+@@ -223,8 +231,14 @@ describe("SLA pause with the real sla-flag handler (AIDA-57)", () => {
+       await freshFlag.slaFlagHandler(undefined, { now: at(resumed.firstResponseDueAt, 1) });
+       expect((await read(id)).isBreached).toBe(true);
+     } finally {
+-      g.prisma = saved;
++      g[POOL_KEY] = savedPool;
++      g[PRISMA_KEY] = savedPrisma;
+       await freshDb.prisma.$disconnect();
++      // Prisma's $disconnect leaves a caller-supplied pool open; end the fresh one here.
++      await freshPool?.end();
++      // Later dynamic imports must not reach the restarted graph and its ended pool: a new graph
++      // picks the restored pool and client up from globalThis.
++      vi.resetModules();
+     }
+   });
+ 
+diff --git a/tests/unit/process-singletons.test.ts b/tests/unit/process-singletons.test.ts
+new file mode 100644
+index 0000000..8a1be82
+--- /dev/null
++++ b/tests/unit/process-singletons.test.ts
+@@ -0,0 +1,108 @@
++// K138 (Codex diff critique round 2, item 3): one pg pool, one Prisma client and one limiter
++// admission state per process, in production too. A production build may instantiate a module
++// once per route bundle; vi.resetModules() plays that here, and NODE_ENV=production exercises the
++// production branch. Nothing connects: the pool points at a closed local port and is never used,
++// and the limiter cases mock the database module.
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++const POOL_KEY = Symbol.for("aida.db.pool");
++const PRISMA_KEY = Symbol.for("aida.db.prisma");
++const ADMISSION_KEY = Symbol.for("aida.rate-limit.admission");
++const g = globalThis as unknown as Record<symbol, unknown>;
++
++function forgetSingletons(): void {
++  delete g[POOL_KEY];
++  delete g[PRISMA_KEY];
++  delete g[ADMISSION_KEY];
++}
++
++beforeEach(() => {
++  vi.stubEnv("NODE_ENV", "production");
++  vi.stubEnv("DATABASE_URL", "postgresql://unused:unused@127.0.0.1:9/unused");
++  vi.stubEnv("RATE_LIMIT_PEPPER", "test-pepper-k138");
++  forgetSingletons();
++  vi.resetModules();
++});
++
++afterEach(async () => {
++  const pool = g[POOL_KEY] as { end?: () => Promise<void> } | undefined;
++  forgetSingletons();
++  await pool?.end?.();
++  vi.doUnmock("@/lib/db");
++  vi.unstubAllEnvs();
++  vi.resetModules();
++});
++
++describe("process singletons (K138)", () => {
++  it("db: a second module instance shares the pool and the Prisma client under NODE_ENV=production", async () => {
++    const first = await import("@/lib/db");
++    vi.resetModules();
++    const second = await import("@/lib/db");
++    expect(second).not.toBe(first);
++    // Identity as booleans: a failing toBe on two Prisma clients overflows the diff printer.
++    expect(second.prisma === first.prisma, "same Prisma client").toBe(true);
++
++    const pool = g[POOL_KEY];
++    expect(pool === undefined, "pool on globalThis").toBe(false);
++    expect(g[PRISMA_KEY] === first.prisma, "client on globalThis").toBe(true);
++    // Both copies read this very pool object.
++    Object.defineProperty(pool, "waitingCount", { get: () => 7, configurable: true });
++    expect(first.dbPoolWaitingCount()).toBe(7);
++    expect(second.dbPoolWaitingCount()).toBe(7);
++  });
++
++  it("limiter: a second module instance shares the slot counters, the per-identity entries, the denial memory and the test limits", async () => {
++    let resolveTransaction: (value: unknown) => void = () => {};
++    const transaction = vi.fn(
++      () =>
++        new Promise((resolve) => {
++          resolveTransaction = resolve;
++        }),
++    );
++    vi.doMock("@/lib/db", () => ({
++      prisma: { $transaction: transaction },
++      dbPoolWaitingCount: () => 0,
++    }));
++    const first = await import("@/lib/rate-limit/check-rate-limit");
++    vi.resetModules();
++    const second = await import("@/lib/rate-limit/check-rate-limit");
++    expect(second).not.toBe(first);
++    const opts = { max: 5, windowMs: 60_000 };
++
++    // A call through the first copy takes a slot synchronously and waits in its transaction.
++    const held = first.consumeRateLimit("k138", "203.0.113.1", opts);
++    expect(transaction).toHaveBeenCalledTimes(1);
++    expect(second.rateLimitTransactionsInFlight()).toBe(1);
++    expect(second.rateLimitIdentitiesInFlight()).toBe(1);
++    // The same identity through the second copy is refused at once (K136), without a transaction.
++    expect(await second.consumeRateLimit("k138", "203.0.113.1", opts)).toEqual({
++      allowed: false,
++      retryAfterSeconds: 1,
++    });
++    expect(transaction).toHaveBeenCalledTimes(1);
++
++    // The first copy's transaction denies; the second copy remembers it.
++    resolveTransaction({
++      allowed: false,
++      retryAfterSeconds: 30,
++      deniedUntilMs: Date.now() + 30_000,
++    });
++    expect(await held).toEqual({ allowed: false, retryAfterSeconds: 30 });
++    expect(second.rateLimitTransactionsInFlight()).toBe(0);
++    expect(second.rateLimitIdentitiesInFlight()).toBe(0);
++    expect(second.rateLimitDenialsRemembered()).toBe(1);
++    const remembered = await second.consumeRateLimit("k138", "203.0.113.1", opts);
++    expect(remembered.allowed).toBe(false);
++    expect(remembered.retryAfterSeconds).toBeGreaterThanOrEqual(29);
++    expect(transaction).toHaveBeenCalledTimes(1);
++
++    // A test limit set through one copy holds in the other.
++    first.setRateLimitAdmissionLimitForTests(0);
++    expect(await second.consumeRateLimit("k138", "203.0.113.2", opts)).toEqual({
++      allowed: false,
++      retryAfterSeconds: 1,
++    });
++    expect(transaction).toHaveBeenCalledTimes(1);
++    second.setRateLimitAdmissionLimitForTests(null);
++  });
++});
+diff --git a/tests/unit/rate-limit-denial-memory.test.ts b/tests/unit/rate-limit-denial-memory.test.ts
+new file mode 100644
+index 0000000..76e9003
+--- /dev/null
++++ b/tests/unit/rate-limit-denial-memory.test.ts
+@@ -0,0 +1,86 @@
++// The limiter's "denied until" memory is bounded and swept (K136). Pure: no database, no timers;
++// every case passes `now` explicitly.
++import { describe, expect, it } from "vitest";
++import { createDenialMemory } from "@/lib/rate-limit/denial-memory";
++
++const MAX = 5;
++const WINDOW = 60_000;
++
++describe("createDenialMemory (K136)", () => {
++  it("answers the stored time before it and nothing from it on, and drops the expired entry", () => {
++    const memory = createDenialMemory({ maxKeys: 10, sweepIntervalMs: 1000 });
++    memory.record("s:a", MAX, WINDOW, 5000, 1000);
++    expect(memory.deniedUntil("s:a", MAX, WINDOW, 1000)).toBe(5000);
++    expect(memory.deniedUntil("s:a", MAX, WINDOW, 4999)).toBe(5000);
++    expect(memory.deniedUntil("s:a", MAX, WINDOW, 5000)).toBeNull();
++    expect(memory.size()).toBe(0);
++  });
++
++  it("is per key, and a call with other limits for the same key is not answered from memory", () => {
++    const memory = createDenialMemory({ maxKeys: 10, sweepIntervalMs: 1000 });
++    memory.record("s:a", MAX, WINDOW, 5000, 1000);
++    expect(memory.deniedUntil("s:b", MAX, WINDOW, 1000)).toBeNull();
++    expect(memory.deniedUntil("t:a", MAX, WINDOW, 1000)).toBeNull();
++    expect(memory.deniedUntil("s:a", MAX + 1, WINDOW, 1000)).toBeNull();
++    expect(memory.deniedUntil("s:a", MAX, WINDOW + 1, 1000)).toBeNull();
++    expect(memory.deniedUntil("s:a", MAX, WINDOW, 1000)).toBe(5000);
++  });
++
++  it("never stores a denial that has already ended", () => {
++    const memory = createDenialMemory({ maxKeys: 10, sweepIntervalMs: 1000 });
++    memory.record("s:a", MAX, WINDOW, 1000, 1000);
++    memory.record("s:b", MAX, WINDOW, 999, 1000);
++    expect(memory.size()).toBe(0);
++  });
++
++  it("holds at most maxKeys entries and evicts the oldest-inserted first", () => {
++    const memory = createDenialMemory({ maxKeys: 3, sweepIntervalMs: 1000 });
++    for (let i = 0; i < 1000; i++) memory.record(`s:${i}`, MAX, WINDOW, 1_000_000, 1);
++    expect(memory.size()).toBe(3);
++    expect(memory.deniedUntil("s:996", MAX, WINDOW, 1)).toBeNull();
++    for (const i of [997, 998, 999]) {
++      expect(memory.deniedUntil(`s:${i}`, MAX, WINDOW, 1), `s:${i}`).toBe(1_000_000);
++    }
++  });
++
++  it("a re-recorded key moves to the end of the eviction order", () => {
++    const memory = createDenialMemory({ maxKeys: 2, sweepIntervalMs: 1000 });
++    memory.record("s:a", MAX, WINDOW, 9000, 1);
++    memory.record("s:b", MAX, WINDOW, 9000, 1);
++    memory.record("s:a", MAX, WINDOW, 9500, 2);
++    memory.record("s:c", MAX, WINDOW, 9000, 3);
++    expect(memory.deniedUntil("s:b", MAX, WINDOW, 3)).toBeNull();
++    expect(memory.deniedUntil("s:a", MAX, WINDOW, 3)).toBe(9500);
++    expect(memory.deniedUntil("s:c", MAX, WINDOW, 3)).toBe(9000);
++  });
++
++  it("the sweep drops every expired entry, so live ones are not evicted for them", () => {
++    const memory = createDenialMemory({ maxKeys: 3, sweepIntervalMs: 1000 });
++    memory.record("s:live", MAX, WINDOW, 100_000, 0);
++    memory.record("s:old1", MAX, WINDOW, 2000, 0);
++    memory.record("s:old2", MAX, WINDOW, 2000, 0);
++    // At capacity, after both short denials ended and the sweep interval passed.
++    memory.record("s:new", MAX, WINDOW, 100_000, 5000);
++    expect(memory.size()).toBe(2);
++    expect(memory.deniedUntil("s:live", MAX, WINDOW, 5000)).toBe(100_000);
++    expect(memory.deniedUntil("s:new", MAX, WINDOW, 5000)).toBe(100_000);
++  });
++
++  it("sweeps at most once per interval", () => {
++    const memory = createDenialMemory({ maxKeys: 10, sweepIntervalMs: 1000 });
++    memory.record("s:a", MAX, WINDOW, 1500, 1000); // sweeps (first record), then stores
++    memory.record("s:b", MAX, WINDOW, 1500, 1100); // inside the interval: no sweep
++    memory.record("s:c", MAX, WINDOW, 9000, 1600); // inside the interval: s:a and s:b stay
++    expect(memory.size()).toBe(3);
++    memory.record("s:d", MAX, WINDOW, 9000, 2000); // interval passed: both expired are dropped
++    expect(memory.size()).toBe(2);
++  });
++
++  it("reset forgets everything", () => {
++    const memory = createDenialMemory({ maxKeys: 10, sweepIntervalMs: 1000 });
++    memory.record("s:a", MAX, WINDOW, 5000, 1000);
++    memory.reset();
++    expect(memory.deniedUntil("s:a", MAX, WINDOW, 1000)).toBeNull();
++    expect(memory.size()).toBe(0);
++  });
++});
+diff --git a/tests/unit/read-bounded-form-data.test.ts b/tests/unit/read-bounded-form-data.test.ts
+index 250268f..479f124 100644
+--- a/tests/unit/read-bounded-form-data.test.ts
++++ b/tests/unit/read-bounded-form-data.test.ts
+@@ -163,14 +163,16 @@ describe("part count before the parse (K135)", () => {
+   }
+ 
+   const countFormParts = (bounded as Record<string, unknown>).countFormParts as
+-    | ((bytes: Uint8Array, contentType: string) => number | null)
++    | ((bytes: Uint8Array, contentType: string, limit: number) => number | null)
+     | undefined;
++  /** Far above every body these cases build, so the K137 early stop never applies here. */
++  const NO_STOP = 1000;
+ 
+   it("counts exactly the parts of a multipart body; the closing delimiter is not a part", async () => {
+     expect(typeof countFormParts).toBe("function");
+     for (const n of [0, 1, 5, 40]) {
+       const { body, type } = await partsBody(n);
+-      expect(countFormParts?.(body, type), `n=${n}`).toBe(n);
++      expect(countFormParts?.(body, type, NO_STOP), `n=${n}`).toBe(n);
+     }
+   });
+ 
+@@ -182,14 +184,16 @@ describe("part count before the parse (K135)", () => {
+     const body = new Uint8Array(await req.arrayBuffer());
+     const type = req.headers.get("content-type") ?? "";
+     const boundary = type.split("boundary=")[1];
+-    expect(countFormParts?.(body, type)).toBe(12);
+-    expect(countFormParts?.(body, `multipart/form-data; boundary="${boundary}"`)).toBe(12);
++    expect(countFormParts?.(body, type, NO_STOP)).toBe(12);
++    expect(countFormParts?.(body, `multipart/form-data; boundary="${boundary}"`, NO_STOP)).toBe(12);
+   });
+ 
+   it("counts the fields of a url-encoded body", () => {
+     const body = new TextEncoder().encode("a=1&b=2&a=3");
+-    expect(countFormParts?.(body, "application/x-www-form-urlencoded")).toBe(3);
+-    expect(countFormParts?.(new Uint8Array(), "application/x-www-form-urlencoded")).toBe(0);
++    expect(countFormParts?.(body, "application/x-www-form-urlencoded", NO_STOP)).toBe(3);
++    expect(countFormParts?.(new Uint8Array(), "application/x-www-form-urlencoded", NO_STOP)).toBe(
++      0,
++    );
+   });
+ 
+   it("over maxParts answers too_many_parts and never runs the parser", async () => {
+@@ -240,3 +244,174 @@ describe("part count before the parse (K135)", () => {
+     expect(result).toEqual({ ok: false, reason: "too_many_parts" });
+   });
+ });
++
++// K137 (Codex diff critique round 2, item 2, and the boundary charset finding): the count's work
++// is bounded, and only a boundary the count reads exactly as the parser does is accepted. Every
++// bound below is an assertion on work done (`examined`: the delimiter or `&` matches the scan
++// looked at), never on wall-clock time. Adversarial bodies are built in memory.
++describe("part count work is bounded (K137)", () => {
++  afterEach(() => {
++    vi.restoreAllMocks();
++  });
++
++  const LIMIT = 17;
++  const enc = (s: string) => new TextEncoder().encode(s);
++  const typeFor = (boundary: string) => `multipart/form-data; boundary=${boundary}`;
++
++  /** `n` text parts framed by hand with `boundary`, closed by `--boundary--` plus `tail`. */
++  function framed(boundary: string, n: number, tail = "\r\n"): string {
++    let s = "";
++    for (let i = 0; i < n; i++) {
++      s += `--${boundary}\r\nContent-Disposition: form-data; name="f${i}"\r\n\r\nv${i}\r\n`;
++    }
++    return `${s}--${boundary}--${tail}`;
++  }
++
++  /** What the platform's own multipart parser makes of a body: its entry count, or "failure". */
++  async function parserEntries(body: Uint8Array, type: string): Promise<number | "failure"> {
++    try {
++      const form = await new Response(new Blob([body as Uint8Array<ArrayBuffer>]), {
++        headers: { "content-type": type },
++      }).formData();
++      return [...form.keys()].length;
++    } catch {
++      return "failure";
++    }
++  }
++
++  const scan = (bytes: Uint8Array, type: string, limit = LIMIT) =>
++    bounded.scanFormParts(bytes, type, limit);
++
++  it("stops at the first closing delimiter: a million fake closing delimiters after a real close are never examined, and the body is refused unparsed", async () => {
++    const body = enc(framed("b", 2) + "--b--".repeat(1_000_000));
++    const result = scan(body, typeFor("b"));
++    // Two part delimiters and the real close: nothing after it is looked at.
++    expect(result.examined).toBe(3);
++    expect(result.parts).toBeNull();
++    const parse = vi.spyOn(Response.prototype, "formData");
++    expect(
++      await readBoundedFormData(post(body, { "content-type": typeFor("b") }), 1 << 30, {
++        maxParts: LIMIT,
++      }),
++    ).toEqual({ ok: false, reason: "invalid" });
++    expect(parse).not.toHaveBeenCalled();
++  });
++
++  it("a closing delimiter followed by nothing, or by one line break, ends an exact count", () => {
++    for (const tail of ["", "\r\n"]) {
++      const result = scan(enc(framed("b", 5, tail)), typeFor("b"));
++      expect(result, JSON.stringify(tail)).toEqual({ parts: 5, examined: 6 });
++    }
++  });
++
++  it("a closing delimiter inside a part's headers, with more parts after it, is refused, never counted short", async () => {
++    // The parser skips header lines, so it reads past this "--b--" and builds every later part.
++    const head = `--b\r\nContent-Disposition: form-data; name="a"\r\n--b--: x\r\n\r\nv\r\n`;
++    const body = enc(head + framed("b", 40));
++    expect(await parserEntries(body, typeFor("b"))).toBe(41);
++    const result = scan(body, typeFor("b"));
++    expect(result.parts).toBeNull();
++    expect(result.examined).toBe(2);
++    const parse = vi.spyOn(Response.prototype, "formData");
++    expect(
++      await readBoundedFormData(post(body, { "content-type": typeFor("b") }), 1 << 20, {
++        maxParts: LIMIT,
++      }),
++    ).toEqual({ ok: false, reason: "invalid" });
++    expect(parse).not.toHaveBeenCalled();
++  });
++
++  it("stops as soon as the count passes the limit", async () => {
++    const body = enc(framed("b", 10_000));
++    const result = scan(body, typeFor("b"));
++    expect(result).toEqual({ parts: LIMIT + 1, examined: LIMIT + 1 });
++    const parse = vi.spyOn(Response.prototype, "formData");
++    expect(
++      await readBoundedFormData(post(body, { "content-type": typeFor("b") }), 1 << 20, {
++        maxParts: LIMIT,
++      }),
++    ).toEqual({ ok: false, reason: "too_many_parts" });
++    expect(parse).not.toHaveBeenCalled();
++  });
++
++  it("url-encoded: four million `&` stop at the limit", async () => {
++    const body = new Uint8Array(4_000_000).fill(0x26);
++    const result = scan(body, "application/x-www-form-urlencoded");
++    expect(result).toEqual({ parts: LIMIT + 1, examined: LIMIT });
++    expect(
++      await readBoundedFormData(
++        post(body, { "content-type": "application/x-www-form-urlencoded" }),
++        1 << 30,
++        { maxParts: LIMIT },
++      ),
++    ).toEqual({ ok: false, reason: "too_many_parts" });
++  });
++
++  it("a non-ASCII boundary is refused unparsed, quoted or not (the parser reads it as UTF-8)", async () => {
++    const boundary = "ééé";
++    const body = enc(framed(boundary, 30));
++    // The parser accepts it and builds all 30 parts; a latin1 count would have found none.
++    expect(await parserEntries(body, `multipart/form-data; boundary="${boundary}"`)).toBe(30);
++    const parse = vi.spyOn(Response.prototype, "formData");
++    for (const type of [
++      `multipart/form-data; boundary="${boundary}"`,
++      `multipart/form-data; boundary=${boundary}`,
++      `multipart/form-data; boundary="ab${boundary}cd"`,
++    ]) {
++      expect(scan(body, type), type).toEqual({ parts: null, examined: 0 });
++      expect(
++        await readBoundedFormData(post(body, { "content-type": type }), 1 << 20, {
++          maxParts: LIMIT,
++        }),
++        type,
++      ).toEqual({ ok: false, reason: "invalid" });
++    }
++    expect(parse).not.toHaveBeenCalled();
++  });
++
++  it("a 71-character boundary is refused unparsed; 70 characters are counted", async () => {
++    const long = "a".repeat(71);
++    const body = enc(framed(long, 3));
++    expect(await parserEntries(body, typeFor(long))).toBe(3);
++    const parse = vi.spyOn(Response.prototype, "formData");
++    for (const type of [typeFor(long), `multipart/form-data; boundary="${long}"`]) {
++      expect(scan(body, type), type).toEqual({ parts: null, examined: 0 });
++      expect(
++        await readBoundedFormData(post(body, { "content-type": type }), 1 << 20, {
++          maxParts: LIMIT,
++        }),
++      ).toEqual({ ok: false, reason: "invalid" });
++    }
++    expect(parse).not.toHaveBeenCalled();
++    const max = "a".repeat(70);
++    expect(scan(enc(framed(max, 3)), typeFor(max))).toEqual({ parts: 3, examined: 4 });
++  });
++
++  it("boundary characters outside RFC 2046 are refused; a trailing space is refused", () => {
++    const body = enc(framed("x", 2));
++    for (const type of [
++      "multipart/form-data; boundary=a!b",
++      "multipart/form-data; boundary=a#b",
++      "multipart/form-data; boundary=a~b",
++      'multipart/form-data; boundary="a!b"',
++      'multipart/form-data; boundary="abc "',
++      'multipart/form-data; boundary=""',
++    ]) {
++      expect(scan(body, type), type).toEqual({ parts: null, examined: 0 });
++    }
++  });
++
++  it("a quoted boundary with RFC 2046 characters that need quoting is counted exactly and parsed", async () => {
++    for (const boundary of ["a:b=c? d", "(x),y/z.w'+_-", " leading-space"]) {
++      const type = `multipart/form-data; boundary="${boundary}"`;
++      const body = enc(framed(boundary, 6));
++      expect(await parserEntries(body, type), boundary).toBe(6);
++      expect(scan(body, type), boundary).toEqual({ parts: 6, examined: 7 });
++      const result = await readBoundedFormData(post(body, { "content-type": type }), 1 << 20, {
++        maxParts: 6,
++      });
++      expect(result.ok, boundary).toBe(true);
++      if (result.ok) expect(result.form.get("f5")).toBe("v5");
++    }
++  });
++});
