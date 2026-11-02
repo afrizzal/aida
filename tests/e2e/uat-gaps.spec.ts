@@ -199,8 +199,10 @@ test("intake API rejects oversized files and content-sniffed disallowed types", 
 });
 
 // ── UAT #3 — public intake rate limit: 5 per IP per hour, 6th rejected ──────
-// Keep this last: it deliberately exhausts the shared IP bucket (the fixture
-// resets rateLimitHit between tests, so it can't leak into other tests anyway).
+// Keep this last: it deliberately exhausts the shared IP bucket. The fixture
+// resets rateLimitHit between tests, but since K136 the server also remembers
+// the denial in memory until Retry-After (up to an hour for intake), so an
+// intake test after this one in the same server run would get 429.
 test("6th intake submission within the window is rate-limited with a message", async ({
   page,
   request,

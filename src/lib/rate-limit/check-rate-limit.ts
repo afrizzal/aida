@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Prisma } from "@/generated/prisma/client";
 import { dbPoolWaitingCount, prisma } from "@/lib/db";
+import { createDenialMemory } from "@/lib/rate-limit/denial-memory";
 
 /**
  * Reads the pepper lazily, on every hash — not once at module load — so importing this module
@@ -100,8 +101,39 @@ export const RATE_LIMIT_BUSY_RETRY_AFTER_SECONDS = 1;
  * docs/OPERATIONS.md), which this limit relies on: N processes would admit N times as many.
  */
 export const RATE_LIMIT_MAX_CONCURRENT = 3;
+
+/**
+ * Fairness in front of the shared slots (K136, Codex diff critique 2 item 1). One identity (scope
+ * plus client-IP hash, the advisory-lock key) holds at most RATE_LIMIT_MAX_PER_IDENTITY slots, so
+ * a flood from one identity cannot take the slots every other identity needs: its second
+ * concurrent call is answered busy at once, without a transaction. One identity's calls queue on
+ * its advisory lock anyway, so a second slot would only add a second waiter, never throughput.
+ * The per-identity entries exist only while a call holds a slot, so there are never more of them
+ * than RATE_LIMIT_MAX_CONCURRENT, and each is removed on every path out (`finally`).
+ */
+export const RATE_LIMIT_MAX_PER_IDENTITY = 1;
+
+/**
+ * Denial memory (K136). A check that denies remembers the time the identity's oldest hit leaves
+ * the window; until then the database would deny again, so later calls with the same limits are
+ * answered 429 from memory, with the same Retry-After, without a transaction. At most
+ * RATE_LIMIT_DENIED_MAX_KEYS identities are remembered; expired entries are swept at most once
+ * per RATE_LIMIT_DENIED_SWEEP_MS, and at capacity the oldest-inserted entry is evicted first
+ * (denial-memory.ts). Forgetting a denial early only sends that identity back to the database.
+ * The memory lives in the process, so rows deleted from RateLimitHit by hand (the E2E fixture)
+ * do not lift a denial it already remembers; a restart does.
+ */
+export const RATE_LIMIT_DENIED_MAX_KEYS = 10_000;
+export const RATE_LIMIT_DENIED_SWEEP_MS = 1000;
+
+const denials = createDenialMemory({
+  maxKeys: RATE_LIMIT_DENIED_MAX_KEYS,
+  sweepIntervalMs: RATE_LIMIT_DENIED_SWEEP_MS,
+});
 let admissionLimit = RATE_LIMIT_MAX_CONCURRENT;
+let perIdentityLimit = RATE_LIMIT_MAX_PER_IDENTITY;
 let inFlight = 0;
+const identitiesInFlight = new Map<string, number>();
 
 /**
  * Test seam only: the atomicity proof runs 20 limiter transactions at once, which the admission
@@ -111,17 +143,52 @@ export function setRateLimitAdmissionLimitForTests(limit: number | null): void {
   admissionLimit = limit ?? RATE_LIMIT_MAX_CONCURRENT;
 }
 
+/**
+ * Test seam only: the atomicity proof races 20 transactions of one identity, which the
+ * per-identity limit would otherwise refuse. `null` restores the shipped limit.
+ */
+export function setRateLimitPerIdentityLimitForTests(limit: number | null): void {
+  perIdentityLimit = limit ?? RATE_LIMIT_MAX_PER_IDENTITY;
+}
+
 /** Limiter transactions running in this process now. */
 export function rateLimitTransactionsInFlight(): number {
   return inFlight;
 }
 
-/** Takes a slot when one is free and the pool is not already queued; never waits. */
-function tryAdmit(): boolean {
+/** Identities holding a limiter slot in this process now. */
+export function rateLimitIdentitiesInFlight(): number {
+  return identitiesInFlight.size;
+}
+
+/** Identities whose denial this process remembers now. */
+export function rateLimitDenialsRemembered(): number {
+  return denials.size();
+}
+
+/**
+ * Takes a slot when this identity holds none, one is free and the pool is not already queued;
+ * never waits. Synchronous, so no other call can interleave between the checks and the take.
+ */
+function tryAdmit(lockKey: string): boolean {
+  const held = identitiesInFlight.get(lockKey) ?? 0;
+  if (held >= perIdentityLimit) return false;
   if (inFlight >= admissionLimit) return false;
   if (dbPoolWaitingCount() >= admissionLimit) return false;
   inFlight += 1;
+  identitiesInFlight.set(lockKey, held + 1);
   return true;
+}
+
+function release(lockKey: string): void {
+  inFlight -= 1;
+  const held = (identitiesInFlight.get(lockKey) ?? 1) - 1;
+  if (held > 0) identitiesInFlight.set(lockKey, held);
+  else identitiesInFlight.delete(lockKey);
+}
+
+function retryAfterFor(untilMs: number, now: number, windowMs: number): number {
+  return Math.min(Math.ceil(windowMs / 1000), Math.max(1, Math.ceil((untilMs - now) / 1000)));
 }
 
 // Postgres SQLSTATE 55P03 (lock_not_available): the lock wait passed `lock_timeout`. Prisma wraps a
@@ -149,8 +216,8 @@ function isTransactionStartTimeout(err: unknown): boolean {
  * transaction-scoped advisory lock on scope plus IP hash serializes the count and the insert for
  * one identity only; Postgres releases it at commit or rollback, so nothing can leak a lock.
  * `pg_advisory_xact_lock` returns `void`, which Prisma's `$queryRaw` cannot deserialize, so it
- * runs through `$executeRaw`. Both waits are bounded (K130, above), and admission in front of the
- * pool is limited (K132, above).
+ * runs through `$executeRaw`. Both waits are bounded (K130, above), admission in front of the
+ * pool is limited (K132, above), and fair per identity, with denials remembered (K136, above).
  */
 export async function consumeRateLimit(
   scope: string,
@@ -169,12 +236,16 @@ export async function consumeRateLimit(
   }
   const ipHash = hashIp(ip);
   const lockKey = `${scope}:${ipHash}`;
-  if (!tryAdmit()) {
+  const remembered = denials.deniedUntil(lockKey, max, windowMs, Date.now());
+  if (remembered !== null) {
+    return { allowed: false, retryAfterSeconds: retryAfterFor(remembered, Date.now(), windowMs) };
+  }
+  if (!tryAdmit(lockKey)) {
     return { allowed: false, retryAfterSeconds: RATE_LIMIT_BUSY_RETRY_AFTER_SECONDS };
   }
   try {
     lockObserver?.beforeTransaction?.();
-    return await prisma.$transaction(
+    const result = await prisma.$transaction(
       async (tx) => {
         // Transaction-local (`true`): the setting ends with this transaction and never leaks to
         // the next user of the pooled connection.
@@ -192,25 +263,30 @@ export async function consumeRateLimit(
             select: { createdAt: true },
           });
           const oldestMs = oldest?.createdAt.getTime() ?? now;
-          const retryAfterSeconds = Math.min(
-            Math.ceil(windowMs / 1000),
-            Math.max(1, Math.ceil((oldestMs + windowMs - now) / 1000)),
-          );
-          return { allowed: false, retryAfterSeconds };
+          return {
+            allowed: false,
+            retryAfterSeconds: retryAfterFor(oldestMs + windowMs, now, windowMs),
+            deniedUntilMs: oldest ? oldestMs + windowMs : null,
+          };
         }
         await tx.rateLimitHit.create({ data: { scope, ipHash } });
-        return { allowed: true, retryAfterSeconds: 0 };
+        return { allowed: true, retryAfterSeconds: 0, deniedUntilMs: null };
       },
       { maxWait: RATE_LIMIT_POOL_WAIT_MS, timeout: 5000 },
     );
+    if (result.deniedUntilMs !== null) {
+      denials.record(lockKey, max, windowMs, result.deniedUntilMs, Date.now());
+    }
+    return { allowed: result.allowed, retryAfterSeconds: result.retryAfterSeconds };
   } catch (err) {
+    // A busy answer is not a quota denial, so nothing is remembered for it.
     if (isLockTimeout(err) || isTransactionStartTimeout(err)) {
       return { allowed: false, retryAfterSeconds: RATE_LIMIT_BUSY_RETRY_AFTER_SECONDS };
     }
     throw err;
   } finally {
-    // Every path out of the transaction, including a throw, frees the slot.
-    inFlight -= 1;
+    // Every path out of the transaction, including a throw, frees the slot and the identity entry.
+    release(lockKey);
   }
 }
 

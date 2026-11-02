@@ -8,12 +8,16 @@ import {
   consumeRateLimit,
   RATE_LIMIT_MAX_CONCURRENT,
   RATE_LIMIT_MAX_WINDOW_MS,
+  rateLimitIdentitiesInFlight,
   rateLimitLockKey,
   rateLimitTransactionsInFlight,
   setRateLimitAdmissionLimitForTests,
   setRateLimitLockObserverForTests,
+  setRateLimitPerIdentityLimitForTests,
 } from "@/lib/rate-limit/check-rate-limit";
+import { rateLimitKeyForIp } from "@/lib/rate-limit/client-ip";
 import { PUBLIC_RATE_LIMITS } from "@/lib/rate-limit/public-limits";
+import { uniqueClientIp } from "../support/client-ip";
 import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
 
 beforeAll(() => {
@@ -25,12 +29,15 @@ const scopeFor = (label: string) => `test-${label}-${randomUUID()}`;
 describe("consumeRateLimit (D-23)", () => {
   afterEach(() => {
     setRateLimitAdmissionLimitForTests(null);
+    setRateLimitPerIdentityLimitForTests(null);
   });
 
-  // The atomicity proof needs 20 transactions to race, so it lifts the K132 admission limit (which
-  // would refuse 17 of them before they start); the assertion is the one it always had.
+  // The atomicity proof needs 20 transactions of one identity to race, so it lifts the K132
+  // admission limit (which would refuse 17 of them before they start) and the K136 one-slot-per-
+  // identity limit (which would refuse 19); the assertion is the one it always had.
   it("allows exactly max of 20 parallel calls and stores exactly max rows", async () => {
     setRateLimitAdmissionLimitForTests(20);
+    setRateLimitPerIdentityLimitForTests(20);
     const scope = scopeFor("parallel");
     const results = await Promise.all(
       Array.from({ length: 20 }, () =>
@@ -234,26 +241,31 @@ describe("admission limit in front of the pool (K132)", () => {
     expect(RATE_LIMIT_MAX_CONCURRENT).toBeLessThan((Number(process.env.DB_POOL_MAX) || 10) / 2);
   });
 
+  // Since K136 one identity holds at most one slot, so the flood comes from FLOOD identities, each
+  // with its advisory lock held by the same backend (before K136 this case used one identity,
+  // which then took all three slots).
   it("a flood while another backend holds the advisory lock: only the limit reaches the pool, the rest get 429 with Retry-After at once, an unrelated query stays prompt, then it recovers", async () => {
-    const ip = "203.0.113.27";
+    const FLOOD = 30;
+    const ips = Array.from({ length: FLOOD }, () => uniqueClientIp());
     const { scope } = PUBLIC_RATE_LIMITS.statusAttachment;
-    const lockKey = rateLimitLockKey(scope, ip);
-    const ipHash = lockKey.slice(scope.length + 1);
-    const hits = () => prisma.rateLimitHit.count({ where: { scope, ipHash } });
+    const lockKeys = ips.map((ip) => rateLimitLockKey(scope, rateLimitKeyForIp(ip)));
+    const ipHashes = lockKeys.map((key) => key.slice(scope.length + 1));
+    const hits = () => prisma.rateLimitHit.count({ where: { scope, ipHash: { in: ipHashes } } });
     const token = `tok-${randomUUID()}`;
     const id = randomUUID();
-    const call = () =>
+    const call = (ip: string) =>
       attachmentGet(
         new Request(`http://localhost/api/public/status/${token}/attachments/${id}`, {
           headers: { "x-forwarded-for": ip },
         }),
         { params: Promise.resolve({ token, id }) },
       );
-    const FLOOD = 30;
 
     const before = await hits();
     const holder = await holdTransaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}::text))`;
+      for (const lockKey of lockKeys) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}::text))`;
+      }
     });
     let reachedPool = 0;
     const waiterPids: number[] = [];
@@ -266,9 +278,9 @@ describe("admission limit in front of the pool (K132)", () => {
       },
     });
     try {
-      const timed = Array.from({ length: FLOOD }, () => {
+      const timed = ips.map((ip) => {
         const startedAt = Date.now();
-        return call().then((res) => ({ res, ms: Date.now() - startedAt }));
+        return call(ip).then((res) => ({ res, ms: Date.now() - startedAt }));
       });
       for (const t of timed) t.catch(() => {});
 
@@ -279,6 +291,7 @@ describe("admission limit in front of the pool (K132)", () => {
       });
       await waitForBlockedBy(prisma, holder.pid, waiterPids, { timeoutMs: 2000 });
       expect(rateLimitTransactionsInFlight()).toBe(RATE_LIMIT_MAX_CONCURRENT);
+      expect(rateLimitIdentitiesInFlight()).toBe(RATE_LIMIT_MAX_CONCURRENT);
 
       // An unrelated query on the same pool, while the admitted calls still wait on the lock.
       const queryStartedAt = Date.now();
@@ -306,7 +319,8 @@ describe("admission limit in front of the pool (K132)", () => {
 
     // Recovery: every slot is free again and the same call takes the normal path.
     expect(rateLimitTransactionsInFlight()).toBe(0);
-    const ok = await call();
+    expect(rateLimitIdentitiesInFlight()).toBe(0);
+    const ok = await call(ips[0]);
     expect(ok.status).toBe(404);
     expect(await hits()).toBe(before + 1);
   });
@@ -322,11 +336,15 @@ describe("admission limit in front of the pool (K132)", () => {
     });
     const holders = await Promise.all(Array.from({ length: poolSize }, () => holdTransaction()));
     try {
-      // Each of these gives up after maxWait; its pool connect stays queued in pg-pool.
+      // Each of these gives up after maxWait; its pool connect stays queued in pg-pool. One
+      // identity each, since K136 lets one identity hold only one slot.
       const timedOut = await withinBound(
         Promise.all(
           Array.from({ length: RATE_LIMIT_MAX_CONCURRENT }, () =>
-            consumeRateLimit(scope, "203.0.113.28", { max: 5, windowMs: 60_000 }),
+            consumeRateLimit(scope, rateLimitKeyForIp(uniqueClientIp()), {
+              max: 5,
+              windowMs: 60_000,
+            }),
           ),
         ),
       );
@@ -364,13 +382,15 @@ describe("admission limit in front of the pool (K132)", () => {
         throw new Error("boom inside the transaction");
       },
     });
+    // One identity each (K136 lets one identity hold only one slot).
     const inside = await Promise.allSettled(
       Array.from({ length: RATE_LIMIT_MAX_CONCURRENT * 2 }, () =>
-        consumeRateLimit(scope, ip, { max: 5, windowMs: 60_000 }),
+        consumeRateLimit(scope, rateLimitKeyForIp(uniqueClientIp()), { max: 5, windowMs: 60_000 }),
       ),
     );
     expect(inside.filter((r) => r.status === "rejected")).toHaveLength(RATE_LIMIT_MAX_CONCURRENT);
     expect(rateLimitTransactionsInFlight()).toBe(0);
+    expect(rateLimitIdentitiesInFlight()).toBe(0);
 
     // An error before the transaction starts.
     setRateLimitLockObserverForTests({
@@ -384,6 +404,7 @@ describe("admission limit in front of the pool (K132)", () => {
       );
     }
     expect(rateLimitTransactionsInFlight()).toBe(0);
+    expect(rateLimitIdentitiesInFlight()).toBe(0);
     setRateLimitLockObserverForTests(null);
 
     // A lock timeout (55P03), handled as busy.
@@ -400,14 +421,175 @@ describe("admission limit in front of the pool (K132)", () => {
       await holder.release();
     }
     expect(rateLimitTransactionsInFlight()).toBe(0);
+    expect(rateLimitIdentitiesInFlight()).toBe(0);
 
-    // Every slot is free: the limit's worth of parallel calls are all admitted and counted.
+    // The identity that went through every error path is admitted and counted again (K136).
+    expect(await consumeRateLimit(scope, ip, { max: 5, windowMs: 60_000 })).toEqual({
+      allowed: true,
+      retryAfterSeconds: 0,
+    });
+
+    // Every slot is free: the limit's worth of parallel calls (one identity each) are all
+    // admitted and counted.
     const results = await Promise.all(
       Array.from({ length: RATE_LIMIT_MAX_CONCURRENT }, () =>
-        consumeRateLimit(scope, ip, { max: 5, windowMs: 60_000 }),
+        consumeRateLimit(scope, rateLimitKeyForIp(uniqueClientIp()), { max: 5, windowMs: 60_000 }),
       ),
     );
     expect(results.every((r) => r.allowed)).toBe(true);
-    expect(await prisma.rateLimitHit.count({ where: { scope } })).toBe(RATE_LIMIT_MAX_CONCURRENT);
+    expect(await prisma.rateLimitHit.count({ where: { scope } })).toBe(
+      RATE_LIMIT_MAX_CONCURRENT + 1,
+    );
+    expect(rateLimitIdentitiesInFlight()).toBe(0);
+  });
+});
+
+// K136 (Codex diff critique round 2, item 1): fairness in front of the shared slots. One identity
+// (scope plus client-IP hash) holds at most one admission slot, so a flood from one identity
+// cannot take the slots another identity needs. A check that denies remembers until when, and
+// that identity's later calls before then are answered 429 without a transaction.
+describe("fairness per identity (K136)", () => {
+  afterEach(() => {
+    setRateLimitLockObserverForTests(null);
+  });
+
+  /** Fast enough that the call cannot have waited on the 500 ms lock or the 1 s pool limit. */
+  const AT_ONCE_MS = 200;
+
+  it("one identity flooding while another backend holds its advisory lock holds one slot; a second identity is still admitted and counted", async () => {
+    const { scope } = PUBLIC_RATE_LIMITS.statusAttachment;
+    const ipA = uniqueClientIp();
+    const ipB = uniqueClientIp();
+    const lockKeyOf = (ip: string) => rateLimitLockKey(scope, rateLimitKeyForIp(ip));
+    const hits = (ip: string) =>
+      prisma.rateLimitHit.count({
+        where: { scope, ipHash: lockKeyOf(ip).slice(scope.length + 1) },
+      });
+    const token = `tok-${randomUUID()}`;
+    const id = randomUUID();
+    const call = (ip: string) =>
+      attachmentGet(
+        new Request(`http://localhost/api/public/status/${token}/attachments/${id}`, {
+          headers: { "x-forwarded-for": ip },
+        }),
+        { params: Promise.resolve({ token, id }) },
+      );
+    const FLOOD = 30;
+    const lockKeyA = lockKeyOf(ipA);
+
+    const holder = await holdTransaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKeyA}::text))`;
+    });
+    let reachedPool = 0;
+    const waiterPids: number[] = [];
+    setRateLimitLockObserverForTests({
+      beforeTransaction: () => {
+        reachedPool += 1;
+      },
+      beforeLock: async (tx) => {
+        waiterPids.push(await backendPid(tx));
+      },
+    });
+    try {
+      const timed = Array.from({ length: FLOOD }, () => {
+        const startedAt = Date.now();
+        return call(ipA).then((res) => ({ res, ms: Date.now() - startedAt }));
+      });
+      for (const t of timed) t.catch(() => {});
+
+      // A's one admitted call really waits on the holder (bound by PID), so it holds its slot.
+      await vi.waitFor(() => expect(waiterPids).toHaveLength(1), { timeout: 2000, interval: 10 });
+      await waitForBlockedBy(prisma, holder.pid, waiterPids, { timeoutMs: 2000 });
+      expect(reachedPool).toBe(1);
+      expect(rateLimitTransactionsInFlight()).toBe(1);
+      expect(rateLimitIdentitiesInFlight()).toBe(1);
+
+      // B, while A's call still waits on the lock: admitted at once and counted.
+      const startedAt = Date.now();
+      const b = await withinBound(call(ipB));
+      const bMs = Date.now() - startedAt;
+      expect(b.status).toBe(404);
+      expect(bMs).toBeLessThan(AT_ONCE_MS);
+      expect(await hits(ipB)).toBe(1);
+      expect(reachedPool).toBe(2);
+
+      const results = await withinBound(Promise.all(timed));
+      for (const { res } of results) {
+        expect(res.status).toBe(429);
+        expect(res.headers.get("Retry-After")).toMatch(/^[1-9]\d*$/);
+      }
+      const atOnce = results.filter(({ ms }) => ms < AT_ONCE_MS);
+      expect(atOnce.length).toBeGreaterThanOrEqual(FLOOD - 1);
+      expect(reachedPool).toBe(2);
+      expect(await hits(ipA)).toBe(0);
+      console.info(
+        `[08-F7] one-identity flood of ${FLOOD}: ${atOnce.length} answered under ${AT_ONCE_MS} ms; second identity admitted in ${bMs} ms`,
+      );
+    } finally {
+      setRateLimitLockObserverForTests(null);
+      await holder.release();
+    }
+
+    // Recovery: every slot and identity entry is free again, and A counts on the normal path.
+    expect(rateLimitTransactionsInFlight()).toBe(0);
+    expect(rateLimitIdentitiesInFlight()).toBe(0);
+    expect((await call(ipA)).status).toBe(404);
+    expect(await hits(ipA)).toBe(1);
+  });
+
+  it("a denied identity's next calls inside Retry-After make no transaction; another identity still reaches the database; after Retry-After the database decides again", async () => {
+    const scope = scopeFor("denied-until");
+    const key = rateLimitKeyForIp(uniqueClientIp());
+    const otherKey = rateLimitKeyForIp(uniqueClientIp());
+    const opts = { max: 1, windowMs: 2000 };
+    const rows = (k: string) =>
+      prisma.rateLimitHit.count({
+        where: { scope, ipHash: rateLimitLockKey(scope, k).slice(scope.length + 1) },
+      });
+    let transactions = 0;
+    setRateLimitLockObserverForTests({
+      beforeTransaction: () => {
+        transactions += 1;
+      },
+    });
+
+    expect(await consumeRateLimit(scope, key, opts)).toEqual({
+      allowed: true,
+      retryAfterSeconds: 0,
+    });
+    const denied = await consumeRateLimit(scope, key, opts);
+    expect(denied.allowed).toBe(false);
+    expect(transactions).toBe(2);
+
+    // Inside Retry-After: sequential and concurrent calls are all denied without a transaction.
+    for (let i = 0; i < 10; i++) {
+      const r = await consumeRateLimit(scope, key, opts);
+      expect(r.allowed).toBe(false);
+      expect(r.retryAfterSeconds).toBeGreaterThanOrEqual(1);
+      expect(r.retryAfterSeconds).toBeLessThanOrEqual(2);
+    }
+    const concurrent = await Promise.all(
+      Array.from({ length: 10 }, () => consumeRateLimit(scope, key, opts)),
+    );
+    expect(concurrent.every((r) => !r.allowed && r.retryAfterSeconds >= 1)).toBe(true);
+    expect(transactions).toBe(2);
+    expect(await rows(key)).toBe(1);
+
+    // The memory is per identity: another identity in the same scope is decided by the database.
+    expect(await consumeRateLimit(scope, otherKey, opts)).toEqual({
+      allowed: true,
+      retryAfterSeconds: 0,
+    });
+    expect(transactions).toBe(3);
+
+    // After Retry-After the database decides again: a call reaches a transaction and is allowed.
+    await vi.waitFor(
+      async () => {
+        expect((await consumeRateLimit(scope, key, opts)).allowed).toBe(true);
+      },
+      { timeout: 8000, interval: 100 },
+    );
+    expect(transactions).toBeGreaterThan(3);
+    expect(await rows(key)).toBe(2);
   });
 });

@@ -287,6 +287,16 @@ without touching the database, and is not counted. The other 7 connections stay 
 the app. The same 429 is given when the check waits longer than 500 ms for another request of the
 same client, or longer than 1 s for a pool connection.
 
+**One check at a time per client.** One client (the client address, per route) runs at most one
+of these checks at once, so a flood from one address cannot take the 3 slots other clients need.
+Its second simultaneous request answers 429 with `Retry-After: 1` at once. Clients without a usable
+address share one bucket, and so share that one check; under the supported topology Caddy always
+supplies the address. When a client is over its quota, the app remembers until when (at most
+10,000 clients, expired entries swept every second), and answers that client's requests before
+then with 429 and the same `Retry-After` without asking the database. This memory lives in the app
+process: deleting rate-limit rows from the database does not lift a denial it already remembers,
+and restarting the app does.
+
 **The limit is per app process.** AIDA runs one app process: one server, one `app` container.
 Running several `app` replicas multiplies the limit, and with it the share of the database those
 checks can take, so it is not supported.
