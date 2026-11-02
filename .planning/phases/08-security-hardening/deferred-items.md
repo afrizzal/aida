@@ -13,3 +13,4 @@
 - **Ollama probe accepts any 200 JSON (F2 observation).** An HTTP service that answers the Ollama probe path with status 200 and any valid JSON makes the Test pass, because the probes do not check the response shape. Not a text oracle, but it tells "some JSON service answered" apart from `connection_failed`. Left for the Codex diff critique and Phase 8.1.
 - The rows deferred in the "Orchestrator dispositions" section of `08-REVIEW.md` (a-IN-a3, a-IN-a5, a-IN-a6, a-IN-a7, b-IN-b5, b-IN-b6, b-IN-b8, c-IN-07), with the reasons given there.
 
+- **Caddy-generated responses have no security headers (Codex diff round 1, LOW).** The probe's 404 and the body-size 413 come from Caddy, not the app proxy. Deferred to Phase 8.1 (08-22, real Caddy), because a global Caddy `header` block would duplicate the app's CSP.

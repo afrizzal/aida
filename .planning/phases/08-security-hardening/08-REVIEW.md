@@ -245,3 +245,25 @@ Source reviews: this file (part a), `08-REVIEW-b.md`, `08-REVIEW-c.md`, `08-REVI
 - b-IN-b6: orphaned files on an unreachable branch. Unreachable today.
 - b-IN-b8: `text/plain` and `text/csv` never pass the sniff. Pre-existing v1 behaviour; widening accepted types is a product choice.
 - c-IN-07: the gate's evidence directory lives in TMPDIR by rule C. The tracked `08-GATE-A.md` keeps the results; the limit is written there.
+
+## Codex diff critique round 1 dispositions (2026-11-12)
+
+Source: `.planning/run-loop/codex/fase08-diff-jawab.md` (4 HIGH, 1 MEDIUM, 1 LOW). The orchestrator checked every claim against the code before triage: `errors.ts` maps any HTTP 401 or 403 to `authentication_failed`, and only the Ollama probes take a configurable URL (the OpenAI and Anthropic probes use the vendor hosts and an API key; the Ollama probes send no credential); the pool in `src/lib/db.ts` has no `connectionTimeoutMillis` and the F3 report already names the abandoned-waiter residual; `imageRow` in `scripts/part-a-gate-check.ts` reads the verify log's word and checks only status, exit, target, tag and run id against the image log; the "foreign resources unchanged" row passes on two identical files, including two empty ones; intake counts only non-empty `file` parts, after the whole multipart body is parsed. All six are accepted. Five are fixed in batch F6; the LOW is deferred.
+
+### Run decisions
+
+- **K131 (Codex 1):** on the Ollama probes, an HTTP 401 or 403 is `connection_failed`, because AIDA sends Ollama no credential, so such a reply cannot be a rejection of AIDA's credentials. A probe passes only when the response has the Ollama shape (`/api/tags`: a `models` array; `/api/embed`: an `embeddings` array of non-empty number arrays). OpenAI and Anthropic keep 401 and 403 as `authentication_failed`. `docs/SECURITY.md` and `errors.ts` drop the claim that a credential rejection proves the protocol; the residual is a service that imitates Ollama's shapes, plus timing.
+- **K132 (Codex 2):** admission control in front of the pool. An in-process limit on concurrent limiter transactions (a small fixed share of the 10-connection pool, leaving the rest for the app); a request over it is answered 429 with `Retry-After` at once and never calls `pool.connect`. With this, a flood cannot grow pg-pool's waiter queue through the limiter. AIDA runs one app process (single server), which the limit relies on; the docs say so. Other database errors on the limiter path still propagate as before (a down database is not an overload).
+- **K133 (Codex 3):** the gate verifier runs the same pure validation the image check's `--verify` runs, over the actual image log and exit file, at derive and at check time, instead of trusting the verify log's word. The validation moves to a module both scripts import, with no Docker code in it. Mutation tests per validated field and for a missing teardown line.
+- **K134 (Codex 4):** the foreign-resource evidence records each listing's exit code and requires exit 0 and a well-formed, non-empty listing (header line present) before and after. The row is renamed to what it measures (the listed containers, and the volumes of project `aida`, unchanged), so it no longer claims every foreign resource. `08-24-PLAN.md` gets a dated revision note for the capture commands; the gate itself is rerun at step 8.
+- **K135 (Codex 5):** a part-count cap before the multipart parse. The bounded reader's raw bytes are scanned for the boundary delimiter, and a body with more parts than a fixed limit (10 file parts plus the route's known text fields, small slack) is answered 413 `too_many_parts` without parsing. Every `file` part counts toward the 10-file cap, empty ones included. No new dependency.
+
+### Batch
+
+| Batch | Rows | Area |
+|---|---|---|
+| F6 | codex-1 (K131), codex-2 (K132), codex-3 (K133), codex-4 (K134), codex-5 (K135) | Ollama probes, limiter admission, gate verifier, public multipart |
+
+### Deferred
+
+- codex-6 (LOW): responses Caddy makes itself (the probe's 404, the body-size 413) carry no security headers. Adding a global `header` block in Caddy would duplicate the app's CSP on proxied responses, and the real Caddy behaviour can only be proven by plan 08-22 (Phase 8.1). Deferred to Phase 8.1 and recorded in `deferred-items.md`.
