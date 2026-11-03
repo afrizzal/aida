@@ -22,10 +22,25 @@
 // idempotent: a second run over the same rows changes nothing. Logs carry the storage key and the
 // error code only, never file content or an error message.
 //
+// Phase 9 (plan 09-04):
+// - U-11, one deletion queue: ProjectFileCleanup and this sweep are the one deletion path for
+//   every stored file, ticket attachments, logos and project files alike. Every path that
+//   dereferences a stored file enqueues its key in the dereferencing transaction; no other code
+//   deletes a file that a committed row ever referenced (the U-13 inventory,
+//   tests/unit/file-delete-callers.test.ts).
+// - U-12, the backup fence (src/lib/storage/file-fence.ts): a run first opens the fence, which
+//   verifies the uploads volume (mount point plus marker equal to `uploads:volume-id`) and takes
+//   the shared side of the session-level fence lock with no unexpired backup lease. A refusal
+//   returns zeros with `skipped` and touches no row and no file. The fence is opened before the
+//   select, every storage.delete promise is tracked by it, and it is released in the background
+//   only after the transaction ended and every tracked delete settled, including one the I/O
+//   budget already reported as ETIMEDOUT. ENOENT counts as done only inside such a verified run.
+//
 // Relative imports only: the worker bundles this module.
 import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "../../generated/prisma/client";
 import type { FileStorage } from "../attachments/file-storage";
+import type { DeleteFence, FenceRefusal, FenceRefusalReason } from "../storage/file-fence";
 import {
   PROJECT_FILE_CLEANUP_BATCH,
   PROJECT_FILE_CLEANUP_IO_BUDGET_MS,
@@ -66,11 +81,15 @@ export interface FileCleanupSweepResult {
   missing: number;
   /** Rows kept for a later attempt because the delete failed with another error. */
   failed: number;
+  /** Set when the fence refused the run: nothing was selected, deleted or changed (U-12). */
+  skipped?: FenceRefusalReason;
 }
 
 export interface FileCleanupSweepOptions {
   client: PrismaClient;
   storage: FileStorage;
+  /** The backup fence and uploads volume check (U-12); required, opened before the select. */
+  fence: { open(): Promise<DeleteFence | FenceRefusal> };
   now?: Date;
   limit?: number;
   /** Milliseconds of file I/O per run (default PROJECT_FILE_CLEANUP_IO_BUDGET_MS). */
@@ -129,6 +148,14 @@ async function withinBudget(work: Promise<void>, ms: number): Promise<void> {
   }
 }
 
+function logSkipped(reason: FenceRefusalReason): void {
+  try {
+    console.error(`[project-file-cleanup] sweep skipped: ${reason}`);
+  } catch {
+    // Logging never changes the sweep's outcome.
+  }
+}
+
 function logStopped(key: string, code: string): void {
   try {
     console.error(
@@ -153,6 +180,28 @@ export async function sweepProjectFileCleanup(
   const budgetMs = opts.ioBudgetMs ?? PROJECT_FILE_CLEANUP_IO_BUDGET_MS;
   const { storage } = opts;
 
+  // U-12: the fence is taken before any due row is selected, and a refusal touches nothing.
+  const fence = await opts.fence.open();
+  if ("refused" in fence) {
+    logSkipped(fence.refused);
+    return { deleted: 0, missing: 0, failed: 0, skipped: fence.refused };
+  }
+
+  try {
+    return await sweepInsideFence(opts, fence, limit, budgetMs, storage);
+  } finally {
+    // Background release: the job returns as before, the lock outlives every tracked delete.
+    fence.close();
+  }
+}
+
+async function sweepInsideFence(
+  opts: FileCleanupSweepOptions,
+  fence: DeleteFence,
+  limit: number,
+  budgetMs: number,
+  storage: FileStorage,
+): Promise<FileCleanupSweepResult> {
   return opts.client.$transaction(async (tx) => {
     // Without an injected clock the run reads the database clock, the clock that wrote
     // nextAttemptAt's default, so a worker clock behind the database's never skips a due row.
@@ -181,10 +230,10 @@ export async function sweepProjectFileCleanup(
       let code: string | null = null;
       let outOfBudget = false;
       try {
-        await withinBudget(
-          storage.delete({ orgId: row.organizationId, key: row.storageKey }),
-          remaining,
-        );
+        const work = storage.delete({ orgId: row.organizationId, key: row.storageKey });
+        // Tracked before the race: a delete that outlives its budget still holds the fence.
+        fence.track(work);
+        await withinBudget(work, remaining);
       } catch (err) {
         code = errorCode(err);
         outOfBudget = err instanceof IoBudgetExceeded;

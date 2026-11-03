@@ -7,8 +7,7 @@
 // outbox rows written by a delete are read directly; the sweep (sweepProjectFileCleanup) removes the
 // files. The AuditEvent table is seeded with raw SQL and compared before and after.
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm, stat } from "node:fs/promises";
-import os from "node:os";
+import { rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { PrismaClient } from "@/generated/prisma/client";
@@ -29,6 +28,7 @@ import { aliasTaskKeyInTx, issueTaskKeyInTx, resolveTaskKey } from "@/lib/projec
 import { createProject } from "@/lib/projects/projects";
 import type { ProjectDb } from "@/lib/projects/service";
 import { createTask, updateTask } from "@/lib/projects/tasks";
+import { testFenceProvider, testUploadsDir } from "../support/file-fence-fixtures";
 import { waitForBlockedBy } from "../support/lock-wait";
 import {
   actorOf,
@@ -64,7 +64,8 @@ beforeAll(async () => {
   const created = createObserverClient();
   observer = created.client;
   closeObserver = created.close;
-  dir = await mkdtemp(path.join(os.tmpdir(), "aida-project-delete-"));
+  // Plan 09-04: the directory carries the uploads volume marker, so the fenced sweep runs.
+  dir = await testUploadsDir("aida-project-delete-");
   previousUploadsDir = process.env.UPLOADS_DIR;
   process.env.UPLOADS_DIR = dir;
   storage = (await import("@/lib/attachments/local-file-storage")).localFileStorage;
@@ -342,7 +343,7 @@ describe("deleteTask", () => {
     expect(after.map((r) => r.verb)).toEqual(["TASK_CREATED", "TASK_UPDATED", "TASK_DELETED"]);
 
     for (const key of keys) expect(await fileExists(w.orgId, key)).toBe(true);
-    await sweepProjectFileCleanup({ client: prisma, storage });
+    await sweepProjectFileCleanup({ client: prisma, fence: testFenceProvider(dir), storage });
     for (const key of keys) expect(await fileExists(w.orgId, key)).toBe(false);
     expect(
       await prisma.projectFileCleanup.count({

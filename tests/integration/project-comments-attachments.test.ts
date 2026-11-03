@@ -3,8 +3,6 @@
 // renderTaskMarkdown and recorded with ids only. Attachments are validated before anything is
 // stored, staged before the transaction and discarded on any refusal or error; every download
 // read checks project access; a delete writes its storage key to ProjectFileCleanup.
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FileStorage } from "@/lib/attachments/file-storage";
@@ -16,6 +14,7 @@ import {
   listTaskComments,
 } from "@/lib/projects/comments";
 import { setProjectServiceObserverForTests } from "@/lib/projects/service";
+import { testFenceProvider, testUploadsDir } from "../support/file-fence-fixtures";
 import {
   actorOf,
   filesUnder,
@@ -37,7 +36,8 @@ let cleanupMod: typeof import("@/lib/projects/file-cleanup");
 const previousUploadsDir = process.env.UPLOADS_DIR;
 
 beforeAll(async () => {
-  uploadsDir = await mkdtemp(path.join(tmpdir(), "aida-project-attachments-"));
+  // Plan 09-04: the directory carries the uploads volume marker, so the fenced sweep below runs.
+  uploadsDir = await testUploadsDir("aida-project-attachments-");
   process.env.UPLOADS_DIR = uploadsDir;
   att = await import("@/lib/projects/attachments");
   storageMod = await import("@/lib/attachments/local-file-storage");
@@ -390,6 +390,7 @@ describe("deleteTaskAttachment", () => {
     );
     await cleanupMod.sweepProjectFileCleanup({
       client: prisma,
+      fence: testFenceProvider(uploadsDir),
       storage: storageMod.localFileStorage,
       now: new Date(Date.now() + 60_000),
     });

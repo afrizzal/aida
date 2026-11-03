@@ -5,6 +5,11 @@ import type { FileStorage } from "./file-storage";
 
 const ROOT = process.env.UPLOADS_DIR ?? "/data/uploads";
 
+/** The uploads root this module writes under (read once, when the module loads). */
+export function uploadsRoot(): string {
+  return ROOT;
+}
+
 // Keys are always server-generated (random hex + extension) — never derived from
 // user-supplied filenames. This regex is the path-traversal guard: reject anything
 // that isn't exactly that shape.
@@ -17,7 +22,9 @@ export const localFileStorage: FileStorage = {
   async save({ orgId, key, data }) {
     const dir = path.join(ROOT, orgId);
     await mkdir(dir, { recursive: true });
-    await writeFile(path.join(dir, safeKey(key)), data);
+    // D-02(1), immutable storage keys: exclusive create, so a save never overwrites a stored file
+    // (EEXIST instead). An upload or a replacement always writes a new key from buildStorageKey.
+    await writeFile(path.join(dir, safeKey(key)), data, { flag: "wx" });
     return { key, sizeBytes: data.byteLength };
   },
   async read({ orgId, key }) {

@@ -5,12 +5,23 @@
 // policy singleton, and the sweep's FOR UPDATE SKIP LOCKED keeps two overlapping runs apart
 // anyway. Idempotent; writes no activity; sends nothing to anyone.
 //
+// Phase 9 (plan 09-04, U-12): every run goes through the backup fence and the uploads volume
+// check on the real UPLOADS_DIR, with the real mount-point test. Outside a container UPLOADS_DIR
+// is usually not a mount point, so a local `pnpm worker` deletes no files and logs
+// `sweep skipped: uploads-unverified` once a minute.
+//
 // Relative imports only: the worker bundles this module.
-import { localFileStorage } from "../../attachments/local-file-storage";
+import { localFileStorage, uploadsRoot } from "../../attachments/local-file-storage";
 import { prisma } from "../../db";
 import { type FileCleanupSweepResult, sweepProjectFileCleanup } from "../../projects/file-cleanup";
+import { createDeleteFenceProvider } from "../../storage/file-fence";
 
 /** The pg-boss handler; the scheduled payload is empty and is not read. */
 export async function projectFileCleanupHandler(_jobs?: unknown): Promise<FileCleanupSweepResult> {
-  return sweepProjectFileCleanup({ client: prisma, storage: localFileStorage });
+  const fence = createDeleteFenceProvider({
+    connectionString: process.env.DATABASE_URL,
+    uploadsDir: uploadsRoot(),
+    client: prisma,
+  });
+  return sweepProjectFileCleanup({ client: prisma, storage: localFileStorage, fence });
 }

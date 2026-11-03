@@ -7,8 +7,13 @@
 // table: every case starts from an empty table. Time-dependent cases inject `now`. The overlap
 // case proves FOR UPDATE SKIP LOCKED with parking, backend PIDs and counts on a one-connection
 // observer client (tests/support/lock-wait.ts); nothing here waits by time.
-import { mkdtemp, rm, stat } from "node:fs/promises";
-import os from "node:os";
+//
+// Phase 9 (plan 09-04): every sweep passes the backup fence. Direct calls use
+// testFenceProvider(dir) (the real fence with the mount-point test replaced); the worker handler
+// builds its own provider on UPLOADS_DIR, so this file replaces only isMountPoint of the uploads
+// volume module, because a temporary directory is never a mount point. The fence, the lease and
+// the marker check stay real. The volume and fence cases themselves are in file-fence.test.ts.
+import { rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
@@ -18,18 +23,27 @@ import type { FileStorage } from "@/lib/attachments/file-storage";
 import { prisma } from "@/lib/db";
 import { PROJECT_FILE_CLEANUP_MAX_ATTEMPTS } from "@/lib/projects/contract";
 import { enqueueFileCleanupInTx, sweepProjectFileCleanup } from "@/lib/projects/file-cleanup";
+import type { DeleteFenceProvider } from "@/lib/storage/file-fence";
+import { testFenceProvider, testUploadsDir, trackFence } from "../support/file-fence-fixtures";
 import { backendPid, type Deferred, deferred } from "../support/lock-wait";
 import { seedFileCleanup, seedOrgWithMembers } from "../support/project-fixtures";
+
+vi.mock("@/lib/storage/uploads-volume", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/storage/uploads-volume")>()),
+  isMountPoint: async () => true,
+}));
 
 let dir = "";
 let previousUploadsDir: string | undefined;
 let storage: FileStorage;
+let fence: DeleteFenceProvider;
 let handler: typeof import("@/lib/worker/jobs/project-file-cleanup").projectFileCleanupHandler;
 
 beforeAll(async () => {
-  dir = await mkdtemp(path.join(os.tmpdir(), "aida-project-cleanup-"));
+  dir = await testUploadsDir("aida-project-cleanup-");
   previousUploadsDir = process.env.UPLOADS_DIR;
   process.env.UPLOADS_DIR = dir;
+  fence = testFenceProvider(dir);
   storage = (await import("@/lib/attachments/local-file-storage")).localFileStorage;
   handler = (await import("@/lib/worker/jobs/project-file-cleanup")).projectFileCleanupHandler;
 });
@@ -171,7 +185,7 @@ describe("project file cleanup sweep edge cases", () => {
     await seedFileCleanup(prisma, orgA, key, { nextAttemptAt: T0 });
     expect(await fileExists(orgA, key)).toBe(false);
 
-    const result = await sweepProjectFileCleanup({ client: prisma, storage, now: T0 });
+    const result = await sweepProjectFileCleanup({ client: prisma, fence, storage, now: T0 });
     expect(result).toEqual({ deleted: 0, missing: 1, failed: 0 });
     expect(await cleanupRow(orgA, key)).toBeNull();
   });
@@ -186,7 +200,9 @@ describe("project file cleanup sweep edge cases", () => {
     });
 
     // First failure: attempts 1, one minute after the injected now.
-    expect(await sweepProjectFileCleanup({ client: prisma, storage: failing, now: T0 })).toEqual({
+    expect(
+      await sweepProjectFileCleanup({ client: prisma, fence, storage: failing, now: T0 }),
+    ).toEqual({
       deleted: 0,
       missing: 0,
       failed: 1,
@@ -199,16 +215,18 @@ describe("project file cleanup sweep edge cases", () => {
 
     // A sweep before nextAttemptAt skips the row.
     const early = new Date(T0.getTime() + 30_000);
-    expect(await sweepProjectFileCleanup({ client: prisma, storage: failing, now: early })).toEqual(
-      { deleted: 0, missing: 0, failed: 0 },
-    );
+    expect(
+      await sweepProjectFileCleanup({ client: prisma, fence, storage: failing, now: early }),
+    ).toEqual({ deleted: 0, missing: 0, failed: 0 });
     expect((await cleanupRow(orgA, key))?.attempts).toBe(1);
 
     // Failures 2 to 8: the delay doubles from the attempts before the failure, capped at 60.
     const expectedDelays = [2, 4, 8, 16, 32, 60, 60];
     let now = new Date(T0.getTime() + MINUTE);
     for (const [index, delay] of expectedDelays.entries()) {
-      expect(await sweepProjectFileCleanup({ client: prisma, storage: failing, now })).toEqual({
+      expect(
+        await sweepProjectFileCleanup({ client: prisma, fence, storage: failing, now }),
+      ).toEqual({
         deleted: 0,
         missing: 0,
         failed: 1,
@@ -228,7 +246,7 @@ describe("project file cleanup sweep edge cases", () => {
 
     // A later success removes the row.
     const ok = stubStorage(async () => {});
-    expect(await sweepProjectFileCleanup({ client: prisma, storage: ok, now })).toEqual({
+    expect(await sweepProjectFileCleanup({ client: prisma, fence, storage: ok, now })).toEqual({
       deleted: 1,
       missing: 0,
       failed: 0,
@@ -258,6 +276,7 @@ describe("project file cleanup sweep edge cases", () => {
     let sweep1FirstCall = true;
     const sweep1 = sweepProjectFileCleanup({
       client: prisma,
+      fence,
       now: T0,
       limit: 10,
       storage: stubStorage(async (key) => {
@@ -297,6 +316,7 @@ describe("project file cleanup sweep edge cases", () => {
     const sweep2Seen: string[] = [];
     const sweep2Run = sweepProjectFileCleanup({
       client: prisma,
+      fence,
       now: T0,
       limit: 100,
       storage: stubStorage(async (key) => {
@@ -352,7 +372,7 @@ describe("project file cleanup sweep edge cases", () => {
     await seedFileCleanup(prisma, orgA, shared, { nextAttemptAt: T0 });
     await seedFileCleanup(prisma, orgB, onlyB, { nextAttemptAt: T0 });
 
-    const result = await sweepProjectFileCleanup({ client: prisma, storage, now: T0 });
+    const result = await sweepProjectFileCleanup({ client: prisma, fence, storage, now: T0 });
     expect(result).toEqual({ deleted: 2, missing: 0, failed: 0 });
     expect(await fileExists(orgA, shared)).toBe(false);
     expect(await fileExists(orgB, shared)).toBe(true);
@@ -369,7 +389,7 @@ describe("project file cleanup sweep edge cases", () => {
   });
 
   it("a row whose nextAttemptAt is in the future is not touched, and an empty table returns zeros", async () => {
-    expect(await sweepProjectFileCleanup({ client: prisma, storage, now: T0 })).toEqual({
+    expect(await sweepProjectFileCleanup({ client: prisma, fence, storage, now: T0 })).toEqual({
       deleted: 0,
       missing: 0,
       failed: 0,
@@ -379,7 +399,7 @@ describe("project file cleanup sweep edge cases", () => {
     await storage.save({ orgId: orgA, key, data: Buffer.from("later") });
     await seedFileCleanup(prisma, orgA, key, { nextAttemptAt: new Date(T0.getTime() + MINUTE) });
 
-    expect(await sweepProjectFileCleanup({ client: prisma, storage, now: T0 })).toEqual({
+    expect(await sweepProjectFileCleanup({ client: prisma, fence, storage, now: T0 })).toEqual({
       deleted: 0,
       missing: 0,
       failed: 0,
@@ -405,7 +425,7 @@ describe("project file cleanup sweep edge cases", () => {
       throw codedError("EACCES", `cannot unlink: ${marker}`);
     });
 
-    await sweepProjectFileCleanup({ client: prisma, storage: failing, now: T0 });
+    await sweepProjectFileCleanup({ client: prisma, fence, storage: failing, now: T0 });
     expect(logged).toHaveLength(1);
     expect(logged[0]).toContain(key);
     expect(logged[0]).toContain("EACCES");
@@ -427,7 +447,9 @@ describe("b-IN-05: bounded sweep", () => {
       calls += 1;
       throw codedError("EACCES");
     });
-    expect(await sweepProjectFileCleanup({ client: prisma, storage: failing, now: T0 })).toEqual({
+    expect(
+      await sweepProjectFileCleanup({ client: prisma, fence, storage: failing, now: T0 }),
+    ).toEqual({
       deleted: 0,
       missing: 0,
       failed: 1,
@@ -438,9 +460,9 @@ describe("b-IN-05: bounded sweep", () => {
     });
     // Much later: the row is no longer selected and stays as it is.
     const later = new Date(T0.getTime() + 30 * 24 * 60 * MINUTE);
-    expect(await sweepProjectFileCleanup({ client: prisma, storage: failing, now: later })).toEqual(
-      { deleted: 0, missing: 0, failed: 0 },
-    );
+    expect(
+      await sweepProjectFileCleanup({ client: prisma, fence, storage: failing, now: later }),
+    ).toEqual({ deleted: 0, missing: 0, failed: 0 });
     expect(calls).toBe(1);
     expect(await cleanupRow(orgA, key)).toMatchObject({
       attempts: PROJECT_FILE_CLEANUP_MAX_ATTEMPTS,
@@ -456,20 +478,36 @@ describe("b-IN-05: bounded sweep", () => {
     await seedFileCleanup(prisma, orgA, next, { nextAttemptAt: T0 });
     vi.spyOn(console, "error").mockImplementation(() => {});
     const touched: string[] = [];
+    // Plan 09-04: the hung delete is released in finally and the fence handle's release awaited,
+    // so no shared fence lock outlives this case.
+    const hung = deferred<void>();
+    const tracked = trackFence(fence);
     const hanging = stubStorage((k) => {
       touched.push(k);
-      return new Promise<void>(() => {});
+      return hung.promise;
     });
-    expect(
-      await sweepProjectFileCleanup({ client: prisma, storage: hanging, now: T0, ioBudgetMs: 300 }),
-    ).toEqual({ deleted: 0, missing: 0, failed: 1 });
-    expect(touched).toHaveLength(1);
-    const first = touched[0] as string;
-    const other = first === stuck ? next : stuck;
-    expect(await cleanupRow(orgA, first)).toMatchObject({
-      attempts: 1,
-      lastErrorCode: "ETIMEDOUT",
-    });
-    expect(await cleanupRow(orgA, other)).toMatchObject({ attempts: 0, lastErrorCode: null });
+    try {
+      expect(
+        await sweepProjectFileCleanup({
+          client: prisma,
+          fence: tracked.fence,
+          storage: hanging,
+          now: T0,
+          ioBudgetMs: 300,
+        }),
+      ).toEqual({ deleted: 0, missing: 0, failed: 1 });
+      expect(touched).toHaveLength(1);
+      const first = touched[0] as string;
+      const other = first === stuck ? next : stuck;
+      expect(await cleanupRow(orgA, first)).toMatchObject({
+        attempts: 1,
+        lastErrorCode: "ETIMEDOUT",
+      });
+      expect(await cleanupRow(orgA, other)).toMatchObject({ attempts: 0, lastErrorCode: null });
+    } finally {
+      hung.resolve();
+      await tracked.allClosed();
+    }
+    expect(tracked.handles).toHaveLength(1);
   });
 });
