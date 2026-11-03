@@ -48,6 +48,24 @@ All of these are one-time, in the repo's GitHub Settings — a workflow file can
    vulnerability reporting → Enable). This is the mechanism `.github/SECURITY.md`'s "Report a
    vulnerability" link depends on.
 
+## Repo-health owner items
+
+Recorded in Phase 9 (plan 09-03, decision U-05, owner decision of 2026-11-11, item 13).
+
+1. **Version.** `package.json` carries `"version": "1.0.0"`, the version of the v1.0.0
+   release. The tag and the release below stay human-only; nothing in CI creates them.
+2. **Bump policy (open owner decision).** Whether every pull request must raise the version is
+   not decided. Until it is, `.github/workflows/check-version.yml` fails only on a missing or
+   invalid version or on a version lower than the base, and reports an unchanged version as a
+   notice. If you decide that every pull request must bump, the equal case in
+   `scripts/check-version.mjs` becomes an error.
+3. **README widgets: not added**, by owner decision (item 13). No third-party widget or
+   tracking image goes into the README.
+4. **Code Owner review (optional setting).** `.github/CODEOWNERS` names the owner for every
+   path. Requiring a Code Owner review before merging is a branch-protection setting (Settings
+   → Branches → the `master` rule → "Require review from Code Owners") that you may turn on.
+   Making `Version check` a required status check is the same kind of setting.
+
 ## Tag and release
 
 Run from a clean `master` checkout:
