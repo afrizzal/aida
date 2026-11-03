@@ -309,6 +309,11 @@ export interface SeedDemoDataOptions {
   agentUserId: string;
   /** injected so tests/CLI can pin "now"; defaults to new Date() */
   now?: Date;
+  /**
+   * Awaited once, right after the first ticket is created (09-02 crash-per-stage tests, through
+   * the tenant guard's hooks). Production callers pass none.
+   */
+  onStage?: (stage: "first-ticket") => Promise<void>;
 }
 
 export interface SeedDemoSummary {
@@ -415,6 +420,7 @@ export async function seedDemoData(opts: SeedDemoDataOptions): Promise<SeedDemoS
       },
       direction: "INBOUND",
     });
+    if (seededTickets.length === 0) await opts.onStage?.("first-ticket");
     messageCount += 1; // the initial inbound message created by createTicket
 
     // Resolve the (already-normalized) contact id for reply authorship (4i) and the
