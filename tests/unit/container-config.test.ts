@@ -115,6 +115,13 @@ function composeService(rel: string, name: string): string {
 
 const MIGRATE_COMMAND =
   'command: ["node", "node_modules/prisma/build/index.js", "migrate", "deploy"]';
+// Phase 9, D-12(4): docker-compose.yml runs the database URL guard first, tsx through node as well.
+// The egress-test compose file keeps its own fixture URL and the plain command (D-13).
+const MIGRATE_COMMANDS: Record<string, string> = {
+  "docker-compose.yml":
+    'command: ["sh", "-c", "node node_modules/tsx/dist/cli.mjs scripts/check-database-url.ts && exec node node_modules/prisma/build/index.js migrate deploy"]',
+  "docker-compose.egress-test.yml": MIGRATE_COMMAND,
+};
 
 describe("non-root migrate through the builder stage (D-08, D-27)", () => {
   it("D-08: the builder stage's last instruction is USER node", () => {
@@ -127,11 +134,19 @@ describe("non-root migrate through the builder stage (D-08, D-27)", () => {
     expect(`node_modules/prisma/${pkg.bin.prisma}`).toBe("node_modules/prisma/build/index.js");
   });
 
+  it("D-12(4): the tsx entry docker-compose.yml calls is the package's own bin", () => {
+    const pkg = JSON.parse(read("node_modules/tsx/package.json")) as { bin: string };
+    expect(`node_modules/tsx/${pkg.bin.replace(/^\.\//, "")}`).toBe(
+      "node_modules/tsx/dist/cli.mjs",
+    );
+  });
+
   for (const file of ["docker-compose.yml", "docker-compose.egress-test.yml"]) {
     it(`D-08: ${file} migrate calls the Prisma CLI through node, not pnpm or corepack`, () => {
       const migrate = composeService(file, "migrate");
-      expect(migrate).toContain(MIGRATE_COMMAND);
+      expect(migrate).toContain(MIGRATE_COMMANDS[file]);
       expect(migrate).not.toMatch(/command:\s*\[\s*"(pnpm|corepack|npx)"/);
+      expect(migrate).not.toMatch(/\b(pnpm|corepack|npx)\b[^\n]*migrate deploy/);
     });
 
     it(`D-27: ${file} migrate keeps CHECKPOINT_DISABLE: "1"`, () => {

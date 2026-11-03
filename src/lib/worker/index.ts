@@ -1,5 +1,6 @@
 import type { Job, JobWithMetadata } from "pg-boss";
 import { PgBoss } from "pg-boss";
+import { assertDatabaseUrlConsistent, DatabaseUrlMismatchError } from "../db-url";
 import { KB_PROPOSAL_GENERATE_QUEUE } from "../kb/proposal-contract";
 import { ensureKbProposalQueue } from "../kb/proposal-queue";
 import { PROJECT_FILE_CLEANUP_CRON, PROJECT_FILE_CLEANUP_QUEUE } from "../projects/contract";
@@ -19,6 +20,17 @@ import { snoozeWakeHandler } from "./jobs/snooze-wake";
 async function main() {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new Error("DATABASE_URL is required for the worker");
+  // D-12(4), AIDA-35: refuse a DATABASE_URL that disagrees with AIDA_EXPECT_DB_* before pg-boss
+  // connects; the message names the component, never a value.
+  try {
+    assertDatabaseUrlConsistent(process.env);
+  } catch (err) {
+    if (err instanceof DatabaseUrlMismatchError) {
+      console.error(`[boot] ${err.message}`);
+      process.exit(1);
+    }
+    throw err;
+  }
 
   const boss = new PgBoss(connectionString);
   boss.on("error", (err: Error) => console.error("[worker] pg-boss error:", err));

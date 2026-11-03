@@ -23,8 +23,10 @@ services:
       target: builder
     # Runs as the non-root `node` user of the builder stage (D-08). The Prisma CLI is called
     # through node, not pnpm: corepack's pnpm download lives in root's cache at build time, so a
-    # non-root runtime would fetch pnpm from the registry (egress, and a failure offline).
-    command: ["node", "node_modules/prisma/build/index.js", "migrate", "deploy"]
+    # non-root runtime would fetch pnpm from the registry (egress, and a failure offline). tsx is
+    # called the same way: scripts/check-database-url.ts runs the D-12(4) boot guard first and stops
+    # migrate, naming only the component, when DATABASE_URL disagrees with AIDA_EXPECT_DB_*.
+    command: ["sh", "-c", "node node_modules/tsx/dist/cli.mjs scripts/check-database-url.ts && exec node node_modules/prisma/build/index.js migrate deploy"]
     depends_on:
       db:
         condition: service_healthy

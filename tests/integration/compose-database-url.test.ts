@@ -39,7 +39,7 @@ const reservedPassword = () => `${hex()}/@:#?${hex()}`;
  * POSTGRES_*, AIDA_* or DATABASE_URL of the test process may reach compose.
  */
 function cliEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { PATH: process.env.PATH ?? "/usr/bin:/bin" };
+  const env: NodeJS.ProcessEnv = { NODE_ENV: "test", PATH: process.env.PATH ?? "/usr/bin:/bin" };
   for (const key of ["HOME", "DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CONTEXT", "TMPDIR"]) {
     if (process.env[key]) env[key] = process.env[key];
   }
@@ -50,6 +50,7 @@ function cliEnv(): NodeJS.ProcessEnv {
 function generatedUrl(vars: { user: string; password: string; database: string }): string {
   const out = execFileSync("sh", [GENERATOR], {
     env: {
+      NODE_ENV: "test",
       PATH: process.env.PATH ?? "/usr/bin:/bin",
       POSTGRES_USER: vars.user,
       POSTGRES_PASSWORD: vars.password,

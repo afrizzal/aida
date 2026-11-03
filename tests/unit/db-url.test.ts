@@ -33,7 +33,7 @@ const base = { host: "db", port: 5432 };
 
 function generator(env: Record<string, string>) {
   return spawnSync("sh", [GENERATOR], {
-    env: { PATH: process.env.PATH ?? "/usr/bin:/bin", ...env },
+    env: { NODE_ENV: "test", PATH: process.env.PATH ?? "/usr/bin:/bin", ...env },
     encoding: "utf8",
   });
 }
@@ -225,4 +225,53 @@ describe("scripts/database-url.sh", () => {
       expect(result.stderr.includes("postgresql://")).toBe(false);
     });
   }
+});
+
+describe("scripts/check-database-url.ts (the migrate pre-step, D-12(4))", () => {
+  const TSX = path.join(ROOT, "node_modules", "tsx", "dist", "cli.mjs");
+
+  function guard(env: Record<string, string>) {
+    return spawnSync(process.execPath, [TSX, "scripts/check-database-url.ts"], {
+      cwd: ROOT,
+      env: {
+        NODE_ENV: "test",
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        HOME: process.env.HOME ?? "",
+        ...env,
+      },
+      encoding: "utf8",
+      timeout: 60_000,
+    });
+  }
+
+  const password = `${hex()}/@:#?`;
+  const url = encodeDatabaseUrl({ user: "aida", password, database: "aida", ...base });
+  const expected = { AIDA_EXPECT_DB_USER: "aida", AIDA_EXPECT_DB_NAME: "aida" };
+
+  it("exits 1 on a mismatch and prints neither value", () => {
+    const other = `${hex()}/@:#?`;
+    const result = guard({ DATABASE_URL: url, ...expected, AIDA_EXPECT_DB_PASSWORD: other });
+    expect(result.status).toBe(1);
+    const output = `${result.stdout}\n${result.stderr}`;
+    expect(
+      output.includes("[migrate] DATABASE_URL password does not match POSTGRES_PASSWORD"),
+    ).toBe(true);
+    for (const secret of [password, other, encodeURIComponent(password), url]) {
+      expect(output.includes(secret)).toBe(false);
+    }
+    expect(output.includes("postgresql://")).toBe(false);
+  });
+
+  it("exits 0 and prints nothing on a matching environment", () => {
+    const result = guard({ DATABASE_URL: url, ...expected, AIDA_EXPECT_DB_PASSWORD: password });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+  });
+
+  it("exits 0 (inactive) without AIDA_EXPECT_DB_PASSWORD", () => {
+    const result = guard({ DATABASE_URL: "postgresql://aida:a/b@:#@db:5432/aida", ...expected });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("");
+  });
 });
