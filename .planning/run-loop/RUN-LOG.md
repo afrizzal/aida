@@ -1644,3 +1644,7 @@ Cek awal putaran lolos (15,4 GiB). Langkah 8 Fase 8 Bagian A: gerbang final 08-2
 ## Putaran tunggu-disk-1 (2026-11-12)
 
 Cek A: `df -h /System/Volumes/Data` menunjukkan 15Gi, tepatnya 14,80 GiB (15,89 GB), di bawah 15 GiB menurut bacaan ketat aturan A. Putaran tidak mengerjakan apa pun; jadwal berikutnya 1800 detik. Terhitung menunggu. Butir yang menunggu: Fase 8 langkah 9 (verifikasi).
+
+## Putaran tunggu-disk-2 (2026-11-12)
+
+Cek A: 14,78 GiB (15,87 GB), masih di bawah 15 GiB. Putaran tidak mengerjakan apa pun; jadwal berikutnya 1800 detik.
