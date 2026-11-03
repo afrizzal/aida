@@ -143,35 +143,40 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 6. `scripts/install.sh`, `check-version`, `AGENTS.md`, `CODEOWNERS` and the README widgets exist, or an item needing an owner account is recorded as manual.
 
 **Stays open for a human:** the Phase 5 visual pass and the Phase 6 real-LLM Insight quality check.
-**Plans:** 0/11 plans complete
+**Plans:** 0/13 plans complete (replanned 2026-11-12 after the owner unparked the phase; plan checker passed, no further Codex plan review per owner item 3)
 **Wave 1**
 
-- [ ] 09-01-PLAN.md — Make a `POSTGRES_PASSWORD` with URL-reserved characters work for migrate, app and worker (AIDA-35, D-12, D-13) (Wave 1)
-- [ ] 09-02-PLAN.md — Close F-09 and F-10 (AIDA-37) and make the guards permanent regression tests (AIDA-38) (Wave 1)
-- [ ] 09-03-PLAN.md — Make the planning records true (AIDA-39, AIDA-41) and ship the repo-health files that need no owner account (A (Wave 1)
+- [ ] 09-01-PLAN.md — `POSTGRES_PASSWORD` with URL-reserved characters for migrate, app and worker; boot refusal on an inconsistent URL (AIDA-35) (Wave 1)
+- [ ] 09-03-PLAN.md — Records and repo health: `01-VERIFICATION.md`, STATE audit, `check-version`, version 1.0.0, `AGENTS.md`, `CODEOWNERS` (AIDA-39, AIDA-40, AIDA-41) (Wave 1)
+- [ ] 09-04-PLAN.md — One deletion queue (Phase 14 `ProjectFileCleanup`) for every stored file and the delete side of the backup fence (AIDA-33, AIDA-38) (Wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 09-04-PLAN.md — Build the storage half of the D-02 consistency protocol (Wave 2)
+- [ ] 09-02-PLAN.md — Seed and demo guards that refuse without deleting, completion marker written last (AIDA-37, AIDA-38) (Wave 2)
+- [ ] 09-06-PLAN.md — Backup core as `1000:1000`, the backup side of the fence, verification of attachments, task attachments and the logo (AIDA-33, AIDA-38) (Wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 09-05-PLAN.md — Logo backend (AIDA-34) (Wave 3)
-- [ ] 09-06-PLAN.md — The backup core for AIDA-33 with its permanent tests (AIDA-38) (Wave 3)
+- [ ] 09-05-PLAN.md — Logo backend on the current public-route pattern (AIDA-34) (Wave 3)
+- [ ] 09-13-PLAN.md — Backup robustness: failure parts, retention, status ownership, overlap, restore lock (AIDA-33, AIDA-38) (Wave 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 09-07-PLAN.md — Logo UI for AIDA-34 per `09-UI-SPEC.md` Surfaces 1-3 (Wave 4)
-- [ ] 09-08-PLAN.md — Put the backup core on a schedule inside the single compose stack (AIDA-33, D-01), give admins a read-only sta (Wave 4)
+- [ ] 09-07-PLAN.md — Logo UI per `09-UI-SPEC.md` Surfaces 1 to 3, DESIGN-SYSTEM amendment, E2E (AIDA-34) (Wave 4)
+- [ ] 09-08-PLAN.md — `backup` service and `backup-init` in compose, scheduler, Backups tab, OPERATIONS docs (AIDA-33) (Wave 4)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 09-09-PLAN.md — Exactly one `<h1>` per app route state (AIDA-36, D-14), per UI-SPEC Surface 5, pinned by an E2E test over ever (Wave 5)
-- [ ] 09-10-PLAN.md — Restore (D-05, D-06 component half of AIDA-33/AIDA-38) and the installer (D-22, AIDA-40), built against the fi (Wave 5)
+- [ ] 09-09-PLAN.md — Exactly one `<h1>` per app route state, pinned by E2E (AIDA-36) (Wave 5)
+- [ ] 09-10-PLAN.md — Restore as `1000:1000` with `--no-same-owner`, round trip for all three file kinds (AIDA-33, AIDA-38) (Wave 5)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 09-11-PLAN.md — Write the stack-level proofs (run later, after the owner's container decision), then run the phase gate, the D (Wave 6)
+- [ ] 09-12-PLAN.md — Installer with fake `curl` and `docker`, egress recorded (AIDA-40) (Wave 6)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 09-11-PLAN.md — Stack-proof specification (`not run`, waits for the Phase 8.1 harness), phase gate, §9 checklist, final STATE check (AIDA-33, AIDA-35, AIDA-38, AIDA-41) (Wave 7)
 
 ### Phase 10: Team
 

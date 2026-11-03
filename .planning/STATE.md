@@ -4,9 +4,9 @@ milestone: v2.0
 milestone_name: Helpdesk & Projects
 current_phase: 14
 current_phase_name: projects-foundation
-status: Phase 8 Part A verified human_needed (16 of 17, no code gap); Part B (Docker test tooling, Phase 8.1) waits for the owner; Phases 9, 10 and 15 unparked; Phases 11, 12, 12.1, 12.2 and 14 verified human_needed
-stopped_at: Phase 8 Part A closed to human_needed (08-VERIFICATION.md); AIDA-26 and AIDA-31 complete, AIDA-25 open, AIDA-27 to 30 and 32 split to Phase 8.1; next queue row is Phase 9
-last_updated: "2026-11-12T05:30:00.000Z"
+status: Phase 8 Part A verified human_needed (16 of 17, no code gap); Part B (Docker test tooling, Phase 8.1) waits for the owner; Phase 9 replanned (13 plans, plan checker passed) and ready to execute; Phases 10 and 15 unparked; Phases 11, 12, 12.1, 12.2 and 14 verified human_needed
+stopped_at: Phase 9 replanned after the owner unparked it (13 plans in 7 waves; CONTEXT update U-01 to U-18; plan checker passed; decision gate 24 of 24); next step is executing Phase 9
+last_updated: "2026-11-12T07:15:00.000Z"
 last_activity: 2026-11-12
 last_activity_desc: Phase 8 Part A closed to human_needed. 18 plans, code review in four parts with fix batches F1 to F8, three Codex diff rounds (run decisions K126 to K140), final gate on fc8078f (lint, typecheck, unit 1395, build, integration 1360, E2E 225 exit 0; audit --prod exit 1 with 10 high; test:egress and image checks blocked by space), verifier 16 of 17 with no code gap. AIDA-26 and AIDA-31 complete; AIDA-25 open (two reachable nodemailer advisories, owner item 08-o3)
 state_head: 0e4df7c
@@ -112,7 +112,7 @@ Also open (not audit items): `milestones/v1.0.0-phases/07-launch-readiness/defer
 ## Session Continuity
 
 **Last session:** 2026-11-12T05:30:00.000Z
-**Stopped at:** Phase 8 Part A verified human_needed; Phase 9 next (2026-11-12)
+**Stopped at:** Phase 9 replanned (13 plans), ready to execute (2026-11-12)
 **Resume file:** .planning/run-loop/ANTREAN.md
 
 **Last action (2026-11-08):** Phase 10 parked after the third Codex plan review (2 HIGH findings accepted, not yet incorporated). No tag, nothing pushed.
