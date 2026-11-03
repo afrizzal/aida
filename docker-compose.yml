@@ -28,8 +28,19 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # DATABASE_URL of migrate, app and worker (D-12, AIDA-35): an AIDA_DATABASE_URL with every
+    # component percent-encoded wins (D-12(1); generate it with scripts/database-url.sh when the
+    # password has a URL-reserved character). Unset, the fallback builds the same URL as before, so
+    # a URL-safe install needs no new variable (D-12(2)). It is not named DATABASE_URL because the
+    # .env DATABASE_URL line is the local-development URL and points at localhost. AIDA_EXPECT_DB_*
+    # carry the parts the boot guard compares against the decoded URL (D-12(4)), under names that
+    # `next dev` and the E2E server never receive; they add no new secret class, since the password
+    # is already inside DATABASE_URL.
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-aida}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-aida}
+      DATABASE_URL: ${AIDA_DATABASE_URL:-postgresql://${POSTGRES_USER:-aida}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-aida}}
+      AIDA_EXPECT_DB_USER: ${POSTGRES_USER:-aida}
+      AIDA_EXPECT_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      AIDA_EXPECT_DB_NAME: ${POSTGRES_DB:-aida}
       # Prisma's CLI phones home to checkpoint.prisma.io for an update-check ping on every
       # `migrate deploy` unless disabled — found via 07-09.1's egress-isolation test (the DNS
       # capture recorded this real, if silently-failing, third-party attempt). Disabling it
@@ -49,7 +60,10 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-aida}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-aida}
+      DATABASE_URL: ${AIDA_DATABASE_URL:-postgresql://${POSTGRES_USER:-aida}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-aida}}
+      AIDA_EXPECT_DB_USER: ${POSTGRES_USER:-aida}
+      AIDA_EXPECT_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      AIDA_EXPECT_DB_NAME: ${POSTGRES_DB:-aida}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL}
       BETTER_AUTH_TRUSTED_ORIGINS: ${BETTER_AUTH_TRUSTED_ORIGINS:-http://localhost,https://localhost}
@@ -104,7 +118,10 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-aida}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-aida}
+      DATABASE_URL: ${AIDA_DATABASE_URL:-postgresql://${POSTGRES_USER:-aida}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-aida}}
+      AIDA_EXPECT_DB_USER: ${POSTGRES_USER:-aida}
+      AIDA_EXPECT_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      AIDA_EXPECT_DB_NAME: ${POSTGRES_DB:-aida}
       DB_POOL_MAX: "5"
       # Worker decrypts stored IMAP/SMTP credentials for the poll + outbound-send jobs
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
