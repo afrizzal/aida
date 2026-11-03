@@ -56,7 +56,7 @@ Keputusan owner 2026-11-11 menjawab butir 0, 1, 2, 3, 5, 6, 7, 8, dan 9 di bawah
 
 ## 4. Titik aman rilis `v1.0.0`
 
-Kandidat (2026-11-11): `4d0eefd`, commit yang dites gerbang Bagian A Fase 8 (08-24, diulang sesudah 08-gap1). Di commit itu lint, typecheck, unit 1156, build, integration 1327 dan E2E 219 lolos. Yang belum: audit produksi exit 1 (10 high, 08-o3), `test:egress` dan cek image non-root `blocked (space)`, dan code review serta verifikasi Bagian A belum dijalankan. Kandidat sebelumnya `61c8696` gugur karena integration gagal 13 test di sana. Ini hanya kandidat; owner yang memutuskan. Bukti: `08-GATE-A.md`.
+Kandidat (2026-11-12): `fc8078f`, commit yang dites gerbang final Bagian A Fase 8 (08-24 sesudah code review, perbaikan F1 sampai F8, dan tiga putaran kritik diff Codex). Di commit itu lint, typecheck, unit 1395, build, integration 1360, dan E2E 225 lolos. Yang belum: audit produksi exit 1 (10 high, butir 08-o3), `test:egress` dan cek image non-root `blocked (space)`, dan verifikasi fase (langkah 9) belum dijalankan. Kandidat sebelumnya `4d0eefd` (sebelum review) dan `61c8696` (integration gagal) digantikan. Ini hanya kandidat; owner yang memutuskan. Bukti: `08-GATE-A.md`, `08-24-SUMMARY.md`.
 
 ## 5. Keputusan penting
 
@@ -80,7 +80,7 @@ Rincian ada di `RUN-LOG.md` putaran 1 dan 2. Jawaban Codex disimpan di `codex/ro
 - Fase 12 (putaran 38 sampai 62): dipecah menjadi 12, 12.1, 12.2 (K32); merge menolak kontak berbeda dan provenance per link memakai `Message.seq` (K33); menambah link ke sumber merge ditolak (K34); balasan email keluar tetap di thread tiket tempat ia ditulis dan thread sebuah tiket adalah pesan yang ditulis di tiket itu (K37 dan K38, menggantikan K36 sesudah Codex menunjukkan alasannya tidak cukup); aturan berhenti untuk siklus perbaiki-review di satu fungsi (K39). Sesudah putaran Codex terakhir, setiap perubahan direview oleh reviewer independen sebelum gerbang.
 - Koreksi kejujuran: AIDA-10 di v1 tercatat selesai, padahal alur undangan tidak pernah ada (F-16). Centang v1 tidak diubah. Celahnya dicatat di `PROJECT.md` dan ditutup oleh AIDA-42.
 - Fase 8 Bagian A, langkah 7 (2026-11-11): code review empat bagian atas `a6a8499..HEAD` memberi 3 critical, 25 warning, 28 info (`08-REVIEW.md`, `-b`, `-c`, `-d`). Critical: nonce basi sesudah refresh memblokir style dialog dan ganti tema (K126); test koneksi IMAP masih membedakan port terbuka dan tertutup, sehingga AIDA-31 belum bisa ditutup walau gerbang menyebutnya bisa (K127); verifier gerbang tidak mencocokkan exit code cek image. Keputusan K127 sampai K130: satu aturan kategori untuk keempat probe (galat jaringan dan protokol menjadi `connection_failed`), batas jumlah berkas dan panjang teks di route publik, tunggu limiter dibatasi menjadi 429. Pendapat Codex menyusul di kritik diff. Delapan butir info ditunda dengan alasan.
-- Ruang host turun dari 26 GiB (pagi 2026-11-11) ke 15,5 GiB. Delapan salinan `.next` kini ada di Trash dan tetap memakan disk; run tidak boleh menghapusnya. Mengosongkan Trash adalah keputusan owner.
+- Ruang host turun dari 26 GiB (pagi 2026-11-11) ke 14,8 GiB (di bawah 15 GiB menurut bacaan ketat aturan A, sehingga putaran menunggu sampai ruang kembali). Delapan salinan `.next` kini ada di Trash dan tetap memakan disk; run tidak boleh menghapusnya. Mengosongkan Trash adalah keputusan owner.
 - Sisa berkas sementara (2026-11-11, F3): satu folder log eksekutor berawalan `aida-f3-` di bawah TMPDIR (228 KB) tidak terhapus karena izin `rm -rf` ditolak. Run tidak menghapusnya lewat jalan lain; owner boleh menghapusnya.
 - Fase 8 Bagian A, langkah 7 selesai (2026-11-12): perbaikan review F1 sampai F5, lalu tiga putaran kritik diff Codex. Putaran 1: 4 HIGH (oracle 401/403 Ollama, antrean pool, verifier gerbang mempercayai log verify, bukti resource asing kosong) dan 1 MEDIUM, diperbaiki F6 (K131 sampai K135). Putaran 2: tanpa HIGH, 3 MEDIUM (fairness slot, kerja penghitung part, singleton produksi), diperbaiki F7 (K136 sampai K138). Putaran 3: tanpa HIGH, 2 MEDIUM (retry E2E, delimiter di tengah baris), diperbaiki F8 (K139, K140) tanpa review Codex lagi karena batas tiga putaran. Pendapat Codex dan keputusan sejalan di semua putaran; tidak ada perbedaan yang tersisa. Dua LOW diterima sebagai batas tertulis, satu LOW (header pada respons buatan Caddy) ditunda ke Fase 8.1.
 
@@ -122,6 +122,12 @@ Baris bertanda baseline berasal dari persiapan (`1ea4281`). Baris 0a dijalankan 
 | `pnpm test:e2e` (gerbang 08-24 ulang) | 0 | 219 lolos, 1 skip; run pertama exit 1 dengan 0 test (global setup macet di `/setup`), lolos sesudah `.next` dipindah |
 | `pnpm audit --prod` (gerbang 08-24 ulang) | 1 | 0 critical, 10 high (baseline 7 critical, 52 high) |
 | `pnpm test:egress` dan dua cek image (gerbang 08-24 ulang) | blocked | ruang host 18,5 GiB, di bawah 20 GiB (aturan J); tidak ada yang dibuat |
+| lint, typecheck, build (gerbang final 08-24, `fc8078f`) | 0 | lint 616 berkas, 1 peringatan lama |
+| `pnpm test` (gerbang final) | 0 | 78 berkas, 1395 test |
+| `pnpm test:integration` (gerbang final) | 0 | 101 berkas, 1360 test |
+| `pnpm test:e2e` (gerbang final) | 0 | 225 lolos, 1 skip, 0 flaky, tanpa ulangan |
+| `pnpm audit --prod` (gerbang final) | 1 | 0 critical, 10 high, 30 moderate, 2 low |
+| `pnpm test:egress` dan dua cek image (gerbang final) | blocked | ruang host 14,8 GiB, di bawah 20 GiB (aturan J); tidak ada yang dibuat |
 
 ## 7. Package baru
 

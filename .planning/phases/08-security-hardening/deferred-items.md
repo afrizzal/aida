@@ -14,3 +14,4 @@
 - The rows deferred in the "Orchestrator dispositions" section of `08-REVIEW.md` (a-IN-a3, a-IN-a5, a-IN-a6, a-IN-a7, b-IN-b5, b-IN-b6, b-IN-b8, c-IN-07), with the reasons given there.
 
 - **Caddy-generated responses have no security headers (Codex diff round 1, LOW).** The probe's 404 and the body-size 413 come from Caddy, not the app proxy. Deferred to Phase 8.1 (08-22, real Caddy), because a global Caddy `header` block would duplicate the app's CSP.
+- **The image check leaves its own temp directories (final gate, 2026-11-12).** `scripts/test-image-check.ts` creates `aida-image-check-*` directories under TMPDIR and does not remove them, also when it stops at the space preflight (10 small directories so far). Fix in Phase 8.1 together with the real image-check runs.
