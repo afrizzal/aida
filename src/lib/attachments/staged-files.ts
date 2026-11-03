@@ -6,7 +6,9 @@
 // - Each key joins the cleanup list BEFORE its save is called, so a save that throws after
 //   writing part of a file is cleaned up together with every earlier key (R2-3).
 // - On a save failure every listed key's delete is attempted and the original save error is
-//   rethrown unchanged.
+//   rethrown unchanged. Exception (Phase 9 plan 09-04, D-02(1) and U-13): saves are exclusive
+//   create, so a save that fails with EEXIST wrote nothing and its key holds a file this request
+//   did not write, possibly one a committed row references; that key is never deleted here.
 // - discard() attempts every saved key once and never throws, so a refusal keeps its own
 //   response and a transaction error keeps its own error.
 //
@@ -77,7 +79,10 @@ export async function saveStagedFiles(
       await storage.save({ orgId, key: file.key, data: file.data });
     }
   } catch (err) {
-    await deleteEach(storage, orgId, attempted);
+    // The key whose save failed with EEXIST belongs to someone else: only this request's own
+    // writes are cleaned up.
+    const own = errorCode(err) === "EEXIST" ? attempted.slice(0, -1) : attempted;
+    await deleteEach(storage, orgId, own);
     throw err;
   }
 
