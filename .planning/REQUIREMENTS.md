@@ -10,12 +10,12 @@ IDs continue at AIDA-25. AIDA-18 keeps its v1 ID.
 ## Security hardening
 
 - [ ] **AIDA-25** `v2` — Production dependencies carry no known critical or high advisory. [Charter, F-05] Accept: `pnpm audit --prod --audit-level=high` exits 0. Otherwise every remaining critical and high advisory is listed in `docs/SECURITY.md` with its ID, why it cannot be fixed, and why it is not reachable, and the gate is reported red with that list, never as passed. The exit code of plain `pnpm audit --prod` is recorded as it is.
-- [ ] **AIDA-26** `v2` — Dependency updates and audits are automated in the repository. [Charter] Accept: `.github/dependabot.yml` exists and a CI job runs `pnpm audit --prod --audit-level=high`. Files only; this run triggers no workflow.
+- [x] **AIDA-26** `v2` — Dependency updates and audits are automated in the repository. [Charter] Accept: `.github/dependabot.yml` exists and a CI job runs `pnpm audit --prod --audit-level=high`. Files only; this run triggers no workflow.
 - [ ] **AIDA-27** `v2` — The `app`, `worker` and `migrate` containers run as a non-root user, and uploads keep working. [Charter, F-06] Accept: `app` and `worker` run with a non-zero UID while up; the one-shot `migrate` service runs with a non-zero UID and exits 0, shown by inspecting its exited container or by `id -u` in the same image; an attachment upload succeeds on a fresh volume; the upgrade path for an existing root-owned `uploads_data` volume is handled or documented in `docs/OPERATIONS.md`.
 - [ ] **AIDA-28** `v2` — Every HTML response carries a Content-Security-Policy that blocks inline script without a nonce and limits `connect-src` to the same origin. [Charter, F-15] Accept: an E2E test asserts the header and zero CSP violations on login, inbox, ticket, public request and public status pages.
 - [ ] **AIDA-29** `v2` — The client IP used for rate limiting comes from one trusted-proxy-aware helper, so a client cannot change its rate-limit identity by sending `X-Forwarded-For`. [Charter, F-07] Accept: unit tests cover the shipped Caddy topology and a spoofed header; all public routes use the helper; the deployment constraint is documented in `docs/OPERATIONS.md`.
 - [ ] **AIDA-30** `v2` — Public routes are protected against abuse. [Charter, F-12] Accept: `/api/health` and `/api/public/status/[token]/attachments/[id]` are throttled without breaking the container healthcheck; `follow-up` enforces a combined request-size cap; both status POST routes check the rate limit before the token lookup.
-- [ ] **AIDA-31** `v2` — Connection tests return categorized errors, not raw failure text. [Charter, F-08] Accept: all four call sites (`settings/actions.ts` for LLM and embedding, `settings/email/actions.ts` for SMTP and IMAP) return a fixed category. The v1 pass named only two of these.
+- [x] **AIDA-31** `v2` — Connection tests return categorized errors, not raw failure text. [Charter, F-08] Accept: all four call sites (`settings/actions.ts` for LLM and embedding, `settings/email/actions.ts` for SMTP and IMAP) return a fixed category. The v1 pass named only two of these.
 - [ ] **AIDA-32** `v2` — The remaining open v1 security findings are closed or justified. [F-11, F-13, F-14] Accept: `NEXT_TELEMETRY_DISABLED=1` is set in the image build and runtime; `next build` makes no request to Google Fonts (the conservative default is a system font stack; a vendored font needs its license cleared first); `addTag` gates before validating; `sla-flag` documents why its raw SQL has no org filter; `docs/SECURITY.md` matches the code.
 
 ## Operations
@@ -144,14 +144,14 @@ Clean-room rule for this and every later section: `PIAGAM.md` → Clean-room. So
 | Requirement | Phase | Status |
 |---|---|---|
 | AIDA-18 | Phase 12.2 | Complete (acceptance verified, `12.2-VERIFICATION.md`; phase visual sign-off and owner items 12.2-o1 to 12.2-o4 pending) |
-| AIDA-25 | Phase 8 | Pending |
-| AIDA-26 | Phase 8 | Pending |
-| AIDA-27 | Phase 8 | Pending |
-| AIDA-28 | Phase 8 | Pending |
-| AIDA-29 | Phase 8 | Pending |
-| AIDA-30 | Phase 8 | Pending |
-| AIDA-31 | Phase 8 | Pending |
-| AIDA-32 | Phase 8 | Pending |
+| AIDA-25 | Phase 8 | Open (`08-VERIFICATION.md`: audit exit 1 with 0 critical and 10 high; two nodemailer advisories are reachable, owner item 08-o3; the residual list in `docs/SECURITY.md` is plan 08-15, Phase 8.1) |
+| AIDA-26 | Phase 8 | Complete (acceptance verified, `08-VERIFICATION.md`: `.github/dependabot.yml`, `.github/workflows/audit.yml` runs `pnpm audit --prod --audit-level=high` on `ubuntu-latest`; files only, no workflow triggered) |
+| AIDA-27 | Phase 8, 8.1 | Split (host side verified in Part A: Dockerfile non-root, migrate on the builder target, OPERATIONS volume section; runtime UIDs, migrate exit 0 and uploads wait for Phase 8.1; image checks `blocked (space)`) |
+| AIDA-28 | Phase 8, 8.1 | Split (nonce CSP and zero-violation E2E on the dev server verified in Part A; production `next start` proof in Phase 8.1, plan 08-21) |
+| AIDA-29 | Phase 8, 8.1 | Split (one helper `getClientIp` on all public routes and unit tests verified in Part A; real Caddy and HTTP proofs in Phase 8.1, plans 08-21 and 08-22) |
+| AIDA-30 | Phase 8, 8.1 | Split (throttles, follow-up size cap and limit-before-lookup verified in Part A; container healthcheck, Caddy pass-through and upstream probe refusal in Phase 8.1) |
+| AIDA-31 | Phase 8 | Complete (acceptance verified, `08-VERIFICATION.md`: all four call sites return a fixed category through `classifyConnectionError`; CR-01 closed by K127 and K131) |
+| AIDA-32 | Phase 8, 8.1 | Split (telemetry off in build and CI, no `next/font`, `addTag` gate and `sla-flag` comment verified in Part A; image runtime telemetry and `docs/SECURITY.md` reconciliation in Phase 8.1) |
 | AIDA-33 | Phase 9 | Pending |
 | AIDA-34 | Phase 9 | Pending |
 | AIDA-35 | Phase 9 | Pending |

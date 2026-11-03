@@ -52,3 +52,7 @@ The charter asks for the Phase 8 commit as the safe point for `v1.0.0`. Part A c
 3. Plan the Part A gate (08-24) with the planner and the plan checker.
 4. Update ROADMAP, REQUIREMENTS traceability, STATE, ANTREAN and LAPORAN.
 5. Execute Part A (`/gsd-execute-phase 8 --no-transition`) once the structure checks pass.
+
+## Correction after verification (2026-11-12)
+
+The Requirements section above says AIDA-25 can close in Part A. That is wrong. AIDA-25 accepts a red audit only if every remaining critical and high advisory is listed in `docs/SECURITY.md` with its ID, why it cannot be fixed and why it is not reachable. Plan 08-04 hands that list to 08-15, which is in Part B, and two of the ten residual advisories (nodemailer GHSA-prgh-xp8r-p3m5 and GHSA-v53p-9fqp-m79j) are reachable (`08-04-SUMMARY.md`, Production residuals). AIDA-25 stays open until the owner decides on nodemailer (queue item 08-o3) and 08-15 runs. AIDA-26 and AIDA-31 closed in Part A (`08-VERIFICATION.md`).

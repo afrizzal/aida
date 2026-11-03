@@ -4,11 +4,11 @@ milestone: v2.0
 milestone_name: Helpdesk & Projects
 current_phase: 14
 current_phase_name: projects-foundation
-status: Phase 8 split after plan review cycle 4 (owner decision 2026-11-11); Part A (dependencies, CSP, non-root, rate limits) to execute next, Part B (Docker test tooling, Phase 8.1) waits for the owner; Phases 9, 10 and 15 unparked; Phases 11, 12, 12.1, 12.2 and 14 verified human_needed
-stopped_at: Phase 8 Part A step 8 done (final gate on fc8078f green except audit 10 high and Docker steps blocked by space; AIDA-26 and AIDA-31 closable); next step 9 verification, waiting while host disk is below 15 GiB
-last_updated: "2026-11-11T18:56:00.000Z"
-last_activity: 2026-11-09
-last_activity_desc: Phase 14 closed to human_needed. 13 plans, code review in three parts with fix batches F1 and F2, three Codex diff rounds with fixes F3 to F5 (run decisions K69 to K73), final gate on 41b1597 (lint, typecheck, unit 838, integration without egress 1297, build exit 0; E2E one failure fixed in tests by a60d339, full E2E 209 passed; audit --prod exit 1 baseline; test:egress blocked O-1), verifier 7 of 7 with no code gap. Open for the owner: 14-o1, 14-o2, 14-o3
+status: Phase 8 Part A verified human_needed (16 of 17, no code gap); Part B (Docker test tooling, Phase 8.1) waits for the owner; Phases 9, 10 and 15 unparked; Phases 11, 12, 12.1, 12.2 and 14 verified human_needed
+stopped_at: Phase 8 Part A closed to human_needed (08-VERIFICATION.md); AIDA-26 and AIDA-31 complete, AIDA-25 open, AIDA-27 to 30 and 32 split to Phase 8.1; next queue row is Phase 9
+last_updated: "2026-11-12T05:30:00.000Z"
+last_activity: 2026-11-12
+last_activity_desc: Phase 8 Part A closed to human_needed. 18 plans, code review in four parts with fix batches F1 to F8, three Codex diff rounds (run decisions K126 to K140), final gate on fc8078f (lint, typecheck, unit 1395, build, integration 1360, E2E 225 exit 0; audit --prod exit 1 with 10 high; test:egress and image checks blocked by space), verifier 16 of 17 with no code gap. AIDA-26 and AIDA-31 complete; AIDA-25 open (two reachable nodemailer advisories, owner item 08-o3)
 state_head: 0e4df7c
 progress:
   total_phases: 12
@@ -61,6 +61,7 @@ Items deferred during v2.0 (run loop):
 
 | Category | Item | Status |
 |----------|------|--------|
+| verification_gap | Phase 08 Part A — `08-VERIFICATION.md` (2026-11-12) | `human_needed` — no Part A code gap; 16 of 17 must-haves verified, the 17th (AIDA-27 image build path) present but unproven because both image checks are `blocked (space)`. AIDA-26 and AIDA-31 complete. AIDA-25 open: audit 10 high, two of them reachable (nodemailer GHSA-prgh-xp8r-p3m5, GHSA-v53p-9fqp-m79j; owner item 08-o3), and `docs/SECURITY.md` has no residual list (plan 08-15, Phase 8.1). AIDA-27 to 30 and 32 split: host-side parts proven, container runtime proofs in Phase 8.1. `docs/SECURITY.md:8` still describes build-time egress the code no longer makes (08-15). Open for a human: owner decision on nodemailer, the v1.0.0 safe point (candidate `fc8078f`), VM space (0a2) then `pnpm test:egress` and both image checks, DESIGN-SYSTEM §9 items 2 to 5 and 7, visual approval of the system font stack and re-capture of screenshots and hero GIF, the real security contact, the `v1.0.0` tag and release, `LAUNCH.md` repository settings, review of the judgment-tier prohibitions. |
 | verification_gap | Phase 11 — `11-VERIFICATION.md` (2026-11-08) | `human_needed` — no code gap; AIDA-47 to 51 verified. Open for a human: visual approval and dark mode of the Phase 11 screens, the 360px and long-text backstops (11-04 to 11-08), the 11-06 backstop of a bulk status change moving tickets out of the filter, and the D-14 screen-reader check of single-letter keys. Also open: full `pnpm test:integration` and `pnpm test:egress` (blocked, O-1); owner item O-2 (auto-close customer notice) |
 | verification_gap | Phase 12 — `12-VERIFICATION.md` (2026-11-09) | `human_needed` — no code gap; AIDA-52, 54 and 55 verified; AIDA-53 verified except the "full `AuditEvent`" clause (owner item 12-o1). Open for a human: visual pass and dark mode of the Phase 12 screens (UI-SPEC E1 to E11), layout widths, screen-reader check, the Asia/Jakarta time-zone check, the deferred copy decisions (IN-06, R2-3), and the two judgment-tier privacy rules in plans 12-01 and 12-04. Full integration and `test:egress` blocked (O-1). |
 | verification_gap | Phase 12.1 — `12.1-VERIFICATION.md` (2026-11-09) | `human_needed` — no code gap; AIDA-56, 97, 57 verified (8/8). Open for a human: visual and dark-mode approval, contrast by eye, screen reader, 360px layout checks, UAT. K47 (stale flag after resume when a priority change extended deadlines during a pause) deferred. Full integration and `test:egress` blocked (O-1). |
@@ -110,8 +111,8 @@ Also open (not audit items): `milestones/v1.0.0-phases/07-launch-readiness/defer
 
 ## Session Continuity
 
-**Last session:** 2026-11-09T13:45:00.000Z
-**Stopped at:** Phase 14 verified human_needed; Phase 15 next (2026-11-09)
+**Last session:** 2026-11-12T05:30:00.000Z
+**Stopped at:** Phase 8 Part A verified human_needed; Phase 9 next (2026-11-12)
 **Resume file:** .planning/run-loop/ANTREAN.md
 
 **Last action (2026-11-08):** Phase 10 parked after the third Codex plan review (2 HIGH findings accepted, not yet incorporated). No tag, nothing pushed.

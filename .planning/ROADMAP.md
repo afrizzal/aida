@@ -59,7 +59,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 6. Dependabot and a CI audit job exist as files.
 
 **Stays open for a human:** the real security contact, the `v1.0.0` tag, the release, and repository settings in `LAUNCH.md`.
-**Plans:** 0/23 plans complete
+**Plans:** 18/18 Part A plans complete; the 7 Part B plans moved to Phase 8.1 (`deferred-8.1/`). Part A verified `human_needed` on 2026-11-12 (`08-VERIFICATION.md`, 16 of 17, no code gap)
 **Wave 1**
 
 - [x] 08-01-PLAN.md — Upgrade `next` to >=16.4.1, pinned (Wave 1)
