@@ -72,6 +72,14 @@ Ditambahkan oleh owner dan mengikat seperti Larangan. Seluruh isi bagian ini, te
 
 Tafsiran run, memakai bacaan paling ketat sampai owner berkata lain: container `aida-dev-db` yang sudah ada tidak disentuh lagi (tidak di-start, stop, hapus, atau dipakai migrasi). Migrasi dev memakai container sekali pakai baru berawalan `aida-test-` dengan label `aida.test=1` di port lain yang kosong. Gerbang compose akhir Fase 08, 13, dan 17 memakai project berawalan `aida-test-`, bukan `aida`. Pembersihan di aturan H juga hanya untuk resource yang cocok label dan awalan.
 
+**K. Putaran tunggu.** Ditambahkan owner 2026-11-12 dan mengikat seperti Larangan. Isinya, kata per kata:
+
+- Putaran tunggu tidak menulis berkas apa pun dan tidak membuat commit. Cukup lapor satu baris di chat. Saat loop lanjut kerja, tulis SATU baris ringkasan lama menunggu ke RUN-LOG.
+- Jarak putaran tunggu: 60 menit
+- Batas 15 GiB di aturan A tetap. Jangan ubah.
+
+Tafsiran run: butir ini menggantikan bagian "catat di `RUN-LOG.md`" dan jeda 1800 detik pada putaran tunggu di aturan A dan B dan di langkah 6 (menunggu regresi Rekriva). Ambang 15 GiB tetap dibaca ketat dalam GiB. Jeda cadangan saat menunggu proses latar milik run (1200 detik) bukan putaran tunggu dan tidak berubah.
+
 ## Urutan fase
 
 Nomor melanjutkan v1. Kerjakan berurutan. Fase boleh dipecah, tetapi isinya tidak boleh dibuang.
