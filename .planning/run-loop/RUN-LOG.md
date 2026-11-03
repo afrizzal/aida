@@ -1672,3 +1672,7 @@ Cek A: 14,85 GiB (15,94 GB), masih di bawah 15 GiB. Putaran tidak mengerjakan ap
 ## Putaran tunggu-disk-8 (2026-11-12)
 
 Cek A: 14,79 GiB (15,88 GB), masih di bawah 15 GiB. Putaran tidak mengerjakan apa pun; jadwal berikutnya 1800 detik.
+
+## Putaran 08-langkah9-1 (2026-11-12)
+
+Lama menunggu disk (aturan A): 01:56 sampai 11:55 WIB, sekitar 10 jam, 13 putaran tunggu (8 tercatat sampai 05:37, lalu 5 putaran aturan K pukul 07:00 sampai 10:56 tanpa berkas), disk 14,09 sampai 14,98 GiB; pukul 11:55 disk 37,83 GiB, bukan karena tindakan loop.
