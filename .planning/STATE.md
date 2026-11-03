@@ -2,20 +2,20 @@
 gsd_state_version: "1.0"
 milestone: v2.0
 milestone_name: Helpdesk & Projects
-current_phase: 14
-current_phase_name: projects-foundation
-status: Phase 8 Part A verified human_needed (16 of 17, no code gap); Part B (Docker test tooling, Phase 8.1) waits for the owner; Phase 9 replanned (13 plans, plan checker passed) and ready to execute; Phases 10 and 15 unparked; Phases 11, 12, 12.1, 12.2 and 14 verified human_needed
-stopped_at: Phase 9 replanned after the owner unparked it (13 plans in 7 waves; CONTEXT update U-01 to U-18; plan checker passed; decision gate 24 of 24); next step is executing Phase 9
-last_updated: "2026-11-12T07:15:00.000Z"
+current_phase: 9
+current_phase_name: operations
+status: Phase 8 Part A verified human_needed (16 of 17, no code gap); Part B (Docker test tooling, Phase 8.1) waits for the owner; Phase 9 executing (2 of 13 plans done); Phases 10 and 15 unparked; Phases 11, 12, 12.1, 12.2 and 14 verified human_needed
+stopped_at: Phase 9 executing, plans 09-01 and 09-03 done; next 09-04 (one plan per round, use_worktrees false)
+last_updated: "2026-11-12T07:25:00.000Z"
 last_activity: 2026-11-12
-last_activity_desc: Phase 8 Part A closed to human_needed. 18 plans, code review in four parts with fix batches F1 to F8, three Codex diff rounds (run decisions K126 to K140), final gate on fc8078f (lint, typecheck, unit 1395, build, integration 1360, E2E 225 exit 0; audit --prod exit 1 with 10 high; test:egress and image checks blocked by space), verifier 16 of 17 with no code gap. AIDA-26 and AIDA-31 complete; AIDA-25 open (two reachable nodemailer advisories, owner item 08-o3)
-state_head: 0e4df7c
+last_activity_desc: Phase 9 executing. 09-01 done (AIDA_DATABASE_URL override and boot guard; unit 1421, integration compose-database-url 5) and 09-03 done (check-version gate, version 1.0.0, 01-VERIFICATION.md human_needed with criterion 2 failed until Phase 10, STATE audit of 43 items, AGENTS.md, CODEOWNERS); stack proofs not run until the Phase 8.1 harness
+state_head: 53135b3
 progress:
-  total_phases: 12
+  total_phases: 13
   completed_phases: 0
-  total_plans: 111
-  completed_plans: 61
-  percent: 0
+  total_plans: 140
+  completed_plans: 81
+  percent: 58
 ---
 
 # STATE — AIDA
@@ -30,10 +30,10 @@ See: .planning/PROJECT.md (updated 2026-11-07, v2.0 opened)
 
 ## Current Position
 
-Phase: 14 (Projects foundation) is executing; plans 14-01 (frozen contract), 14-02 (schema foundation), 14-03 (pure helpers), 14-04 (core services), 14-05 (file cleanup outbox and sweep, worker uploads volume) 14-06 (task core, keys, subtasks), 14-07 (comments, attachments, labels, milestones), 14-08 (members, teams, K69 assignment copy), 14-09 (recurring tasks, exactly-once successor), 14-10 (archive, favorites, confirmed hard delete), 14-11 (move and duplicate) and 14-12 (reorder, bulk update, derived progress) are complete. Phases 11, 12, 12.1 and 12.2 are verified human_needed (no code gap; visual, dark-mode and screen-reader checks wait for a human). Phases 08, 09 and 10 are PARKED (owner decision); Phases 13, 16 and 17 are parked by dependency on Phase 10.
-Plan: 14-13 complete (inventory passes after K70; gate on 4d6a498 recorded in 14-GATE.md with E2E red, 3 failures in pre-Phase-14 UI specs, not rerun; egress, full integration and compose blocked O-1). All 13 Phase 14 plans complete. Next: Phase 14 verification (orchestrator).
-Status: Milestone v2.0 opened by hand on 2026-11-07. `REQUIREMENTS.md` (91 requirements) and `ROADMAP.md` (Phases 8–17) are written and were revised over three Codex critique rounds (queue item 0b done). The public demo was walked under the clean-room rules and added AIDA-100 to AIDA-114 (item 0c done). Phase 8 context is committed (`08-CONTEXT.md`, `8abbc6c`) and the phase is planned: 23 plans in 14 waves; three Codex review cycles; parked after cycle 3 (owner decision, `run-loop/LAPORAN.md`). No Phase 8 code has been executed. Baseline 0a is done: build passes; integration passes except the egress file; E2E passes 63 with two honesty-invariants flakes that pass alone (fixed by plan 08-17). The egress baseline (0a2) was parked while `binaries.prisma.sh` sent no bytes on GET (07.45 to 09.09); the host recovered and the test waits for the Rekriva regression to finish.
-Last activity: 2026-11-08 — Phase 10 parked after its third Codex plan review (K27); Phases 8 and 9 were parked the same way (K24, K25). v1.0.0 stays complete and archived; its archives are `milestones/v1.0.0-*`.
+Phase: 9 (Operations) is executing under `run-loop/PIAGAM.md`, one plan per round (`use_worktrees: false`). Plans 09-01 (database URL encoding and boot guard) and 09-03 (records and repo health) are complete; 11 of 13 remain, next 09-04.
+Plan: 13 plans in 7 waves, replanned 2026-11-12 after the owner unparked the phase (CONTEXT "Update 2026-11-12", U-01 to U-18); the plan checker passed.
+Status: Phase 8 Part A verified `human_needed` (`08-VERIFICATION.md`); Phase 8.1 (Docker test tooling and runtime proofs) waits for the owner. Phases 11, 12, 12.1, 12.2 and 14 are verified `human_needed`. Phases 10 and 15 are unparked and not yet executed; 13, 16 and 17 are not planned. No phase is parked.
+Last activity: 2026-11-12 — Phase 9 execution started (09-01, 09-03). v1.0.0 stays complete and archived (`milestones/v1.0.0-*`); the v1.0.0 safe-point candidate is `fc8078f` (owner decides).
 
 ## Accumulated Context
 
@@ -124,11 +124,11 @@ Owner items, in the order of `run-loop/LAPORAN.md` section 3:
 
 ## Session Continuity
 
-**Last session:** 2026-11-12T05:30:00.000Z
-**Stopped at:** Phase 9 replanned (13 plans), ready to execute (2026-11-12)
+**Last session:** 2026-11-12T07:25:00.000Z
+**Stopped at:** Phase 9 executing, 09-01 and 09-03 done, next 09-04 (2026-11-12)
 **Resume file:** .planning/run-loop/ANTREAN.md
 
-**Last action (2026-11-08):** Phase 10 parked after the third Codex plan review (2 HIGH findings accepted, not yet incorporated). No tag, nothing pushed.
+**Last action (2026-11-12):** plan 09-03 executed (check-version, version 1.0.0, `01-VERIFICATION.md`, STATE audit, `AGENTS.md`, `CODEOWNERS`). No tag, nothing pushed.
 
 **Next action:** follow `run-loop/PIAGAM.md`; the first open row of `run-loop/ANTREAN.md` decides the next step.
 
