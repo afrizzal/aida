@@ -1,0 +1,84 @@
+# Version gate (Phase 9, U-05 and U-18, AIDA-40). Compares the package.json "version" of the
+# head with the one at the exact pull request base (github.event.pull_request.base.sha) using
+# scripts/check-version.mjs: a missing, invalid or lower head version fails; an unchanged
+# version passes with a notice, because whether every pull request must raise the version is
+# an open owner decision (LAUNCH.md). A base commit that cannot be read fails loudly (for
+# example after a force push removed the previous master tip); there is no silent fallback.
+# Charter rule I and U-06: ubuntu-latest only, no scheduled trigger, and it runs only on pull
+# requests, pushes to master and manual dispatch. The plain pull_request event (never the
+# privileged target variant), no secrets, a read-only token; the base sha reaches the shell
+# only through env, never as interpolated script text.
+name: Version check
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-version-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check-version:
+    name: package.json version (SemVer, not below base)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0             # the base commit's package.json is read with git show
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+
+      # No pnpm and no install step: the script uses node built-ins only.
+      - name: Compare the version with the base
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          check_against() {
+            local sha="$1"
+            if ! [[ "$sha" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]]; then
+              echo "::error::The base commit id is missing or malformed; refusing to guess a base."
+              exit 1
+            fi
+            if ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+              echo "::error::The base commit ${sha} cannot be read in this checkout; refusing to guess a base."
+              exit 1
+            fi
+            if git cat-file -e "${sha}:package.json" 2>/dev/null; then
+              git show "${sha}:package.json" > "$RUNNER_TEMP/base-package.json"
+              node scripts/check-version.mjs --head package.json --base "$RUNNER_TEMP/base-package.json"
+            else
+              node scripts/check-version.mjs --head package.json --base-without-file
+            fi
+          }
+          case "$EVENT_NAME" in
+            pull_request)
+              check_against "$PR_BASE_SHA"
+              ;;
+            push)
+              if [ "$PUSH_BEFORE" = "0000000000000000000000000000000000000000" ]; then
+                node scripts/check-version.mjs --head package.json --no-base "new branch"
+              else
+                check_against "$PUSH_BEFORE"
+              fi
+              ;;
+            workflow_dispatch)
+              node scripts/check-version.mjs --head package.json --no-base "manual run"
+              ;;
+            *)
+              echo "::error::Unexpected event ${EVENT_NAME}."
+              exit 1
+              ;;
+          esac
