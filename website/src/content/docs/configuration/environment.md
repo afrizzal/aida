@@ -14,7 +14,8 @@ This table covers exactly the variables in `.env.example` — nothing more, noth
 | `NEXT_PUBLIC_APP_URL` | Yes | `http://localhost` | Public app URL exposed to the browser — links in emails, absolute URLs in client code. |
 | `BETTER_AUTH_SECRET` | Yes | — | Session-signing secret. Generate with `openssl rand -base64 32`. |
 | `BETTER_AUTH_TRUSTED_ORIGINS` | Yes | `http://localhost,https://localhost` | Comma-separated extra origins trusted for CSRF checks. |
-| `DATABASE_URL` | Yes | `postgresql://aida:aida@localhost:5432/aida` | Postgres connection string. In Docker Compose, `app`/`worker`/`migrate` get this constructed for them from `POSTGRES_*` and don't read the `.env` value directly — it only matters for local (non-Docker) dev. |
+| `DATABASE_URL` | Yes (local dev) | `postgresql://aida:aida@localhost:5432/aida` | Postgres connection string for local (non-Docker) development: host-side tools and `pnpm dev`. Docker Compose never passes this `.env` value to `app`, `worker` or `migrate`: it builds their URL from `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB`, unless `AIDA_DATABASE_URL` is set. |
+| `AIDA_DATABASE_URL` | Only for a password with URL-reserved characters | *(unset)* | The URL `app`, `worker` and `migrate` use instead of the one built from `POSTGRES_*`. Leave it unset when `POSTGRES_PASSWORD` is URL-safe (for example `openssl rand -hex 24`). Otherwise generate it with `sh scripts/database-url.sh` (with `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` set), which percent-encodes all three and prints one `AIDA_DATABASE_URL=...` line to paste into `.env`. The three services refuse to start when this URL and `POSTGRES_*` disagree. |
 | `POSTGRES_USER` | Yes | `aida` | Postgres role used by the `db` service and by `backup.sh`/`restore.sh`. |
 | `POSTGRES_PASSWORD` | Yes | — | Postgres password. The `db` service refuses to start without it. |
 | `POSTGRES_DB` | Yes | `aida` | Database name. |
@@ -48,10 +49,13 @@ openssl rand -base64 32   # APP_ENCRYPTION_KEY
 ```
 
 Also set a real `POSTGRES_PASSWORD` — the shipped example value is for a quick local trial only.
-Prefer a URL-safe generator such as `openssl rand -hex 24` for this one specifically: `DATABASE_URL`
-is built by interpolating `POSTGRES_PASSWORD` directly into a connection-string URL without
-URL-encoding it, so a base64-generated password containing `/`, `@`, `:` or `#` can silently break
-the connection string.
+Prefer a URL-safe generator such as `openssl rand -hex 24` for this one specifically: by default
+Compose builds the services' database URL by interpolating `POSTGRES_PASSWORD` into it without
+URL-encoding, so a base64-generated password containing `/`, `@`, `:` or `#` breaks that URL. If
+you keep such a password, run `sh scripts/database-url.sh` (with `POSTGRES_USER`,
+`POSTGRES_PASSWORD` and `POSTGRES_DB` set) and paste the `AIDA_DATABASE_URL=...` line it prints into
+`.env`. `app`, `worker` and `migrate` refuse to start, without printing the password, when the URL
+and `POSTGRES_*` disagree.
 
 :::danger
 `BETTER_AUTH_SECRET` and `APP_ENCRYPTION_KEY` must be preserved across restores and server
