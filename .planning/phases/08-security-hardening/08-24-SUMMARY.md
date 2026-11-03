@@ -189,7 +189,7 @@ Evidence checks: all 7 `passed`. The K134 row ``listed containers, and the volum
 
 Design-system checklist: items 1, 6 and 8 `passed`; items 2 to 5 `not run (manual: 6 UI files changed)`; item 7 `not run (manual: visual check)`. Unchanged from the earlier runs. The plan's `part-a-src.patch` selects only the `type(08-NN):` commits of Part A plans, so the four `.tsx` files changed by F1 to F8 are not in it. A read-only diff of `src/**/*.tsx` and `src/**/*.css` between `4d0eefd` and the tested commit shows no added named text size. That check is noted in the gate file and was not derived.
 
-Matrix: row 1 `failed` (audit), row 7 `blocked (space)`, and every other Part A row `passed`. The 14 rows that have a Phase 8.1 part read `moved to Phase 8.1`, and none of them is closed.
+Matrix: row 1 `failed` (audit), row 7 `blocked (space)`, and every other Part A row `passed`. The 13 rows that have a Phase 8.1 part (5, 6, 8, 10, 12, 13, 17, 18, 20, 24, 25, 27, 31) read `moved to Phase 8.1`, and none of them is closed.
 
 | Requirement | Part A rows closed | Moved to Phase 8.1 | Requirement closed |
 |---|---|---|---|
