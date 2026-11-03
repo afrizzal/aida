@@ -1,7 +1,7 @@
 # Phase 9: Operations - Context
 
 **Gathered:** 2026-11-08, by hand under `run-loop/PIAGAM.md` (not `/gsd-discuss-phase`)
-**Status:** Ready for UI design contract, then planning
+**Status:** Ready for UI design contract, then planning. **Updated 2026-11-12** for the replan after the owner unparked the phase: see "Update 2026-11-12" at the end, which overrides earlier text where they differ
 **Sources:** facts checked against the code at `1e276dc`; Codex brainstorm in `run-loop/codex/fase09-tanya.md` and `fase09-jawab.md`. Every Codex claim used below was re-checked in the code unless marked *unverified*.
 
 <domain>
@@ -9,7 +9,7 @@
 
 A self-hoster can run AIDA unattended: backups happen on their own, the known boot and seed traps are fixed and pinned by tests, and the planning records tell the truth. Requirements AIDA-33 to AIDA-41 in `.planning/REQUIREMENTS.md`. No feature beyond those requirements.
 
-Phase 8 is **parked** (`08-REVIEWS.md` → Outcome). Its code changes do not exist: no trusted client-IP helper, the limiter is still `count` then `create`, containers run as root, no CSP. Phase 9 must not assume any of them.
+Phase 8 is **parked** (`08-REVIEWS.md` → Outcome). Its code changes do not exist: no trusted client-IP helper, the limiter is still `count` then `create`, containers run as root, no CSP. Phase 9 must not assume any of them. **Superseded 2026-11-12:** Phase 8 Part A is now in the code; see "Update 2026-11-12", U-01.
 
 </domain>
 
@@ -130,7 +130,33 @@ Do not create `checkpoint:human-verify` tasks. Write every human verification as
 - Dilarang mengisi hasil UAT, visual pass, atau penilaian manusia rekaan. Kosong tetap kosong.
 - Dilarang menulis backslash ke `last_activity_desc` di `STATE.md`.
 
+## Update 2026-11-12 (binding for the replan)
+
+The owner unparked Phase 9 on 2026-11-11 (`run-loop/ANTREAN.md`, "Keputusan owner 2026-11-11", items 3 and 13). The plans were written on 2026-11-08 against `1e276dc`. Since then Phases 11, 12, 12.1, 12.2 and 14 and Phase 8 Part A were executed, so the plans name files, lines and behaviour that have changed. The replan re-checks every path, line and behaviour against the current code. Facts below were checked against the code at the commit that adds this section.
+
+### Owner decisions (verbatim)
+
+- Item 3: "Fase 9: b. Seed menolak, tidak pernah menghapus data demo." Option b: replan with the cycle 3 findings, the plan checker as the gate, then execution; no further Codex plan review. The Codex diff critique at execution step 7 is the second opinion.
+- Item 13: "Versi 1.0.0 saat rilis v1.0.0. CODEOWNERS berisi @afrizzal Widget README: tidak."
+
+### Decisions
+
+- **U-01 (fact, replaces the Phase 8 sentence in Phase Boundary):** Phase 8 Part A is in the code; Part B is Phase 8.1 and waits for the owner (`08-SPLIT.md`, `08-VERIFICATION.md`). What exists now: one client-IP helper `getClientIp(request)` in `src/lib/rate-limit/client-ip.ts` with `TRUSTED_PROXY_HOPS`, and Caddy strips a client-sent `x-aida-client-ip`; `checkRateLimit(scope, ip, opts)` in `src/lib/rate-limit/check-rate-limit.ts` runs in a transaction behind an admission limit (`RATE_LIMIT_MAX_CONCURRENT`), one slot per identity, and a bounded denial memory; a nonce CSP from `src/lib/security/csp.ts` with `img-src 'self' data: blob:`; `app` and `worker` run as `USER node`, and `/data/uploads` is created `node:node` in the runner image (`Dockerfile:93`), files written with the default mode (`src/lib/attachments/local-file-storage.ts`); `migrate` runs on `target: builder` as `node`; the container healthcheck uses a probe path that Caddy refuses; `readBoundedFormData(request, maxBytes, { maxParts })` and `PUBLIC_TEXT_LIMITS` bound public bodies; E2E sets `TRUSTED_PROXY_HOPS: "0"` in `tests/e2e/global-setup.ts`. Phase 9 builds on these and must not duplicate or weaken them.
+- **U-02 (replaces D-26):** Phase 9 adapts to the Phase 8 Part A code above. The new public logo route uses `getClientIp` and `checkRateLimit` under its own scope; under the existing `/api/public` prefix it needs no new `PUBLIC_PREFIXES` entry, and the CSP already allows same-origin images. Each SUMMARY still records the final contract of every file Phase 8.1 plans also touch (`docker-compose.yml`, `docs/OPERATIONS.md`, `docs/SECURITY.md`, `src/proxy.ts`), so the Phase 8.1 replan (owner-gated) can account for the `backup` service and the logo route. Phase 9 does not edit `deferred-8.1/`.
+- **U-03 (drift from Phase 14):** Phase 14 added `ProjectFileCleanup` (`prisma/schema.prisma`) with `enqueueFileCleanupInTx` and `sweepProjectFileCleanup` (`src/lib/projects/file-cleanup.ts`), which delete stored project files, and the worker now mounts `uploads_data` (K68). 09-04's `PendingFileDeletion` outbox and the D-02 lease must cover every path that deletes a stored file, project files included. How (one outbox, or both sweeps honouring the lease) is decided in the replan with the Codex brainstorm below; two deletion paths that ignore each other's lease are not acceptable.
+- **U-04 (owner item 3, resolves cycle 3 R1):** no Phase 9 code deletes demo data. `recoverDemoPartial()` and every other recovery that deletes organizations, users or demo rows are removed from the plans. A partial or pre-marker demo dataset makes the seed CLI and the demo boot refuse with a log line and no write, and the operator docs say how to recover by hand. AIDA-37 and D-15 to D-19 otherwise stand.
+- **U-05 (owner item 13, replaces D-23 and D-25):** `package.json` gets `"version": "1.0.0"`, the version of the v1.0.0 release. The bump policy (whether every pull request must raise the version) is still not decided by the owner, so `check-version` fails only on a missing or invalid version or on a version lower than the base, and reports an equal version as a notice; it keeps its fixture tests. The bump policy stays an owner item. `CODEOWNERS` lists the owner's GitHub handle as the owner wrote it in item 13. No README widgets. The tag and the release stay human-only.
+- **U-06 (rule I):** every workflow Phase 9 adds or edits runs only on `ubuntu-latest`, adds no `schedule:`, and triggers only on `pull_request`, push to `master` or `workflow_dispatch`. In doubt, it is forbidden and becomes an owner item.
+- **U-07 (rule J replaces the 2026-11-08 container rule in "Owner rules" above):** any test that creates Docker resources uses a project name starting `aida-test-`, the label `aida.test=1`, a unique image tag that never overwrites an existing one, the 20 GiB host and VM preflight, and cleanup only by label and prefix, through the J1 helpers (`tests/support/docker-test-labels.ts`, `docker-test-preflight.ts`, `docker-test-resources.ts`, `scripts/test-docker-cleanup.ts`). Never project `aida` or `aida-dev-db`. A step stopped by the preflight is recorded `blocked (space)`, never as passed. How the stack-level proofs (D-06, D-13, 09-11) relate to the Phase 8.1 container harness (08-14, owner-gated) is decided in the replan with the Codex brainstorm below.
+- **U-08 (non-root):** no Phase 9 service runs as root without a written reason. The `backup` service reads `uploads_data` read-only (files owned by `node`, default modes) and writes `backups_data`; who owns `backups_data` and which user the service runs as is decided in the replan with the Codex brainstorm below. Restore must leave uploads owned by `node`.
+- **U-09 (cycle 3 findings):** R2 to R6 in `09-REVIEWS.md` Cycle 3 are incorporated into the plans, R1 through U-04.
+- **U-10 (`.next`):** if `tsc` or the build breaks after repeated E2E runs, `mv .next ~/.Trash/aida-next-$(date +%s)` (owner decision 2026-11-11 item 9), never `rm`; the executor reports every move.
+
+### Updated Larangan line
+
+The container line of the Larangan above now reads, in the charter: "Dilarang menghentikan, menghapus, atau mengubah container dan volume selain milik project `aida` dan `aida-dev-db`. Dilarang `docker system prune` dan `docker volume prune`. Aturan J mempersempit butir ini."
+
 ---
 
 *Phase: 09-operations*
-*Context gathered: 2026-11-08*
+*Context gathered: 2026-11-08; updated 2026-11-12*
