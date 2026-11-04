@@ -10,6 +10,8 @@ import { describe, expect, it } from "vitest";
 
 const SCRIPT = path.resolve(__dirname, "../../scripts/backup/scheduler.sh");
 const DAY = 86_400;
+/** A minimal environment: no BACKUP_* of the test process reaches the script. */
+const BASE_ENV: NodeJS.ProcessEnv = { NODE_ENV: "test", PATH: process.env.PATH ?? "/usr/bin:/bin" };
 
 /** A fixed UTC day (2026-11-12T00:00:00Z) plus seconds. */
 const DAY_START = Date.UTC(2026, 10, 12) / 1000;
@@ -18,7 +20,7 @@ const at = (hh: number, mm: number, ss = 0) => DAY_START + hh * 3600 + mm * 60 +
 function nextDelay(...args: string[]) {
   const run = spawnSync("sh", [SCRIPT, "--next-delay", ...args], {
     encoding: "utf8",
-    env: { PATH: process.env.PATH ?? "/usr/bin:/bin" },
+    env: BASE_ENV,
   });
   return { status: run.status, stdout: run.stdout, stderr: run.stderr };
 }
@@ -83,7 +85,7 @@ describe("scheduler.sh --next-delay (D-01 schedule, UTC)", () => {
 });
 
 describe("scheduler.sh loop mode", () => {
-  const baseEnv = { PATH: process.env.PATH ?? "/usr/bin:/bin" };
+  const baseEnv = BASE_ENV;
 
   it("an invalid BACKUP_SCHEDULE logs one line and exits 2 before any run", () => {
     const run = spawnSync("sh", [SCRIPT], {
