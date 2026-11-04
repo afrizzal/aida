@@ -47,6 +47,7 @@ import {
   TEST_TMP_ROOT,
 } from "./support/backup-runner";
 import { createIsolatedDatabase, type IsolatedDatabase } from "./support/isolated-database";
+import { countAllTables, type TableInventory } from "./support/table-inventory";
 
 type FenceFixtures = typeof import("../support/file-fence-fixtures");
 type ProjectFixtures = typeof import("../support/project-fixtures");
@@ -133,13 +134,16 @@ afterAll(async () => {
   }
 }, 180_000);
 
-beforeEach(async () => {
+/** Empty file tables in the source: every backup sees only the files its own case wrote. */
+async function clearSource(): Promise<void> {
   await prisma.$executeRaw`DELETE FROM "Attachment"`;
   await prisma.$executeRaw`DELETE FROM "TaskAttachment"`;
   await prisma.$executeRaw`DELETE FROM "Setting" WHERE key = 'branding:logo'`;
   await prisma.$executeRaw`DELETE FROM "ProjectFileCleanup"`;
   await prisma.$executeRaw`DELETE FROM "SystemSetting" WHERE key IN ('backup:lease', 'backup:lastRun')`;
-});
+}
+
+beforeEach(clearSource);
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -621,6 +625,526 @@ describe("restore tracer (U-14, U-16, Q4, Q7)", () => {
       expect(await volumeIdentity(target)).toBe(await fence.testVolumeIdentity());
       expect(await targetTouched(runner, c)).toBe("uploads");
       await releaseLock(runner, c, holder);
+    },
+    CASE_TIMEOUT,
+  );
+});
+
+// ---------------------------------------------------------------------------------------------
+// Task 2: bad sets and unsafe targets are refused before any write (P5, Q4, R3, U-16), the empty
+// install round-trips (R3), and the restore lock guards the whole run (Q3).
+//
+// The rejection cases restore copies of one valid base set into one shared isolated target
+// database. Each case asserts its exit code and reason line, an unchanged full table inventory of
+// the target, an unchanged entry list of its target volume, no `target-touched` file, no staging
+// directory, and the restore lock still held by the case's holder (the set script never releases
+// it; the wrapper does).
+
+interface BaseSet {
+  c: Case;
+  setId: string;
+}
+
+let base: BaseSet | null = null;
+let sharedTarget: IsolatedDatabase | null = null;
+
+async function baseSet(): Promise<BaseSet> {
+  if (base) return base;
+  await clearSource();
+  const c = await newCase();
+  await seedFour(c);
+  const setId = await backupSucceeded(c, runBackup(c));
+  base = { c, setId };
+  return base;
+}
+
+async function rejectionTarget(): Promise<IsolatedDatabase> {
+  if (!sharedTarget) sharedTarget = await createIsolatedDatabase();
+  return sharedTarget;
+}
+
+afterAll(async () => {
+  await sharedTarget?.drop();
+}, 120_000);
+
+/** A new case whose backups directory holds a copy of the base set, made by uid 1000. */
+async function copyOfBase(runner: RestoreRunner): Promise<{ c: Case; setId: string }> {
+  const b = await baseSet();
+  const c = await newCase();
+  await execOk(runner, [
+    "cp",
+    "-R",
+    `/backups/${b.c.backupsName}/${b.setId}`,
+    `/backups/${c.backupsName}/${b.setId}`,
+  ]);
+  return { c, setId: b.setId };
+}
+
+/** Runs a shell script in the restore runner with SET set to the case's set directory. */
+async function inSet(runner: RestoreRunner, c: Case, setId: string, script: string) {
+  return execOk(runner, [
+    "sh",
+    "-c",
+    `set -eu\nSET=$1\n${script}`,
+    "sh",
+    `/backups/${c.backupsName}/${setId}`,
+  ]);
+}
+
+/** Rewrites the manifest's sha256 and size of one part to match the part as it is now. */
+const UPDATE_MANIFEST = String.raw`update_manifest() {
+  f="$SET/$1"
+  sha=$(sha256sum "$f" | cut -d " " -f 1)
+  size=$(stat -c %s "$f")
+  re=$(printf %s "$1" | sed "s/\./\\\\./g")
+  sed -i -E "s/^(    \"$re\": \{ \"sha256\": \")[0-9a-f]{64}(\", \"size\": )[0-9]+( \},?)\$/\1$sha\2$size\3/" "$SET/manifest.json"
+  grep -q "\"sha256\": \"$sha\", \"size\": $size " "$SET/manifest.json"
+}
+`;
+
+/** Builds a crafted uploads.tar.gz in a scratch directory and makes the manifest agree with it. */
+async function craftArchive(runner: RestoreRunner, c: Case, setId: string, build: string) {
+  await inSet(
+    runner,
+    c,
+    setId,
+    `${UPDATE_MANIFEST}d=$(mktemp -d)\nmkdir -p "$d/orgx"\n${build}\nupdate_manifest uploads.tar.gz\nrm -rf "$d"`,
+  );
+}
+
+/** Extracts the set's archive to $x and its member list to $x.list (for a rebuild). */
+const UNPACK = `x=$(mktemp -d)
+tar -tzf "$SET/uploads.tar.gz" > "$x.list"
+tar -xzf "$SET/uploads.tar.gz" -C "$x"
+first=$(head -n 1 "$x.list")
+printf 'changed' >> "$x/$first"
+tar -czf "$SET/uploads.tar.gz" -C "$x" --no-recursion --verbatim-files-from -T "$x.list"`;
+
+interface TargetSnapshot {
+  inventory: TableInventory;
+  volume: string[];
+  extra: string[];
+}
+
+async function snapshot(
+  runner: RestoreRunner,
+  target: IsolatedDatabase,
+  extraDir?: string,
+): Promise<TargetSnapshot> {
+  return {
+    inventory: await countAllTables(target.url),
+    volume: await targetEntries(runner),
+    extra: extraDir ? await targetEntries(runner, extraDir) : [],
+  };
+}
+
+async function stagingDirs(c: Case): Promise<string[]> {
+  return (await readdir(c.backups)).filter((name) => name.startsWith(".restore-staging-"));
+}
+
+async function lockHolder(runner: RestoreRunner, c: Case): Promise<string | null> {
+  const result = await lib(runner, c, "restore_lock_holder");
+  return result.exitCode === 0 ? result.stdout.trim() : null;
+}
+
+async function expectRefused(opts: {
+  runner: RestoreRunner;
+  c: Case;
+  setId: string;
+  target: IsolatedDatabase;
+  exit: 3 | 4 | 6;
+  line: string;
+  /** The holder the run uses; defaults to the lock's own holder. */
+  runHolder?: string;
+  uploadsDir?: string;
+  before: TargetSnapshot;
+  lockHolder: string;
+}): Promise<void> {
+  const result = await runRestore(
+    opts.runner,
+    opts.c,
+    opts.setId,
+    opts.runHolder ?? opts.lockHolder,
+    {
+      uploadsDir: opts.uploadsDir,
+    },
+  ).done;
+  expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(opts.exit);
+  expectRestoreLog(result);
+  expect(result.stdout).toContain(`[restore] ${opts.line}`);
+  if (opts.exit === 4) expect(result.stdout).toContain("[restore] set failed validation");
+  expect(result.stdout).not.toContain("restoring the database");
+  expect(await snapshot(opts.runner, opts.target, opts.uploadsDir)).toEqual(opts.before);
+  expect(await targetTouched(opts.runner, opts.c)).toBeNull();
+  expect(await stagingDirs(opts.c)).toEqual([]);
+  expect(await lockHolder(opts.runner, opts.c)).toBe(opts.lockHolder);
+}
+
+/** One rejection case: a copy of the base set, changed by `prepare`, then refused. */
+async function rejectCase(opts: {
+  prepare: (runner: RestoreRunner, c: Case, setId: string) => Promise<void>;
+  exit: 4 | 6;
+  line: string;
+  uploadsDir?: string;
+}): Promise<void> {
+  const target = await rejectionTarget();
+  const runner = await newRestoreRunner(target);
+  const { c, setId } = await copyOfBase(runner);
+  await opts.prepare(runner, c, setId);
+  const holder = newHolder();
+  await acquireLock(runner, c, holder);
+  const before = await snapshot(runner, target, opts.uploadsDir);
+  await expectRefused({
+    runner,
+    c,
+    setId,
+    target,
+    exit: opts.exit,
+    line: opts.line,
+    uploadsDir: opts.uploadsDir,
+    before,
+    lockHolder: holder,
+  });
+  await releaseLock(runner, c, holder);
+}
+
+describe("rejection matrix: a bad set is refused before any write (P5, Q4)", () => {
+  it(
+    "tampered: one byte of the archive changed, manifest unchanged",
+    async () => {
+      await rejectCase({
+        prepare: async (runner, c, setId) => {
+          await inSet(
+            runner,
+            c,
+            setId,
+            `b=$(od -An -tu1 -j 40 -N 1 "$SET/uploads.tar.gz" | tr -d ' ')
+printf "\\\\$(printf %03o $(( (b + 1) % 256 )))" | dd of="$SET/uploads.tar.gz" bs=1 seek=40 conv=notrunc 2>/dev/null`,
+          );
+        },
+        exit: 4,
+        line: "validation: uploads.tar.gz checksum",
+      });
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "forged checksum list: uploads.sha256 edited, manifest unchanged",
+    async () => {
+      await rejectCase({
+        prepare: async (runner, c, setId) => {
+          await inSet(
+            runner,
+            c,
+            setId,
+            `sed -i -E '1s/^0/1/;t;1s/^[0-9a-f]/0/' "$SET/uploads.sha256"`,
+          );
+        },
+        exit: 4,
+        line: "validation: uploads.sha256 checksum",
+      });
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "forged pair: archive and uploads.sha256 changed consistently, manifest unchanged",
+    async () => {
+      await rejectCase({
+        prepare: async (runner, c, setId) => {
+          await inSet(
+            runner,
+            c,
+            setId,
+            `${UNPACK}
+(cd "$x" && sha256sum $(cat "$x.list")) | sort -k 2 > "$SET/uploads.sha256"`,
+          );
+        },
+        exit: 4,
+        line: "validation: uploads.tar.gz checksum",
+      });
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "staged mismatch: archive rebuilt with a changed file and its manifest hash updated, uploads.sha256 not",
+    async () => {
+      await rejectCase({
+        prepare: async (runner, c, setId) => {
+          await inSet(
+            runner,
+            c,
+            setId,
+            `${UPDATE_MANIFEST}${UNPACK}\nupdate_manifest uploads.tar.gz`,
+          );
+        },
+        exit: 4,
+        line: "validation: staged checksum",
+      });
+    },
+    CASE_TIMEOUT,
+  );
+
+  const crafted: [string, string, string][] = [
+    [
+      "traversal: a ../x member",
+      `mkdir -p "$d/a"; printf x > "$d/x1.txt"; (cd "$d/a" && tar -czPf "$SET/uploads.tar.gz" ../x1.txt)`,
+      "validation: member name",
+    ],
+    [
+      "absolute: an absolute member path",
+      `printf x > "$d/orgx/a1.txt"; tar -czPf "$SET/uploads.tar.gz" "$d/orgx/a1.txt"`,
+      "validation: member name",
+    ],
+    [
+      "symlink: a symbolic link member with a valid name",
+      `ln -s /etc/passwd "$d/orgx/l1.txt"; tar -czf "$SET/uploads.tar.gz" -C "$d" orgx/l1.txt`,
+      "validation: member type",
+    ],
+    [
+      "hard link: a hard link member with a valid name",
+      `printf a > "$d/orgx/a1.txt"; ln "$d/orgx/a1.txt" "$d/orgx/b1.txt"; tar -czf "$SET/uploads.tar.gz" -C "$d" orgx/a1.txt orgx/b1.txt`,
+      "validation: member type",
+    ],
+    [
+      "fifo: a FIFO member with a valid name",
+      `mkfifo "$d/orgx/f1.txt"; tar -czf "$SET/uploads.tar.gz" -C "$d" orgx/f1.txt`,
+      "validation: member type",
+    ],
+    [
+      "special name: a member under a directory named -rf",
+      `mkdir "$d/-rf"; printf x > "$d/-rf/a1.txt"; printf -- '-rf/a1.txt\\0' > "$d.list"; tar -czf "$SET/uploads.tar.gz" -C "$d" --null --no-recursion --verbatim-files-from -T "$d.list"`,
+      "validation: member name",
+    ],
+    [
+      "newline: a member whose name contains a newline",
+      `n=$(printf 'orgx/ab\\ncd.txt'); printf y > "$d/$n"; printf '%s\\0' "$n" > "$d.list"; tar -czf "$SET/uploads.tar.gz" -C "$d" --null --no-recursion --verbatim-files-from -T "$d.list"`,
+      "validation: member name",
+    ],
+    [
+      "marker member: the archive carries .aida-uploads-volume",
+      `printf 'ffffffffffffffffffffffffffffffff\\n' > "$d/.aida-uploads-volume"; printf a > "$d/orgx/a1.txt"; tar -czf "$SET/uploads.tar.gz" -C "$d" .aida-uploads-volume orgx/a1.txt`,
+      "validation: member name",
+    ],
+  ];
+  for (const [name, build, line] of crafted) {
+    it(
+      name,
+      async () => {
+        await rejectCase({
+          prepare: (runner, c, setId) => craftArchive(runner, c, setId, build),
+          exit: 4,
+          line,
+        });
+      },
+      CASE_TIMEOUT,
+    );
+  }
+
+  it(
+    "missing identity: the dump holds no uploads:volume-id",
+    async () => {
+      await rejectCase({
+        prepare: async (runner, c, setId) => {
+          const dumped = await activeBackupRunner().exec([
+            "pg_dump",
+            "-Fc",
+            '--exclude-table-data="SystemSetting"',
+            "-f",
+            `/backups/${c.backupsName}/${setId}/db.dump`,
+          ]);
+          expect(dumped.exitCode, dumped.stderr).toBe(0);
+          await inSet(runner, c, setId, `${UPDATE_MANIFEST}update_manifest db.dump`);
+        },
+        exit: 4,
+        line: "validation: volume identity missing from the dump",
+      });
+    },
+    CASE_TIMEOUT,
+  );
+});
+
+describe("unsafe targets are refused before any write (U-16, Q7)", () => {
+  it(
+    "foreign owner: the target volume already holds an entry not owned by 1000",
+    async () => {
+      await rejectCase({
+        prepare: async (runner) => {
+          const planted = await runner.execAsRoot([
+            "sh",
+            "-c",
+            `mkdir "${RESTORE_UPLOADS}/rootdir" && printf x > "${RESTORE_UPLOADS}/rootdir/x1.txt"`,
+          ]);
+          expect(planted.exitCode, planted.stderr).toBe(0);
+        },
+        exit: 6,
+        line: "target check failed: uploads target holds an entry not owned by 1000:1000",
+      });
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "not a mount point: UPLOADS_DIR is a plain directory",
+    async () => {
+      await rejectCase({
+        prepare: async (runner) => {
+          await execOk(runner, ["mkdir", "-p", "/tmp/plain-uploads"]);
+        },
+        exit: 6,
+        line: "target check failed: uploads target is not a mount point",
+        uploadsDir: "/tmp/plain-uploads",
+      });
+    },
+    CASE_TIMEOUT,
+  );
+});
+
+describe("empty round trip (R3)", () => {
+  it(
+    "empty round trip: an install with the identity and its marker and no file backs up and restores, and the restored marker equals the restored identity",
+    async () => {
+      const c = await newCase();
+      const setId = await backupSucceeded(c, runBackup(c));
+      const target = await newTargetDatabase();
+      const runner = await newRestoreRunner(target);
+      const holder = newHolder();
+      await acquireLock(runner, c, holder);
+      const result = await runRestore(runner, c, setId, holder).done;
+      expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expectRestoreLog(result);
+      expect(await databaseReferences(target)).toEqual({
+        Attachment: [],
+        TaskAttachment: [],
+        logo: [],
+      });
+      await expectRestoredVolume(runner, target);
+      expect(await volumeIdentity(target)).toBe(await fence.testVolumeIdentity());
+      expect((await targetEntries(runner)).map((e) => e.split("|")[0])).toEqual([
+        ".aida-uploads-volume",
+      ]);
+      expect(await stagingDirs(c)).toEqual([]);
+      await releaseLock(runner, c, holder);
+    },
+    CASE_TIMEOUT,
+  );
+});
+
+describe("restore lock and holder (Q3)", () => {
+  it(
+    "double acquire: a second restore_lock_acquire fails and the first holder's files are intact",
+    async () => {
+      const target = await rejectionTarget();
+      const runner = await newRestoreRunner(target);
+      const c = await newCase();
+      const first = newHolder();
+      await acquireLock(runner, c, first);
+      const read = 'cat "$(restore_lock_dir)/holder" "$(restore_lock_dir)/heartbeat"';
+      const before = await lib(runner, c, read);
+      const second = await lib(runner, c, 'restore_lock_acquire "$1"', newHolder());
+      expect(second.exitCode).not.toBe(0);
+      expect(await lib(runner, c, read)).toEqual(before);
+      expect(await lockHolder(runner, c)).toBe(first);
+      await releaseLock(runner, c, first);
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "foreign holder: the set script with another RESTORE_HOLDER refuses before any target write",
+    async () => {
+      const target = await rejectionTarget();
+      const runner = await newRestoreRunner(target);
+      const { c, setId } = await copyOfBase(runner);
+      const holder = newHolder();
+      await acquireLock(runner, c, holder);
+      const before = await snapshot(runner, target);
+      await expectRefused({
+        runner,
+        c,
+        setId,
+        target,
+        exit: 3,
+        line: "restore lock not held by this restore",
+        runHolder: newHolder(),
+        before,
+        lockHolder: holder,
+      });
+      await releaseLock(runner, c, holder);
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "heartbeat swap: another holder written during validation stops the run before any target write",
+    async () => {
+      const target = await rejectionTarget();
+      const runner = await newRestoreRunner(target);
+      const { c, setId } = await copyOfBase(runner);
+      const holder = newHolder();
+      await acquireLock(runner, c, holder);
+      const before = await snapshot(runner, target);
+      const run = runRestore(runner, c, setId, holder, {
+        pauseAt: ["validating"],
+        env: { RESTORE_HEARTBEAT_SECONDS: "1" },
+      });
+      await run.waitReached("validating");
+      const intruder = newHolder();
+      const swapped = await lib(
+        runner,
+        c,
+        'restore_lock_write "$(restore_lock_dir)" holder "$1"',
+        intruder,
+      );
+      expect(swapped.exitCode, swapped.stderr).toBe(0);
+      // From here the lock is the intruder's: afterEach must release it under that holder.
+      for (const held of heldLocks) if (held.holder === holder) held.holder = intruder;
+      // The run is never released from its pause point: only the heartbeat can end it.
+      const result = await run.done;
+      expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(3);
+      expect(result.stdout).toContain("[restore] restore aborted: restore lock lost");
+      expect(result.stdout).not.toContain("set validated");
+      expect(await snapshot(runner, target)).toEqual(before);
+      expect(await targetTouched(runner, c)).toBeNull();
+      expect(await stagingDirs(c)).toEqual([]);
+      expect(await lockHolder(runner, c)).toBe(intruder);
+      await releaseLock(runner, c, intruder);
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "break stale lock: removed only for the matching holder with a heartbeat older than the limit",
+    async () => {
+      const target = await rejectionTarget();
+      const runner = await newRestoreRunner(target);
+      const c = await newCase();
+      const holder = newHolder();
+      await acquireLock(runner, c, holder);
+      const breakStale = (who: string) => lib(runner, c, 'restore_lock_break_stale "$1" 900', who);
+
+      // Fresh heartbeat: refused (3), lock intact.
+      expect((await breakStale(holder)).exitCode).toBe(3);
+      expect(await lockHolder(runner, c)).toBe(holder);
+      // An old heartbeat, but another holder named: refused (2), lock intact.
+      const aged = await lib(
+        runner,
+        c,
+        'restore_lock_write "$(restore_lock_dir)" heartbeat "$(( $(date -u +%s) - 1000 ))"',
+      );
+      expect(aged.exitCode, aged.stderr).toBe(0);
+      expect((await lib(runner, c, "restore_lock_age")).stdout.trim()).toMatch(/^10\d\d$/);
+      expect((await breakStale(newHolder())).exitCode).toBe(2);
+      expect(await lockHolder(runner, c)).toBe(holder);
+      // Matching holder and an old heartbeat: removed.
+      expect((await breakStale(holder)).exitCode).toBe(0);
+      expect(await lockHolder(runner, c)).toBeNull();
+      const i = heldLocks.findIndex((l) => l.holder === holder);
+      if (i >= 0) heldLocks.splice(i, 1);
+      // Nothing to break any more.
+      expect((await breakStale(holder)).exitCode).toBe(1);
     },
     CASE_TIMEOUT,
   );
