@@ -51,7 +51,7 @@ changes your data's ownership without you running it. The full procedure is in
 Back up first:
 
 ```bash
-./scripts/backup.sh ./backups
+./scripts/backup.sh
 ```
 
 Then:
@@ -81,6 +81,7 @@ docker compose logs -f app       # Next.js request logs, auth events
 docker compose logs -f worker    # pg-boss job execution
 docker compose logs -f caddy     # reverse proxy / TLS
 docker compose logs -f migrate   # one-shot migration output (only runs at startup)
+docker compose logs -f backup    # scheduled backups: next run, results, skip and failure lines
 ```
 
 Normal `worker` output is a recurring cadence of small job-completion lines — a heartbeat job,

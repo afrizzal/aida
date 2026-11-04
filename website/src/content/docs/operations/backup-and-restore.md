@@ -10,44 +10,58 @@ when you need to bring an instance back from one.
 
 A complete AIDA backup has **two parts**, and both are required to restore an instance:
 
-1. A **Postgres logical dump** — tickets, contacts, messages, KB articles, insight runs,
-   settings, everything in the database.
-2. A **tarball of the uploads volume** — every ticket attachment. Files live on disk, not in
-   Postgres.
+1. A **Postgres dump** — tickets, contacts, messages, KB articles, insight runs, settings,
+   everything in the database.
+2. An **archive of the uploads volume** — every ticket and task attachment and the workspace
+   logo. Files live on disk, not in Postgres.
 
 **A database-only dump is not a complete backup.** Restoring only the database dump silently
 loses every attachment — there's no warning at restore time, because the restore succeeds; the
 files are just gone.
 
-## Taking a backup
+**Backups contain tenant data**: every workspace's database rows and files. They stay on your
+server, and copying them off the host is your job.
+
+## Scheduled backups
+
+`docker compose up -d` starts a `backup` service that takes one backup every day: by default at
+02:00 UTC, keeping the 7 newest successful sets. `BACKUP_ENABLED`, `BACKUP_SCHEDULE` and
+`BACKUP_RETENTION` in `.env` change that (see [Environment variables](/aida/configuration/environment/));
+recreate the service afterwards with `docker compose up -d backup`.
+
+The service uses the same `pgvector/pgvector:pg16` image as the database and runs as the
+non-root user `1000:1000`, the same user as `app` and `worker`, with the uploads volume mounted
+read-only. One one-shot service, `backup-init`, runs as root once to give the new backups volume's
+mount point to that user (mode `0700`); it touches nothing else and has no network.
+
+Each set is one directory in the `backups_data` volume, named by its set id, holding `db.dump`,
+`uploads.tar.gz`, `uploads.sha256` and `manifest.json`. Admins see the most recent run in
+**Settings → Backups**; every run is in `docker compose logs backup`.
+
+## Taking a backup by hand
 
 ```bash
-./scripts/backup.sh ./backups
+./scripts/backup.sh
 ```
 
-This produces two timestamped files:
+This runs one backup now in the `backup` service and prints its result; the set lands in the
+`backups_data` volume like a scheduled one. It needs the `db` service to be running.
 
-```
-backups/aida-db-20260728T225848Z.dump
-backups/aida-uploads-20260728T225848Z.tar.gz
-```
+## Copying backups off the host
 
-The script prints both paths, their sizes, and the exact restore command to use them.
+A backup on the same disk as the instance it protects doesn't survive a disk failure. Copy sets
+off the host yourself, for example:
 
-### Automating backups
-
-AIDA ships no built-in scheduler — there's no backup sidecar service. Schedule `backup.sh`
-yourself with cron and prune on a retention window:
-
-```txt
-# 03:30 daily, keep 14 days
-30 3 * * * cd /srv/aida && ./scripts/backup.sh /srv/aida-backups >> /var/log/aida-backup.log 2>&1
-35 3 * * * find /srv/aida-backups -type f -mtime +14 -delete
+```bash
+docker compose run --rm --no-deps -T --entrypoint tar backup -C /backups -cf - <setId> > aida-backup-<setId>.tar
 ```
 
-**Copy backups off the machine.** A backup on the same disk as the instance it protects doesn't
-survive a disk failure — sync your backup directory to off-box storage as part of your own
-operational practice.
+Keep `APP_ENCRYPTION_KEY` separately: it is not in any set, and without it the credentials stored
+in Settings cannot be read after a restore.
+
+The full runbook (failure categories, the skip and abort log lines, and what to do when a run's
+outcome could not be recorded) is in
+[docs/OPERATIONS.md, Backups](https://github.com/afrizzal/aida/blob/master/docs/OPERATIONS.md#backups).
 
 ## Restoring
 

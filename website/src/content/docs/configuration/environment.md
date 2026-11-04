@@ -16,7 +16,7 @@ This table covers exactly the variables in `.env.example` — nothing more, noth
 | `BETTER_AUTH_TRUSTED_ORIGINS` | Yes | `http://localhost,https://localhost` | Comma-separated extra origins trusted for CSRF checks. |
 | `DATABASE_URL` | Yes (local dev) | `postgresql://aida:aida@localhost:5432/aida` | Postgres connection string for local (non-Docker) development: host-side tools and `pnpm dev`. Docker Compose never passes this `.env` value to `app`, `worker` or `migrate`: it builds their URL from `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB`, unless `AIDA_DATABASE_URL` is set. |
 | `AIDA_DATABASE_URL` | Only for a password with URL-reserved characters | *(unset)* | The URL `app`, `worker` and `migrate` use instead of the one built from `POSTGRES_*`. Leave it unset when `POSTGRES_PASSWORD` is URL-safe (for example `openssl rand -hex 24`). Otherwise generate it with `sh scripts/database-url.sh` (with `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` set), which percent-encodes all three and prints one `AIDA_DATABASE_URL=...` line to paste into `.env`. The three services refuse to start when this URL and `POSTGRES_*` disagree. |
-| `POSTGRES_USER` | Yes | `aida` | Postgres role used by the `db` service and by `backup.sh`/`restore.sh`. |
+| `POSTGRES_USER` | Yes | `aida` | Postgres role used by the `db` service, the `backup` service (as `PGUSER`) and `restore.sh`. |
 | `POSTGRES_PASSWORD` | Yes | — | Postgres password. The `db` service refuses to start without it. |
 | `POSTGRES_DB` | Yes | `aida` | Database name. |
 | `DOMAIN` | Yes (prod) | `localhost` | Domain Caddy serves. `localhost` uses Caddy's local CA; a real domain triggers Let's Encrypt auto-HTTPS. |
@@ -32,6 +32,11 @@ This table covers exactly the variables in `.env.example` — nothing more, noth
 | `DEMO_ADMIN_EMAIL` | No | `admin@demo.aida.test` | Email for the auto-created demo admin account. Only takes effect when `DEMO_MODE=true`. |
 | `DEMO_ADMIN_PASSWORD` | No | `aida-demo-2026` | Password for the auto-created demo admin (and demo agent) account. Only takes effect when `DEMO_MODE=true`. |
 | `DEMO_AGENT_EMAIL` | No | `agent@demo.aida.test` | Email for the auto-created demo agent account. Only takes effect when `DEMO_MODE=true`. |
+| `BACKUP_ENABLED` | No | `true` | `true` runs the `backup` service's daily backup; `false` keeps the service up without running any. See [Backup & restore](/aida/operations/backup-and-restore/). |
+| `BACKUP_SCHEDULE` | No | `02:00` | Daily backup time, `HH:MM`, 24-hour, **UTC**. An invalid value stops the `backup` service with exit code 2 and a log line naming the format. |
+| `BACKUP_RETENTION` | No | `7` | Number of successful backup sets kept in the `backups_data` volume, 1 to 9999. Older sets are removed after each successful run. |
+| `BACKUP_LEASE_TTL_SECONDS` | No | `900` | Advanced. Lifetime in seconds of the lease a backup holds while deletions of stored files wait; renewed every third of it. A run that cannot renew it aborts (`backup aborted: lease lost`). |
+| `BACKUP_FENCE_WAIT_SECONDS` | No | `300` | Advanced. Seconds a backup waits for a file deletion in progress before it fails with `file fence busy`. |
 
 AIDA trusts X-Forwarded-For only because the shipped Caddy overwrites it with the address of the
 connecting peer. Anyone putting a CDN or another proxy in front of Caddy must follow

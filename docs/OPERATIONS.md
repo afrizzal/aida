@@ -6,43 +6,129 @@ The day-two runbook for a self-hosted AIDA instance: backups, restore, upgrades,
 
 A **complete** AIDA backup has two parts, and both are required to restore an instance:
 
-1. A **Postgres logical dump** (`pg_dump --format=custom`) — tickets, contacts, messages, KB articles, insight runs, settings, everything in the database.
-2. A **tarball of the `uploads_data` volume** — every ticket and task attachment. Files live on disk under `/data/uploads`, not in Postgres, so a database-only dump silently loses every attachment. The `app` and `worker` services share this volume: the app stores uploads, and the worker stores inbound email attachments and runs the scheduled job (every minute) that removes the files of deleted task attachments.
+1. A **Postgres dump** (`pg_dump --format=custom`): tickets, contacts, messages, KB articles, insight runs, settings, everything in the database.
+2. An **archive of the `uploads_data` volume**: every ticket and task attachment and the workspace logo. Files live on disk under `/data/uploads`, not in Postgres, so a database-only dump silently loses every attachment. The `app` and `worker` services share this volume: the app stores uploads, and the worker stores inbound email attachments and runs the scheduled job (every minute) that removes the files of deleted attachments.
 
 **A database-only dump is not a complete backup.** Never treat `pg_dump` alone as sufficient.
 
-Run:
+**Backups contain tenant data.** Every set holds the whole database and every stored file of every workspace on the instance. They stay on this server: copying them off the host, and controlling who can read them there, is your job (see [Copying backups off the host](#copying-backups-off-the-host)).
+
+### Scheduled backups: the `backup` service
+
+`docker compose up -d` starts a `backup` service with the rest of the stack. It is on by default and runs one backup every day:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `BACKUP_ENABLED` | `true` | `false` keeps the service up without running any backup; it logs `[backup] backups disabled (BACKUP_ENABLED=false)` once. |
+| `BACKUP_SCHEDULE` | `02:00` | The daily run time, `HH:MM`, 24-hour, **UTC**. An invalid value logs `[backup] invalid BACKUP_SCHEDULE: use HH:MM, 24-hour UTC, for example 02:00` and the service exits with code 2 (and is restarted, logging the line again, until you fix it). |
+| `BACKUP_RETENTION` | `7` | How many successful sets are kept, 1 to 9999. After each successful run, older sets are removed. Failed runs never count and never remove a set. |
+| `BACKUP_LEASE_TTL_SECONDS` | `900` | Advanced. How long the backup's lease lasts before it must be renewed (the run renews it every third of this time). |
+| `BACKUP_FENCE_WAIT_SECONDS` | `300` | Advanced. How long a run waits for a file deletion that is in progress before it gives up with `file fence busy`. |
+
+Change a setting in `.env`, then recreate the service: `docker compose up -d backup`. The exact time of the next run is in the log (`[backup] next backup in <seconds>s`). A run that is exactly due when the previous one ends waits for the next day; there is never a second run in the same minute.
+
+The service uses the same image as `db` (`pgvector/pgvector:pg16`, which ships `pg_dump` and `pg_restore`), so there is no extra image to build or pull. It runs `scripts/backup/scheduler.sh`, mounted read-only from this checkout, and reaches the database with the libpq variables `PGHOST`, `PGUSER`, `PGPASSWORD` and `PGDATABASE` taken from `POSTGRES_*`, never with a connection URL, so a password with URL-reserved characters needs nothing extra here.
+
+**Why it runs as `1000:1000`.** `app` and `worker` run as the image's `node` user, UID and GID 1000, and the files they store keep the default modes. Running the backup as the same numeric user lets it read every stored file without root. The PostgreSQL image has no `node` account, so the compose file names the user by number. The uploads volume is mounted **read-only** into `backup`: a backup can read stored files but never change or delete one.
+
+### The one-time preparation: `backup-init`
+
+A new named volume's root directory is created owned by `root:root` with mode `0755`, so user 1000 cannot write into a fresh `backups_data` volume. The PostgreSQL image has no account or directory owned by 1000 that the volume could inherit, and AIDA does not build an extra image for this. The alternative, a root entrypoint in `backup`, would run the whole backup as root. So one one-shot service, `backup-init`, runs as root before `backup` starts and does only this, on the `/backups` mount point of `backups_data` and nothing else:
+
+- if the mount point already reads owner `1000:1000` and mode `700`, it exits at once (`[backup-init] /backups already 1000:1000 mode 700`);
+- otherwise it sets mode `0700`, then owner `1000:1000` (`[backup-init] /backups prepared: 1000:1000 mode 700`). It never changes ownership recursively and never touches `uploads_data` or any file inside the volume.
+
+It has no network (`network_mode: none`), a read-only root filesystem, every capability dropped except `CAP_CHOWN`, and `no-new-privileges`. It is the only AIDA container that runs as root, and this section is its written reason.
+
+**If `backup-init` fails**, it logs `[backup-init] could not prepare /backups; see docs/OPERATIONS.md, Backups`, and `backup` does not start. Without `CAP_FOWNER` the init step can change the mode only of a directory it owns, so the usual cause is a mount point already owned by 1000 whose mode was changed by hand. The fix is a one-time `chmod 0700` on that mount point, run as its owner:
 
 ```bash
-./scripts/backup.sh ./backups
+docker compose run --rm --no-deps --entrypoint chmod backup 0700 /backups
+docker compose run --rm --no-deps --entrypoint stat backup -c '%u:%g:%a' /backups   # must print 1000:1000:700
+docker compose up -d
 ```
 
-This produces two timestamped files in the output directory (default `./backups` if you omit the argument):
+### Where sets live
+
+Sets live in the `backups_data` volume (Compose prefixes it with the project name, for example `aida_backups_data`), one directory per set, named by its set id (UTC time plus a random suffix, for example `20261112T020001Z-a1b2c3`):
 
 ```
-backups/aida-db-20260728T225848Z.dump
-backups/aida-uploads-20260728T225848Z.tar.gz
+<setId>/db.dump          the Postgres dump (custom format)
+<setId>/uploads.tar.gz   every stored file, as <organizationId>/<storageKey>
+<setId>/uploads.sha256   the sha256 of every file in the archive
+<setId>/manifest.json    set id, time, AIDA version, counts, and the sha256 and size of each part
 ```
 
-The script prints both file paths, their sizes, and the exact restore command to use them. It requires the `db` service to already be running (`docker compose up -d db`) and exits with an error if either output file ends up empty.
+A run writes into a temporary `.tmp-<setId>` directory and renames it to `<setId>` only after the dump, the archive and the manifest all validated, so a directory named by a set id is always complete. To list the sets:
+
+```bash
+docker compose run --rm --no-deps --entrypoint ls backup -1 /backups
+```
+
+**How a set stays consistent.** While a backup holds its lease and the file fence, every deletion of a stored file waits (deleted files are queued and removed later by the worker), so every file the dump refers to is still on disk when the archive is taken. After archiving, the run checks that every attachment, task attachment and logo the dump references is in the archive with a checksum; if one is missing, the set fails and nothing is published.
+
+The uploads volume carries an identity marker that the worker writes the first time its cleanup job runs on the mounted volume. A backup refuses to run (`uploads volume not verified`) when the marker is missing or does not match the database, for example when a different volume is mounted. A local `pnpm worker` outside a container deletes no stored files: its `UPLOADS_DIR` is not a mount point, so the cleanup job refuses to delete there.
+
+### Seeing the result
+
+- **Settings → Backups** (workspace owners and admins only) shows the most recent run: Succeeded or Failed, when it finished, the set id, and on failure one fixed sentence for its category. It shows nothing else and has no buttons: backups are configured here, on the server.
+- **`docker compose logs backup`** shows every run. A success ends with `[backup] backup succeeded: <setId>`, a failure with `[backup] backup failed: <category>`, usually after a line naming the reason.
+
+| Category | Meaning | What to check |
+|---|---|---|
+| `dump` | `pg_dump` failed, for example a lock it could not get in time. | The `db` service and its log; long-running transactions. |
+| `archive` | The uploads archive could not be written, for example a file the backup user cannot read. | Ownership of the files in `uploads_data` (see [Upgrading an install whose containers ran as root](#upgrading-an-install-whose-containers-ran-as-root)). |
+| `verification` | A file the database refers to was missing from the archive. | The uploads volume: the set was refused on purpose. |
+| `storage` | The backups volume could not be written or is full. | Free space on the host; the `backup-init` result. |
+| `unknown` | Anything else, including the cases in the next section. | The reason line before `backup failed: unknown`. |
+
+### When a run does not complete
+
+These lines appear in `docker compose logs backup`:
+
+- **`backup skipped: lease held`** (exit code 3): another backup is running, for example a manual run that overlaps the schedule. Nothing was touched; the next scheduled run tries again.
+- **`backup skipped: restore in progress`** (exit code 3): a restore holds its lock (`.restore-lock` in the backups volume). Nothing more is published, no set is removed and no status is recorded.
+- **`backup aborted: lease lost`**: the run could no longer renew its lease (the database became unreachable, or the container was paused past `BACKUP_LEASE_TTL_SECONDS`). Nothing is published and no status is recorded, because the run can no longer prove deletions were waiting. The next scheduled run tries again.
+- **`file fence busy`**: a file deletion held the fence for longer than `BACKUP_FENCE_WAIT_SECONDS`. The run fails with category `unknown`; the next one tries again.
+- **`uploads volume not verified`**: see the identity marker above. The run fails with category `unknown` before any dump.
+- **`database not reachable`**: the run could not reach `db`. Its failure usually cannot be recorded either (exit code 5, below).
+- **`backup retention incomplete`**: the new set was published, but an old set could not be removed. The run still counts as succeeded.
+
+**When the outcome cannot be recorded** (exit code 5), the database was unreachable when the run tried to write its status, so Settings → Backups still shows the previous run. The outcome is kept in two places instead:
+
+- one stderr line in the service log, `AIDA_BACKUP_STATUS_UNRECORDED {"finishedAt":...,"result":...,"setId":...,"category":...}`. Find it with `docker compose logs backup | grep AIDA_BACKUP_STATUS_UNRECORDED`;
+- a file `status-unrecorded-<setId>.json` with the same four fields in the backups volume, one per run. AIDA never removes these files; delete each one once you have dealt with it:
+
+```bash
+docker compose run --rm --no-deps --entrypoint sh backup -c 'ls /backups/status-unrecorded-*.json'
+docker compose run --rm --no-deps --entrypoint rm backup /backups/status-unrecorded-<setId>.json
+```
+
+### Running a backup by hand
+
+```bash
+./scripts/backup.sh
+```
+
+This takes one backup now, outside the schedule, in a one-off container of the `backup` service (as 1000:1000, the same script and settings). It requires the `db` service to be running (`docker compose up -d db`), runs `backup-init` first (it exits at once on a prepared volume), and exits with the run's code: 0 succeeded, 2 failed, 3 skipped, 5 outcome not recorded; 1 means its own preflight failed. The new set lands in `backups_data` like a scheduled one and counts towards `BACKUP_RETENTION`. Releases before this one took an output directory argument; the script now refuses one, because sets live in the volume.
 
 If you use the legacy `docker-compose` binary instead of the `docker compose` plugin:
 
 ```bash
-COMPOSE_CMD="docker-compose" ./scripts/backup.sh ./backups
+COMPOSE_CMD="docker-compose" ./scripts/backup.sh
 ```
 
-### Automating backups (cron)
+### Copying backups off the host
 
-AIDA v1 ships **no built-in scheduler** — there is no backup sidecar service (deferred idea, see roadmap). Schedule `backup.sh` yourself with cron and prune old backups on a retention window:
+A backup that lives on the same disk as the instance it protects does not survive a disk failure, and AIDA copies nothing anywhere by itself. Copy sets off the host as part of your own practice, for example one set as a tar stream:
 
-```cron
-# 03:30 daily, keep 14 days
-30 3 * * * cd /srv/aida && ./scripts/backup.sh /srv/aida-backups >> /var/log/aida-backup.log 2>&1
-35 3 * * * find /srv/aida-backups -type f -mtime +14 -delete
+```bash
+docker compose run --rm --no-deps -T --entrypoint tar backup -C /backups -cf - <setId> > aida-backup-<setId>.tar
 ```
 
-**Copy backups off the machine.** A backup that lives on the same disk as the instance it protects does not survive a disk failure. Sync `/srv/aida-backups` to off-box storage (object storage, another host, etc.) as part of your own operational practice — this is outside what the scripts do.
+Treat the copy like the database itself: it holds every workspace's tickets, contacts and files, so keep it encrypted and readable only by the people who operate the instance.
+
+**Back up `APP_ENCRYPTION_KEY` separately.** It is not in any set. Credentials stored in Settings (IMAP and SMTP passwords, LLM provider keys) are encrypted with it, so a restore without the same key cannot read them; they would have to be entered again. Keep `BETTER_AUTH_SECRET` with it, or every session ends after a restore.
 
 ## Restore
 
@@ -93,7 +179,7 @@ docker compose up -d
 
 The one-shot `migrate` service runs `prisma migrate deploy` automatically before `app`/`worker` start (it's gated on `db` being healthy, and `app`/`worker` are gated on `migrate` completing successfully) — **no manual migration step is needed**.
 
-**Take a backup first**: `./scripts/backup.sh ./backups` before every upgrade. If something goes wrong, roll back by checking out the previous git tag and restoring the pre-upgrade dump:
+**Take a backup first**: `./scripts/backup.sh` before every upgrade. If something goes wrong, roll back by checking out the previous git tag and restoring the pre-upgrade dump:
 
 ```bash
 git checkout <previous-tag>
@@ -149,7 +235,7 @@ From this release, `app`, `worker` and `migrate` run as the image's built-in `no
    docker compose up -d
    ```
 
-The procedure is idempotent: running steps 5 and 6 again changes nothing and prints the same result. There is deliberately no automatic fix: no root entrypoint, `su-exec` wrapper or init container changes operator data without the operator's consent.
+The procedure is idempotent: running steps 5 and 6 again changes nothing and prints the same result. There is deliberately no automatic fix: no root entrypoint, `su-exec` wrapper or init container changes operator data without the operator's consent. The one root init step AIDA has, `backup-init` (see [Backups](#the-one-time-preparation-backup-init)), touches only the mount point of the backups volume, never `uploads_data`.
 
 ## Logs
 
@@ -158,6 +244,7 @@ docker compose logs -f app       # Next.js request logs, auth events
 docker compose logs -f worker    # pg-boss job execution
 docker compose logs -f caddy     # reverse proxy / TLS
 docker compose logs -f migrate   # one-shot migration output (only runs at startup)
+docker compose logs -f backup    # scheduled backups: next run, results, skip and failure lines
 ```
 
 Normal `worker` output is a recurring cadence of small job-completion lines — a heartbeat job (writes `SystemSetting['heartbeat:lastRunAt']`), the SLA-flag sweep, and the rate-limit-hit cleanup job. If the email channel is configured, you'll also see periodic inbound-poll job runs. A **repeated inbound-poll failure** (IMAP auth error, connection refused, TLS error) in the worker log means the email channel is broken even though the app itself is healthy — check Settings → Email for the last-checked status.
@@ -319,7 +406,7 @@ Every variable in `.env.example`, and nothing else. `Required` means the app wil
 | `BETTER_AUTH_TRUSTED_ORIGINS` | Yes | `http://localhost,https://localhost` | Comma-separated extra origins trusted for CSRF checks. |
 | `DATABASE_URL` | Yes (local dev) | `postgresql://aida:aida@localhost:5432/aida` | Postgres connection string for local (non-Docker) development: host-side tools and `pnpm dev`. Docker Compose never passes this `.env` value to `app`, `worker` or `migrate`: it builds their URL from `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` (`postgresql://<user>:<password>@db:5432/<db>`), unless `AIDA_DATABASE_URL` is set. |
 | `AIDA_DATABASE_URL` | Only for a password with URL-reserved characters | *(unset)* | The URL `app`, `worker` and `migrate` use instead of the one built from `POSTGRES_*`. Leave it unset when `POSTGRES_PASSWORD` is URL-safe (for example `openssl rand -hex 24`). If the password, user or database name contains a character such as `/ @ : # ?` or `%`, generate it with `POSTGRES_USER=... POSTGRES_PASSWORD='...' POSTGRES_DB=... sh scripts/database-url.sh`, which percent-encodes all three and prints one `AIDA_DATABASE_URL=...` line to paste into `.env`. At start-up the three services compare the decoded URL with `POSTGRES_*` and refuse to start on a difference (see [Troubleshooting](#troubleshooting)). |
-| `POSTGRES_USER` | Yes | `aida` | Postgres role used by the `db` service and by `backup.sh`/`restore.sh`. |
+| `POSTGRES_USER` | Yes | `aida` | Postgres role used by the `db` service, the `backup` service (as `PGUSER`) and `restore.sh`. |
 | `POSTGRES_PASSWORD` | Yes | — | Postgres password. The `db` service refuses to start without it. |
 | `POSTGRES_DB` | Yes | `aida` | Database name. |
 | `DOMAIN` | Yes (prod) | `localhost` | Domain Caddy serves. `localhost` uses Caddy's local CA; a real domain triggers Let's Encrypt auto-HTTPS. |
@@ -335,6 +422,11 @@ Every variable in `.env.example`, and nothing else. `Required` means the app wil
 | `DEMO_ADMIN_EMAIL` | No | `admin@demo.aida.test` | Email for the auto-created demo admin account. Only takes effect when `DEMO_MODE=true`. |
 | `DEMO_ADMIN_PASSWORD` | No | `aida-demo-2026` | Password for the auto-created demo admin (and demo agent) account. Only takes effect when `DEMO_MODE=true`. |
 | `DEMO_AGENT_EMAIL` | No | `agent@demo.aida.test` | Email for the auto-created demo agent account ("Sam Rivera"). Only takes effect when `DEMO_MODE=true`. |
+| `BACKUP_ENABLED` | No | `true` | `true` runs the `backup` service's daily backup; `false` keeps the service up without running any. See [Backups](#scheduled-backups-the-backup-service). |
+| `BACKUP_SCHEDULE` | No | `02:00` | Daily backup time, `HH:MM`, 24-hour, **UTC**. An invalid value stops the `backup` service with exit code 2 and a log line naming the format. |
+| `BACKUP_RETENTION` | No | `7` | Number of successful backup sets kept in the `backups_data` volume, 1 to 9999. Older sets are removed after each successful run. |
+| `BACKUP_LEASE_TTL_SECONDS` | No | `900` | Advanced. Lifetime in seconds of the lease a backup holds while deletions of stored files wait; renewed every third of it. A run that cannot renew it aborts (`backup aborted: lease lost`). |
+| `BACKUP_FENCE_WAIT_SECONDS` | No | `300` | Advanced. Seconds a backup waits for a file deletion in progress before it fails with `file fence busy`. |
 
 ### Demo mode
 
