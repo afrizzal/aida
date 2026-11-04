@@ -6,7 +6,7 @@ import { ThreadMessage } from "@/components/tickets/thread-message";
 import { ThreadSystemEvent } from "@/components/tickets/thread-system-event";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { BRANDING_SETTING_KEYS } from "@/lib/branding/settings";
+import { loadPublicBrand } from "@/lib/branding/public-brand";
 import { prisma } from "@/lib/db";
 import { loadStatusPageData } from "@/lib/tickets/status-page-data";
 import { CsatForm } from "./csat-form";
@@ -24,25 +24,17 @@ interface StatusPageProps {
 export default async function StatusPage({ params }: StatusPageProps) {
   const { token } = await params;
 
-  // Unauthenticated route — no session/scopedDb here. Single-org v1 resolution (mirrors the
-  // public intake route's `prisma.organization.findFirst()` precedent).
-  const org = await prisma.organization.findFirst({ select: { id: true, name: true } });
-  const row = org
-    ? await prisma.setting.findFirst({
-        where: { organizationId: org.id, key: BRANDING_SETTING_KEYS.workspaceName },
-      })
-    : null;
-  const brandName = (row?.value ?? "").trim() || org?.name || "AIDA";
-
   // Unauthenticated bearer-token flow — the token IS the authorization. Everything the page
   // shows comes from the one loader: messages are filtered server-side by the shared
   // provenance predicate (INTERNAL notes are never fetched, D-21; per-token provenance after a
   // merge, D-09), and a merged source never exposes its target's number, subject or state.
   const ticket = await loadStatusPageData(token);
 
+  // An invalid token renders no brand row at all (no logo, name, icon or "AIDA"), so the answer
+  // is the same whatever organizations exist (D-10).
   if (!ticket) {
     return (
-      <PublicPageShell maxWidth={720} brandName={brandName}>
+      <PublicPageShell maxWidth={720} brand={null}>
         <div className="space-y-4 text-center">
           <h1 className="text-[18px] font-semibold">We couldn't find that ticket</h1>
           <p className="text-[14px] text-muted-foreground">
@@ -57,8 +49,16 @@ export default async function StatusPage({ params }: StatusPageProps) {
     );
   }
 
+  // A valid token shows the brand of the ticket's own organization (D-10). Unauthenticated route:
+  // no session or scopedDb; organization is a Better Auth model, read with bare prisma.
+  const org = await prisma.organization.findUnique({
+    where: { id: ticket.organizationId },
+    select: { id: true, name: true },
+  });
+  const brand = await loadPublicBrand(org);
+
   return (
-    <PublicPageShell maxWidth={720} brandName={brandName}>
+    <PublicPageShell maxWidth={720} brand={brand}>
       <div className="mb-4 flex items-center justify-between gap-2">
         <h1 className="truncate text-[18px] font-semibold">
           #{ticket.number} {ticket.subject}

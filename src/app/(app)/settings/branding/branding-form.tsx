@@ -1,10 +1,11 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod/v4";
+import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -33,16 +34,23 @@ type FormValues = z.infer<typeof formSchema>;
 interface BrandingFormProps {
   initialWorkspaceName: string;
   orgName: string;
+  /** The current logo's versioned public URL, or null (the preview then shows Sparkles). */
+  logoUrl: string | null;
   canEdit: boolean;
 }
 
 /**
  * Settings > Branding tab's client form — mirrors EmailSettingsForm's/SlaForm's
  * react-hook-form + zod + Server Action + toast shape. D-16 name-only scope: exactly one
- * field. The preview block reproduces sidebar.tsx's brand mark verbatim so an admin sees the
- * result before saving.
+ * field. The preview renders the sidebar's BrandMark (logo or Sparkles, with the name being
+ * typed) so an admin sees the result before saving.
  */
-export function BrandingForm({ initialWorkspaceName, orgName, canEdit }: BrandingFormProps) {
+export function BrandingForm({
+  initialWorkspaceName,
+  orgName,
+  logoUrl,
+  canEdit,
+}: BrandingFormProps) {
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: { workspaceName: initialWorkspaceName },
@@ -88,13 +96,8 @@ export function BrandingForm({ initialWorkspaceName, orgName, canEdit }: Brandin
             )}
           />
 
-          <div className="flex items-center gap-2.5 rounded-md border border-sidebar-border bg-sidebar px-4 py-3">
-            <div className="flex size-7 items-center justify-center rounded-md bg-sidebar-primary shadow-sm">
-              <Sparkles className="size-4 text-sidebar-primary-foreground" />
-            </div>
-            <span className="min-w-0 truncate text-[15px] font-semibold tracking-tight text-sidebar-foreground">
-              {previewName}
-            </span>
+          <div className="flex items-center rounded-md border border-sidebar-border bg-sidebar px-4 py-3">
+            <BrandMark variant="sidebar" name={previewName} logoUrl={logoUrl} />
           </div>
 
           {canEdit ? (

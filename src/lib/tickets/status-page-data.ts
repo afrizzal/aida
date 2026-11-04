@@ -42,6 +42,8 @@ export interface StatusPageMessage {
 
 export interface StatusPageData {
   ticketId: string;
+  /** The ticket's organization: the status page shows this organization's brand (D-10). */
+  organizationId: string;
   number: number;
   subject: string;
   /** The group of the ticket's state; the only state information the public side gets. */
@@ -78,6 +80,7 @@ export async function loadStatusPageData(token: string): Promise<StatusPageData 
       where: { statusToken: token },
       select: {
         id: true,
+        organizationId: true,
         number: true,
         subject: true,
         state: { select: { group: true } },
@@ -114,6 +117,7 @@ export async function loadStatusPageData(token: string): Promise<StatusPageData 
 
     return {
       ticketId: ticket.id,
+      organizationId: ticket.organizationId,
       number: ticket.number,
       subject: ticket.subject,
       group: ticket.state.group,

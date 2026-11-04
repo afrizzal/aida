@@ -1,5 +1,5 @@
 import { PublicPageShell } from "@/components/public/public-page-shell";
-import { BRANDING_SETTING_KEYS } from "@/lib/branding/settings";
+import { loadPublicBrand } from "@/lib/branding/public-brand";
 import { prisma } from "@/lib/db";
 import { RequestForm } from "./request-form";
 
@@ -10,16 +10,12 @@ export const dynamic = "force-dynamic";
 export default async function RequestPage() {
   // Unauthenticated route — no session/scopedDb here. Single-org v1 resolution (mirrors the
   // public intake route's `prisma.organization.findFirst()` precedent).
+  // The brand (name and logo) of that organization, D-10.
   const org = await prisma.organization.findFirst({ select: { id: true, name: true } });
-  const row = org
-    ? await prisma.setting.findFirst({
-        where: { organizationId: org.id, key: BRANDING_SETTING_KEYS.workspaceName },
-      })
-    : null;
-  const brandName = (row?.value ?? "").trim() || org?.name || "AIDA";
+  const brand = await loadPublicBrand(org);
 
   return (
-    <PublicPageShell maxWidth={640} brandName={brandName}>
+    <PublicPageShell maxWidth={640} brand={brand}>
       <RequestForm />
     </PublicPageShell>
   );

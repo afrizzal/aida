@@ -1,11 +1,19 @@
 "use client";
 
-import { CircleAlert, Loader2, Upload } from "lucide-react";
+import { CircleAlert, Loader2, Trash2, Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ChangeEvent, useId, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { LOGO_MIME_TYPES } from "@/lib/branding/settings";
 
 const LOGO_ROUTE = "/api/settings/branding/logo";
@@ -32,6 +40,7 @@ const ERROR_COPY = {
 
 /** Rate-limited, network and every unknown or unexpected answer. */
 const SAVE_FAILED = "The logo could not be saved. Wait a moment and try again.";
+const REMOVE_FAILED = "The logo could not be removed. Wait a moment and try again.";
 
 type RefusalCode = keyof typeof ERROR_COPY;
 
@@ -69,21 +78,22 @@ interface LogoCardProps {
 
 /**
  * Settings > Branding's Logo card (Phase 9 plan 09-07, AIDA-34, D-11, UI-SPEC Surface 1). A
- * file pick uploads at once through the 09-05 route handler (POST, form field `file`); the
- * server's byte sniffing, dimension check and role check are authoritative and its response code
- * picks the Copywriting row. router.refresh() then re-renders the sidebar, the Name-card preview
- * and this card without a full reload.
+ * file pick uploads at once through the 09-05 route handler (POST, form field `file`); Remove
+ * asks first, then sends DELETE. The server's byte sniffing, dimension check and role check are
+ * authoritative and its response code picks the Copywriting row. router.refresh() then
+ * re-renders the sidebar, the Name-card preview and this card without a full reload.
  */
 export function LogoCard({ logoUrl, canEdit }: LogoCardProps) {
   const router = useRouter();
   const helpId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
+  const [pending, setPending] = useState<"upload" | "remove" | null>(null);
   const [refreshing, startRefresh] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [removeOpen, setRemoveOpen] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
-  const busy = uploading || refreshing;
-  const uploadLabel = logoUrl ? "Replace logo" : "Upload logo";
+  const busy = pending !== null || refreshing;
 
   async function upload(file: File) {
     const refusal = precheck(file);
@@ -91,7 +101,7 @@ export function LogoCard({ logoUrl, canEdit }: LogoCardProps) {
       setError(ERROR_COPY[refusal]);
       return;
     }
-    setUploading(true);
+    setPending("upload");
     try {
       const body = new FormData();
       body.append("file", file);
@@ -107,7 +117,7 @@ export function LogoCard({ logoUrl, canEdit }: LogoCardProps) {
     } catch {
       setError(SAVE_FAILED);
     } finally {
-      setUploading(false);
+      setPending(null);
     }
   }
 
@@ -121,6 +131,33 @@ export function LogoCard({ logoUrl, canEdit }: LogoCardProps) {
       // Reset after every attempt, so the same file can be picked again.
       input.value = "";
     }
+  }
+
+  async function confirmRemove() {
+    setPending("remove");
+    setRemoveError(null);
+    try {
+      const response = await fetch(LOGO_ROUTE, { method: "DELETE" });
+      if (!response.ok) {
+        setRemoveError(REMOVE_FAILED);
+        return;
+      }
+      setRemoveOpen(false);
+      setError(null);
+      toast.success("Logo removed.");
+      startRefresh(() => router.refresh());
+    } catch {
+      setRemoveError(REMOVE_FAILED);
+    } finally {
+      setPending(null);
+    }
+  }
+
+  function onRemoveOpenChange(open: boolean) {
+    // The dialog stays open while the removal is pending; its result decides.
+    if (pending === "remove") return;
+    if (open) setRemoveError(null);
+    setRemoveOpen(open);
   }
 
   // Card is flex-col with a 16px gap (--card-spacing): the contract's space-y-4 stack.
@@ -167,13 +204,25 @@ export function LogoCard({ logoUrl, canEdit }: LogoCardProps) {
               aria-describedby={helpId}
               onClick={() => inputRef.current?.click()}
             >
-              {uploading ? (
+              {pending === "upload" ? (
                 <Loader2 className="mr-2 size-4 animate-spin" />
               ) : (
                 <Upload className="mr-2 size-4" />
               )}
-              {uploading ? "Uploading…" : uploadLabel}
+              {pending === "upload" ? "Uploading…" : logoUrl ? "Replace logo" : "Upload logo"}
             </Button>
+            {logoUrl ? (
+              <Button
+                type="button"
+                variant="ghost"
+                className="text-destructive"
+                disabled={busy}
+                onClick={() => onRemoveOpenChange(true)}
+              >
+                <Trash2 className="mr-2 size-4" />
+                Remove logo
+              </Button>
+            ) : null}
           </div>
           {error ? (
             <div
@@ -184,6 +233,40 @@ export function LogoCard({ logoUrl, canEdit }: LogoCardProps) {
               {error}
             </div>
           ) : null}
+
+          <Dialog open={removeOpen} onOpenChange={onRemoveOpenChange}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Remove the workspace logo?</DialogTitle>
+                <DialogDescription>
+                  The sidebar and your public pages will show the default icon next to the workspace
+                  name. You can upload a logo again at any time.
+                </DialogDescription>
+                {removeError ? (
+                  <p role="alert" className="text-[13px] text-destructive">
+                    {removeError}
+                  </p>
+                ) : null}
+              </DialogHeader>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  disabled={pending === "remove"}
+                  onClick={() => onRemoveOpenChange(false)}
+                >
+                  Keep logo
+                </Button>
+                <Button
+                  variant="destructive"
+                  disabled={pending === "remove"}
+                  onClick={confirmRemove}
+                >
+                  {pending === "remove" ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+                  {pending === "remove" ? "Removing…" : "Remove logo"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </>
       ) : (
         <p className="text-[13px] text-muted-foreground">

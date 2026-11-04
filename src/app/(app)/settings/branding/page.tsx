@@ -34,6 +34,7 @@ export default async function BrandingSettingsPage() {
       <BrandingForm
         initialWorkspaceName={branding.workspaceName}
         orgName={org?.name ?? "AIDA"}
+        logoUrl={logoUrl}
         canEdit={canEdit}
       />
       <LogoCard logoUrl={logoUrl} canEdit={canEdit} />
