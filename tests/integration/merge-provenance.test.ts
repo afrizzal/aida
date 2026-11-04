@@ -370,12 +370,16 @@ describe("two status links of one contact (D-09, D-10)", () => {
         "messages",
         "group",
         "number",
+        // The source's own organization, for the page's brand (Phase 9 plan 09-07, D-10). A merge
+        // stays inside one organization, so it names nothing about the target.
+        "organizationId",
         "subject",
         "ticketId",
       ].sort(),
     );
     expect(d).toMatchObject({
       ticketId: s.id,
+      organizationId: orgId,
       number: source.number,
       subject: source.subject,
       group: "CLOSED",
