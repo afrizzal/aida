@@ -47,6 +47,8 @@ desktop.ini
 # Docker volumes (local)
 /pgdata/
 /tests/integration/egress-fixtures/.dns-log/
+# Repo-local test directories bind-mounted into test containers (Colima shares only $HOME)
+.test-tmp/
 
 # Claude Code local settings (may contain sensitive paths or keys)
 .claude/settings.json
