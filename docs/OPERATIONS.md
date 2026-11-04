@@ -331,7 +331,7 @@ Every variable in `.env.example`, and nothing else. `Required` means the app wil
 | `RATE_LIMIT_PEPPER` | Yes | — | Salts the per-IP hash used by the public-intake rate limiter (raw IPs are never stored). Generate with `openssl rand -base64 32`. Without it the public routes (request form, status-page follow-up, CSAT, status-page attachments) answer 500 rather than store an unsalted hash. If it is missing or still the `.env.example` placeholder, the app logs one line at start-up naming `RATE_LIMIT_PEPPER`; it still starts. |
 | `TRUSTED_PROXY_HOPS` | No | *(blank, meaning 0)* | Advanced. Number of trusted proxy addresses at the right end of X-Forwarded-For, 0 to 10. Leave blank behind the shipped Caddy; set only with a CDN in front of Caddy, see [Client IP and reverse proxies](#client-ip-and-reverse-proxies). An invalid value puts every client in one shared rate-limit bucket. |
 | `APP_ENCRYPTION_KEY` | Yes (once credentials saved) | — | AES-256-GCM key encrypting IMAP/SMTP (and LLM) secrets at rest. The app boots without it, but saving any credential in Settings requires it. Generate with `openssl rand -base64 32`. **Must be preserved across restores/migrations** — losing or changing this key makes every previously stored credential permanently undecryptable. |
-| `DEMO_MODE` | No | *(blank)* | When exactly `true` **and** the database has zero tickets, the app auto-creates a demo org/admin/agent and loads the fictional demo dataset at boot. **Never enable this on an internet-facing instance** — the credentials below are documented publicly (README, this file). Leave blank for a normal install. |
+| `DEMO_MODE` | No | *(blank)* | When exactly `true`, the app seeds the demo org/admin/agent and the fictional demo dataset at boot **only into an empty database** (no organization and no user). A database holding the complete demo is left as it is; any other database gets one refusal line in the log, nothing is written, and the app starts normally. See [Demo mode](#demo-mode). **Never enable this on an internet-facing instance** — the credentials below are documented publicly (README, this file). Leave blank for a normal install. |
 | `DEMO_ADMIN_EMAIL` | No | `admin@demo.aida.test` | Email for the auto-created demo admin account. Only takes effect when `DEMO_MODE=true`. |
 | `DEMO_ADMIN_PASSWORD` | No | `aida-demo-2026` | Password for the auto-created demo admin (and demo agent) account. Only takes effect when `DEMO_MODE=true`. |
 | `DEMO_AGENT_EMAIL` | No | `agent@demo.aida.test` | Email for the auto-created demo agent account ("Sam Rivera"). Only takes effect when `DEMO_MODE=true`. |
@@ -340,11 +340,31 @@ Every variable in `.env.example`, and nothing else. `Required` means the app wil
 
 Demo mode (AIDA-22) turns a fresh `docker compose up` into an instantly explorable, fully populated helpdesk — no shell, no `pnpm db:seed` command, just one environment variable.
 
-**Turning it on:** set `DEMO_MODE=true` in `.env` (optionally override `DEMO_ADMIN_EMAIL` / `DEMO_ADMIN_PASSWORD` / `DEMO_AGENT_EMAIL`) before the **first** `docker compose up` against a fresh database. On boot, `instrumentation.register()` logs a loud `[demo] DEMO MODE IS ACTIVE...` warning, then — only if the workspace has zero tickets — creates the demo org, a demo admin, a demo agent, and seeds ~30 tickets, contacts, KB articles, CSAT responses, and three completed AIDA Insight runs.
+**Turning it on:** set `DEMO_MODE=true` in `.env` (optionally override `DEMO_ADMIN_EMAIL` / `DEMO_ADMIN_PASSWORD` / `DEMO_AGENT_EMAIL`) before the **first** `docker compose up` against a fresh database. On boot, `instrumentation.register()` logs a loud `[demo] DEMO MODE IS ACTIVE...` warning, then checks the database and creates the demo org, a demo admin, a demo agent, and seeds ~30 tickets, contacts, KB articles, CSAT responses, and three completed AIDA Insight runs, only if the database is empty. The log line names the admin email and never a password; the password is the `DEMO_ADMIN_PASSWORD` you set (or the documented default).
 
-**It only fires once, on an empty database.** If the workspace already has tickets (a real install, or a demo that already seeded), `DEMO_MODE=true` is a safe no-op — the boot log shows `[demo] Demo data already present (N tickets) — skipping seed.` instead of seeding again.
+**It seeds only an empty database.** Before any write, the demo boot and `pnpm db:seed` classify the tenant data (organizations and users; infrastructure rows such as migrations, the job queue, `SystemSetting` and `RateLimitHit` never count):
 
-**Resetting a demo instance:** `docker compose down -v` (this **deletes all data**, including the uploads volume) then `docker compose up` again with `DEMO_MODE=true` still set — seeding starts fresh against the new, empty database.
+| Database holds | `DEMO_MODE` boot | `pnpm db:seed` |
+|---|---|---|
+| No organization and no user | Seeds the demo | Seeds the demo, exit 0 |
+| The complete demo: one organization carrying the demo completion marker, and only the configured demo accounts | Leaves it as it is (`[demo] The complete demo workspace is already present; nothing written.`) | Prints that it is already seeded, exit 0 |
+| An incomplete demo: demo accounts only, no completion marker (a seed that stopped part-way) | Refuses with one log line, writes nothing | Refuses, writes nothing, exit 1 |
+| Anything else (a real workspace, a non-demo user, a second organization) | Refuses with one log line, writes nothing | Refuses, writes nothing, exit 1 |
+
+A refusal never deletes, renames or changes anything, and the demo boot never stops the app from starting: every outcome, and every error, ends in one log line and a normal start. The seed CLI, the demo boot and the headless admin bootstrap take the same database lock, so two of them started together cannot both create a workspace; the `/setup` wizard and user sign-up do not take that lock.
+
+**`DEMO_MODE` together with `ADMIN_EMAIL` and `ADMIN_PASSWORD`.** The headless admin bootstrap runs first at boot. On an empty database it creates a real workspace for `ADMIN_EMAIL`, and the demo boot then finds a workspace that is not the demo and refuses. Set one or the other, not both.
+
+**The seed's writes are not one transaction.** The demo accounts, the organization and each ticket commit on their own, and the completion marker is written last. A seed that stops part-way (a crash, a killed container, a database restart) leaves those rows and no marker; from then on both the boot and `pnpm db:seed` refuse that database as an incomplete demo.
+
+**Recovering from an incomplete or unwanted demo** is a manual step, by design; nothing in AIDA deletes it for you:
+
+1. Stop the writers: `docker compose stop app worker`.
+2. Keep the database and the uploads as they are, for investigation. Do not delete them.
+3. Point the demo at a new, separate database: for example a separate Compose project with its own volumes (`docker compose -p <new-project-name> up -d`, run from a separate copy of this directory with its own `.env`; it needs the ports the old project's `caddy` service holds, so stop that service first), or a new, empty database on your Postgres server set in `AIDA_DATABASE_URL`.
+4. Let `migrate` apply the migrations to the new database, then seed it: start the stack with `DEMO_MODE=true`, or run `pnpm db:seed` against it.
+
+Never try to make AIDA accept the old database by adding the completion marker by hand: the marker is only trustworthy when the seed itself wrote it last.
 
 **The seeded AI results are stored data, not live model output.** Every seeded triage tag, drafted-reply audit row, and Insight run is stamped `provider: "demo"` / `model: "demo-seed"` — the UI renders it exactly like a real AI result would, but it was written directly by the seed script so every AI surface looks populated even with **zero LLM configured**. Turning on a real provider in Settings → AI does not touch this seeded data; it only affects new, live AI actions (Generate draft, Generate insights, Re-run triage) from that point forward.
 

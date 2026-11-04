@@ -73,8 +73,8 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       ADMIN_NAME: ${ADMIN_NAME:-}
-      # Demo mode (AIDA-22): when DEMO_MODE=true AND the database has no tickets, the app
-      # auto-creates a demo org/admin/agent and loads the fictional demo dataset at boot.
+      # Demo mode (AIDA-22, AIDA-37): DEMO_MODE=true seeds the demo only into an empty database (no
+      # organization, no user); any other database gets one refusal log line, no write, and a normal start.
       # NEVER enable this on an internet-facing instance — the credentials are documented publicly.
       DEMO_MODE: ${DEMO_MODE:-}
       DEMO_ADMIN_EMAIL: ${DEMO_ADMIN_EMAIL:-}

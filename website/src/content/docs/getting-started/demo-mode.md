@@ -9,10 +9,10 @@ see are live AI and which are pre-recorded data.
 
 ## What demo mode is
 
-Demo mode is a single environment variable, `DEMO_MODE=true`, checked once at boot. On a **fresh
-database** (zero tickets), it auto-creates a demo organization plus a demo admin and demo agent
-account, then loads a fictional support dataset — so `docker compose up` gives you an instantly
-explorable, realistic helpdesk instead of a blank one.
+Demo mode is a single environment variable, `DEMO_MODE=true`, checked once at boot. On an **empty
+database** (no organization and no user), it auto-creates a demo organization plus a demo admin and
+demo agent account, then loads a fictional support dataset — so `docker compose up` gives you an
+instantly explorable, realistic helpdesk instead of a blank one.
 
 ## What gets seeded
 
@@ -65,17 +65,38 @@ That has two honest consequences:
   nothing to retrieve until you configure an embedding provider and run **Re-embed all** from
   Settings → AI Features.
 
-## Resetting the demo
+## When demo mode seeds, skips or refuses
 
-```bash
-docker compose down -v
-docker compose up -d
-```
+Before it writes anything, the demo boot (and `pnpm db:seed`, which shares the same check) looks at
+the organizations and users in the database. Migrations, the job queue and other infrastructure
+rows never count.
 
-`down -v` removes the database and uploads volumes entirely, so the next boot seeds fresh. The
-seed refuses to run — and logs that it's skipping — against a database that already has tickets,
-whether that's a real install or a demo that already seeded. It will never duplicate data or
-overwrite a real instance's tickets.
+| Database holds | What demo mode does |
+|---|---|
+| No organization and no user | Seeds the demo |
+| The complete demo (one organization carrying the demo completion marker, only the demo accounts) | Leaves it as it is |
+| An incomplete demo (demo accounts, no completion marker) | Refuses with one log line and writes nothing |
+| Anything else, such as a real workspace | Refuses with one log line and writes nothing |
+
+A refusal never deletes or changes anything, and the app still starts normally. If you also set
+`ADMIN_EMAIL` and `ADMIN_PASSWORD`, the headless admin bootstrap runs first and creates a real
+workspace, so demo mode then refuses: set one or the other.
+
+## Starting the demo over
+
+The seed's writes are not one transaction; the completion marker is written last. A seed that
+stops part-way leaves an incomplete demo that both demo mode and `pnpm db:seed` refuse from then
+on. AIDA never deletes it for you. To start over:
+
+1. Stop the writers: `docker compose stop app worker`.
+2. Keep the old database and uploads as they are, for investigation.
+3. Point the demo at a new, separate database, for example a separate Compose project with its
+   own volumes, or a new, empty database set in `AIDA_DATABASE_URL`.
+4. Let the migrations run on the new database and seed it (boot with `DEMO_MODE=true`, or run
+   `pnpm db:seed` against it).
+
+Never add the completion marker by hand to make AIDA accept the old database. The full procedure
+is in `docs/OPERATIONS.md`, section "Demo mode".
 
 :::caution
 **Never enable demo mode on an internet-facing instance.** The demo admin and agent credentials
