@@ -18,7 +18,9 @@
 # (marker equals `uploads:volume-id`); exclusive file fence; lease; lease renewal in the
 # background; dump; list of archivable files; archive; checksums from the archive; every file the
 # dump references (Attachment, TaskAttachment, the `branding:logo` Setting) must be in the
-# archive; manifest; validation; publish; status `backup:lastRun`. On every exit path the trap
+# archive; manifest; validation; publish; retention (D-03: the BACKUP_RETENTION newest sets are
+# kept, older sets and stale `.tmp-<setId>` directories are removed, under the owned lease);
+# status `backup:lastRun`. On every exit path the trap
 # stops the renewal, records a failed status when none was recorded, releases its own lease and
 # the fence, and removes its own .tmp-<setId> unless it was published.
 #
@@ -26,6 +28,7 @@
 #
 # Settings (environment):
 #   BACKUP_DIR (default /backups), UPLOADS_DIR (default /data/uploads),
+#   BACKUP_RETENTION (7, the number of successful sets kept, 1 to 9999),
 #   BACKUP_LEASE_TTL_SECONDS (900), BACKUP_FENCE_WAIT_SECONDS (300),
 #   BACKUP_DUMP_LOCK_TIMEOUT (300s), BACKUP_APP_VERSION_FILE
 #   (default /opt/aida-backup-meta/package.json; its top-level "version", else "unknown").
@@ -40,9 +43,12 @@ trap '' PIPE
 BACKUP_LIB_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 # shellcheck source=scripts/backup/lib.sh
 . "$BACKUP_LIB_DIR/lib.sh"
+AIDA_BACKUP_LIB=$BACKUP_LIB_DIR/lib.sh
+export AIDA_BACKUP_LIB
 
 BACKUP_DIR=${BACKUP_DIR:-/backups}
 UPLOADS_DIR=${UPLOADS_DIR:-/data/uploads}
+BACKUP_RETENTION=${BACKUP_RETENTION:-7}
 BACKUP_LEASE_TTL_SECONDS=${BACKUP_LEASE_TTL_SECONDS:-900}
 BACKUP_FENCE_WAIT_SECONDS=${BACKUP_FENCE_WAIT_SECONDS:-300}
 BACKUP_DUMP_LOCK_TIMEOUT=${BACKUP_DUMP_LOCK_TIMEOUT:-300s}
@@ -93,10 +99,10 @@ on_exit() {
   fi
   fence_close
   if [ "$PUBLISHED" = 0 ] && [ -n "$SET_TMP" ] && [ -d "$SET_TMP" ]; then
-    rm -rf -- "$SET_TMP"
+    rm -r -- "$SET_TMP" </dev/null 2>/dev/null
   fi
   if [ -n "$RUN_TMP" ] && [ -d "$RUN_TMP" ]; then
-    rm -rf -- "$RUN_TMP"
+    rm -r -- "$RUN_TMP" </dev/null 2>/dev/null
   fi
   exit "$_rc"
 }
@@ -211,12 +217,16 @@ trap on_exit EXIT
 trap 'fail unknown' INT TERM HUP
 trap on_lease_lost USR1
 
-for _n in "$BACKUP_LEASE_TTL_SECONDS" "$BACKUP_FENCE_WAIT_SECONDS"; do
+for _n in "$BACKUP_LEASE_TTL_SECONDS" "$BACKUP_FENCE_WAIT_SECONDS" "$BACKUP_RETENTION"; do
   is_uint "$_n" && [ "$_n" -ge 1 ] || {
     log 'invalid setting'
     fail unknown
   }
 done
+[ "${#BACKUP_RETENTION}" -le 4 ] || {
+  log 'invalid setting'
+  fail unknown
+}
 printf '%s\n' "$BACKUP_DUMP_LOCK_TIMEOUT" | grep -Eqx '[0-9]{1,6}(ms|s|min)?' || {
   log 'invalid setting'
   fail unknown
@@ -381,8 +391,7 @@ fi
 AIDA_SET_TMP=$SET_TMP
 AIDA_SET_FINAL=$SET_FINAL
 AIDA_SET_ID=$SET_ID
-AIDA_BACKUP_LIB=$BACKUP_LIB_DIR/lib.sh
-export AIDA_SET_TMP AIDA_SET_FINAL AIDA_SET_ID AIDA_BACKUP_LIB
+export AIDA_SET_TMP AIDA_SET_FINAL AIDA_SET_ID
 cat >"$RUN_TMP/publish.sh" <<'EOF'
 set -eu
 [ -d "$AIDA_SET_TMP" ] && [ ! -L "$AIDA_SET_TMP" ] || exit 1
@@ -412,6 +421,19 @@ if [ "$_pub" -ne 0 ]; then
   step_failed storage
 fi
 PUBLISHED=1
+
+# Retention under the owned lease, after publish and before the status write (D-03, P6, Q8). A
+# failed removal is logged; the published set stands.
+set +e
+retention "$SET_ID" "$BACKUP_RETENTION"
+_ret=$?
+set -e
+if [ "$_ret" -eq 4 ]; then
+  on_lease_lost
+fi
+if [ "$_ret" -ne 0 ]; then
+  log 'backup retention incomplete'
+fi
 
 set +e
 fenced_action "$SET_ID" "$RUN_TMP/status.sh"

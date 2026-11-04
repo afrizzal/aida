@@ -285,6 +285,72 @@ SQL
   esac
 }
 
+# retention_prune <dir> <keep> <current setId>: the body of one retention pass (D-03), run only
+# inside fenced_action (see retention). Keeps the <keep> newest set directories, newest by name
+# (the set id starts with its UTC time, so name order is time order), and removes every older one
+# whole. Removes every `.tmp-<setId>` directory whose holder file does not name the current run.
+# Only names that pass valid_set_id, as plain directories (no link), are ever removed, with
+# `rm -r --`; every other entry (`.restore-lock`, `.restore-staging-*`, `status-unrecorded-*`,
+# anything else) is left alone. Returns 1 when a removal failed.
+retention_prune() {
+  _rp_dir=$1
+  _rp_keep=$2
+  _rp_self=$3
+  is_uint "$_rp_keep" && [ "$_rp_keep" -ge 1 ] || return 1
+  valid_set_id "$_rp_self" || return 1
+  [ -d "$_rp_dir" ] && [ ! -L "$_rp_dir" ] || return 1
+  _rp_sets=''
+  for _rp_path in "$_rp_dir"/*; do
+    _rp_name=${_rp_path##*/}
+    if valid_set_id "$_rp_name" && [ -d "$_rp_path" ] && [ ! -L "$_rp_path" ]; then
+      _rp_sets="$_rp_sets$_rp_name
+"
+    fi
+  done
+  _rp_failed=0
+  _rp_i=0
+  # Validated names only: no space, glob or newline can reach the word splitting below.
+  for _rp_name in $(printf '%s' "$_rp_sets" | sort -r); do
+    _rp_i=$((_rp_i + 1))
+    if [ "$_rp_i" -gt "$_rp_keep" ] && [ "$_rp_name" != "$_rp_self" ]; then
+      rm -r -- "$_rp_dir/$_rp_name" </dev/null 2>>"${BACKUP_ERRLOG:-/dev/null}" || _rp_failed=1
+    fi
+  done
+  for _rp_path in "$_rp_dir"/.tmp-*; do
+    _rp_name=${_rp_path##*/}
+    _rp_id=${_rp_name#.tmp-}
+    valid_set_id "$_rp_id" || continue
+    [ -d "$_rp_path" ] && [ ! -L "$_rp_path" ] || continue
+    _rp_holder=''
+    if [ -f "$_rp_path/holder" ] && [ ! -L "$_rp_path/holder" ]; then
+      _rp_holder=$(head -c 64 "$_rp_path/holder" 2>/dev/null) || _rp_holder=''
+    fi
+    [ "$_rp_holder" != "$_rp_self" ] || continue
+    rm -r -- "$_rp_path" </dev/null 2>>"${BACKUP_ERRLOG:-/dev/null}" || _rp_failed=1
+  done
+  [ "$_rp_failed" = 0 ]
+}
+
+# retention <holder> <keep>: one retention pass over BACKUP_DIR through fenced_action, so only the
+# owner of an unexpired lease prunes (no live run's temporary directory is removed). Needs
+# RUN_TMP (the action script lives there) and AIDA_BACKUP_LIB (this file). Returns what
+# fenced_action returns.
+retention() {
+  valid_set_id "$1" || return 1
+  is_uint "$2" && [ "$2" -ge 1 ] || return 1
+  [ -n "${RUN_TMP:-}" ] && [ -d "$RUN_TMP" ] && [ -n "${AIDA_BACKUP_LIB:-}" ] || return 1
+  AIDA_RETENTION_DIR=${BACKUP_DIR:-/backups}
+  AIDA_RETENTION_KEEP=$2
+  AIDA_RETENTION_SELF=$1
+  export AIDA_RETENTION_DIR AIDA_RETENTION_KEEP AIDA_RETENTION_SELF AIDA_BACKUP_LIB
+  cat >"$RUN_TMP/retention.sh" <<'EOF' || return 1
+set -eu
+. "$AIDA_BACKUP_LIB"
+retention_prune "$AIDA_RETENTION_DIR" "$AIDA_RETENTION_KEEP" "$AIDA_RETENTION_SELF"
+EOF
+  fenced_action "$1" "$RUN_TMP/retention.sh"
+}
+
 # record_status <succeeded|failed> <setId|-> <category|->: upserts `backup:lastRun` with exactly
 # the keys finishedAt, result, setId and category (D-04). Nothing else goes into the record.
 record_status() {
