@@ -674,3 +674,301 @@ describe("privacy of the record and the output (D-04, T-09-19a)", () => {
     CASE_TIMEOUT,
   );
 });
+
+// ---------------------------------------------------------------------------------------------
+// Task 3: overlapping and manual runs, the restore lock (Q3, Q8, the AIDA-33 overlap edge)
+
+const HOLDER_PATTERN = /^restore-[0-9a-f]{32}$/;
+
+/** Calls one lib.sh function in the main runner with BACKUP_DIR at the case's backups directory. */
+async function libCall(c: Case, fn: string, ...args: string[]): Promise<RunResult> {
+  return activeRunner().exec(["sh", "-c", `. /opt/aida-backup/lib.sh; ${fn} "$@"`, "sh", ...args], {
+    BACKUP_DIR: `/backups/${c.backupsName}`,
+  });
+}
+
+async function newHolder(c: Case): Promise<string> {
+  const result = await libCall(c, "new_restore_holder");
+  expect(result.exitCode, result.stderr).toBe(0);
+  const holder = result.stdout.trim();
+  expect(holder).toMatch(HOLDER_PATTERN);
+  return holder;
+}
+
+async function lockFiles(c: Case): Promise<{ holder: string; heartbeat: string }> {
+  const dir = path.join(c.backups, ".restore-lock");
+  return {
+    holder: await readFile(path.join(dir, "holder"), "utf8"),
+    heartbeat: await readFile(path.join(dir, "heartbeat"), "utf8"),
+  };
+}
+
+async function acquireRestoreLock(c: Case): Promise<string> {
+  const holder = await newHolder(c);
+  const result = await libCall(c, "restore_lock_acquire", holder);
+  expect(result.exitCode, result.stderr).toBe(0);
+  return holder;
+}
+
+async function releaseRestoreLock(c: Case, holder: string): Promise<void> {
+  const result = await libCall(c, "restore_lock_release", holder);
+  expect(result.exitCode, result.stderr).toBe(0);
+  expect(await entries(c.backups)).not.toContain(".restore-lock");
+}
+
+async function leaseRaw(): Promise<string | null> {
+  const row = await prisma.systemSetting.findUnique({ where: { key: "backup:lease" } });
+  return row ? row.value : null;
+}
+
+describe("overlapping and manual runs (AIDA-33 overlap edge)", () => {
+  it(
+    "overlapping: a second run while the first waits at after-dump exits 3 'backup skipped: lease held'; the first run's temp directory and lease survive and the first run then publishes",
+    async () => {
+      const c = await newCase();
+      const earlier = expectSucceeded(await runIn(c).done);
+      const earlierStatus = await lastRunRaw();
+      await nextSecond();
+
+      const first = runIn(c, { pauseAt: ["after-dump"] });
+      await first.waitReached("after-dump");
+      const [tmp] = await tmpDirs(c);
+      expect(tmp).toMatch(/^\.tmp-/);
+      const firstId = (tmp as string).slice(".tmp-".length);
+      const holderBefore = await readFile(path.join(c.backups, tmp as string, "holder"), "utf8");
+      const leaseBefore = await leaseRaw();
+      expect(JSON.parse(leaseBefore as string)).toMatchObject({ holder: firstId });
+
+      const second = await runIn(c).done;
+      expect(second.exitCode, second.stdout).toBe(3);
+      expect(second.stdout).toBe("[backup] backup skipped: lease held\n");
+      expect(second.stderr).toBe("");
+      expect(await publishedSets(c)).toEqual([earlier]);
+      expect(await tmpDirs(c)).toEqual([tmp]);
+      expect(await readFile(path.join(c.backups, tmp as string, "holder"), "utf8")).toBe(
+        holderBefore,
+      );
+      expect(await leaseRaw()).toBe(leaseBefore);
+      expect(await lastRunRaw()).toBe(earlierStatus);
+      expect(await unrecordedFiles(c)).toEqual([]);
+
+      await first.go("after-dump");
+      const result = await first.done;
+      expect(expectSucceeded(result)).toBe(firstId);
+      expect(await publishedSets(c)).toEqual([earlier, firstId]);
+      expect(await tmpDirs(c)).toEqual([]);
+      expect(await lastRun()).toEqual({
+        finishedAt: expect.stringMatching(FINISHED_AT),
+        result: "succeeded",
+        setId: firstId,
+        category: null,
+      });
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "manual run: a run in a second runner container during a scheduled run (same database and directories) exits 3 and touches neither the sets nor the first run's state",
+    async () => {
+      const c = await newCase();
+      const earlier = expectSucceeded(await runIn(c).done);
+      const earlierStatus = await lastRunRaw();
+      await nextSecond();
+      const manualRunner = await startBackupRunner(runnerOptions);
+      try {
+        const scheduled = runIn(c, { pauseAt: ["after-list"] });
+        await scheduled.waitReached("after-list");
+        const [tmp] = await tmpDirs(c);
+        const scheduledId = (tmp as string).slice(".tmp-".length);
+        const leaseBefore = await leaseRaw();
+
+        const manual = await runIn(c, { on: manualRunner }).done;
+        expect(manual.exitCode, manual.stdout).toBe(3);
+        expect(manual.stdout).toBe("[backup] backup skipped: lease held\n");
+        expect(manual.stderr).toBe("");
+        expect(await publishedSets(c)).toEqual([earlier]);
+        expect(await tmpDirs(c)).toEqual([tmp]);
+        expect(await leaseRaw()).toBe(leaseBefore);
+        expect(await lastRunRaw()).toBe(earlierStatus);
+        expect(await unrecordedFiles(c)).toEqual([]);
+
+        await scheduled.go("after-list");
+        expect(expectSucceeded(await scheduled.done)).toBe(scheduledId);
+        expect(await publishedSets(c)).toEqual([earlier, scheduledId]);
+        expect(await tmpDirs(c)).toEqual([]);
+      } finally {
+        await manualRunner.stop();
+      }
+    },
+    CASE_TIMEOUT,
+  );
+});
+
+describe("restore lock (Q3, backup side)", () => {
+  it(
+    "restore in progress: a .restore-lock present before the start makes the run exit 3 'backup skipped: restore in progress' with sets, status and locks untouched",
+    async () => {
+      const c = await newCase();
+      const earlier = expectSucceeded(await runIn(c).done);
+      const earlierStatus = await lastRunRaw();
+      const stale = `.tmp-${plantedSetId(5)}`;
+      await plantDir(c, stale, { holder: `${plantedSetId(5)}\n` });
+      // An expired lease of another holder: a run that took the lease would replace and then
+      // delete this row.
+      await prisma.$executeRaw`
+        INSERT INTO "SystemSetting" (id, key, value, "updatedAt")
+        VALUES (gen_random_uuid()::text, 'backup:lease',
+                '{"holder":"20200101T000000Z-0a0a0a","expiresAt":"2020-01-01T00:00:00.000Z"}', now())`;
+      const leaseBefore = await leaseRaw();
+      const holder = await acquireRestoreLock(c);
+      const lockBefore = await lockFiles(c);
+      const before = await entries(c.backups);
+
+      const result = await runIn(c, { env: { BACKUP_RETENTION: "1" } }).done;
+      expect(result.exitCode, result.stdout).toBe(3);
+      expect(result.stdout).toBe("[backup] backup skipped: restore in progress\n");
+      expect(result.stderr).toBe("");
+      expect(await entries(c.backups)).toEqual(before);
+      expect(await publishedSets(c)).toEqual([earlier]);
+      expect(await tmpDirs(c)).toEqual([stale]);
+      expect(await lastRunRaw()).toBe(earlierStatus);
+      expect(await leaseRaw()).toBe(leaseBefore);
+      expect(await lockFiles(c)).toEqual(lockBefore);
+      expect(await fence.backendsNamed(BACKUP_FENCE)).toEqual([]);
+      expect(await unrecordedFiles(c)).toEqual([]);
+
+      await prisma.$executeRaw`DELETE FROM "SystemSetting" WHERE key = 'backup:lease'`;
+      await releaseRestoreLock(c, holder);
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "restore lock mid-run after-fence: a lock taken while the run waits at after-fence (lease row intact) makes it exit 3 with nothing published, no retention, backup:lastRun unchanged and no unrecorded file",
+    async () => {
+      const c = await newCase();
+      await seedEarlierStatus();
+      const older = plantedSetId(6);
+      const stale = `.tmp-${plantedSetId(7)}`;
+      await plantDir(c, older, { "manifest.json": "{}\n" });
+      await plantDir(c, stale, { holder: `${plantedSetId(7)}\n` });
+
+      const run = runIn(c, { pauseAt: ["after-fence"], env: { BACKUP_RETENTION: "1" } });
+      await run.waitReached("after-fence");
+      const lease = JSON.parse((await leaseRaw()) as string) as { holder: string };
+      expect(lease.holder).toMatch(SET_ID_PATTERN);
+      const holder = await acquireRestoreLock(c);
+      const lockBefore = await lockFiles(c);
+
+      await run.go("after-fence");
+      const result = await run.done;
+      expect(result.exitCode, result.stdout).toBe(3);
+      expect(result.stdout).toContain("[backup] backup skipped: restore in progress");
+      expect(result.stdout).not.toContain("backup succeeded");
+      expect(result.stdout).not.toContain("backup failed");
+      expect(result.stderr).toBe("");
+      expect(await publishedSets(c)).toEqual([older]);
+      // No retention: the older set and the stale temp directory are still there; the run's
+      // own temp directory is gone.
+      expect(await entries(c.backups)).toEqual([older, stale, ".restore-lock"].sort());
+      expect(await lastRunRaw()).toBe(EARLIER_STATUS);
+      expect(await unrecordedFiles(c)).toEqual([]);
+      expect(await lockFiles(c)).toEqual(lockBefore);
+      expect(await leaseRaw()).toBeNull();
+
+      await releaseRestoreLock(c, holder);
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "restore lock mid-run after-archive: a lock taken and the backup:lease row deleted (as a database replacement does) while the run waits at after-archive gives the same outcome",
+    async () => {
+      const c = await newCase();
+      await seedEarlierStatus();
+      const older = plantedSetId(8);
+      const stale = `.tmp-${plantedSetId(9)}`;
+      await plantDir(c, older, { "manifest.json": "{}\n" });
+      await plantDir(c, stale, { holder: `${plantedSetId(9)}\n` });
+
+      const run = runIn(c, { pauseAt: ["after-archive"], env: { BACKUP_RETENTION: "1" } });
+      await run.waitReached("after-archive");
+      expect(await tmpDirs(c)).toHaveLength(2);
+      const holder = await acquireRestoreLock(c);
+      const lockBefore = await lockFiles(c);
+      await prisma.$executeRaw`DELETE FROM "SystemSetting" WHERE key = 'backup:lease'`;
+
+      await run.go("after-archive");
+      const result = await run.done;
+      expect(result.exitCode, result.stdout).toBe(3);
+      expect(result.stdout).toMatch(
+        /\[backup\] backup skipped: restore in progress|\[backup\] backup aborted: lease lost/,
+      );
+      expect(result.stdout).not.toContain("backup succeeded");
+      expect(result.stdout).not.toContain("backup failed");
+      expect(result.stderr).toBe("");
+      expect(await publishedSets(c)).toEqual([older]);
+      expect(await entries(c.backups)).toEqual([older, stale, ".restore-lock"].sort());
+      expect(await lastRunRaw()).toBe(EARLIER_STATUS);
+      expect(await unrecordedFiles(c)).toEqual([]);
+      expect(await lockFiles(c)).toEqual(lockBefore);
+      expect(await leaseRaw()).toBeNull();
+
+      await releaseRestoreLock(c, holder);
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "restore_lock_acquire twice: the second acquire fails and the first holder's files stay intact",
+    async () => {
+      const c = await newCase();
+      const first = await newHolder(c);
+      const second = await newHolder(c);
+      expect(second).not.toBe(first);
+      expect((await libCall(c, "restore_lock_present")).exitCode).not.toBe(0);
+
+      expect((await libCall(c, "restore_lock_acquire", first)).exitCode).toBe(0);
+      const files = await lockFiles(c);
+      expect(files.holder).toBe(`${first}\n`);
+      expect(files.heartbeat).toMatch(/^[0-9]{10,}\n$/);
+      expect(await entries(path.join(c.backups, ".restore-lock"))).toEqual(["heartbeat", "holder"]);
+
+      expect((await libCall(c, "restore_lock_acquire", second)).exitCode).not.toBe(0);
+      expect(await lockFiles(c)).toEqual(files);
+      expect((await libCall(c, "restore_lock_present")).exitCode).toBe(0);
+      // A malformed holder is refused before anything is touched.
+      expect((await libCall(c, "restore_lock_release", "restore-../x")).exitCode).not.toBe(0);
+      expect(await lockFiles(c)).toEqual(files);
+
+      await releaseRestoreLock(c, first);
+      expect((await libCall(c, "restore_lock_present")).exitCode).not.toBe(0);
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "restore_lock_heartbeat and restore_lock_release with a foreign holder change nothing; the own holder renews and releases",
+    async () => {
+      const c = await newCase();
+      const own = await acquireRestoreLock(c);
+      const foreign = await newHolder(c);
+      const files = await lockFiles(c);
+      await nextSecond();
+
+      expect((await libCall(c, "restore_lock_heartbeat", foreign)).exitCode).not.toBe(0);
+      expect((await libCall(c, "restore_lock_release", foreign)).exitCode).not.toBe(0);
+      expect(await lockFiles(c)).toEqual(files);
+      expect(await entries(path.join(c.backups, ".restore-lock"))).toEqual(["heartbeat", "holder"]);
+
+      expect((await libCall(c, "restore_lock_heartbeat", own)).exitCode).toBe(0);
+      const renewed = await lockFiles(c);
+      expect(renewed.holder).toBe(files.holder);
+      expect(Number(renewed.heartbeat)).toBeGreaterThan(Number(files.heartbeat));
+      expect(await entries(path.join(c.backups, ".restore-lock"))).toEqual(["heartbeat", "holder"]);
+
+      await releaseRestoreLock(c, own);
+    },
+    CASE_TIMEOUT,
+  );
+});

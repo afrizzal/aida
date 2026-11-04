@@ -14,7 +14,8 @@
 # The set is written to BACKUP_DIR/.tmp-<setId> and renamed to BACKUP_DIR/<setId> only after
 # every part validated, under the owned lease (fenced_action), never over an existing directory.
 #
-# Order of one run: set id; skip when another run's lease is active; uploads volume identity
+# Order of one run (review Q8): restore lock check (a `.restore-lock` in BACKUP_DIR: skip, exit 3,
+# nothing touched); set id; skip when another run's lease is active; uploads volume identity
 # (marker equals `uploads:volume-id`); exclusive file fence; lease; lease renewal in the
 # background; dump; list of archivable files; archive; checksums from the archive; every file the
 # dump references (Attachment, TaskAttachment, the `branding:logo` Setting) must be in the
@@ -30,7 +31,13 @@
 # `AIDA_BACKUP_STATUS_UNRECORDED <json>` on stderr, writes BACKUP_DIR/status-unrecorded-<setId>.json
 # when it can, and the run exits 5.
 #
-# Exit codes: 0 succeeded, 2 failed, 3 skipped (another run holds the lease; nothing touched),
+# Restore lock (review Q3): fenced_action re-checks `.restore-lock` inside its locked session
+# immediately before publish, retention and the status write; on a lock the run exits 3 with
+# nothing more published, no retention, no status and no unrecorded-status file, and removes only
+# its own temporary directory.
+#
+# Exit codes: 0 succeeded, 2 failed, 3 skipped (another run holds the lease, or a restore is in
+# progress; nothing touched),
 # 5 the status could not be recorded (the outcome is in the stderr line and the per-set file).
 #
 # Settings (environment):
@@ -101,13 +108,19 @@ on_exit() {
     if [ "$STATUS_DONE" = 0 ] && [ "$LEASE_LOST" = 0 ]; then
       write_status failed - "$CATEGORY"
       case $? in
+        3)
+          _rc=3
+          log 'backup skipped: restore in progress'
+          ;;
         4)
           LEASE_LOST=1
           log 'backup aborted: lease lost'
           ;;
       esac
     fi
-    log "backup failed: $CATEGORY"
+    if [ "$_rc" = 2 ]; then
+      log "backup failed: $CATEGORY"
+    fi
   fi
   if [ "$STATUS_UNRECORDED" = 1 ]; then
     _rc=5
@@ -140,16 +153,26 @@ step_failed() {
   fail "$1"
 }
 
+# A restore took its lock: stop with exit 3 and no status (the trap removes the own temp dir).
+restore_skip() {
+  SKIPPED=1
+  log 'backup skipped: restore in progress'
+  exit 3
+}
+
 on_lease_lost() {
   trap '' USR1
   LEASE_LOST=1
   log 'backup aborted: lease lost'
+  # A restore replaces the database (and with it the lease row) only under its restore lock.
+  if restore_lock_present; then restore_skip; fi
   fail unknown
 }
 
 # write_status <succeeded|failed> <setId|-> <category|->: the status write by its owner (D-04,
 # P6). Without the lease (never held): directly. With the lease: through fenced_action, so a run
-# that lost its lease writes nothing (returns 4). When the write fails, the unrecorded-status
+# that lost its lease writes nothing (returns 4) and nothing is written during a restore
+# (returns 3). When the write fails, the unrecorded-status
 # fallback runs and STATUS_UNRECORDED is set (returns 5). Returns 0 when recorded.
 write_status() {
   STATUS_DONE=1
@@ -164,7 +187,7 @@ write_status() {
       _ws=$?
     fi
     case $_ws in
-      0 | 4) return "$_ws" ;;
+      0 | 3 | 4) return "$_ws" ;;
     esac
   elif record_status "$1" "$2" "$3"; then
     return 0
@@ -262,6 +285,11 @@ file_sha256() {
 trap on_exit EXIT
 trap 'fail unknown' INT TERM HUP
 trap on_lease_lost USR1
+
+# A restore in progress: back off before touching sets, status or locks (review Q3).
+if restore_lock_present; then
+  restore_skip
+fi
 
 # The set id comes first: the unrecorded-status file of any later failure is named by it.
 SET_ID=$(new_set_id) || SET_ID=''
@@ -463,6 +491,9 @@ set +e
 fenced_action "$SET_ID" "$RUN_TMP/publish.sh"
 _pub=$?
 set -e
+if [ "$_pub" -eq 3 ]; then
+  restore_skip
+fi
 if [ "$_pub" -eq 4 ]; then
   on_lease_lost
 fi
@@ -481,6 +512,9 @@ set +e
 retention "$SET_ID" "$BACKUP_RETENTION"
 _ret=$?
 set -e
+if [ "$_ret" -eq 3 ]; then
+  restore_skip
+fi
 if [ "$_ret" -eq 4 ]; then
   on_lease_lost
 fi
@@ -492,6 +526,9 @@ set +e
 write_status succeeded "$SET_ID" -
 _st=$?
 set -e
+if [ "$_st" -eq 3 ]; then
+  restore_skip
+fi
 if [ "$_st" -eq 4 ]; then
   on_lease_lost
 fi

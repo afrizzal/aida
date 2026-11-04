@@ -59,6 +59,23 @@ valid_set_id() {
   printf '%s\n' "$1" | grep -Eqx '[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}'
 }
 
+# A restore holder (plan 09-10 takes the restore lock and the lease with it): "restore-" and 32
+# random hex characters.
+new_restore_holder() {
+  _nrh_hex=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n') || return 1
+  printf 'restore-%s\n' "$_nrh_hex"
+}
+
+valid_restore_holder() {
+  [ "${#1}" -eq 40 ] || return 1
+  printf '%s\n' "$1" | grep -Eqx 'restore-[0-9a-f]{32}'
+}
+
+# A lease holder: a backup run's set id or a restore holder.
+valid_lease_holder() {
+  valid_set_id "$1" || valid_restore_holder "$1"
+}
+
 psql_q() {
   PGAPPNAME="$BACKUP_APPLICATION_NAME" psql -X -q -t -A -v ON_ERROR_STOP=1 "$@" \
     2>>"${BACKUP_ERRLOG:-/dev/null}"
@@ -100,7 +117,7 @@ SQL
 # lease_acquire <holder> <ttl>: writes the lease only when no unexpired lease exists. Prints
 # "acquired" or "held".
 lease_acquire() {
-  valid_set_id "$1" || return 1
+  valid_lease_holder "$1" || return 1
   is_uint "$2" || return 1
   _la_out=$(psql_q -v holder="$1" -v ttl="$2" <<SQL
 INSERT INTO "SystemSetting" (id, key, value, "updatedAt")
@@ -136,7 +153,7 @@ SQL
 
 # lease_release <holder>: deletes the lease only when it is the caller's own.
 lease_release() {
-  valid_set_id "$1" || return 1
+  valid_lease_holder "$1" || return 1
   psql_q -v holder="$1" >/dev/null <<SQL
 DELETE FROM "SystemSetting"
 WHERE key = '${BACKUP_LEASE_KEY}' AND ($(lease_holder_sql value));
@@ -246,14 +263,18 @@ fence_close() {
 }
 
 # fenced_action <holder> <script>: in one psql session, locks the lease row FOR UPDATE, checks
-# that <holder> owns an unexpired lease and runs `sh <script>` before it commits. Returns 0 when
-# the action ran and succeeded, 4 when the lease is not owned (nothing ran), 1 otherwise. The
-# script path must not contain spaces (it lives in the run's mktemp directory).
+# that no restore lock exists in BACKUP_DIR (review Q3: a shell test run with \! inside the
+# locked session, immediately before the action) and that <holder> owns an unexpired lease, and
+# runs `sh <script>` before it commits. Returns 0 when the action ran and succeeded, 3 when a
+# restore lock exists (nothing ran), 4 when the lease is not owned (nothing ran), 1 otherwise.
+# The script path must not contain spaces (it lives in the run's mktemp directory).
 fenced_action() {
   valid_set_id "$1" || return 1
   case $2 in
     '' | *[!A-Za-z0-9._/-]*) return 1 ;;
   esac
+  AIDA_RESTORE_LOCK_PATH=$(restore_lock_dir) || return 1
+  export AIDA_RESTORE_LOCK_PATH
   _fa_out=$(psql_q -v holder="$1" <<SQL
 BEGIN;
 WITH locked AS MATERIALIZED (
@@ -262,6 +283,9 @@ WITH locked AS MATERIALIZED (
 SELECT COALESCE((
   SELECT ($(lease_holder_sql value)) AND ($(lease_active_sql value)) FROM locked
 ), false) AS owned \gset
+\! test ! -e "\$AIDA_RESTORE_LOCK_PATH" && test ! -L "\$AIDA_RESTORE_LOCK_PATH"
+SELECT :SHELL_EXIT_CODE = 0 AS no_restore_lock \gset
+\if :no_restore_lock
 \if :owned
 \! sh $2
 SELECT :SHELL_EXIT_CODE = 0 AS action_ok \gset
@@ -276,13 +300,81 @@ ROLLBACK;
 ROLLBACK;
 \echo fenced-not-owned
 \endif
+\else
+ROLLBACK;
+\echo fenced-restore-lock
+\endif
 SQL
 ) || return 1
   case $_fa_out in
     *fenced-done) return 0 ;;
+    *fenced-restore-lock) return 3 ;;
     *fenced-not-owned) return 4 ;;
     *) return 1 ;;
   esac
+}
+
+# Restore lock (review Q3, shared with plan 09-10): the directory BACKUP_DIR/.restore-lock with
+# the files `holder` (the restore holder) and `heartbeat` (UTC epoch seconds), each written to a
+# temporary file in the directory and renamed. It lives on the backups volume, so it survives a
+# database replacement. It is never taken over automatically.
+restore_lock_dir() {
+  printf '%s/.restore-lock\n' "${BACKUP_DIR:-/backups}"
+}
+
+# restore_lock_write <dir> <name> <value>: <dir>/<name> = <value>, temporary file then rename.
+restore_lock_write() {
+  (printf '%s\n' "$3" >"$1/.$2.tmp") 2>/dev/null || return 1
+  mv -f -T -- "$1/.$2.tmp" "$1/$2" 2>/dev/null
+}
+
+# True while a restore lock (or anything at its path) exists.
+restore_lock_present() {
+  _rlp_dir=$(restore_lock_dir) || return 1
+  [ -e "$_rlp_dir" ] || [ -L "$_rlp_dir" ]
+}
+
+# restore_lock_acquire <holder>: creates the lock with an atomic mkdir; fails when the directory
+# exists. Writes holder and heartbeat; on a write failure removes the directory it created.
+restore_lock_acquire() {
+  valid_restore_holder "$1" || return 1
+  _rla_dir=$(restore_lock_dir) || return 1
+  mkdir -- "$_rla_dir" 2>/dev/null || return 1
+  _rla_now=$(date -u +%s) || _rla_now=''
+  if is_uint "$_rla_now" && restore_lock_write "$_rla_dir" holder "$1" &&
+    restore_lock_write "$_rla_dir" heartbeat "$_rla_now"; then
+    return 0
+  fi
+  rm -r -- "$_rla_dir" </dev/null 2>/dev/null || :
+  return 1
+}
+
+# Prints the holder stored in the lock; fails when there is no readable lock.
+restore_lock_holder() {
+  _rlh_dir=$(restore_lock_dir) || return 1
+  [ -d "$_rlh_dir" ] && [ ! -L "$_rlh_dir" ] || return 1
+  [ -f "$_rlh_dir/holder" ] && [ ! -L "$_rlh_dir/holder" ] || return 1
+  head -c 64 "$_rlh_dir/holder" 2>/dev/null
+}
+
+# restore_lock_heartbeat <holder>: renews the heartbeat only when the stored holder is <holder>;
+# returns 1 otherwise (the restore that called it must stop).
+restore_lock_heartbeat() {
+  valid_restore_holder "$1" || return 1
+  _rlb_holder=$(restore_lock_holder) || return 1
+  [ "$_rlb_holder" = "$1" ] || return 1
+  _rlb_now=$(date -u +%s) || return 1
+  is_uint "$_rlb_now" || return 1
+  restore_lock_write "$(restore_lock_dir)" heartbeat "$_rlb_now"
+}
+
+# restore_lock_release <holder>: removes the lock directory only when the stored holder is
+# <holder>; returns 1 otherwise and changes nothing.
+restore_lock_release() {
+  valid_restore_holder "$1" || return 1
+  _rlr_holder=$(restore_lock_holder) || return 1
+  [ "$_rlr_holder" = "$1" ] || return 1
+  rm -r -- "$(restore_lock_dir)" </dev/null 2>/dev/null
 }
 
 # retention_prune <dir> <keep> <current setId>: the body of one retention pass (D-03), run only
