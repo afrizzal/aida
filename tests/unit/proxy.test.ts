@@ -271,6 +271,38 @@ describe("proxy — D-18 client identity header for Better Auth", () => {
   });
 });
 
+// Phase 9 plan 09-05 (AIDA-34, U-02, PATTERNS D7): the public logo route needs no entry of its
+// own; the existing /api/public prefix makes it public. The logo upload route is authenticated.
+describe("proxy — 09-05 logo routes", () => {
+  it("X: /api/public/logo/a/b is public: forwarded without a session, with the nonce CSP and nosniff", async () => {
+    const response = proxy(new NextRequest("http://localhost/api/public/logo/a/b"));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.headers.get("content-security-policy") ?? "").toContain("img-src 'self'");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  it("Y: /api/settings/branding/logo is authenticated: 401 JSON without a session, forwarded with one", async () => {
+    for (const method of ["POST", "DELETE"]) {
+      const anonymous = proxy(
+        new NextRequest("http://localhost/api/settings/branding/logo", { method }),
+      );
+      expect(anonymous.status).toBe(401);
+      expect(anonymous.headers.get("x-middleware-next")).toBeNull();
+      expect(anonymous.headers.get("x-content-type-options")).toBe("nosniff");
+    }
+    const signedIn = proxy(
+      new NextRequest("http://localhost/api/settings/branding/logo", {
+        method: "POST",
+        headers: { cookie: "better-auth.session_token=abc" },
+      }),
+    );
+    expect(signedIn.status).toBe(200);
+    expect(signedIn.headers.get("x-middleware-next")).toBe("1");
+  });
+});
+
 // Review d-WR-d3: the header the proxy emits is pinned to buildCsp() for the same nonce and mode,
 // on every forwarding branch, so a looser string, an extra source or a wrong mode test in
 // src/proxy.ts fails here (csp.test.ts pins buildCsp() itself to the D-11 string).

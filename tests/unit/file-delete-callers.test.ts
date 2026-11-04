@@ -1,7 +1,9 @@
 // Phase 9 plan 09-04, U-13: the static inventory of every path that deletes a stored file. A text
 // scan of src/ (no import of src): a new caller of a FileStorage delete, a new direct unlink, a new
 // enqueue of the deletion queue or an organization delete must be added here on purpose, together
-// with its test in tests/integration/file-delete-inventory.test.ts.
+// with its test in tests/integration/file-delete-inventory.test.ts. The logo store (plan 09-05)
+// enqueues the dereferenced key on replace and remove; its tests are in
+// tests/integration/logo-store.test.ts.
 //
 // Organization delete (PATTERNS D4): no code in src/ deletes an organization, so the
 // ProjectFileCleanup organization cascade removes queue rows only through a path src/ does not
@@ -90,13 +92,26 @@ describe("U-13 inventory of stored-file deletion", () => {
     expect(users).toEqual(["src/lib/attachments/local-file-storage.ts"]);
   });
 
-  it("the deletion queue is enqueued by the project attachment delete and the task and project hard delete (plan 09-05 adds the logo store)", () => {
+  it("the deletion queue is enqueued by the project attachment delete, the task and project hard delete and the logo store (replace and remove, plan 09-05)", () => {
     const callers = files
       .filter((f) => f.rel !== "src/lib/projects/file-cleanup.ts")
       .filter((f) => /\benqueueFileCleanupInTx\s*\(/.test(f.code))
       .map((f) => f.rel)
       .sort();
-    expect(callers).toEqual(["src/lib/projects/attachments.ts", "src/lib/projects/delete.ts"]);
+    expect(callers).toEqual([
+      "src/lib/branding/logo-store.ts",
+      "src/lib/projects/attachments.ts",
+      "src/lib/projects/delete.ts",
+    ]);
+  });
+
+  it("the logo store deletes no file itself: replace and remove only enqueue, and its staged rollback is saveStagedFiles", () => {
+    const store = files.find((f) => f.rel === "src/lib/branding/logo-store.ts");
+    expect(store).toBeDefined();
+    const code = (store as SourceFile).code;
+    expect(fileStorageDeletes(store as SourceFile)).toEqual([]);
+    expect(code.match(/\benqueueFileCleanupInTx\s*\(/g)).toHaveLength(2);
+    expect(code).toMatch(/\bsaveStagedFiles\s*\(/);
   });
 
   it("no code in src/ deletes an organization (the queue's organization cascade is unreachable from src/)", () => {
