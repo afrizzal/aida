@@ -14,6 +14,9 @@ export default async function TicketsPage({ searchParams }: TicketsPageProps) {
 
   return (
     <>
+      {/* AIDA-36 (D-14): the page's one h1, sr-only because the top bar shows "Tickets". Kept
+          outside the Suspense boundary so the streamed fallback has it too. */}
+      <h1 className="sr-only">Tickets</h1>
       <Suspense fallback={<TicketListPanelSkeleton />}>
         <TicketListPanel searchParams={params} />
       </Suspense>

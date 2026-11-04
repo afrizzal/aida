@@ -52,7 +52,9 @@ export function TopBar({ user }: TopBarProps) {
 
   return (
     <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b border-border/70 bg-background/80 px-6 backdrop-blur-sm supports-[backdrop-filter]:bg-background/65">
-      <h1 className="text-[18px] font-semibold">{title}</h1>
+      {/* AIDA-36 (D-14, DESIGN-SYSTEM 4.2): the top-bar title is text, not a heading. Each page
+          owns its one h1 inside <main> (sr-only when it repeats these words). */}
+      <p className="text-[18px] font-semibold">{title}</p>
       <div className="flex items-center gap-2">
         {/* Palette trigger (AIDA-49, UI-SPEC Surface 4a): the visible entry point for mouse and
             touch; the key cap is decorative, the shortcut is announced by aria-keyshortcuts. */}

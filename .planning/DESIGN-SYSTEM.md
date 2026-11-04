@@ -130,7 +130,7 @@ Wajib: `sticky top-0 z-10`, `backdrop-blur-sm`, `border-border/70` (bukan `borde
 
 Judul top bar adalah `<p>`, bukan heading. `<h1>` milik halaman di dalam `<main>` (visible, atau `sr-only` bila teksnya sama dengan top bar).
 
-> Catatan (Phase 9, 2026-11-12): aturan ini kontrak AIDA-36 dan diterapkan oleh plan 09-09. Sampai plan itu dieksekusi, `src/components/top-bar.tsx` masih merender `<h1>`.
+> Catatan (Phase 9, 2026-11-12): aturan ini kontrak AIDA-36 dan diterapkan oleh plan 09-09: `src/components/top-bar.tsx` merender judul sebagai `<p>`, dan `tests/e2e/single-h1.spec.ts` memeriksa satu `<h1>` di dalam `<main>` per state route.
 
 ### 4.3 Empty State
 
