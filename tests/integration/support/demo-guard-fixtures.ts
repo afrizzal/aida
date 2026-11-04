@@ -111,6 +111,15 @@ export interface DriverResult {
   message?: string;
 }
 
+/** Removes every configured secret from a text before it can reach an error message. */
+export function redact(text: string, guard: GuardEnv, extra: Record<string, string> = {}): string {
+  let out = text;
+  for (const secret of [guard.password, extra.ADMIN_PASSWORD, DOCUMENTED_DEMO_PASSWORD]) {
+    if (secret) out = out.split(secret).join("[redacted]");
+  }
+  return out;
+}
+
 export async function runDriver(
   url: string,
   guard: GuardEnv,
@@ -128,7 +137,7 @@ export async function runDriver(
     .find((l) => l.startsWith(DRIVER_RESULT_PREFIX));
   if (run.code !== 0 || !line) {
     throw new Error(
-      `demo driver ${args.join(" ")} exited ${String(run.code)} without a result line\n${run.stderr.slice(-2000)}`,
+      `demo driver ${args.join(" ")} exited ${String(run.code)} without a result line\n${redact(run.stderr.slice(-2000), guard, extra)}`,
     );
   }
   const parsed = JSON.parse(line.slice(DRIVER_RESULT_PREFIX.length)) as { results: DriverResult[] };

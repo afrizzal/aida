@@ -807,7 +807,8 @@ async function main(): Promise<void> {
         encoding: "utf-8",
       },
     );
-    console.log(seedOutput);
+    // The seed prints no password (D-18, 09-02); redact it anyway before echoing its output.
+    console.log(seedOutput.split(DEMO_ADMIN_PASSWORD).join("[redacted]"));
     const ticketCountMatch = seedOutput.match(/"tickets":\s*(\d+)/);
     const ticketCount = ticketCountMatch ? Number(ticketCountMatch[1]) : 0;
     if (ticketCount !== 30) {
