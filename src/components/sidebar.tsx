@@ -1,8 +1,9 @@
 "use client";
 
-import { BookOpen, Inbox, Lightbulb, Settings2, Sparkles, Users } from "lucide-react";
+import { BookOpen, Inbox, Lightbulb, Settings2, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { BrandMark } from "@/components/brand-mark";
 import { SidebarViews } from "@/components/sidebar-views";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import type { SidebarViews as SidebarViewLists } from "@/lib/saved-views/ui-state";
@@ -16,6 +17,8 @@ interface SidebarUser {
 interface SidebarProps {
   user: SidebarUser;
   brandName: string;
+  /** The workspace logo's versioned public URL, or null for the Sparkles box (AIDA-34, D-11). */
+  logoUrl: string | null;
   /** Saved views loaded server-side by the (app) layout (AIDA-47, UI-SPEC Surface 1). */
   views: SidebarViewLists;
 }
@@ -38,19 +41,14 @@ function getInitials(name: string): string {
     .toUpperCase();
 }
 
-export function Sidebar({ user, brandName, views }: SidebarProps) {
+export function Sidebar({ user, brandName, logoUrl, views }: SidebarProps) {
   const pathname = usePathname();
 
   return (
     <aside className="flex h-screen w-60 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
-      {/* Brand */}
-      <div className="flex h-14 items-center gap-2.5 px-4">
-        <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-sidebar-primary shadow-sm">
-          <Sparkles className="size-4 text-sidebar-primary-foreground" />
-        </div>
-        <span className="min-w-0 truncate text-[15px] font-semibold tracking-tight text-sidebar-foreground">
-          {brandName}
-        </span>
+      {/* Brand: the workspace logo or the Sparkles box, always with the name (BrandMark). */}
+      <div className="flex h-14 items-center px-4">
+        <BrandMark variant="sidebar" name={brandName} logoUrl={logoUrl} />
       </div>
 
       {/* Nav: scrolls when the links plus the Views section exceed the height, so the user

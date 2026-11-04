@@ -1,7 +1,7 @@
 import { CommandProvider } from "@/components/command-provider";
 import { Sidebar } from "@/components/sidebar";
 import { TopBar } from "@/components/top-bar";
-import { getBrandingSettings } from "@/lib/branding/settings";
+import { getBrandingSettings, getLogoSetting, logoPublicUrl } from "@/lib/branding/settings";
 import { prisma } from "@/lib/db";
 import { listSavedViewsForViewer } from "@/lib/saved-views/service";
 import { sidebarViewsOrEmpty } from "@/lib/saved-views/ui-state";
@@ -36,6 +36,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     select: { name: true },
   });
   const { workspaceName } = await getBrandingSettings(scopedDb(orgId), org?.name ?? "AIDA");
+  // The active organization's logo (AIDA-34, D-10, D-11): its versioned public URL, or null for
+  // the Sparkles box when none (or a malformed reference) is stored.
+  const logo = await getLogoSetting(scopedDb(orgId));
+  const logoUrl = logo ? logoPublicUrl(orgId, logo.version) : null;
 
   // Saved views for the sidebar (AIDA-47, UI-SPEC Surface 1): the viewer's private views and the
   // organization's shared views, membership-checked by the service (D-01). A failed read, a
@@ -48,7 +52,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <CommandProvider views={views}>
       <div className="flex min-h-screen">
-        <Sidebar user={user} brandName={workspaceName} views={views} />
+        <Sidebar user={user} brandName={workspaceName} logoUrl={logoUrl} views={views} />
         <div className="flex flex-1 flex-col">
           <TopBar user={user} />
           <main className="flex-1 overflow-auto p-6">{children}</main>
