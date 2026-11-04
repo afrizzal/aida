@@ -42,6 +42,8 @@ export default async function ContactsPage({ searchParams }: ContactsPageProps) 
 
   return (
     <div className="flex flex-col">
+      {/* AIDA-36 (D-14): sr-only because the top bar already shows "Contacts". */}
+      <h1 className="sr-only">Contacts</h1>
       <div className="px-6 py-4">
         <ContactSearch defaultValue={q ?? ""} />
       </div>

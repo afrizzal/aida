@@ -71,14 +71,28 @@ export default async function ProposalReviewPage({ params }: ProposalReviewPageP
   const result = await loadProposalReview(await getSessionActor(), id, { now: new Date() });
 
   if (result.kind === "NOT_ALLOWED") {
-    return <EmptyState icon={BookOpen} heading={NOT_ALLOWED_HEADING} body={NOT_ALLOWED_BODY} />;
+    return (
+      <EmptyState
+        icon={BookOpen}
+        headingAs="h1"
+        heading={NOT_ALLOWED_HEADING}
+        body={NOT_ALLOWED_BODY}
+      />
+    );
   }
   if (result.kind === "MEMBERSHIP_ENDED") {
     const { heading, body } = membershipEndedParts();
-    return <EmptyState icon={BookOpen} heading={heading} body={body} />;
+    return <EmptyState icon={BookOpen} headingAs="h1" heading={heading} body={body} />;
   }
   if (result.kind === "NOT_FOUND") {
-    return <EmptyState icon={BookOpen} heading={NOT_FOUND_HEADING} body={NOT_FOUND_BODY} />;
+    return (
+      <EmptyState
+        icon={BookOpen}
+        headingAs="h1"
+        heading={NOT_FOUND_HEADING}
+        body={NOT_FOUND_BODY}
+      />
+    );
   }
 
   const { proposal } = result;

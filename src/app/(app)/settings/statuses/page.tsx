@@ -22,7 +22,13 @@ export default async function TicketStatusesSettingsPage() {
   const list = await listStatesForSettings(prisma, await getSessionActor());
 
   if (!list.ok) {
-    return <p className="text-[13px] text-muted-foreground">{MEMBERSHIP_ENDED}</p>;
+    // AIDA-36 (D-14): the access-ended state keeps the page's one h1.
+    return (
+      <div className="space-y-6">
+        <h1 className="text-[18px] font-semibold">{STATUS_PAGE_TITLE}</h1>
+        <p className="text-[13px] text-muted-foreground">{MEMBERSHIP_ENDED}</p>
+      </div>
+    );
   }
 
   return (

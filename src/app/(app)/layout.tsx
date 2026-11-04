@@ -15,12 +15,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // If null here it means an unexpected state (e.g. orphaned session); show a safe
   // fallback rather than crashing downstream getScopedDb calls. (AIDA-10)
   if (!session.session.activeOrganizationId) {
+    // AIDA-36 (D-14, UI-SPEC Surface 5): the fallback is a landmark with the state's one h1
+    // (sr-only); the visible copy is unchanged.
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <main className="flex min-h-screen items-center justify-center">
+        <h1 className="sr-only">Workspace not found</h1>
         <p className="text-[14px] text-muted-foreground">
           No workspace found. Please sign out and sign in again.
         </p>
-      </div>
+      </main>
     );
   }
 

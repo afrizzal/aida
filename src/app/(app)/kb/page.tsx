@@ -28,8 +28,10 @@ export default async function KbPage() {
 
   return (
     <div className="flex flex-col">
-      <div className="flex items-center justify-between px-6 py-4">
-        <h1 className="text-[18px] font-semibold tracking-tight text-foreground">Knowledge Base</h1>
+      {/* AIDA-36 (D-14, UI-SPEC E5): the h1 is sr-only because the top bar shows "Knowledge Base";
+          the row is justify-end so the actions stay right-aligned. */}
+      <div className="flex items-center justify-end px-6 py-4">
+        <h1 className="sr-only">Knowledge Base</h1>
         <div className="flex items-center gap-2">
           {isAdmin && (
             <Button asChild variant="outline" size="sm" className="text-[13px]">

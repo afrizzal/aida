@@ -35,6 +35,7 @@ export default async function ContactDetailPage({ params }: ContactDetailPagePro
     return (
       <EmptyState
         icon={ShieldOff}
+        headingAs="h1"
         heading="Your access to this workspace has ended."
         body="Sign out, then sign in again."
       />
@@ -45,6 +46,7 @@ export default async function ContactDetailPage({ params }: ContactDetailPagePro
     return (
       <EmptyState
         icon={Users}
+        headingAs="h1"
         heading="Contact not found"
         body="This contact may have been removed or belongs to a different workspace."
       />

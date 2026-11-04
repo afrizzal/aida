@@ -36,6 +36,7 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
         <div className="flex flex-1 items-center justify-center overflow-y-auto">
           <EmptyState
             icon={ShieldOff}
+            headingAs="h1"
             heading="Your access to this workspace has ended."
             body="Sign out, then sign in again."
           />
@@ -51,6 +52,7 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
         <div className="flex flex-1 items-center justify-center overflow-y-auto">
           <EmptyState
             icon={MessageSquare}
+            headingAs="h1"
             heading="Ticket not found"
             body="This ticket may have been deleted, or you don't have access to it."
           />

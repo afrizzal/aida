@@ -25,6 +25,7 @@ export default async function KbArticleDetailPage({ params }: KbArticleDetailPag
     return (
       <EmptyState
         icon={BookOpen}
+        headingAs="h1"
         heading="Article not found"
         body="This article may have been removed or belongs to a different workspace."
       />

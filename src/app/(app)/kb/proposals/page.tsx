@@ -46,11 +46,18 @@ export default async function KbProposalsPage() {
   const result = await loadProposalList(await getSessionActor());
 
   if (result.kind === "NOT_ALLOWED") {
-    return <EmptyState icon={BookOpen} heading={NOT_ALLOWED_HEADING} body={NOT_ALLOWED_BODY} />;
+    return (
+      <EmptyState
+        icon={BookOpen}
+        headingAs="h1"
+        heading={NOT_ALLOWED_HEADING}
+        body={NOT_ALLOWED_BODY}
+      />
+    );
   }
   if (result.kind === "MEMBERSHIP_ENDED") {
     const { heading, body } = membershipEndedParts();
-    return <EmptyState icon={BookOpen} heading={heading} body={body} />;
+    return <EmptyState icon={BookOpen} headingAs="h1" heading={heading} body={body} />;
   }
 
   const { rows, aiEnabled } = result;
