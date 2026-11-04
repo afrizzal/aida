@@ -20,11 +20,18 @@
 # dump references (Attachment, TaskAttachment, the `branding:logo` Setting) must be in the
 # archive; manifest; validation; publish; retention (D-03: the BACKUP_RETENTION newest sets are
 # kept, older sets and stale `.tmp-<setId>` directories are removed, under the owned lease);
-# status `backup:lastRun`. On every exit path the trap
-# stops the renewal, records a failed status when none was recorded, releases its own lease and
-# the fence, and removes its own .tmp-<setId> unless it was published.
+# status `backup:lastRun`. On every exit path the trap stops the renewal, records a failed
+# status when none was recorded, releases its own lease and the fence, and removes its own
+# .tmp-<setId> unless it was published.
 #
-# Exit codes: 0 succeeded, 2 failed, 3 skipped (another run holds the lease; nothing touched).
+# Status ownership (D-04, P6): a run that never held the lease writes `backup:lastRun` directly;
+# a run that holds it writes through fenced_action; a run that lost it writes nothing and logs
+# 'backup aborted: lease lost'. When the status write fails, lib.sh status_unrecorded prints
+# `AIDA_BACKUP_STATUS_UNRECORDED <json>` on stderr, writes BACKUP_DIR/status-unrecorded-<setId>.json
+# when it can, and the run exits 5.
+#
+# Exit codes: 0 succeeded, 2 failed, 3 skipped (another run holds the lease; nothing touched),
+# 5 the status could not be recorded (the outcome is in the stderr line and the per-set file).
 #
 # Settings (environment):
 #   BACKUP_DIR (default /backups), UPLOADS_DIR (default /data/uploads),
@@ -63,7 +70,9 @@ OUTCOME=failed
 SKIPPED=0
 LEASE_HELD=0
 PUBLISHED=0
-STATUS_RECORDED=0
+STATUS_DONE=0
+STATUS_UNRECORDED=0
+LEASE_LOST=0
 RENEW_PID=''
 FENCE_FD_OPEN=0
 FENCE_HELD=0
@@ -83,16 +92,25 @@ on_exit() {
   trap '' USR1 INT TERM HUP
   set +e
   stop_renewal
-  if [ "$OUTCOME" = succeeded ]; then
-    _rc=0
-  elif [ "$SKIPPED" = 1 ]; then
+  if [ "$SKIPPED" = 1 ]; then
     _rc=3
+  elif [ "$OUTCOME" = succeeded ]; then
+    _rc=0
   else
     _rc=2
-    if [ "$STATUS_RECORDED" = 0 ]; then
-      record_status failed - "$CATEGORY" || log 'backup status not recorded'
+    if [ "$STATUS_DONE" = 0 ] && [ "$LEASE_LOST" = 0 ]; then
+      write_status failed - "$CATEGORY"
+      case $? in
+        4)
+          LEASE_LOST=1
+          log 'backup aborted: lease lost'
+          ;;
+      esac
     fi
     log "backup failed: $CATEGORY"
+  fi
+  if [ "$STATUS_UNRECORDED" = 1 ]; then
+    _rc=5
   fi
   if [ "$LEASE_HELD" = 1 ]; then
     lease_release "$SET_ID" || :
@@ -124,8 +142,36 @@ step_failed() {
 
 on_lease_lost() {
   trap '' USR1
+  LEASE_LOST=1
   log 'backup aborted: lease lost'
   fail unknown
+}
+
+# write_status <succeeded|failed> <setId|-> <category|->: the status write by its owner (D-04,
+# P6). Without the lease (never held): directly. With the lease: through fenced_action, so a run
+# that lost its lease writes nothing (returns 4). When the write fails, the unrecorded-status
+# fallback runs and STATUS_UNRECORDED is set (returns 5). Returns 0 when recorded.
+write_status() {
+  STATUS_DONE=1
+  if [ "$LEASE_HELD" = 1 ]; then
+    AIDA_STATUS_RESULT=$1
+    AIDA_STATUS_SET=$2
+    AIDA_STATUS_CATEGORY=$3
+    export AIDA_STATUS_RESULT AIDA_STATUS_SET AIDA_STATUS_CATEGORY
+    _ws=1
+    if [ -n "$RUN_TMP" ] && [ -f "$RUN_TMP/status.sh" ]; then
+      fenced_action "$SET_ID" "$RUN_TMP/status.sh"
+      _ws=$?
+    fi
+    case $_ws in
+      0 | 4) return "$_ws" ;;
+    esac
+  elif record_status "$1" "$2" "$3"; then
+    return 0
+  fi
+  STATUS_UNRECORDED=1
+  status_unrecorded "${SET_ID:--}" "$1" "$2" "$3" || log 'backup status not recorded'
+  return 5
 }
 
 renew_loop() {
@@ -217,6 +263,13 @@ trap on_exit EXIT
 trap 'fail unknown' INT TERM HUP
 trap on_lease_lost USR1
 
+# The set id comes first: the unrecorded-status file of any later failure is named by it.
+SET_ID=$(new_set_id) || SET_ID=''
+valid_set_id "$SET_ID" || {
+  SET_ID=''
+  fail unknown
+}
+
 for _n in "$BACKUP_LEASE_TTL_SECONDS" "$BACKUP_FENCE_WAIT_SECONDS" "$BACKUP_RETENTION"; do
   is_uint "$_n" && [ "$_n" -ge 1 ] || {
     log 'invalid setting'
@@ -236,13 +289,19 @@ RUN_TMP=$(mktemp -d) || fail unknown
 BACKUP_ERRLOG="$RUN_TMP/errors.log"
 : >"$BACKUP_ERRLOG"
 export BACKUP_ERRLOG
+cat >"$RUN_TMP/status.sh" <<'EOF' || fail unknown
+set -eu
+. "$AIDA_BACKUP_LIB"
+record_status "$AIDA_STATUS_RESULT" "$AIDA_STATUS_SET" "$AIDA_STATUS_CATEGORY"
+EOF
 
-SET_ID=$(new_set_id) || fail unknown
-valid_set_id "$SET_ID" || fail unknown
 CREATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # Another run holds an unexpired lease: skip without touching anything.
-_active=$(lease_active) || fail unknown
+_active=$(lease_active) || {
+  log 'database not reachable'
+  fail unknown
+}
 if [ "$_active" = t ]; then
   SKIPPED=1
   log 'backup skipped: lease held'
@@ -400,12 +459,6 @@ rm -f -- "$AIDA_SET_TMP/holder"
 mv -n -T -- "$AIDA_SET_TMP" "$AIDA_SET_FINAL" 2>>"$BACKUP_ERRLOG"
 [ -d "$AIDA_SET_FINAL" ] && [ ! -e "$AIDA_SET_TMP" ]
 EOF
-cat >"$RUN_TMP/status.sh" <<'EOF'
-set -eu
-. "$AIDA_BACKUP_LIB"
-record_status succeeded "$AIDA_SET_ID" -
-EOF
-
 set +e
 fenced_action "$SET_ID" "$RUN_TMP/publish.sh"
 _pub=$?
@@ -436,15 +489,15 @@ if [ "$_ret" -ne 0 ]; then
 fi
 
 set +e
-fenced_action "$SET_ID" "$RUN_TMP/status.sh"
+write_status succeeded "$SET_ID" -
 _st=$?
 set -e
-if [ "$_st" -ne 0 ]; then
-  log 'backup status not recorded'
-  if [ "$_st" -eq 4 ]; then log 'backup aborted: lease lost'; fi
-  fail unknown
+if [ "$_st" -eq 4 ]; then
+  on_lease_lost
 fi
-STATUS_RECORDED=1
 OUTCOME=succeeded
 log "backup succeeded: $SET_ID"
+if [ "$_st" -ne 0 ]; then
+  exit 5
+fi
 exit 0

@@ -555,6 +555,8 @@ async function expectFailedRun(
   result: RunResult,
   category: string,
   line: string,
+  /** "none" for a run that lost its lease: it writes no status at all (D-04, P6; plan 09-13). */
+  status: "recorded" | "none" = "recorded",
 ): Promise<void> {
   expect(result.exitCode, result.stdout).toBe(2);
   expectQuietOutput(result);
@@ -563,6 +565,10 @@ async function expectFailedRun(
   expect(await publishedSets(c)).toEqual([]);
   // Nothing published and the run's own temporary directory removed.
   expect(await entries(c.backups)).toEqual([]);
+  if (status === "none") {
+    expect(await lastRun()).toBeNull();
+    return;
+  }
   expect(await lastRun()).toEqual({
     finishedAt: expect.any(String),
     result: "failed",
@@ -915,7 +921,7 @@ describe("U-12 fence with the real script", () => {
 
       await run.go("after-dump");
       const result = await run.done;
-      await expectFailedRun(c, result, "unknown", "[backup] backup aborted: lease lost");
+      await expectFailedRun(c, result, "unknown", "[backup] backup aborted: lease lost", "none");
       expect(await leaseValue()).toBeNull();
       expect(await fence.fenceLocks()).toEqual([]);
       expect(await fence.backendsNamed(BACKUP_FENCE)).toEqual([]);
@@ -1088,7 +1094,8 @@ describe("U-12 fence with the real script", () => {
         expect(sets).toHaveLength(1);
         const setId = sets[0] as string;
         expect(setId).not.toBe(killedSetId);
-        expect(await entries(c.backups)).toEqual([`.tmp-${killedSetId}`, setId].sort());
+        // The new run's retention (plan 09-13, D-03) removed the killed run's stale temp directory.
+        expect(await entries(c.backups)).toEqual([setId]);
         expect(await lastRun()).toEqual({
           finishedAt: expect.any(String),
           result: "succeeded",
@@ -1138,7 +1145,7 @@ describe("U-12 fence with the real script", () => {
 
       await run.go("after-archive");
       const result = await run.done;
-      await expectFailedRun(c, result, "unknown", "[backup] backup aborted: lease lost");
+      await expectFailedRun(c, result, "unknown", "[backup] backup aborted: lease lost", "none");
       expect(
         await prisma.systemSetting.findUniqueOrThrow({ where: { key: "backup:lease" } }),
       ).toEqual(takenOver);

@@ -19,6 +19,11 @@
 // package.json read-only at /opt/aida-backup-meta/package.json. Each run points UPLOADS_DIR,
 // BACKUP_DIR and BACKUP_TEST_PAUSE_DIR at subdirectories of those roots.
 //
+// Failure options (plan 09-13, review P11, real causes only): `backupsReadOnly` mounts the backups
+// root read-only (a bind option of the same runner); `closedDatabasePort` points one run's PGPORT
+// at CLOSED_DATABASE_PORT, a port nothing listens on in the database container's network
+// namespace, so every connection is refused.
+//
 // Relative imports only.
 import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -48,6 +53,9 @@ export const PAUSE_POINTS = ["after-fence", "after-dump", "after-list", "after-a
 export type PausePoint = (typeof PAUSE_POINTS)[number];
 
 export const SET_ID_PATTERN = /^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}$/;
+
+/** A TCP port nothing listens on inside the database container's network namespace. */
+export const CLOSED_DATABASE_PORT = "1";
 
 /** A fresh directory under the repository's `.test-tmp/`, writable by uid 1000. */
 export async function makeTestDir(parent: string, prefix: string): Promise<string> {
@@ -121,6 +129,8 @@ export interface BackupRunOptions {
   /** The points this run waits at; every other point is released in advance. */
   pauseAt?: readonly PausePoint[];
   env?: Record<string, string>;
+  /** Points PGPORT at CLOSED_DATABASE_PORT for this run: the database is unreachable. */
+  closedDatabasePort?: boolean;
 }
 
 export interface BackupRun {
@@ -142,8 +152,8 @@ export interface BackupRunner {
   readonly uploadsRoot: string;
   readonly backupsRoot: string;
   runBackup(opts: BackupRunOptions): BackupRun;
-  /** Runs a command in the runner container as uid 1000. */
-  exec(command: string[]): Promise<RunResult>;
+  /** Runs a command in the runner container as uid 1000, with extra environment variables. */
+  exec(command: string[], env?: Record<string, string>): Promise<RunResult>;
   pause(): Promise<void>;
   unpause(): Promise<void>;
   kill(): Promise<void>;
@@ -167,6 +177,8 @@ export interface StartBackupRunnerOptions {
   uploadsRoot: string;
   backupsRoot: string;
   pauseRoot: string;
+  /** Mounts the backups root read-only (the storage failure cause). */
+  backupsReadOnly?: boolean;
 }
 
 /** Starts one runner container per the rules in this file's header. */
@@ -195,7 +207,7 @@ export async function startBackupRunner(opts: StartBackupRunnerOptions): Promise
       { source: SCRIPT_DIR, target: "/opt/aida-backup", mode: "ro" },
       { source: PACKAGE_JSON, target: "/opt/aida-backup-meta/package.json", mode: "ro" },
       { source: opts.uploadsRoot, target: "/data/uploads", mode: "ro" },
-      { source: opts.backupsRoot, target: "/backups", mode: "rw" },
+      { source: opts.backupsRoot, target: "/backups", mode: opts.backupsReadOnly ? "ro" : "rw" },
       { source: opts.pauseRoot, target: "/pause", mode: "rw" },
     ])
     .start();
@@ -225,7 +237,7 @@ export async function startBackupRunner(opts: StartBackupRunnerOptions): Promise
     name,
     uploadsRoot: opts.uploadsRoot,
     backupsRoot: opts.backupsRoot,
-    exec: (command) => exec(command),
+    exec: (command, env) => exec(command, env),
     runBackup(run) {
       runSeq += 1;
       const pauseName = `run-${runSeq}-${randomBytes(3).toString("hex")}`;
@@ -244,6 +256,7 @@ export async function startBackupRunner(opts: StartBackupRunnerOptions): Promise
           BACKUP_DIR: `/backups/${run.backups}`,
           BACKUP_TEST_PAUSE_DIR: `/pause/${pauseName}`,
           ...run.env,
+          ...(run.closedDatabasePort ? { PGPORT: CLOSED_DATABASE_PORT } : {}),
         }),
       );
       return {

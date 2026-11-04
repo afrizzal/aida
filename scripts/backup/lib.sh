@@ -354,15 +354,7 @@ EOF
 # record_status <succeeded|failed> <setId|-> <category|->: upserts `backup:lastRun` with exactly
 # the keys finishedAt, result, setId and category (D-04). Nothing else goes into the record.
 record_status() {
-  case $1 in
-    succeeded | failed) ;;
-    *) return 1 ;;
-  esac
-  case $3 in
-    dump | archive | verification | storage | unknown | -) ;;
-    *) return 1 ;;
-  esac
-  if [ "$2" != - ]; then valid_set_id "$2" || return 1; fi
+  status_args_ok "$1" "$2" "$3" || return 1
   psql_q -v result="$1" -v setid="$2" -v category="$3" >/dev/null <<SQL
 INSERT INTO "SystemSetting" (id, key, value, "updatedAt")
 VALUES (
@@ -378,6 +370,61 @@ VALUES (
 )
 ON CONFLICT ("key") DO UPDATE SET value = EXCLUDED.value, "updatedAt" = now();
 SQL
+}
+
+status_args_ok() {
+  case $1 in
+    succeeded | failed) ;;
+    *) return 1 ;;
+  esac
+  case $3 in
+    dump | archive | verification | storage | unknown | -) ;;
+    *) return 1 ;;
+  esac
+  if [ "$2" != - ]; then valid_set_id "$2" || return 1; fi
+}
+
+# status_json <finishedAt> <succeeded|failed> <setId|-> <category|->: the `backup:lastRun`
+# record as one JSON line with exactly the keys finishedAt, result, setId and category (D-04).
+status_json() {
+  printf '%s\n' "$1" | grep -Eqx '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z' ||
+    return 1
+  status_args_ok "$2" "$3" "$4" || return 1
+  _sj_set=null
+  [ "$3" = - ] || _sj_set="\"$3\""
+  _sj_cat=null
+  [ "$4" = - ] || _sj_cat="\"$4\""
+  printf '{"finishedAt":"%s","result":"%s","setId":%s,"category":%s}\n' "$1" "$2" "$_sj_set" \
+    "$_sj_cat"
+}
+
+# status_unrecorded <run setId|-> <succeeded|failed> <setId|-> <category|->: the defined "status
+# could not be recorded" condition (D-04, P6, Q8). Prints one stderr line
+# `AIDA_BACKUP_STATUS_UNRECORDED <json>` with the record's four keys, then writes the same JSON
+# to `$BACKUP_DIR/status-unrecorded-<run setId>.json` (temporary file, then a rename that never
+# replaces an existing file; a failure is logged). Nothing ever removes such a file: set ids are
+# unique per run and retention leaves every name but sets and `.tmp-<setId>` alone.
+status_unrecorded() {
+  _su_time=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ 2>/dev/null) || _su_time=''
+  _su_json=$(status_json "$_su_time" "$2" "$3" "$4") ||
+    _su_json=$(status_json "$(date -u +%Y-%m-%dT%H:%M:%S).000Z" "$2" "$3" "$4") || return 1
+  printf 'AIDA_BACKUP_STATUS_UNRECORDED %s\n' "$_su_json" >&2 || :
+  log 'backup status not recorded'
+  if ! valid_set_id "$1"; then
+    log 'backup status record file not written'
+    return 0
+  fi
+  _su_dir=${BACKUP_DIR:-/backups}
+  _su_final="$_su_dir/status-unrecorded-$1.json"
+  _su_part="$_su_dir/.status-unrecorded-$1.json.part"
+  if (printf '%s\n' "$_su_json" >"$_su_part") 2>/dev/null &&
+    mv -n -T -- "$_su_part" "$_su_final" 2>/dev/null &&
+    [ -f "$_su_final" ] && [ ! -e "$_su_part" ]; then
+    return 0
+  fi
+  rm -f -- "$_su_part" 2>/dev/null || :
+  log 'backup status record file not written'
+  return 0
 }
 
 # pause_point <name>: test synchronisation only. With BACKUP_TEST_PAUSE_DIR set, writes
