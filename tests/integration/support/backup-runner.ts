@@ -25,13 +25,14 @@
 // namespace, so every connection is refused.
 //
 // Relative imports only.
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { access, chmod, mkdir, mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
+import { applyCleanup, planExact } from "../../../scripts/test-docker-cleanup";
 import type { FileStorage } from "../../../src/lib/attachments/file-storage";
 import {
   recordResource,
@@ -321,6 +322,240 @@ export async function startBackupRunner(opts: StartBackupRunnerOptions): Promise
       }
       await started.stop();
     },
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Restore runner (plan 09-10, AIDA-33, AIDA-38; U-07 rule J, U-16).
+//
+// A second container from the same image, as user 1000:1000, sharing the integration database
+// container's network namespace like the backup runner. Mounts: scripts/backup read-only at
+// /opt/aida-backup, the backups root at /backups (the directory the backup runner wrote its sets
+// into), the pause root at /pause, and one named volume of its own at /restore/uploads, the
+// restore target. The volume is created by this module (name testResourceName("uploads", runId),
+// labels testLabels(runId), recorded in the run ledger before and after it exists), checked by
+// label before the container mounts it, and removed in stop() only through planExact and
+// applyCleanup of scripts/test-docker-cleanup.ts with its exact name, after the container is gone.
+// One runner, so one volume, per test case.
+//
+// Root is used for fixture preparation only, never for the script under test: right after start
+// the volume's root directory is given to 1000:1000 (a production uploads_data volume takes that
+// ownership from the app image's /data/uploads, Dockerfile:93; a fresh volume in this image is
+// root-owned), and execAsRoot lets a case plant an entry not owned by 1000 (the U-16 refusal).
+
+export const RESTORE_PAUSE_POINTS = ["validating"] as const;
+export type RestorePausePoint = (typeof RESTORE_PAUSE_POINTS)[number];
+
+/** The restore target inside the restore runner. */
+export const RESTORE_UPLOADS = "/restore/uploads";
+
+export interface RestoreRunOptions {
+  /** Subdirectory of the backups root (BACKUP_DIR inside the container). */
+  backups: string;
+  setId: string;
+  holder: string;
+  /** UPLOADS_DIR inside the container; defaults to the named volume's mount point. */
+  uploadsDir?: string;
+  pauseAt?: readonly RestorePausePoint[];
+  env?: Record<string, string>;
+}
+
+export interface RestoreRun {
+  readonly done: Promise<RunResult>;
+  waitReached(point: RestorePausePoint, timeoutMs?: number): Promise<void>;
+  go(point: RestorePausePoint): Promise<void>;
+  releaseAll(): Promise<void>;
+}
+
+export interface RestoreRunner {
+  readonly id: string;
+  readonly name: string;
+  readonly volume: string;
+  /** Runs a command as uid 1000 with extra environment variables. */
+  exec(command: string[], env?: Record<string, string>): Promise<RunResult>;
+  /** Fixture preparation only (see the header above). */
+  execAsRoot(command: string[]): Promise<RunResult>;
+  runRestore(opts: RestoreRunOptions): RestoreRun;
+  /** Stops the container, then removes this runner's volume by its exact name (rule J). */
+  stop(): Promise<void>;
+}
+
+export interface StartRestoreRunnerOptions {
+  /** The target database (PGDATABASE). */
+  database: string;
+  user: string;
+  password: string;
+  backupsRoot: string;
+  pauseRoot: string;
+}
+
+const cleanupDocker = (args: string[]): string =>
+  execFileSync("docker", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+
+/** Removes exactly one volume of this run through the cleanup library; throws on any leftover. */
+export function removeTestVolume(runId: string, volume: string): void {
+  const { plan, notOurs } = planExact(cleanupDocker, runId, { volume: [volume] });
+  if (notOurs.length > 0) {
+    throw new Error(`restore-runner: volume ${volume} is not this run's; left alone`);
+  }
+  const result = applyCleanup(cleanupDocker, runId, plan);
+  if (result.failed.length > 0 || result.skipped.length > 0) {
+    throw new Error(
+      `restore-runner: volume ${volume} not removed: ${JSON.stringify({ failed: result.failed, skipped: result.skipped })}`,
+    );
+  }
+}
+
+/** Starts one restore runner with a new labelled named volume per the rules above. */
+export async function startRestoreRunner(opts: StartRestoreRunnerOptions): Promise<RestoreRunner> {
+  await assertRunnerImagePresent();
+  const dbContainer = await integrationDatabaseContainerId();
+  const runId = testRunId();
+  const volume = testResourceName("uploads", runId);
+  const labelArgs = Object.entries(testLabels(runId)).flatMap(([k, v]) => ["--label", `${k}=${v}`]);
+  recordResource(runId, { type: "volume", name: volume, state: "planned" });
+  await docker(["volume", "create", ...labelArgs, volume]);
+  recordResource(runId, { type: "volume", name: volume, state: "created" });
+  // A Binds entry names a volume that Docker would otherwise create unlabelled: confirm it is
+  // this run's before anything mounts it.
+  const { plan } = planExact(cleanupDocker, runId, { volume: [volume] });
+  if (plan.length !== 1) throw new Error(`restore-runner: volume ${volume} is not labelled`);
+
+  const name = testResourceName("restore", runId);
+  let started: StartedTestContainer;
+  try {
+    recordResource(runId, { type: "container", name, state: "planned" });
+    started = await new GenericContainer(POSTGRES_TEST_IMAGE)
+      .withName(name)
+      .withLabels(testLabels(runId))
+      .withTmpFs({ "/var/lib/postgresql/data": "rw" })
+      .withNetworkMode(`container:${dbContainer}`)
+      .withUser("1000:1000")
+      .withEntrypoint(["sleep"])
+      .withCommand(["infinity"])
+      .withEnvironment({
+        PGHOST: "127.0.0.1",
+        PGPORT: "5432",
+        PGUSER: opts.user,
+        PGPASSWORD: opts.password,
+        PGDATABASE: opts.database,
+      })
+      .withBindMounts([
+        { source: SCRIPT_DIR, target: "/opt/aida-backup", mode: "ro" },
+        { source: opts.backupsRoot, target: "/backups", mode: "rw" },
+        { source: opts.pauseRoot, target: "/pause", mode: "rw" },
+        { source: volume, target: RESTORE_UPLOADS, mode: "rw" },
+      ])
+      .start();
+  } catch (err) {
+    removeTestVolume(runId, volume);
+    throw err;
+  }
+  const id = started.getId();
+  let stopped = false;
+
+  async function stop(): Promise<void> {
+    if (stopped) return;
+    stopped = true;
+    try {
+      await started.stop();
+    } finally {
+      removeTestVolume(runId, volume);
+    }
+  }
+
+  async function execAs(
+    user: string,
+    command: string[],
+    env?: Record<string, string>,
+  ): Promise<RunResult> {
+    try {
+      const result = await started.exec(command, { user, env });
+      return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+    } catch (err) {
+      return { exitCode: -1, stdout: "", stderr: (err as Error).message };
+    }
+  }
+
+  try {
+    recordResource(runId, { type: "container", name, id, state: "created" });
+    const prepared = await execAs("0:0", ["chown", "1000:1000", RESTORE_UPLOADS]);
+    if (prepared.exitCode !== 0) {
+      throw new Error(`restore-runner: could not prepare ${RESTORE_UPLOADS}: ${prepared.stderr}`);
+    }
+  } catch (err) {
+    await stop();
+    throw err;
+  }
+
+  let runSeq = 0;
+  return {
+    id,
+    name,
+    volume,
+    exec: (command, env) => execAs("1000:1000", command, env),
+    execAsRoot: (command) => execAs("0:0", command),
+    runRestore(run) {
+      runSeq += 1;
+      const pauseName = `restore-${runSeq}-${randomBytes(3).toString("hex")}`;
+      const hostPauseDir = path.join(opts.pauseRoot, pauseName);
+      const prepared = (async () => {
+        await mkdir(hostPauseDir);
+        await chmod(hostPauseDir, 0o777);
+        for (const point of RESTORE_PAUSE_POINTS) {
+          if (!run.pauseAt?.includes(point))
+            await writeFile(path.join(hostPauseDir, `${point}.go`), "");
+        }
+      })();
+      const done = prepared.then(() =>
+        execAs(
+          "1000:1000",
+          ["sh", "/opt/aida-backup/aida-restore-set.sh", `/backups/${run.backups}/${run.setId}`],
+          {
+            BACKUP_DIR: `/backups/${run.backups}`,
+            RESTORE_HOLDER: run.holder,
+            UPLOADS_DIR: run.uploadsDir ?? RESTORE_UPLOADS,
+            BACKUP_TEST_PAUSE_DIR: `/pause/${pauseName}`,
+            ...run.env,
+          },
+        ),
+      );
+      return {
+        done,
+        async waitReached(point, timeoutMs = 60_000) {
+          await prepared;
+          const deadline = Date.now() + timeoutMs;
+          let finished = false;
+          void done.then(() => {
+            finished = true;
+          });
+          for (;;) {
+            if (await exists(path.join(hostPauseDir, `${point}.reached`))) return;
+            if (finished) {
+              const result = await done;
+              throw new Error(
+                `restore-runner: the run ended (exit ${result.exitCode}) before ${point}: ${result.stdout}`,
+              );
+            }
+            if (Date.now() >= deadline) {
+              throw new Error(`restore-runner: ${point} not reached within ${timeoutMs} ms`);
+            }
+            await new Promise((r) => setTimeout(r, 50));
+          }
+        },
+        async go(point) {
+          await prepared;
+          await writeFile(path.join(hostPauseDir, `${point}.go`), "");
+        },
+        async releaseAll() {
+          await prepared;
+          for (const point of RESTORE_PAUSE_POINTS) {
+            await writeFile(path.join(hostPauseDir, `${point}.go`), "");
+          }
+        },
+      };
+    },
+    stop,
   };
 }
 

@@ -377,6 +377,61 @@ restore_lock_release() {
   rm -r -- "$(restore_lock_dir)" </dev/null 2>/dev/null
 }
 
+# restore_lock_age: prints the age of the stored heartbeat in whole seconds (now minus heartbeat,
+# never negative); fails when there is no readable lock or heartbeat.
+restore_lock_age() {
+  _rlg_dir=$(restore_lock_dir) || return 1
+  [ -f "$_rlg_dir/heartbeat" ] && [ ! -L "$_rlg_dir/heartbeat" ] || return 1
+  _rlg_beat=$(head -c 20 "$_rlg_dir/heartbeat" 2>/dev/null) || return 1
+  is_uint "$_rlg_beat" || return 1
+  _rlg_now=$(date -u +%s) || return 1
+  is_uint "$_rlg_now" || return 1
+  if [ "$_rlg_now" -le "$_rlg_beat" ]; then
+    printf '0\n'
+  else
+    printf '%s\n' "$((_rlg_now - _rlg_beat))"
+  fi
+}
+
+# restore_lock_break_stale <holder> <min age seconds>: the explicit operator action behind
+# `scripts/restore.sh --break-stale-lock` (review Q3; never automatic). Removes the lock only when
+# the stored holder is <holder> and the heartbeat is older than <min age>. Returns 0 when removed,
+# 1 when there is no readable lock, 2 when the holder differs, 3 when the heartbeat is too recent
+# (or unreadable), 4 when the removal failed.
+restore_lock_break_stale() {
+  valid_restore_holder "$1" || return 1
+  is_uint "$2" || return 1
+  _rbs_holder=$(restore_lock_holder) || return 1
+  [ "$_rbs_holder" = "$1" ] || return 2
+  _rbs_age=$(restore_lock_age) || return 3
+  [ "$_rbs_age" -gt "$2" ] || return 3
+  restore_lock_release "$1" || return 4
+}
+
+# Archive members of a set (plan 09-10, the shape aida-backup.sh archives): one
+# <organizationId>/<storageKey> path. The organization part never starts with "-".
+MEMBER_PATH_RE='[A-Za-z0-9_-]{1,64}/[a-z0-9]+\.[a-z0-9]{1,8}'
+
+# valid_member_path <path>: true for one member path of the shape above (no absolute path, no
+# "..", no ".", no leading "-", no control character or newline, never the volume marker).
+valid_member_path() {
+  case $1 in
+    -* | *'
+'*) return 1 ;;
+  esac
+  printf '%s\n' "$1" | grep -Eqx "$MEMBER_PATH_RE"
+}
+
+# member_list_ok <file>: true when every line of <file> is a valid member path and no path
+# appears twice. Lines come from `tar --quoting-style=escape`, so a name holding a newline or a
+# control character shows a backslash and fails the pattern.
+member_list_ok() {
+  [ -f "$1" ] || return 1
+  if grep -Evx "$MEMBER_PATH_RE" "$1" >/dev/null; then return 1; fi
+  if grep -E '^-' "$1" >/dev/null; then return 1; fi
+  [ -z "$(sort "$1" | uniq -d)" ]
+}
+
 # retention_prune <dir> <keep> <current setId>: the body of one retention pass (D-03), run only
 # inside fenced_action (see retention). Keeps the <keep> newest set directories, newest by name
 # (the set id starts with its UTC time, so name order is time order), and removes every older one
