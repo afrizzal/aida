@@ -21,6 +21,8 @@ import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@/generated/prisma/client";
 import type { FileStorage } from "@/lib/attachments/file-storage";
+import { BACKUP_LEASE_ACTIVE_SQL } from "@/lib/storage/file-fence";
+import { deferred, waitForBlockedBy } from "../support/lock-wait";
 import {
   type BackupRun,
   type BackupRunner,
@@ -52,6 +54,7 @@ let fx: ProjectFixtures;
 let attachments: AttachmentsModule;
 let cleanup: FileCleanupModule;
 let runner: BackupRunner | null = null;
+let runnerOptions: Parameters<typeof startBackupRunner>[0];
 let testRoot = "";
 let uploadsRoot = "";
 let backupsRoot = "";
@@ -84,14 +87,15 @@ beforeAll(async () => {
   attachments = await import("@/lib/projects/attachments");
   cleanup = await import("@/lib/projects/file-cleanup");
 
-  runner = await startBackupRunner({
+  runnerOptions = {
     database: url.pathname.slice(1),
     user: decodeURIComponent(url.username),
     password: decodeURIComponent(url.password),
     uploadsRoot,
     backupsRoot,
     pauseRoot,
-  });
+  };
+  runner = await startBackupRunner(runnerOptions);
 }, 300_000);
 
 afterAll(async () => {
@@ -756,6 +760,399 @@ describe("archive tolerance and odd entries (U-13, T-09-21)", () => {
         skippedEntries: 1,
       });
       expect(await readSums(c, setId)).toEqual(new Map());
+    },
+    CASE_TIMEOUT,
+  );
+});
+
+// ---------------------------------------------------------------------------------------------
+// Task 3: U-12 with the real script (09-04 fence contract G2 to G4, review P2) and the D-02(5)
+// crash rule. Each case asserts, in its own assertion set: the run's exit code, the published
+// set count, `backup:lastRun`, whether the sweep deleted, and which fence locks and sessions are
+// held (pg_locks and pg_stat_activity by application_name).
+//
+// Limit L1 of 09-04 is not tested: a run that is paused, has lost its fence session and whose
+// lease expired, all at once, lifts the fence by construction. That run aborts on lease loss when
+// it resumes, and verification refuses a set missing a referenced file.
+
+const BACKUP_FENCE = "aida-backup-fence";
+const DELETE_FENCE = "aida-delete-fence";
+
+async function leaseActive(): Promise<boolean> {
+  const rows = await prisma.$queryRawUnsafe<{ active: boolean }[]>(BACKUP_LEASE_ACTIVE_SQL);
+  return rows[0]?.active === true;
+}
+
+async function leaseValue(): Promise<Record<string, unknown> | null> {
+  const row = await prisma.systemSetting.findUnique({ where: { key: "backup:lease" } });
+  return row ? (JSON.parse(row.value) as Record<string, unknown>) : null;
+}
+
+async function waitFor(check: () => Promise<boolean>, what: string, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await check()) return;
+    if (Date.now() >= deadline) throw new Error(`waitFor: ${what} within ${timeoutMs} ms`);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+/** The set id of the run's .tmp-<setId> directory in the case's backups directory. */
+async function tmpSetId(c: Case): Promise<string> {
+  const tmp = (await entries(c.backups)).filter((name) => name.startsWith(".tmp-"));
+  expect(tmp).toHaveLength(1);
+  const setId = (tmp[0] as string).slice(".tmp-".length);
+  expect(setId).toMatch(SET_ID_PATTERN);
+  return setId;
+}
+
+function backupHoldsFence(pid: number) {
+  return [{ pid, applicationName: BACKUP_FENCE, mode: "ExclusiveLock", granted: true }];
+}
+
+async function oneBackupFencePid(): Promise<number> {
+  const pids = await fence.backendsNamed(BACKUP_FENCE);
+  expect(pids).toHaveLength(1);
+  return pids[0] as number;
+}
+
+/** A file no row references, queued for cleanup (due), as a dereferenced file would be. */
+async function queuedLooseFile(c: Case, w: World): Promise<string> {
+  const key = await storeFile(c, w.orgId, "bin");
+  await fx.seedFileCleanup(prisma, w.orgId, key);
+  return key;
+}
+
+/** A storage over the case directory whose delete of one key waits for `gate`. */
+function gatedStorage(c: Case, gatedKey: string, gate: Promise<void>): FileStorage {
+  return {
+    save: (p) => c.storage.save(p),
+    read: (p) => c.storage.read(p),
+    async delete(p) {
+      if (p.key === gatedKey) await gate;
+      await c.storage.delete(p);
+    },
+  };
+}
+
+describe("U-12 fence with the real script", () => {
+  it(
+    "G2 dropped session: the run's fence session is terminated; its unexpired lease still blocks the sweep, and the run logs the loss, publishes a consistent set and succeeds",
+    async () => {
+      const c = await newCase();
+      const w = await seedFour(c);
+      // A due queue row whose key the dump references.
+      const referenced = w.keys[2] as string;
+      await fx.seedFileCleanup(prisma, w.orgId, referenced);
+      const run = runIn(c, { pauseAt: ["after-dump"], env: { BACKUP_LEASE_TTL_SECONDS: "30" } });
+      await run.waitReached("after-dump");
+      const setId = await tmpSetId(c);
+      const pid = await oneBackupFencePid();
+      expect(await fence.fenceLocks()).toEqual(backupHoldsFence(pid));
+      expect(await leaseValue()).toEqual({ holder: setId, expiresAt: expect.any(String) });
+
+      await prisma.$queryRaw`SELECT pg_terminate_backend(${pid}::int)`;
+      await waitFor(async () => (await fence.backendsNamed(BACKUP_FENCE)).length === 0, "gone");
+      expect(await fence.fenceLocks()).toEqual([]);
+      expect(await leaseActive()).toBe(true);
+
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      expect(await sweep(c)).toEqual({
+        deleted: 0,
+        missing: 0,
+        failed: 0,
+        skipped: "backup-lease",
+      });
+      expect(await exists(fileOf(c, w.orgId, referenced))).toBe(true);
+
+      await run.go("after-dump");
+      const result = await run.done;
+      expect(result.stdout).toContain(
+        "[backup] fence session lost; the lease still fenced deletions",
+      );
+      expect(await expectSucceededRun(c, result)).toBe(setId);
+      await expectConsistentSet(c, setId);
+      expect((await readSums(c, setId)).has(`${w.orgId}/${referenced}`)).toBe(true);
+      expect(await leaseValue()).toBeNull();
+      expect(await fence.fenceLocks()).toEqual([]);
+      expect(await fence.backendsNamed(BACKUP_FENCE)).toEqual([]);
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "G3 paused: with the runner container paused past its lease TTL, the frozen fence session still blocks the sweep; after unpause the run aborts on lease loss, publishes nothing, and the next sweep deletes",
+    async () => {
+      const c = await newCase();
+      const w = await seedFour(c);
+      const loose = await queuedLooseFile(c, w);
+      const r = activeRunner();
+      const run = runIn(c, { pauseAt: ["after-dump"], env: { BACKUP_LEASE_TTL_SECONDS: "4" } });
+      await run.waitReached("after-dump");
+      const setId = await tmpSetId(c);
+      const pid = await oneBackupFencePid();
+      expect(await leaseValue()).toEqual({ holder: setId, expiresAt: expect.any(String) });
+
+      const pausedAt = Date.now();
+      await r.pause();
+      try {
+        await waitFor(async () => !(await leaseActive()), "lease expired", 15_000);
+        expect(await leaseValue()).toEqual({ holder: setId, expiresAt: expect.any(String) });
+        expect(await fence.fenceLocks()).toEqual(backupHoldsFence(pid));
+        vi.spyOn(console, "error").mockImplementation(() => {});
+        expect(await sweep(c)).toEqual({
+          deleted: 0,
+          missing: 0,
+          failed: 0,
+          skipped: "backup-archiving",
+        });
+        expect(await exists(fileOf(c, w.orgId, loose))).toBe(true);
+        const left = 10_000 - (Date.now() - pausedAt);
+        if (left > 0) await new Promise((res) => setTimeout(res, left));
+      } finally {
+        await r.unpause();
+      }
+
+      await run.go("after-dump");
+      const result = await run.done;
+      await expectFailedRun(c, result, "unknown", "[backup] backup aborted: lease lost");
+      expect(await leaseValue()).toBeNull();
+      expect(await fence.fenceLocks()).toEqual([]);
+      expect(await fence.backendsNamed(BACKUP_FENCE)).toEqual([]);
+      expect(await sweep(c)).toEqual({ deleted: 1, missing: 0, failed: 0 });
+      expect(await exists(fileOf(c, w.orgId, loose))).toBe(false);
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "G4 io timeout: a sweep delete still running past its I/O budget holds the run at its fence step until the delete settles; then the run succeeds",
+    async () => {
+      const c = await newCase();
+      const w = await seedFour(c);
+      const loose = await queuedLooseFile(c, w);
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const gate = deferred<void>();
+      const tracked = fence.trackFence(fence.testFenceProvider(c.uploads));
+      try {
+        expect(
+          await cleanup.sweepProjectFileCleanup({
+            client: prisma,
+            storage: gatedStorage(c, loose, gate.promise),
+            fence: tracked.fence,
+            now: FUTURE,
+            ioBudgetMs: 300,
+          }),
+        ).toEqual({ deleted: 0, missing: 0, failed: 1 });
+        const held = await fence.fenceLocks();
+        expect(held).toHaveLength(1);
+        expect(held[0]).toMatchObject({
+          applicationName: DELETE_FENCE,
+          mode: "ShareLock",
+          granted: true,
+        });
+        const sweepPid = (held[0] as { pid: number }).pid;
+
+        const run = runIn(c, {
+          pauseAt: ["after-fence"],
+          env: { BACKUP_FENCE_WAIT_SECONDS: "60" },
+        });
+        await waitFor(async () => (await fence.backendsNamed(BACKUP_FENCE)).length === 1, "fence");
+        const backupPid = await oneBackupFencePid();
+        await waitForBlockedBy(prisma, sweepPid, [backupPid]);
+        const watchUntil = Date.now() + 5_000;
+        while (Date.now() < watchUntil) {
+          expect(await run.hasReached("after-fence")).toBe(false);
+          await new Promise((res) => setTimeout(res, 250));
+        }
+        expect(await fence.fenceLocks()).toEqual(
+          [
+            { pid: sweepPid, applicationName: DELETE_FENCE, mode: "ShareLock", granted: true },
+            {
+              pid: backupPid,
+              applicationName: BACKUP_FENCE,
+              mode: "ExclusiveLock",
+              granted: false,
+            },
+          ].sort((a, b) => a.pid - b.pid),
+        );
+        expect(await leaseValue()).toBeNull();
+        expect(await exists(fileOf(c, w.orgId, loose))).toBe(true);
+
+        gate.resolve();
+        await tracked.allClosed();
+        await run.waitReached("after-fence");
+        expect(await fence.fenceLocks()).toEqual(backupHoldsFence(backupPid));
+        expect(await exists(fileOf(c, w.orgId, loose))).toBe(false);
+        await run.go("after-fence");
+        const result = await run.done;
+        const setId = await expectSucceededRun(c, result);
+        await expectConsistentSet(c, setId);
+        expect(await fence.fenceLocks()).toEqual([]);
+      } finally {
+        gate.resolve();
+        await tracked.allClosed();
+      }
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "fence busy: with the delete never settling during the run, the run fails 'file fence busy' after BACKUP_FENCE_WAIT_SECONDS, publishes nothing and leaves no lease",
+    async () => {
+      const c = await newCase();
+      const w = await seedFour(c);
+      const loose = await queuedLooseFile(c, w);
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const gate = deferred<void>();
+      const tracked = fence.trackFence(fence.testFenceProvider(c.uploads));
+      try {
+        expect(
+          await cleanup.sweepProjectFileCleanup({
+            client: prisma,
+            storage: gatedStorage(c, loose, gate.promise),
+            fence: tracked.fence,
+            now: FUTURE,
+            ioBudgetMs: 300,
+          }),
+        ).toEqual({ deleted: 0, missing: 0, failed: 1 });
+        const started = Date.now();
+        const result = await runIn(c, { env: { BACKUP_FENCE_WAIT_SECONDS: "3" } }).done;
+        expect(Date.now() - started).toBeGreaterThanOrEqual(3_000);
+        await expectFailedRun(c, result, "unknown", "[backup] file fence busy");
+        expect(await leaseValue()).toBeNull();
+        expect(await fence.backendsNamed(BACKUP_FENCE)).toEqual([]);
+        const held = await fence.fenceLocks();
+        expect(held).toHaveLength(1);
+        expect(held[0]).toMatchObject({ applicationName: DELETE_FENCE, granted: true });
+        expect(await exists(fileOf(c, w.orgId, loose))).toBe(true);
+      } finally {
+        gate.resolve();
+        await tracked.allClosed();
+      }
+      expect(await fence.fenceLocks()).toEqual([]);
+      expect(await exists(fileOf(c, w.orgId, loose))).toBe(false);
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "crash (D-02(5)): a killed run releases its fence with the process and publishes nothing; its lease blocks the sweep until the TTL passes; then the sweep deletes and a new runner's run takes the expired lease and succeeds",
+    async () => {
+      const c = await newCase();
+      const w = await seedFour(c);
+      const loose = await queuedLooseFile(c, w);
+      const crashRunner = await startBackupRunner(runnerOptions);
+      try {
+        const run = crashRunner.runBackup({
+          uploads: c.uploadsName,
+          backups: c.backupsName,
+          pauseAt: ["after-dump"],
+          env: { BACKUP_LEASE_TTL_SECONDS: "4" },
+        });
+        openRuns.push(run);
+        await run.waitReached("after-dump");
+        const killedSetId = await tmpSetId(c);
+        expect(await fence.fenceLocks()).toEqual(backupHoldsFence(await oneBackupFencePid()));
+
+        await crashRunner.kill();
+        const killed = await run.done;
+        expect(killed.exitCode).not.toBe(0);
+        await waitFor(async () => (await fence.fenceLocks()).length === 0, "fence released");
+        expect(await fence.backendsNamed(BACKUP_FENCE)).toEqual([]);
+        expect(await leaseValue()).toEqual({ holder: killedSetId, expiresAt: expect.any(String) });
+        expect(await publishedSets(c)).toEqual([]);
+        expect(await entries(c.backups)).toEqual([`.tmp-${killedSetId}`]);
+        // The killed run recorded nothing.
+        expect(await lastRun()).toBeNull();
+
+        vi.spyOn(console, "error").mockImplementation(() => {});
+        if (await leaseActive()) {
+          expect(await sweep(c)).toEqual({
+            deleted: 0,
+            missing: 0,
+            failed: 0,
+            skipped: "backup-lease",
+          });
+          expect(await exists(fileOf(c, w.orgId, loose))).toBe(true);
+        }
+        await waitFor(async () => !(await leaseActive()), "lease expired", 15_000);
+        expect(await leaseValue()).toEqual({ holder: killedSetId, expiresAt: expect.any(String) });
+        expect(await sweep(c)).toEqual({ deleted: 1, missing: 0, failed: 0 });
+        expect(await exists(fileOf(c, w.orgId, loose))).toBe(false);
+
+        const result = await runIn(c).done;
+        expect(result.exitCode, result.stdout).toBe(0);
+        expectQuietOutput(result);
+        const sets = await publishedSets(c);
+        expect(sets).toHaveLength(1);
+        const setId = sets[0] as string;
+        expect(setId).not.toBe(killedSetId);
+        expect(await entries(c.backups)).toEqual([`.tmp-${killedSetId}`, setId].sort());
+        expect(await lastRun()).toEqual({
+          finishedAt: expect.any(String),
+          result: "succeeded",
+          setId,
+          category: null,
+        });
+        await expectConsistentSet(c, setId);
+        expect(await leaseValue()).toBeNull();
+      } finally {
+        await crashRunner.stop();
+      }
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "takeover (P2): another holder overwrites the lease while the run waits at after-archive; the run aborts on lease loss, publishes nothing and leaves the other holder's lease unchanged",
+    async () => {
+      const c = await newCase();
+      const w = await seedFour(c);
+      const loose = await queuedLooseFile(c, w);
+      const run = runIn(c, { pauseAt: ["after-archive"] });
+      await run.waitReached("after-archive");
+      const setId = await tmpSetId(c);
+      const pid = await oneBackupFencePid();
+      expect(await leaseValue()).toEqual({ holder: setId, expiresAt: expect.any(String) });
+
+      await prisma.$executeRaw`
+        UPDATE "SystemSetting"
+        SET value = json_build_object(
+          'holder', 'another-backup',
+          'expiresAt', to_char((now() + interval '120 seconds') AT TIME ZONE 'UTC',
+                               'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))::text,
+            "updatedAt" = now()
+        WHERE key = 'backup:lease'`;
+      const takenOver = await prisma.systemSetting.findUniqueOrThrow({
+        where: { key: "backup:lease" },
+      });
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      expect(await sweep(c)).toEqual({
+        deleted: 0,
+        missing: 0,
+        failed: 0,
+        skipped: "backup-archiving",
+      });
+      expect(await fence.fenceLocks()).toEqual(backupHoldsFence(pid));
+
+      await run.go("after-archive");
+      const result = await run.done;
+      await expectFailedRun(c, result, "unknown", "[backup] backup aborted: lease lost");
+      expect(
+        await prisma.systemSetting.findUniqueOrThrow({ where: { key: "backup:lease" } }),
+      ).toEqual(takenOver);
+      expect(await fence.fenceLocks()).toEqual([]);
+      expect(await fence.backendsNamed(BACKUP_FENCE)).toEqual([]);
+      // The other holder's unexpired lease still refuses the sweep.
+      expect(await sweep(c)).toEqual({
+        deleted: 0,
+        missing: 0,
+        failed: 0,
+        skipped: "backup-lease",
+      });
+      expect(await exists(fileOf(c, w.orgId, loose))).toBe(true);
+      await prisma.$executeRaw`DELETE FROM "SystemSetting" WHERE key = 'backup:lease'`;
     },
     CASE_TIMEOUT,
   );
