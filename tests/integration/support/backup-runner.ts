@@ -132,6 +132,8 @@ export interface BackupRun {
   hasReached(point: PausePoint): Promise<boolean>;
   /** Lets the script continue past the point. */
   go(point: PausePoint): Promise<void>;
+  /** Releases every pause point (teardown after a failed case). */
+  releaseAll(): Promise<void>;
 }
 
 export interface BackupRunner {
@@ -274,6 +276,12 @@ export async function startBackupRunner(opts: StartBackupRunnerOptions): Promise
         async go(point) {
           await prepared;
           await writeFile(path.join(hostPauseDir, `${point}.go`), "");
+        },
+        async releaseAll() {
+          await prepared;
+          for (const point of PAUSE_POINTS) {
+            await writeFile(path.join(hostPauseDir, `${point}.go`), "");
+          }
         },
       };
     },

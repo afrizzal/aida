@@ -16,7 +16,7 @@
 //
 // One test process at a time (vitest.integration.config.ts, fileParallelism: false).
 import { randomUUID } from "node:crypto";
-import { readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@/generated/prisma/client";
@@ -38,6 +38,8 @@ import { createIsolatedDatabase, type IsolatedDatabase } from "./support/isolate
 
 type FenceFixtures = typeof import("../support/file-fence-fixtures");
 type ProjectFixtures = typeof import("../support/project-fixtures");
+type AttachmentsModule = typeof import("@/lib/projects/attachments");
+type FileCleanupModule = typeof import("@/lib/projects/file-cleanup");
 
 const CASE_TIMEOUT = 180_000;
 const POOL_KEY = Symbol.for("aida.db.pool");
@@ -47,6 +49,8 @@ let iso: IsolatedDatabase | null = null;
 let prisma: PrismaClient;
 let fence: FenceFixtures;
 let fx: ProjectFixtures;
+let attachments: AttachmentsModule;
+let cleanup: FileCleanupModule;
 let runner: BackupRunner | null = null;
 let testRoot = "";
 let uploadsRoot = "";
@@ -77,6 +81,8 @@ beforeAll(async () => {
   expect(current[0]?.db).toBe(url.pathname.slice(1));
   fence = await import("../support/file-fence-fixtures");
   fx = await import("../support/project-fixtures");
+  attachments = await import("@/lib/projects/attachments");
+  cleanup = await import("@/lib/projects/file-cleanup");
 
   runner = await startBackupRunner({
     database: url.pathname.slice(1),
@@ -114,8 +120,15 @@ beforeEach(async () => {
   await prisma.$executeRaw`DELETE FROM "SystemSetting" WHERE key IN ('backup:lease', 'backup:lastRun')`;
 });
 
+/** Every run a case started; afterEach lets each one finish before it checks for leftovers. */
+const openRuns: BackupRun[] = [];
+
 afterEach(async () => {
   vi.restoreAllMocks();
+  for (const run of openRuns.splice(0)) {
+    await run.releaseAll();
+    await run.done;
+  }
   // Shared database hygiene: no case leaves a lease, a fence lock, a fence session or a
   // restore lock of its own behind.
   const leases = await prisma.systemSetting.count({ where: { key: "backup:lease" } });
@@ -404,12 +417,14 @@ function runIn(
   c: Case,
   opts: { pauseAt?: readonly PausePoint[]; env?: Record<string, string> } = {},
 ): BackupRun {
-  return activeRunner().runBackup({
+  const run = activeRunner().runBackup({
     uploads: c.uploadsName,
     backups: c.backupsName,
     pauseAt: opts.pauseAt,
     env: opts.env,
   });
+  openRuns.push(run);
+  return run;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -469,6 +484,278 @@ describe("backup tracer", () => {
         category: null,
       });
       expect(Object.keys(status ?? {})).toEqual(["finishedAt", "result", "setId", "category"]);
+    },
+    CASE_TIMEOUT,
+  );
+});
+
+// ---------------------------------------------------------------------------------------------
+// Task 2: add, replace and delete while the run waits at each pause point (D-02, AIDA-33), one
+// negative control per stored-file kind (U-14), a file nobody references vanishing (U-13), and
+// the empty edge.
+
+/** Every queued key is due: the queue's nextAttemptAt defaults to now(). */
+const FUTURE = new Date("2031-03-01T00:00:00.000Z");
+
+async function exists(file: string): Promise<boolean> {
+  try {
+    await stat(file);
+    return true;
+  } catch (err) {
+    if ((err as { code?: string }).code === "ENOENT") return false;
+    throw err;
+  }
+}
+
+function fileOf(c: Case, orgId: string, key: string): string {
+  return path.join(c.uploads, orgId, key);
+}
+
+/** The real fenced sweep over the case's uploads directory (mount check replaced only). */
+async function sweep(c: Case) {
+  const tracked = fence.trackFence(fence.testFenceProvider(c.uploads));
+  const result = await cleanup.sweepProjectFileCleanup({
+    client: prisma,
+    storage: c.storage,
+    fence: tracked.fence,
+    now: FUTURE,
+  });
+  await tracked.allClosed();
+  return result;
+}
+
+/** Replaces the logo: new file, then the committed Setting update with the old key enqueued. */
+async function replaceLogo(c: Case, w: World, oldKey: string, version: number): Promise<string> {
+  const key = await storeFile(c, w.orgId, "png");
+  await prisma.$transaction(async (tx) => {
+    await tx.setting.update({
+      where: { organizationId_key: { organizationId: w.orgId, key: "branding:logo" } },
+      data: { value: logoValue(key, version) },
+    });
+    await cleanup.enqueueFileCleanupInTx(tx, w.orgId, [oldKey]);
+  });
+  return key;
+}
+
+async function queuedKeys(orgId: string): Promise<string[]> {
+  const rows = await prisma.projectFileCleanup.findMany({
+    where: { organizationId: orgId },
+    select: { storageKey: true },
+    orderBy: { storageKey: "asc" },
+  });
+  return rows.map((r) => r.storageKey);
+}
+
+async function expectFailedRun(
+  c: Case,
+  result: RunResult,
+  category: string,
+  line: string,
+): Promise<void> {
+  expect(result.exitCode, result.stdout).toBe(2);
+  expectQuietOutput(result);
+  expect(result.stdout).toContain(line);
+  expect(result.stdout).toContain(`[backup] backup failed: ${category}`);
+  expect(await publishedSets(c)).toEqual([]);
+  // Nothing published and the run's own temporary directory removed.
+  expect(await entries(c.backups)).toEqual([]);
+  expect(await lastRun()).toEqual({
+    finishedAt: expect.any(String),
+    result: "failed",
+    setId: null,
+    category,
+  });
+}
+
+async function expectSucceededRun(c: Case, result: RunResult): Promise<string> {
+  expect(result.exitCode, result.stdout).toBe(0);
+  expectQuietOutput(result);
+  const sets = await publishedSets(c);
+  expect(sets).toHaveLength(1);
+  const setId = sets[0] as string;
+  expect(await entries(c.backups)).toEqual([setId]);
+  expect(await lastRun()).toEqual({
+    finishedAt: expect.any(String),
+    result: "succeeded",
+    setId,
+    category: null,
+  });
+  return setId;
+}
+
+describe("mid-backup add, replace and delete (D-02, AIDA-33)", () => {
+  for (const point of ["after-fence", "after-dump", "after-list", "after-archive"] as const) {
+    it(
+      `${point}: rows and files added, the logo replaced and a task attachment deleted while the run waits; the sweep deletes nothing; every dumped record has its file and checksum in the set`,
+      async () => {
+        const c = await newCase();
+        const w = await seedFour(c);
+        const oldLogo = w.keys[3] as string;
+        const doomed = await addTaskAttachment(c, w);
+
+        const run = runIn(c, { pauseAt: [point] });
+        await run.waitReached(point);
+
+        const addedTicketKey = await addTicketAttachment(c, w);
+        const addedTask = await addTaskAttachment(c, w);
+        const newLogo = await replaceLogo(c, w, oldLogo, 2);
+        expect(
+          await attachments.deleteTaskAttachment(fx.actorOf(w.ownerId, w.orgId), doomed.id),
+        ).toEqual({ ok: true, cleanupQueued: 1 });
+        expect(await queuedKeys(w.orgId)).toEqual([oldLogo, doomed.key].sort());
+
+        vi.spyOn(console, "error").mockImplementation(() => {});
+        expect(await sweep(c)).toEqual({
+          deleted: 0,
+          missing: 0,
+          failed: 0,
+          skipped: "backup-archiving",
+        });
+        for (const key of [oldLogo, doomed.key]) {
+          expect(await exists(fileOf(c, w.orgId, key))).toBe(true);
+        }
+        expect(await queuedKeys(w.orgId)).toEqual([oldLogo, doomed.key].sort());
+
+        await run.go(point);
+        const result = await run.done;
+        const setId = await expectSucceededRun(c, result);
+        const refs = await expectConsistentSet(c, setId);
+
+        // What the dump holds depends on where the run waited: before the dump it sees the
+        // changes, from after-dump on it holds the earlier state, whose files were still there.
+        const ticketKeys = [w.keys[0], w.keys[1]].map((k) => `${w.orgId}/${k}`);
+        if (point === "after-fence") {
+          expect(refs).toEqual({
+            Attachment: [...ticketKeys, `${w.orgId}/${addedTicketKey}`].sort(),
+            TaskAttachment: [`${w.orgId}/${w.keys[2]}`, `${w.orgId}/${addedTask.key}`].sort(),
+            Setting: [`${w.orgId}/${newLogo}`],
+          });
+        } else {
+          expect(refs).toEqual({
+            Attachment: ticketKeys.sort(),
+            TaskAttachment: [`${w.orgId}/${w.keys[2]}`, `${w.orgId}/${doomed.key}`].sort(),
+            Setting: [`${w.orgId}/${oldLogo}`],
+          });
+        }
+        const manifest = await readManifest(c, setId);
+        expect((manifest.counts as Record<string, number>).referencedFiles).toBe(
+          Object.values(refs).flat().length,
+        );
+
+        // After the run the fence and the lease are gone and the sweep deletes the queued keys.
+        expect(await sweep(c)).toEqual({ deleted: 2, missing: 0, failed: 0 });
+        for (const key of [oldLogo, doomed.key]) {
+          expect(await exists(fileOf(c, w.orgId, key))).toBe(false);
+        }
+        expect(await queuedKeys(w.orgId)).toEqual([]);
+      },
+      CASE_TIMEOUT,
+    );
+  }
+});
+
+describe("verification covers every stored-file kind (U-14)", () => {
+  const kinds = [
+    { kind: "ticket attachment", index: 0 },
+    { kind: "task attachment", index: 2 },
+    { kind: "logo", index: 3 },
+  ] as const;
+  for (const { kind, index } of kinds) {
+    it(
+      `negative control, ${kind}: its referenced file removed behind the queue's back at after-dump fails the set with category verification and publishes nothing`,
+      async () => {
+        const c = await newCase();
+        const w = await seedFour(c);
+        const run = runIn(c, { pauseAt: ["after-dump"] });
+        await run.waitReached("after-dump");
+        await unlink(fileOf(c, w.orgId, w.keys[index] as string));
+        await run.go("after-dump");
+        const result = await run.done;
+        await expectFailedRun(
+          c,
+          result,
+          "verification",
+          "[backup] verification: 1 referenced files missing from the archive",
+        );
+      },
+      CASE_TIMEOUT,
+    );
+  }
+});
+
+describe("archive tolerance and odd entries (U-13, T-09-21)", () => {
+  it(
+    "U-13: a file no row references, removed at after-list, leaves the run succeeded and is in neither the archive nor uploads.sha256",
+    async () => {
+      const c = await newCase();
+      const w = await seedFour(c);
+      const loose = await storeFile(c, w.orgId, "bin");
+      const run = runIn(c, { pauseAt: ["after-list"] });
+      await run.waitReached("after-list");
+      await unlink(fileOf(c, w.orgId, loose));
+      await run.go("after-list");
+      const result = await run.done;
+      const setId = await expectSucceededRun(c, result);
+      await expectConsistentSet(c, setId);
+      const sums = await readSums(c, setId);
+      expect(sums.has(`${w.orgId}/${loose}`)).toBe(false);
+      expect((await archiveHashes(c, setId)).has(`${w.orgId}/${loose}`)).toBe(false);
+      expect((await readManifest(c, setId)).counts).toEqual({
+        referencedFiles: 4,
+        archivedFiles: 4,
+        skippedEntries: 1,
+      });
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "only regular files at <organizationId>/<storageKey> are archived; the marker, links, nested directories and other names are counted as skipped",
+    async () => {
+      const c = await newCase();
+      const w = await seedFour(c);
+      const orgDir = path.join(c.uploads, w.orgId);
+      await symlink(path.join(orgDir, w.keys[0] as string), path.join(orgDir, "link0.txt"));
+      await mkdir(path.join(orgDir, "nested0.dir"));
+      await writeFile(path.join(orgDir, "nested0.dir", "deep0.txt"), "deep");
+      await writeFile(path.join(orgDir, "UPPER0.txt"), "upper");
+      await writeFile(path.join(orgDir, "with space.txt"), "space");
+      await writeFile(path.join(c.uploads, "stray0.txt"), "stray");
+      await mkdir(path.join(c.uploads, "bad.name"));
+      const result = await runIn(c).done;
+      const setId = await expectSucceededRun(c, result);
+      await expectConsistentSet(c, setId);
+      expect([...(await readSums(c, setId)).keys()].sort()).toEqual(
+        w.keys.map((k) => `${w.orgId}/${k}`).sort(),
+      );
+      // Marker, stray0.txt, bad.name at the top; link0.txt, nested0.dir, UPPER0.txt and
+      // "with space.txt" inside the organization directory.
+      expect((await readManifest(c, setId)).counts).toEqual({
+        referencedFiles: 4,
+        archivedFiles: 4,
+        skippedEntries: 7,
+      });
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "empty: no attachment, no logo and an uploads directory holding only the marker give a succeeded set with counts 0",
+    async () => {
+      const c = await newCase();
+      const result = await runIn(c).done;
+      const setId = await expectSucceededRun(c, result);
+      expect(await expectConsistentSet(c, setId)).toEqual({
+        Attachment: [],
+        TaskAttachment: [],
+        Setting: [],
+      });
+      expect((await readManifest(c, setId)).counts).toEqual({
+        referencedFiles: 0,
+        archivedFiles: 0,
+        skippedEntries: 1,
+      });
+      expect(await readSums(c, setId)).toEqual(new Map());
     },
     CASE_TIMEOUT,
   );
