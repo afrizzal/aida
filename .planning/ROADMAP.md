@@ -143,7 +143,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 6. `scripts/install.sh`, `check-version`, `AGENTS.md`, `CODEOWNERS` and the README widgets exist, or an item needing an owner account is recorded as manual.
 
 **Stays open for a human:** the Phase 5 visual pass and the Phase 6 real-LLM Insight quality check.
-**Plans:** 4/13 plans complete (replanned 2026-11-12 after the owner unparked the phase; plan checker passed, no further Codex plan review per owner item 3)
+**Plans:** 5/13 plans complete (replanned 2026-11-12 after the owner unparked the phase; plan checker passed, no further Codex plan review per owner item 3)
 **Wave 1**
 
 - [x] 09-01-PLAN.md — `POSTGRES_PASSWORD` with URL-reserved characters for migrate, app and worker; boot refusal on an inconsistent URL (AIDA-35) (Wave 1)
@@ -153,7 +153,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 **Wave 2** *(blocked on Wave 1 completion)*
 
 - [x] 09-02-PLAN.md — Seed and demo guards that refuse without deleting, completion marker written last (AIDA-37, AIDA-38) (Wave 2)
-- [ ] 09-06-PLAN.md — Backup core as `1000:1000`, the backup side of the fence, verification of attachments, task attachments and the logo (AIDA-33, AIDA-38) (Wave 2)
+- [x] 09-06-PLAN.md — Backup core as `1000:1000`, the backup side of the fence, verification of attachments, task attachments and the logo (AIDA-33, AIDA-38) (Wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 

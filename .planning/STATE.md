@@ -4,8 +4,8 @@ milestone: v2.0
 milestone_name: Helpdesk & Projects
 current_phase: 9
 current_phase_name: operations
-status: Phase 8 Part A verified human_needed (16 of 17, no code gap); Part B (Docker test tooling, Phase 8.1) waits for the owner; Phase 9 executing (4 of 13 plans done); Phases 10 and 15 unparked; Phases 11, 12, 12.1, 12.2 and 14 verified human_needed
-stopped_at: Phase 9 executing, 09-01, 09-02, 09-03, 09-04 done; next 09-06 (one plan per round, use_worktrees false)
+status: Phase 8 Part A verified human_needed (16 of 17, no code gap); Part B (Docker test tooling, Phase 8.1) waits for the owner; Phase 9 executing (5 of 13 plans done); Phases 10 and 15 unparked; Phases 11, 12, 12.1, 12.2 and 14 verified human_needed
+stopped_at: Phase 9 executing, waves 1 and 2 done (09-01 to 09-04, 09-06); next 09-05 (one plan per round, use_worktrees false)
 last_updated: "2026-11-12T07:25:00.000Z"
 last_activity: 2026-11-12
 last_activity_desc: Phase 9 executing. 09-01 done (AIDA_DATABASE_URL override and boot guard; unit 1421, integration compose-database-url 5) and 09-03 done (check-version gate, version 1.0.0, 01-VERIFICATION.md human_needed with criterion 2 failed until Phase 10, STATE audit of 43 items, AGENTS.md, CODEOWNERS); stack proofs not run until the Phase 8.1 harness
@@ -14,8 +14,8 @@ progress:
   total_phases: 13
   completed_phases: 0
   total_plans: 140
-  completed_plans: 83
-  percent: 59
+  completed_plans: 84
+  percent: 60
 ---
 
 # STATE — AIDA
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-11-07, v2.0 opened)
 
 ## Current Position
 
-Phase: 9 (Operations) is executing under `run-loop/PIAGAM.md`, one plan per round (`use_worktrees: false`). Wave 1 is complete: 09-01 (database URL encoding and boot guard), 09-03 (records and repo health), 09-04 (one deletion queue and the delete side of the backup fence); 09-02 (seed and demo guards that refuse without deleting) is also complete; 9 of 13 remain, next 09-06.
+Phase: 9 (Operations) is executing under `run-loop/PIAGAM.md`, one plan per round (`use_worktrees: false`). Wave 1 is complete: 09-01 (database URL encoding and boot guard), 09-03 (records and repo health), 09-04 (one deletion queue and the delete side of the backup fence); 09-02 (seed and demo guards that refuse without deleting) and 09-06 (backup core and the backup side of the fence) are also complete; 8 of 13 remain, next 09-05.
 Plan: 13 plans in 7 waves, replanned 2026-11-12 after the owner unparked the phase (CONTEXT "Update 2026-11-12", U-01 to U-18); the plan checker passed.
 Status: Phase 8 Part A verified `human_needed` (`08-VERIFICATION.md`); Phase 8.1 (Docker test tooling and runtime proofs) waits for the owner. Phases 11, 12, 12.1, 12.2 and 14 are verified `human_needed`. Phases 10 and 15 are unparked and not yet executed; 13, 16 and 17 are not planned. No phase is parked.
 Last activity: 2026-11-12 — Phase 9 execution started (09-01, 09-03). v1.0.0 stays complete and archived (`milestones/v1.0.0-*`); the v1.0.0 safe-point candidate is `fc8078f` (owner decides).
@@ -125,7 +125,7 @@ Owner items, in the order of `run-loop/LAPORAN.md` section 3:
 ## Session Continuity
 
 **Last session:** 2026-11-12T07:25:00.000Z
-**Stopped at:** Phase 9 executing, 4 of 13 plans done, next 09-06 (2026-11-12)
+**Stopped at:** Phase 9 executing, 5 of 13 plans done, next 09-05 (2026-11-12)
 **Resume file:** .planning/run-loop/ANTREAN.md
 
 **Last action (2026-11-12):** plan 09-03 executed (check-version, version 1.0.0, `01-VERIFICATION.md`, STATE audit, `AGENTS.md`, `CODEOWNERS`). No tag, nothing pushed.
