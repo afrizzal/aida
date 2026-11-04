@@ -11,6 +11,9 @@ export const PUBLIC_RATE_LIMITS = {
   // 120 per minute per identity is a hypothesis to tune from real traffic (D-21): a status page
   // with many attachments stays well under it, while token probing through this route is slowed.
   statusAttachment: { scope: "status-attachment", max: 120, windowMs: 60 * 1000 },
+  // The sidebar and the public pages load a logo once per version per browser (immutable cache),
+  // so 300 per minute per identity leaves room for many users behind one address (09-05, D-09).
+  logo: { scope: "public-logo", max: 300, windowMs: 60 * 1000 },
 } as const;
 
 export function rateLimitedResponse(retryAfterSeconds: number) {
