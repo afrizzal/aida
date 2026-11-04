@@ -99,7 +99,7 @@ Ten categorical tokens for ticket state chips and dots (D-14). Each is defined i
 ```tsx
 // Shell wajib
 <aside className="flex h-screen w-60 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
-  {/* Brand header: tinggi h-14, ikon Sparkles di brand box */}
+  {/* Brand header: tinggi h-14, `BrandMark` (logo workspace atau Sparkles fallback) + nama */}
   {/* Nav: space-y-0.5, px-2 py-2, active=bg-sidebar-accent */}
   {/* User footer: border-t border-sidebar-border p-2 */}
 </aside>
@@ -127,6 +127,10 @@ Ten categorical tokens for ticket state chips and dots (D-14). Each is defined i
 ```
 
 Wajib: `sticky top-0 z-10`, `backdrop-blur-sm`, `border-border/70` (bukan `border-border`).
+
+Judul top bar adalah `<p>`, bukan heading. `<h1>` milik halaman di dalam `<main>` (visible, atau `sr-only` bila teksnya sama dengan top bar).
+
+> Catatan (Phase 9, 2026-11-12): aturan ini kontrak AIDA-36 dan diterapkan oleh plan 09-09. Sampai plan itu dieksekusi, `src/components/top-bar.tsx` masih merender `<h1>`.
 
 ### 4.3 Empty State
 
@@ -201,7 +205,7 @@ Ticket states use the state palette (§2 "State palette (Phase 12.1)"):
 
 Gunakan **Lucide React** saja. Ukuran default: `size-4` (16px) untuk inline, `size-6` (24px) untuk icon di box.
 
-Sidebar brand box: `Sparkles` — jangan ganti kecuali rebranding.
+Sidebar brand box: `Sparkles` di `bg-sidebar-primary` adalah **default dan fallback**. Jika workspace punya logo (Settings → Branding), logo menggantikan ikon: `<img>` dengan `object-contain` di box `h-7` (maks. lebar 72px di sidebar, 120px di halaman publik), tanpa plate/border, `alt=""`. Nama workspace **selalu** tetap terlihat di sebelahnya. Jika logo gagal dimuat, kembali ke Sparkles. Satu komponen untuk semua tempat: `BrandMark` (`src/components/brand-mark.tsx`).
 
 ---
 
@@ -252,5 +256,7 @@ Sebelum plan suatu fase UI di-approve, jawab semua:
 - [ ] `tsc --noEmit` clean?
 
 ---
+
+> Migration note (Phase 9, 2026-11-12, plan 09-07, AIDA-34): aturan lama §5 yang mengunci `Sparkles` sebagai satu-satunya isi brand box (boleh diganti hanya saat rebranding) diganti oleh aturan logo workspace di §5. `Sparkles` kini default dan fallback. Brand mark sidebar, preview di Settings → Branding, dan baris brand `PublicPageShell` sekarang satu komponen, `BrandMark` (`src/components/brand-mark.tsx`), dengan jarak ikon ke nama `gap-2` (sebelumnya `gap-2.5` di tiga salinan markup). Komentar brand header §4.1 diperbarui, dan §4.2 mendapat aturan judul top bar (diterapkan plan 09-09). Tampilan logo di sidebar dan halaman publik, terang dan gelap, belum diperiksa manusia.
 
 *Dokumen ini hidup — update jika ada pattern baru yang disepakati. Jangan hapus pattern lama tanpa migration note.*
