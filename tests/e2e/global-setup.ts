@@ -94,6 +94,9 @@ export default async function globalSetup(_config: FullConfig) {
     // the request carries it (uat-gaps.spec.ts, K139), else the socket address Next fills in.
     // Set explicitly so a local .env cannot change it.
     TRUSTED_PROXY_HOPS: "0",
+    // The E2E fault hook (src/lib/testing/e2e-fault.ts) acts only on this server: single-h1.spec
+    // renders error and loading states through it. Set here and nowhere else.
+    AIDA_E2E_FAULTS: "1",
     ADMIN_EMAIL: "",
     ADMIN_PASSWORD: "",
     ADMIN_NAME: "",

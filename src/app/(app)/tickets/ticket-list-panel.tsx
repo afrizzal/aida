@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { prisma } from "@/lib/db";
 import { findConservativeMembership, isAdminRole } from "@/lib/membership";
 import { getScopedDb } from "@/lib/session";
+import { e2eFault } from "@/lib/testing/e2e-fault";
 import {
   legacyRedirectSearch,
   MAX_LIST_LIMIT,
@@ -37,6 +38,7 @@ export async function TicketListPanel({
   selectedId,
   basePath = "/tickets",
 }: TicketListPanelProps) {
+  await e2eFault("tickets-list-delay"); // inert outside the E2E server (src/lib/testing/e2e-fault.ts)
   const { db, orgId, session } = await getScopedDb();
   // The actor's membership is checked before any panel data is read (D-01, Codex diff critique
   // D1): a removed member with a still-valid session gets no roster, no tickets and no tags,

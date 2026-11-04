@@ -11,6 +11,12 @@
  * one draft proposal are seeded and every route is rendered again. The shared E2E organization is
  * only read (the first case), so later files see it unchanged.
  *
+ * Error and loading states are rendered through the E2E fault hook (src/lib/testing/e2e-fault.ts),
+ * which acts only on the E2E dev server (global-setup.ts sets its flag) and only for a request that
+ * carries the `aida-e2e-fault` cookie naming a fault point: a page point makes the page throw, so
+ * the route's error.tsx renders; the list delay point holds TicketListPanel, so the /tickets
+ * Suspense fallback is visible for a few seconds.
+ *
  * APP_PAGE_ROUTES is the page list of src/app/(app) (`git ls-files 'src/app/(app)/**\/page.tsx'`
  * at the time of writing). The last case fails when a listed route was not rendered by any case.
  */
@@ -24,8 +30,10 @@ import {
   PROPOSALS_PAGE_TITLE,
   REVIEW_PAGE_TITLE,
 } from "../../src/lib/kb/proposal-copy";
+import type { E2EFaultPoint } from "../../src/lib/testing/e2e-fault";
 import { STATUS_PAGE_TITLE } from "../../src/lib/tickets/state-copy";
 import { prisma } from "./support/db";
+import { baseURL } from "./support/test-env";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AUTH_DIR = path.resolve(__dirname, ".auth");
@@ -36,6 +44,8 @@ const ENDED_STORAGE = path.join(AUTH_DIR, "single-h1-ended.json");
 const NO_WORKSPACE_STORAGE = path.join(AUTH_DIR, "single-h1-no-workspace.json");
 
 const OWN_PASSWORD = "E2E-single-h1-password-1!";
+/** The fault hook's cookie (E2E_FAULT_COOKIE); a literal here so this file never loads next/headers. */
+const FAULT_COOKIE = "aida-e2e-fault";
 const ACCESS_ENDED_HEADING = "Your access to this workspace has ended.";
 
 /** The page routes of src/app/(app); every one must be rendered by at least one case below. */
@@ -363,6 +373,95 @@ test.describe
       await gotoWarm(page, "/kb");
       await expect(page.locator("main h1")).toHaveClass(/\bsr-only\b/);
       await expect(page.getByRole("main").getByRole("link", { name: "New article" })).toBeVisible();
+      await context.close();
+    });
+
+    test("error states, rendered through the fault hook", async ({ browser }) => {
+      test.setTimeout(240_000);
+      const context = await browser.newContext({ storageState: OWNER_STORAGE });
+      const page = await context.newPage();
+      const errorRows: readonly (Row & { point: E2EFaultPoint; copy: string })[] = [
+        {
+          route: "/tickets",
+          state: "error",
+          url: "/tickets",
+          h1: "Tickets",
+          point: "tickets-page",
+          copy: "Couldn't load tickets.",
+        },
+        {
+          route: "/tickets/[id]",
+          state: "error",
+          url: `/tickets/${ticket.id}`,
+          h1: "Tickets",
+          point: "ticket-detail-page",
+          copy: "Couldn't load tickets.",
+        },
+        {
+          route: "/contacts",
+          state: "error",
+          url: "/contacts",
+          h1: "Contacts",
+          point: "contacts-page",
+          copy: "Couldn't load contacts.",
+        },
+        {
+          // No error.tsx of its own: the error state is the inherited contacts/error.tsx.
+          route: "/contacts/[id]",
+          state: "error",
+          url: `/contacts/${ticket.contactId}`,
+          h1: "Contacts",
+          point: "contact-detail-page",
+          copy: "Couldn't load contacts.",
+        },
+      ];
+      for (const row of errorRows) {
+        await test.step(`${row.state}: ${row.url}`, async () => {
+          // Warm without the cookie, so a first-hit compile is not mistaken for the fault.
+          await gotoWarm(page, row.url);
+          await expect(page.getByText(row.copy)).toHaveCount(0);
+          await context.addCookies([{ name: FAULT_COOKIE, value: row.point, url: baseURL }]);
+          await page.goto(row.url);
+          await expect(page.getByRole("main").getByText(row.copy)).toBeVisible();
+          await expectSingleH1(page, row.h1);
+          await context.clearCookies({ name: FAULT_COOKIE });
+        });
+        rendered.set(row.route, [...(rendered.get(row.route) ?? []), row.state]);
+      }
+      // With the cookie cleared the route renders normally again.
+      await gotoWarm(page, "/tickets");
+      await expect(page.getByText("Couldn't load tickets.")).toHaveCount(0);
+      await context.close();
+    });
+
+    test("loading state: the /tickets Suspense fallback, rendered through the fault hook", async ({
+      browser,
+    }) => {
+      test.setTimeout(180_000);
+      const context = await browser.newContext({ storageState: OWNER_STORAGE });
+      const page = await context.newPage();
+      await gotoWarm(page, "/tickets");
+      await context.addCookies([
+        { name: FAULT_COOKIE, value: "tickets-list-delay" satisfies E2EFaultPoint, url: baseURL },
+      ]);
+      const skeleton = page.locator('main [data-slot="skeleton"]').first();
+      const listPanel = page.locator("main #ticket-list-panel");
+
+      await page.goto("/tickets", { waitUntil: "commit" });
+      await expect(skeleton).toBeVisible();
+      await expect(listPanel).toHaveCount(0);
+      await expectSingleH1(page, "Tickets");
+      // Still the fallback after the assertion: the h1 was counted while the skeleton was showing.
+      await expect(listPanel).toHaveCount(0);
+      await expect(skeleton).toBeVisible();
+
+      // The held panel streams in after the delay; the page still has its one h1.
+      await expect(listPanel).toBeVisible({ timeout: 30_000 });
+      await expect(page.locator('main [data-slot="skeleton"]')).toHaveCount(0);
+      await expect(listPanel.getByText(ticket.subject)).toBeVisible();
+      await expectSingleH1(page, "Tickets");
+      await context.clearCookies({ name: FAULT_COOKIE });
+      rendered.set("/tickets", [...(rendered.get("/tickets") ?? []), "loading"]);
       await context.close();
     });
 

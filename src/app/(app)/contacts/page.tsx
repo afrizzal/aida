@@ -5,6 +5,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import { getScopedDb } from "@/lib/session";
+import { e2eFault } from "@/lib/testing/e2e-fault";
 import { ContactSearch } from "./contact-search";
 
 interface ContactsPageProps {
@@ -22,6 +23,7 @@ function getInitials(name: string): string {
 }
 
 export default async function ContactsPage({ searchParams }: ContactsPageProps) {
+  await e2eFault("contacts-page"); // inert outside the E2E server (src/lib/testing/e2e-fault.ts)
   const { db } = await getScopedDb();
   const { q } = await searchParams;
 

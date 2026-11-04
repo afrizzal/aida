@@ -8,6 +8,7 @@ import { loadContactDetailData } from "@/lib/contacts/contact-detail-data";
 import { prisma } from "@/lib/db";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import { getSessionActor } from "@/lib/session";
+import { e2eFault } from "@/lib/testing/e2e-fault";
 import { NotesForm } from "./notes-form";
 
 interface ContactDetailPageProps {
@@ -25,6 +26,7 @@ function getInitials(name: string): string {
 }
 
 export default async function ContactDetailPage({ params }: ContactDetailPageProps) {
+  await e2eFault("contact-detail-page"); // inert outside the E2E server (src/lib/testing/e2e-fault.ts)
   const actor = await getSessionActor();
   const { id } = await params;
 

@@ -11,6 +11,7 @@ import { prisma } from "@/lib/db";
 import { findConservativeMembership, isAdminRole } from "@/lib/membership";
 import { scopedDb } from "@/lib/scoped-db";
 import { getSessionActor } from "@/lib/session";
+import { e2eFault } from "@/lib/testing/e2e-fault";
 import { loadTicketDetailData } from "@/lib/tickets/ticket-detail-data";
 import { TicketListPanel } from "../ticket-list-panel";
 
@@ -20,6 +21,7 @@ interface TicketDetailPageProps {
 }
 
 export default async function TicketDetailPage({ params, searchParams }: TicketDetailPageProps) {
+  await e2eFault("ticket-detail-page"); // inert outside the E2E server (src/lib/testing/e2e-fault.ts)
   const { id } = await params;
   const sp = await searchParams;
   const actor = await getSessionActor();
