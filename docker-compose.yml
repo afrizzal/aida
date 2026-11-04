@@ -138,6 +138,92 @@ services:
         limits:
           memory: 1g
 
+  # ── One-shot: prepare the backups volume for the non-root backup service (U-16) ──
+  # Why this one step runs as root: a new named volume's root directory is created root:root
+  # 0755, the pgvector/pgvector:pg16 image has no account or directory owned by 1000 for the volume
+  # to inherit, and D-01 forbids a new image. The other way, a root entrypoint in `backup`, would run
+  # the whole backup as root. So this container only touches the /backups mount point: it exits at
+  # once when it already reads 1000:1000 mode 700, otherwise it sets mode 0700 (first, so it needs
+  # no CAP_FOWNER) and then owner 1000:1000, never recursively and never on uploads_data. No
+  # network, a read-only root filesystem, CAP_CHOWN only. See docs/OPERATIONS.md "Backups".
+  backup-init:
+    image: pgvector/pgvector:pg16
+    user: "0:0"
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        if [ "$$(stat -c '%u:%g:%a' /backups)" = 1000:1000:700 ]; then
+        echo '[backup-init] /backups already 1000:1000 mode 700'; exit 0; fi;
+        if chmod 0700 /backups && chown 1000:1000 /backups; then
+        echo '[backup-init] /backups prepared: 1000:1000 mode 700'; exit 0; fi;
+        echo '[backup-init] could not prepare /backups; see docs/OPERATIONS.md, Backups' >&2; exit 1
+    volumes:
+      - backups_data:/backups
+    # The image declares VOLUME /var/lib/postgresql/data; a tmpfs there keeps `docker compose up`
+    # from creating an anonymous volume for this service.
+    tmpfs:
+      - /var/lib/postgresql/data
+    network_mode: none
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
+  # ── Scheduled backups (AIDA-33, D-01): database dump + uploads archive, daily ──
+  # Same image as db (it ships pg_dump and pg_restore): no build, no new image. scheduler.sh runs
+  # aida-backup.sh at BACKUP_SCHEDULE (UTC) and keeps the BACKUP_RETENTION newest successful sets
+  # in backups_data; BACKUP_ENABLED=false keeps the container up without running a backup. It
+  # reaches the database with libpq variables and PGPASSWORD, never a URL, reads uploads read-only
+  # and records each run in SystemSetting backup:lastRun (Settings -> Backups). Manual run:
+  # scripts/backup.sh. See docs/OPERATIONS.md "Backups".
+  backup:
+    image: pgvector/pgvector:pg16
+    # node's UID and GID in the app image (Dockerfile:87). The PostgreSQL image has no node
+    # account, so the user is numeric; uploads written by app and worker stay readable.
+    user: "1000:1000"
+    entrypoint: ["sh", "/opt/aida-backup/scheduler.sh"]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      backup-init:
+        condition: service_completed_successfully
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-aida}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-aida}
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
+      BACKUP_SCHEDULE: ${BACKUP_SCHEDULE:-02:00}
+      BACKUP_RETENTION: ${BACKUP_RETENTION:-7}
+      # Advanced: see docs/OPERATIONS.md "Backups" before changing these two.
+      BACKUP_LEASE_TTL_SECONDS: ${BACKUP_LEASE_TTL_SECONDS:-900}
+      BACKUP_FENCE_WAIT_SECONDS: ${BACKUP_FENCE_WAIT_SECONDS:-300}
+      BACKUP_DIR: /backups
+      UPLOADS_DIR: /data/uploads
+    volumes:
+      - ./scripts/backup:/opt/aida-backup:ro
+      # The manifest's app version is read from this file (aida-backup.sh BACKUP_APP_VERSION_FILE).
+      - ./package.json:/opt/aida-backup-meta/package.json:ro
+      - uploads_data:/data/uploads:ro
+      - backups_data:/backups
+    # The image declares VOLUME /var/lib/postgresql/data; a tmpfs there keeps `docker compose up`
+    # from creating an anonymous volume for this service.
+    tmpfs:
+      - /var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
   # ── Caddy reverse proxy (auto-HTTPS for real domains, local CA for localhost) ──
   caddy:
     image: caddy:2
@@ -157,9 +243,14 @@ services:
 volumes:
   # Single source of truth for Postgres data — backup = snapshot this volume (D-11)
   postgres_data:
-  # Attachment storage (ticket and task attachments) — mounted by both `app` and `worker`:
-  # the app stores uploads in the request/response cycle; the worker stores inbound email
-  # attachments and reads and deletes files for the scheduled project file cleanup.
+  # Attachment storage (ticket and task attachments, the workspace logo) — mounted read-write by
+  # both `app` and `worker`: the app stores uploads in the request/response cycle; the worker stores
+  # inbound email attachments and reads and deletes files for the scheduled file cleanup.
+  # `backup` mounts it read-only and archives it into each backup set.
   uploads_data:
+  # Backup sets, one directory per set (D-01, U-16). Prepared once by `backup-init` (owner
+  # 1000:1000, mode 0700, on the mount point only) and written by `backup` as 1000:1000. It holds
+  # tenant data: copying it off this host is the operator's job (docs/OPERATIONS.md "Backups").
+  backups_data:
   caddy_data:
   caddy_config:
