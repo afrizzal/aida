@@ -35,6 +35,7 @@ function logFile(): string {
 /** Only the fake's directory and the system tools: no real docker can be found. */
 function env(log: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   return {
+    NODE_ENV: "test",
     PATH: `${FAKE_DIR}:/usr/bin:/bin`,
     HOME: os.tmpdir(),
     LC_ALL: "C",
