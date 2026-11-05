@@ -4,9 +4,8 @@
 // case did not expect: a different URL or host, a second download, a Docker subcommand outside
 // the case's allowlist. Nothing here reaches the network, a Docker daemon or a real install
 // directory: every case installs into its own temporary directory.
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -25,8 +24,9 @@ import { afterEach, describe, expect, it } from "vitest";
 const ROOT = path.resolve(__dirname, "../..");
 const SCRIPT = path.join(ROOT, "scripts", "install.sh");
 const FAKES = path.join(ROOT, "tests", "unit", "fixtures", "install");
-const VERSION = (JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as { version: string })
-  .version;
+const VERSION = (
+  JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as { version: string }
+).version;
 const DEFAULT_TAG = `v${VERSION}`;
 // The default slug is the one README.md already uses (D-22); read from there, not repeated here.
 const SLUG = (() => {
@@ -105,7 +105,9 @@ function release(w: Work, tag: string, extra: Record<string, string> = {}): Rele
     writeFileSync(path.join(top, rel), content);
   }
   const tarball = path.join(base, `${tag}.tar.gz`);
-  const made = spawnSync("tar", ["-czf", tarball, "-C", base, path.basename(top)], { encoding: "utf8" });
+  const made = spawnSync("tar", ["-czf", tarball, "-C", base, path.basename(top)], {
+    encoding: "utf8",
+  });
   if (made.status !== 0) throw new Error(`fixture tar failed: ${made.stderr}`);
   return { tarball, compose };
 }
@@ -138,6 +140,7 @@ function lines(file: string): string[] {
 
 function env(w: Work, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   return {
+    NODE_ENV: "test",
     PATH: `${w.bin}:/usr/bin:/bin`,
     HOME: w.root,
     TMPDIR: w.tmp,
@@ -193,12 +196,6 @@ function parseEnv(text: string): Map<string, string[]> {
   return map;
 }
 
-function installFresh(w: Work, rel = release(w, DEFAULT_TAG)): Run {
-  const res = run(w, ["install"], { env: installEnv(rel) });
-  expect(res.status, res.stderr).toBe(0);
-  return res;
-}
-
 describe("scripts/install.sh install (fixture release, fake curl and docker)", () => {
   it("install: one download of the default tag, generated secrets in a mode-600 .env, compose up, the URL printed", () => {
     const w = work();
@@ -241,9 +238,9 @@ describe("scripts/install.sh install (fixture release, fake curl and docker)", (
       }
     }
     expect(new Set(secrets).size).toBe(4);
-    expect(readdirSync(w.dir).filter((name) => name.startsWith(".env") && name !== ".env.example")).toEqual([
-      ".env",
-    ]);
+    expect(
+      readdirSync(w.dir).filter((name) => name.startsWith(".env") && name !== ".env.example"),
+    ).toEqual([".env"]);
 
     // The stack is started through compose in the install directory.
     expect(res.docker).toEqual(["compose up -d --build"]);
@@ -259,13 +256,16 @@ describe("scripts/install.sh install (fixture release, fake curl and docker)", (
 
   it("install under dash behaves the same (POSIX sh, no bashisms)", () => {
     const w = work();
-    const res = run(w, ["install"], { env: installEnv(release(w, DEFAULT_TAG)), shell: "/bin/dash" });
+    const res = run(w, ["install"], {
+      env: installEnv(release(w, DEFAULT_TAG)),
+      shell: "/bin/dash",
+    });
     expect(res.status, res.stderr).toBe(0);
     expect(res.curl).toHaveLength(1);
     expect(res.docker).toEqual(["compose up -d --build"]);
-    expect(parseEnv(readFileSync(path.join(w.dir, ".env"), "utf8")).get("POSTGRES_PASSWORD")?.[0]).toMatch(
-      /^[0-9a-f]{64}$/,
-    );
+    expect(
+      parseEnv(readFileSync(path.join(w.dir, ".env"), "utf8")).get("POSTGRES_PASSWORD")?.[0],
+    ).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("install [tag] downloads that tag, and AIDA_REPO overrides the slug", () => {
@@ -273,7 +273,11 @@ describe("scripts/install.sh install (fixture release, fake curl and docker)", (
     const rel = release(w, "v1.2.3-rc.1");
     const fork = "example-org/aida-fork";
     const res = run(w, ["install", "v1.2.3-rc.1"], {
-      env: { AIDA_REPO: fork, FAKE_CURL_EXPECT_URL: archiveUrl("v1.2.3-rc.1", fork), FAKE_CURL_TARBALL: rel.tarball },
+      env: {
+        AIDA_REPO: fork,
+        FAKE_CURL_EXPECT_URL: archiveUrl("v1.2.3-rc.1", fork),
+        FAKE_CURL_TARBALL: rel.tarball,
+      },
     });
     expect(res.status, res.stderr).toBe(0);
     expect(res.curl).toHaveLength(1);
@@ -290,7 +294,10 @@ describe("scripts/install.sh install (fixture release, fake curl and docker)", (
     const w = work();
     const rel = release(w, DEFAULT_TAG);
     const res = run(w, ["install"], {
-      env: { FAKE_CURL_EXPECT_URL: archiveUrl(DEFAULT_TAG, "someone-else/aida"), FAKE_CURL_TARBALL: rel.tarball },
+      env: {
+        FAKE_CURL_EXPECT_URL: archiveUrl(DEFAULT_TAG, "someone-else/aida"),
+        FAKE_CURL_TARBALL: rel.tarball,
+      },
     });
     expect(res.status).not.toBe(0);
     expect(res.stderr).toContain("fake curl: unexpected call");
@@ -302,7 +309,9 @@ describe("scripts/install.sh install (fixture release, fake curl and docker)", (
 
   it("an unexpected docker subcommand makes the fake exit 97 and the install fail", () => {
     const w = work();
-    const res = run(w, ["install"], { env: { ...installEnv(release(w, DEFAULT_TAG)), FAKE_DOCKER_ALLOW: "" } });
+    const res = run(w, ["install"], {
+      env: { ...installEnv(release(w, DEFAULT_TAG)), FAKE_DOCKER_ALLOW: "" },
+    });
     expect(res.status).not.toBe(0);
     expect(res.stderr).toContain("fake docker: unexpected call: compose up -d --build");
   });
