@@ -194,6 +194,63 @@ function runProbe(): { code: number; probe: ProbeOutput | null; stdout: string; 
   return { code, probe, stdout, stderr };
 }
 
+// Plan 09-12 (AIDA-40; reviews P12, Q6): scripts/install.sh runs on the operator's host before any
+// container exists, so the stack below cannot observe its download. This describe pins it
+// statically instead and needs no Docker: it uses none of the stack's hooks or helpers, so
+// `vitest run --config vitest.egress.config.ts -t "<this describe's name>"` runs it alone and
+// starts nothing. Its runtime evidence is tests/unit/install-script.test.ts (fake curl).
+describe("installer egress inventory", () => {
+  test("scripts/install.sh makes exactly one download, from github.com, and docs/SECURITY.md lists it", () => {
+    const script = fs.readFileSync(path.join(PROJECT_ROOT, "scripts", "install.sh"), "utf8");
+    const code = script.split("\n").filter((line) => !/^\s*#/.test(line));
+
+    // A network tool in command position: line start, after ; & | ( or $( or a backquote, or
+    // after then/do/else/exec/command/env, with or without a directory in front of it.
+    const invocation =
+      /(?:^|[;&|(`]|\$\(|\b(?:then|do|else|exec|command|env)\s)\s*(?:\S*\/)?(curl|wget|nc|ncat|socat|ftp|telnet)\b/;
+    const calls = code.filter((line) => invocation.test(line));
+    expect(calls, calls.join("\n")).toHaveLength(1);
+    expect(invocation.exec(calls[0])?.[1]).toBe("curl");
+    // Every other mention of curl is a preflight `need curl`; no other network tool at all.
+    const mentions = code
+      .filter((line) => /\bcurl\b/.test(line) && line !== calls[0])
+      .map((line) => line.trim());
+    expect(mentions.length).toBeGreaterThan(0);
+    expect(new Set(mentions)).toEqual(new Set(["need curl"]));
+    expect(
+      code.filter((line) => /\b(?:wget|nc|ncat|socat|telnet)\b|\/dev\/(?:tcp|udp)/.test(line)),
+    ).toEqual([]);
+
+    // The one call downloads the one URL the script builds, and that URL's host is github.com.
+    expect(calls[0]).toContain('"$url"');
+    const assigned = code
+      .filter((line) => /^\s*\w+="?https?:\/\//.test(line))
+      .map((line) => line.trim());
+    expect(assigned).toEqual(['url="https://github.com/$REPO/archive/refs/tags/$1.tar.gz"']);
+    expect(new URL("https://github.com/x/x/archive/refs/tags/x.tar.gz").host).toBe("github.com");
+    // Any other URL in the script is only printed (the app's local address), never fetched.
+    const hosts = code
+      .flatMap((line) => line.match(/https?:\/\/[^\s"'}]+/g) ?? [])
+      .map((literal) => new URL(literal.replace(/\$\w+/g, "x")).hostname);
+    expect(hosts.filter((host) => host === "github.com")).toHaveLength(1);
+    expect(hosts.filter((host) => host !== "github.com" && host !== "localhost")).toEqual([]);
+
+    // docs/SECURITY.md records it in its egress section, including GitHub's redirect host.
+    const security = fs.readFileSync(path.join(PROJECT_ROOT, "docs", "SECURITY.md"), "utf8");
+    const egress =
+      security.split(/^## /m).find((section) => section.startsWith("Data residency & egress")) ??
+      "";
+    for (const name of [
+      "Installer network use",
+      "scripts/install.sh",
+      "github.com",
+      "codeload.github.com",
+    ]) {
+      expect(egress, name).toContain(name);
+    }
+  });
+});
+
 describe("egress isolation: no flow requires a route to the public internet", () => {
   beforeAll(async () => {
     releaseLock = acquireLock(RUN_ID);

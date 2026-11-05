@@ -233,6 +233,8 @@ docker compose build
 docker compose up -d
 ```
 
+**With the installer** (an install made by `scripts/install.sh`, not a git clone): from the install directory run `sh scripts/install.sh backup`, then `sh scripts/install.sh upgrade <tag>`. It downloads that tag's source archive (its only network call; docs/SECURITY.md, "Installer network use"), replaces every file of the install except `.env`, and runs `docker compose up -d --build`; `.env` stays byte-identical. When the new `.env.example` has keys your `.env` lacks it names them, and `sh scripts/install.sh install` adds them without touching an existing value. Files that the new release no longer ships are left in place. A git clone keeps the `git pull` steps above.
+
 The one-shot `migrate` service runs `prisma migrate deploy` automatically before `app`/`worker` start (it's gated on `db` being healthy, and `app`/`worker` are gated on `migrate` completing successfully) — **no manual migration step is needed**.
 
 **Take a backup first**: `./scripts/backup.sh` before every upgrade, and note the set id on its `backup succeeded` line. If something goes wrong, roll back by checking out the previous git tag and restoring the pre-upgrade set:

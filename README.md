@@ -49,6 +49,24 @@ Most helpdesk software treats AI as a paywalled add-on with per-resolution fees,
 
 ## Quick start
 
+**With the installer** (one host with Docker Compose, `curl`, `tar` and `openssl`). Download
+`scripts/install.sh` from the tagged release, read it, then run it:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/afrizzal/aida/v1.0.0/scripts/install.sh
+less install.sh
+sh install.sh install
+```
+
+It downloads the v1.0.0 source archive into `./aida` (`AIDA_DIR` picks another directory), writes
+`.env` with generated secrets (mode 600; a rerun never replaces an existing value), and runs
+`docker compose up -d --build`. That archive download from github.com is its only network call
+(docs/SECURITY.md, "Installer network use"). From inside `./aida` afterwards:
+`sh scripts/install.sh upgrade <tag>`, `backup`, `restore <setId>` and `logs [service]`. The installer
+is tested against a local stand-in release; a run on a clean VM has not been verified yet.
+
+**By hand:**
+
 ```bash
 git clone https://github.com/afrizzal/aida.git
 cd aida
