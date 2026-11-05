@@ -4,14 +4,23 @@
 #
 # Usage:
 #   sh install.sh install [tag]    download release <tag> (default: AIDA_DEFAULT_TAG below) into
-#                                  AIDA_DIR, write .env with generated secrets, start the stack
+#                                  AIDA_DIR, write .env with generated secrets, start the stack.
+#                                  On an existing install it downloads nothing: it adds the keys
+#                                  .env lacks (keeping every existing value) and starts the stack.
+#   sh install.sh upgrade <tag>    download release <tag>, replace every file of the install except
+#                                  .env, then rebuild and start the stack. Take a backup first.
+#   sh install.sh backup           run scripts/backup.sh (one backup set now)
+#   sh install.sh restore <setId> [--yes]
+#                                  run scripts/restore.sh <setId> (destructive; see its header)
+#   sh install.sh logs [service]   docker compose logs [service]
 #
 # Variables:
 #   AIDA_DIR   the install directory. Default: the current directory when it already is an AIDA
 #              install (so `sh scripts/install.sh ...` works from inside one), otherwise ./aida
 #   AIDA_REPO  the GitHub repository to download from, owner/name. Default: the canonical one.
 #
-# Network: the only network call this script makes is one HTTPS download per install, of the
+# Network: the only network call this script makes is one HTTPS download per install or upgrade
+# (backup, restore and logs make none), of the
 # tagged source archive https://github.com/<AIDA_REPO>/archive/refs/tags/<tag>.tar.gz (GitHub
 # redirects it to codeload.github.com). No telemetry, no version check, no other host.
 # docs/SECURITY.md, "Installer network use".
@@ -58,6 +67,10 @@ trap 'exit 143' TERM
 usage() {
   cat <<'EOF'
 Usage: sh install.sh install [tag]
+       sh install.sh upgrade <tag>
+       sh install.sh backup
+       sh install.sh restore <setId> [--yes]
+       sh install.sh logs [service]
 Variables: AIDA_DIR (install directory), AIDA_REPO (owner/name). See the header of this script.
 EOF
 }
@@ -112,6 +125,20 @@ dir_state() {
   else
     echo other
   fi
+}
+
+valid_name() {
+  one_line "$1" || return 1
+  printf '%s\n' "$1" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$' || return 1
+  case $1 in
+    *..*) return 1 ;;
+  esac
+  return 0
+}
+
+require_install() {
+  [ "$(dir_state)" = checkout ] ||
+    die 1 "no AIDA install in $DIR; run install first, or set AIDA_DIR to the install directory"
 }
 
 resolve_repo() {
@@ -234,6 +261,14 @@ write_env() {
   done
 }
 
+# Names of the keys $1/.env.example has and $1/.env lacks.
+missing_keys() {
+  while IFS= read -r line || [ -n "$line" ]; do
+    key=$(line_key "$line") || continue
+    if ! has_key "$key" "$1/.env"; then printf ' %s' "$key"; fi
+  done <"$1/.env.example"
+}
+
 app_url() {
   url=$(grep -E '^NEXT_PUBLIC_APP_URL=' "$1/.env" | tail -n 1 | cut -d= -f2-)
   printf '%s' "${url:-http://localhost}"
@@ -248,12 +283,23 @@ compose_up() {
 
 cmd_install() {
   [ "$#" -le 1 ] || usage_die
-  tag=${1:-$AIDA_DEFAULT_TAG}
+  tag=${1-$AIDA_DEFAULT_TAG}
   valid_tag "$tag" || die 2 "invalid tag (expected vMAJOR.MINOR.PATCH, for example $AIDA_DEFAULT_TAG)"
   resolve_repo
   state=$(dir_state)
   case $state in
     other) die 1 "$DIR exists and is not an empty directory or an AIDA install; set AIDA_DIR to another path" ;;
+    checkout)
+      # A rerun downloads nothing: it completes .env and starts the stack.
+      need openssl
+      need docker
+      say "AIDA is already installed in $DIR; nothing is downloaded."
+      say "To move to another release run: sh scripts/install.sh upgrade <tag>"
+      write_env "$DIR"
+      compose_up
+      say "AIDA is starting. Open $(app_url "$DIR") once the containers are healthy."
+      return 0
+      ;;
   esac
 
   need tar
@@ -275,22 +321,95 @@ cmd_install() {
   say "AIDA $tag is starting. Open $(app_url "$DIR") once the containers are healthy."
 }
 
+cmd_upgrade() {
+  [ "$#" -eq 1 ] || usage_die
+  tag=$1
+  valid_tag "$tag" || die 2 "invalid tag (expected vMAJOR.MINOR.PATCH, for example $AIDA_DEFAULT_TAG)"
+  resolve_repo
+  require_install
+  [ -f "$DIR/.env" ] || die 1 "$DIR has no .env; run install first"
+  need tar
+  need docker
+  need curl
+  say "Upgrading $DIR to $tag. Take a backup first if you have not: sh scripts/install.sh backup"
+  download "$tag"
+  extract "$(dirname "$DIR")"
+  # .env belongs to the operator: never taken from an archive, never touched here.
+  rm -rf "$STAGE/.env"
+  cp -R "$STAGE/." "$DIR/"
+  rm -rf "$STAGE"
+  STAGE=''
+  say "Replaced the files of $DIR with AIDA $tag; .env unchanged"
+  lacking=$(missing_keys "$DIR")
+  if [ -n "$lacking" ]; then
+    say "The new .env.example has keys .env lacks:$lacking"
+    say "Add them with: sh scripts/install.sh install (existing values are kept)"
+  fi
+  compose_up
+  say "AIDA $tag is starting. Open $(app_url "$DIR") once the containers are healthy."
+}
+
+cmd_backup() {
+  [ "$#" -eq 0 ] || usage_die
+  require_install
+  need docker
+  (cd "$DIR" && sh scripts/backup.sh)
+}
+
+cmd_restore() {
+  if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then usage_die; fi
+  set_id=$1
+  valid_name "$set_id" || die 2 "invalid set id; list the sets as docs/OPERATIONS.md, Restore shows"
+  if [ "$#" -eq 2 ] && [ "$2" != --yes ]; then usage_die; fi
+  require_install
+  need docker
+  need bash
+  # scripts/restore.sh is a bash script.
+  if [ "$#" -eq 2 ]; then
+    (cd "$DIR" && bash scripts/restore.sh "$set_id" --yes)
+  else
+    (cd "$DIR" && bash scripts/restore.sh "$set_id")
+  fi
+}
+
+cmd_logs() {
+  [ "$#" -le 1 ] || usage_die
+  if [ "$#" -eq 1 ]; then valid_name "$1" || die 2 "invalid service name"; fi
+  require_install
+  need docker
+  if [ "$#" -eq 1 ]; then
+    (cd "$DIR" && docker compose logs "$1")
+  else
+    (cd "$DIR" && docker compose logs)
+  fi
+}
+
 # --- main --------------------------------------------------------------------------------------
 
-[ "$#" -ge 1 ] || usage_die
-if [ -n "${AIDA_DIR:-}" ]; then
-  DIR=$AIDA_DIR
-elif is_checkout .; then
-  DIR=.
-else
-  DIR=./aida
-fi
-one_line "$DIR" || die 2 "AIDA_DIR must be a single line"
+main() {
+  [ "$#" -ge 1 ] || usage_die
+  if [ -n "${AIDA_DIR:-}" ]; then
+    DIR=$AIDA_DIR
+  elif is_checkout .; then
+    DIR=.
+  else
+    DIR=./aida
+  fi
+  one_line "$DIR" || die 2 "AIDA_DIR must be a single line"
 
-command=$1
-shift
-case $command in
-  install) cmd_install "$@" ;;
-  -h | --help | help) usage ;;
-  *) usage_die ;;
-esac
+  command=$1
+  shift
+  case $command in
+    install) cmd_install "$@" ;;
+    upgrade) cmd_upgrade "$@" ;;
+    backup) cmd_backup "$@" ;;
+    restore) cmd_restore "$@" ;;
+    logs) cmd_logs "$@" ;;
+    -h | --help | help) usage ;;
+    *) usage_die ;;
+  esac
+}
+
+# upgrade replaces this very file when it runs from inside an install. The shell has parsed every
+# function above and this whole line before main starts, and `exit` keeps it from reading on.
+main "$@"; exit "$?"
