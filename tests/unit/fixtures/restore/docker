@@ -1,0 +1,120 @@
+#!/bin/sh
+# tests/unit/fixtures/restore/docker: a fake `docker` for tests/unit/restore-script.test.ts (plan
+# 09-10). It never reaches a Docker daemon. Every call appends its arguments, newlines folded to
+# spaces, as one line to the file named by FAKE_DOCKER_LOG, then answers from these variables:
+#
+#   FAKE_MISSING_VOLUMES  space-separated volume names that `volume inspect` reports missing
+#   FAKE_LOCK_EXIT        exit code of the restore-lock step (default 0)
+#   FAKE_LOCK_OUTPUT      its output (default holder=restore-0123456789abcdef0123456789abcdef)
+#   FAKE_LEASE_EXIT       exit code of the lease step (default 0)
+#   FAKE_TOUCHED          what the target-touched read prints (default: nothing)
+#   FAKE_SET_EXIT         exit code of the set script step (default 0)
+#   FAKE_SET_MODE         `hang`: the set script step waits until it is signalled
+#   FAKE_RELEASE_EXIT     exit code of the release step (default 0)
+#   FAKE_BREAK_EXIT       exit code of the break-stale-lock step (default 0)
+#   FAKE_BREAK_OUTPUT     its output (default nothing)
+#
+# Any other call exits 97, so an unexpected command (a `down`, a volume removal, a build) fails
+# the case that caused it.
+: "${FAKE_DOCKER_LOG:?FAKE_DOCKER_LOG is not set}"
+{
+  printf '%s' "$*" | tr '\n' ' '
+  printf '\n'
+} >>"$FAKE_DOCKER_LOG"
+
+unexpected() {
+  printf 'fake docker: unexpected call: %s\n' "$*" >&2
+  exit 97
+}
+
+has() {
+  case " $ARGS " in
+    *" $1 "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+ARGS=$(printf '%s' "$*" | tr '\n' ' ')
+
+case "$1 $2" in
+  'volume inspect')
+    [ "$#" -eq 3 ] || unexpected "$@"
+    for _missing in ${FAKE_MISSING_VOLUMES:-}; do
+      if [ "$_missing" = "$3" ]; then
+        printf 'Error response from daemon: get %s: no such volume\n' "$3" >&2
+        exit 1
+      fi
+    done
+    printf '[{"Name": "%s"}]\n' "$3"
+    exit 0
+    ;;
+  'compose config')
+    [ "$*" = 'compose config --format json' ] || unexpected "$@"
+    cat <<'EOF'
+{
+  "name": "aida",
+  "services": {
+    "backup": {
+      "image": "pgvector/pgvector:pg16",
+      "volumes": [
+        { "type": "volume", "source": "uploads_data", "target": "/data/uploads", "read_only": true },
+        { "type": "volume", "source": "backups_data", "target": "/backups", "volume": {} }
+      ]
+    }
+  },
+  "volumes": {
+    "backups_data": { "name": "aida_backups_data" },
+    "uploads_data": {
+      "name": "aida_uploads_data"
+    }
+  }
+}
+EOF
+    exit 0
+    ;;
+  'compose stop' | 'compose start')
+    [ "$*" = "compose $2 backup app worker" ] || unexpected "$@"
+    exit 0
+    ;;
+  'compose exec')
+    [ "$*" = 'compose exec -T app wget -qO- http://127.0.0.1:3000/api/health/probe' ] ||
+      unexpected "$@"
+    printf '{"status":"ok"}\n'
+    exit 0
+    ;;
+  'compose run') ;;
+  *) unexpected "$@" ;;
+esac
+
+# compose run: only one-off containers of the backup service, removed when they exit.
+has --rm && has --no-deps && has -T && has backup || unexpected "$@"
+
+if has /opt/aida-backup/aida-restore-set.sh; then
+  if [ "${FAKE_SET_MODE:-}" = hang ]; then
+    trap 'exit 143' TERM INT HUP
+    while :; do
+      sleep 0.2 &
+      wait "$!"
+    done
+  fi
+  exit "${FAKE_SET_EXIT:-0}"
+fi
+if has aida-restore-lock; then
+  printf '%s\n' "${FAKE_LOCK_OUTPUT:-holder=restore-0123456789abcdef0123456789abcdef}"
+  exit "${FAKE_LOCK_EXIT:-0}"
+fi
+if has aida-restore-lease; then
+  exit "${FAKE_LEASE_EXIT:-0}"
+fi
+if has aida-restore-touched; then
+  if [ -n "${FAKE_TOUCHED:-}" ]; then printf '%s\n' "$FAKE_TOUCHED"; fi
+  exit 0
+fi
+if has aida-restore-release; then
+  exit "${FAKE_RELEASE_EXIT:-0}"
+fi
+if has aida-restore-break; then
+  if [ -n "${FAKE_BREAK_OUTPUT:-}" ]; then printf '%s\n' "$FAKE_BREAK_OUTPUT"; fi
+  exit "${FAKE_BREAK_EXIT:-0}"
+fi
+unexpected "$@"
