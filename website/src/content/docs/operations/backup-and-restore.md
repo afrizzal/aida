@@ -66,13 +66,27 @@ outcome could not be recorded) is in
 ## Restoring
 
 ```bash
-./scripts/restore.sh <db-dump> <uploads-tarball>
+docker compose run --rm --no-deps -T --entrypoint ls backup -1 /backups   # list the sets
+./scripts/restore.sh <setId>
 ```
 
-**This is destructive.** It stops `app` and `worker` first (so nothing writes mid-restore),
-replaces the entire database and the entire uploads volume with the backup's contents, then
-starts `app` and `worker` again and health-checks the result. Unless you pass `--yes`, it prompts
-for an explicit confirmation before touching anything.
+**This is destructive.** It replaces the entire database and the entire uploads volume with one
+set. Unless you pass `--yes`, it asks you to type `restore` before it touches anything.
+`APP_ENCRYPTION_KEY` must be the one from the install that made the set, and restoring copies
+every workspace's data in the set into this instance.
+
+It takes a restore lock on the backups volume and the backup lease, so a second restore or a
+running backup makes it refuse before anything is stopped. Then it stops `backup`, `app` and
+`worker` and validates the **whole set before it writes anything**: every checksum against the
+manifest, every archive member (regular files named `<organizationId>/<storageKey>` only), and
+the extracted files against the checksum list. Only then does it restore the database and the
+uploads volume, as the app's user (1000:1000), and write the volume marker from the restored
+database. On success it starts the services again.
+
+If validation fails, nothing was changed and the services are started again. If the database or
+the uploads step fails, the services are **left stopped** and the message names the step: run the
+restore again. The checks detect corruption and partial tampering, not a set forged consistently
+including its unsigned manifest.
 
 ## Restoring onto a new server
 
@@ -80,15 +94,18 @@ for an explicit confirmation before touching anything.
 2. Recreate `.env`. **`BETTER_AUTH_SECRET` and `APP_ENCRYPTION_KEY` must be the exact same
    values as the old server** — losing either makes existing sessions invalid and every stored
    IMAP/SMTP/LLM credential permanently undecryptable.
-3. Start the database only (`docker compose up -d db`). The target database image **must be
-   `pgvector/pgvector:pg16`** — a stock `postgres:16` image can't load a dump containing
+3. Start a fresh, empty instance with `docker compose up -d --build`. The database image **must
+   be `pgvector/pgvector:pg16`** — a stock `postgres:16` image can't load a dump containing
    `CREATE EXTENSION vector`.
-4. Run `./scripts/restore.sh <db-dump> <uploads-tarball> --yes`.
-5. Bring up the full stack with `docker compose up -d`.
+4. Copy the set into the backups volume:
+   `docker compose run --rm --no-deps -T --entrypoint tar backup -C /backups -xf - < aida-backup-<setId>.tar`.
+5. Run `./scripts/restore.sh <setId> --yes`.
 
 ## Full runbook
 
-This page is a practical summary. For the complete runbook — restore warnings you can safely
-ignore, the `AuditEvent` append-only trigger's interaction with restore, and troubleshooting —
+This page is a practical summary. For the complete runbook — every refusal message, what each
+failure leaves behind, a restore lock left behind (`--break-stale-lock`), restore warnings you can
+safely ignore, the `AuditEvent` append-only trigger's interaction with restore, and
+troubleshooting —
 see [`docs/OPERATIONS.md`](https://github.com/afrizzal/aida/blob/master/docs/OPERATIONS.md) in
 the repository.

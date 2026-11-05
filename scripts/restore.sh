@@ -1,105 +1,393 @@
 #!/usr/bin/env bash
-# scripts/restore.sh — restore a COMPLETE AIDA backup.
+# scripts/restore.sh: restore one AIDA backup set (Phase 9 plan 09-10, AIDA-33; D-05, reviews P5
+# and Q3). See docs/OPERATIONS.md, Restore.
 #
-# THIS IS DESTRUCTIVE. It REPLACES the current database contents and the
-# entire uploads volume with the contents of the given backup files. There
-# is no undo other than restoring a different backup.
+# THIS IS DESTRUCTIVE. It replaces the whole current database and every stored file with the
+# contents of one set from the backups_data volume. There is no undo other than restoring another
+# set.
 #
 # Usage:
-#   ./scripts/restore.sh DB_DUMP UPLOADS_TARBALL [--yes]
+#   ./scripts/restore.sh <setId> [--yes]          restore the set BACKUP_DIR/<setId>
+#   ./scripts/restore.sh --break-stale-lock <holder>
+#                                                 remove a restore lock left by a restore that is
+#                                                 no longer running (its heartbeat is older than
+#                                                 900 s and the holder matches)
 #
-#   --yes  skip the interactive confirmation prompt (for scripted use)
+#   --yes  skip the interactive confirmation (type `restore` to continue)
+#
+# Order of a restore:
+#   1. the set id is checked and, without --yes, the operator confirms;
+#   2. the real names of the uploads_data and backups_data volumes come from
+#      `docker compose config --format json` and each is checked with `docker volume inspect`
+#      (missing: exit 6, nothing stopped);
+#   3. one-off containers of the `backup` service take the restore lock on the backups volume
+#      (random holder restore-<32 hex> from lib.sh new_restore_holder; held: exit 3, with the
+#      holder and the heartbeat age) and then the backup lease with the same holder (a running
+#      backup: the lock is released, exit 3, nothing stopped);
+#   4. `docker compose stop backup app worker`;
+#   5. scripts/backup/aida-restore-set.sh runs in a one-off `backup` container as 1000:1000 with
+#      the uploads volume mounted read-write at /restore/uploads. It validates the whole set before
+#      it writes anything, and writes `.restore-lock/target-touched` (`database`, then `uploads`)
+#      immediately before its first write to each target;
+#   6. on success: the lease and the lock are released, backup, app and worker are started, and
+#      the app's probe is polled for up to 60 s (a warning only).
+#
+# One trap on EXIT, INT, TERM and HUP decides every other outcome. It always releases this
+# restore's own lease and lock. After a failure before `target-touched` exists nothing was
+# changed, so it starts backup, app and worker again. Once `target-touched` exists (a failure or a
+# signal in the database or uploads step) it leaves them stopped and says which step failed and
+# where to read on. It never removes a volume and never runs `down`.
+#
+# Exit codes: 0 restored; 1 aborted or another error; 2 usage; 3 a restore lock or a running
+# backup refused the restore (or --break-stale-lock refused); 4 the set failed validation; 6 a
+# volume or the restore target failed its check; 7 the database step failed; 8 the uploads step
+# failed; 129, 130, 143 interrupted by HUP, INT, TERM.
+#
+# Legacy compose binary: COMPOSE_CMD="docker-compose" ./scripts/restore.sh <setId> (it must
+# support `config --format json`). This script never reads .env itself: compose passes the
+# database settings to the backup service.
 set -euo pipefail
 
-DB_DUMP="${1:-}"
-UPLOADS_TARBALL="${2:-}"
-CONFIRM="${3:-}"
-
-if [ -z "$DB_DUMP" ] || [ -z "$UPLOADS_TARBALL" ]; then
-  echo "Usage: ./scripts/restore.sh DB_DUMP UPLOADS_TARBALL [--yes]" >&2
-  exit 1
-fi
-if [ ! -r "$DB_DUMP" ]; then
-  echo "[restore] Cannot read DB_DUMP: $DB_DUMP" >&2
-  exit 1
-fi
-if [ ! -r "$UPLOADS_TARBALL" ]; then
-  echo "[restore] Cannot read UPLOADS_TARBALL: $UPLOADS_TARBALL" >&2
-  exit 1
-fi
-
-if [ "$CONFIRM" != "--yes" ]; then
-  read -r -p "Restore will REPLACE the current database and all attachments. Type 'restore' to continue: " ANSWER
-  if [ "$ANSWER" != "restore" ]; then
-    echo "[restore] Aborted."
-    exit 1
-  fi
-fi
-
 COMPOSE="${COMPOSE_CMD:-docker compose}"
+LEASE_TTL_SECONDS=900
+STALE_LOCK_SECONDS=900
+DOCS='docs/OPERATIONS.md, Restore'
 
-if [ -f .env ]; then
-  set -a
-  # shellcheck disable=SC1091
-  source .env
-  set +a
+usage() {
+  echo "Usage: ./scripts/restore.sh <setId> [--yes]"
+  echo "       ./scripts/restore.sh --break-stale-lock <holder>"
+  echo "List the sets with: docker compose run --rm --no-deps -T --entrypoint ls backup -1 /backups"
+}
+
+log() { printf '[restore] %s\n' "$*"; }
+err() { printf '[restore] %s\n' "$*" >&2; }
+
+# backup_step <name> <script> [args...]: <script> runs after `. /opt/aida-backup/lib.sh` in a
+# one-off container of the backup service, with $0 = <name> and the args as $1, $2.
+backup_step() {
+  local name=$1 script=$2
+  shift 2
+  $COMPOSE run --rm --no-deps -T --entrypoint sh backup -c ". /opt/aida-backup/lib.sh; $script" \
+    "$name" "$@" </dev/null
+}
+
+# Prints the `name` of top-level volume <key> from `docker compose config --format json` on stdin.
+# A small JSON scanner (no jq on the host): it tracks the key path and prints the string at
+# volumes.<key>.name.
+volume_name_from_config() {
+  awk -v target="$1" '
+    { s = s $0 "\n" }
+    END {
+      n = length(s); i = 1; depth = 0; found = 0
+      while (i <= n) {
+        c = substr(s, i, 1)
+        if (c == "\"") {
+          j = i + 1; str = ""
+          while (j <= n) {
+            d = substr(s, j, 1)
+            if (d == "\\") { str = str substr(s, j, 2); j += 2; continue }
+            if (d == "\"") break
+            str = str d; j++
+          }
+          if (j > n) exit 2
+          i = j + 1
+          if (type[depth] == "o" && wantkey[depth]) { key[depth] = str; wantkey[depth] = 0; continue }
+          if (!found && depth == 3 && key[1] == "volumes" && key[2] == target && key[3] == "name") {
+            print str; found = 1
+          }
+          continue
+        }
+        if (c == "{") { depth++; type[depth] = "o"; wantkey[depth] = 1; key[depth] = ""; i++; continue }
+        if (c == "[") { depth++; type[depth] = "a"; wantkey[depth] = 0; key[depth] = ""; i++; continue }
+        if (c == "}" || c == "]") { depth--; i++; continue }
+        if (c == ",") { if (type[depth] == "o") wantkey[depth] = 1; i++; continue }
+        i++
+      }
+      exit found ? 0 : 1
+    }
+  '
+}
+
+# --- arguments ---------------------------------------------------------------------------------
+
+MODE=restore
+SET_ID=''
+YES=0
+BREAK_HOLDER=''
+case "${1:-}" in
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  --break-stale-lock)
+    if [ "$#" -ne 2 ]; then
+      usage >&2
+      exit 2
+    fi
+    MODE=break
+    BREAK_HOLDER=$2
+    ;;
+  *)
+    SET_ID=${1:-}
+    [ "$#" -gt 0 ] && shift
+    for arg in "$@"; do
+      case $arg in
+        --yes) YES=1 ;;
+        *)
+          usage >&2
+          exit 2
+          ;;
+      esac
+    done
+    ;;
+esac
+
+# --- --break-stale-lock ------------------------------------------------------------------------
+
+if [ "$MODE" = break ]; then
+  if ! [[ $BREAK_HOLDER =~ ^restore-[0-9a-f]{32}$ ]]; then
+    err "Not a restore holder: expected restore-<32 hex>, as printed by the restore that holds the lock."
+    exit 2
+  fi
+  set +e
+  out=$(backup_step aida-restore-break \
+    "restore_lock_break_stale \"\$1\" $STALE_LOCK_SECONDS; r=\$?; if [ \"\$r\" -ne 0 ]; then printf 'holder %s heartbeat %s\\n' \"\$(restore_lock_holder || echo none)\" \"\$(restore_lock_age || echo unknown)\"; fi; exit \$r" \
+    "$BREAK_HOLDER")
+  rc=$?
+  set -e
+  case $rc in
+    0)
+      log "Removed the stale restore lock of $BREAK_HOLDER. The services were not started; start them with: docker compose up -d"
+      exit 0
+      ;;
+    1) err "Refused: there is no restore lock to break. ($out)" ;;
+    2) err "Refused: the restore lock is held by another holder, not $BREAK_HOLDER. ($out)" ;;
+    3) err "Refused: the heartbeat is not older than $STALE_LOCK_SECONDS s, so that restore may still be running. ($out)" ;;
+    *) err "Refused: the restore lock could not be removed (exit $rc). ($out)" ;;
+  esac
+  exit 3
 fi
-DB_USER="${POSTGRES_USER:-aida}"
-DB_NAME="${POSTGRES_DB:-aida}"
 
-# Stop the writers first — prevents concurrent writes to the DB and pg-boss
-# job pickup by the worker while the restore is in progress.
-echo "[restore] Stopping app and worker..."
-$COMPOSE stop app worker
+# --- restore -----------------------------------------------------------------------------------
 
-echo "[restore] Restoring database from $DB_DUMP ..."
-# --clean --if-exists drops existing objects (including the append-only
-# AuditEvent trigger) before recreating them from the dump — this is why
-# restore works even though the trigger blocks plain DELETE/UPDATE.
-# pg_restore prints benign warnings when restoring into a non-empty database;
-# only a non-zero exit code indicates real failure — EXCEPT for one known
-# false alarm: pg-boss's `pgboss.job` table is declaratively partitioned, and
-# `--clean`'s generated `ALTER TABLE ONLY pgboss.job_common DROP CONSTRAINT`
-# is rejected by Postgres ("cannot drop inherited constraint") even though
-# pg_restore continues and the rest of the restore (including this table's
-# data) completes correctly. Treat that specific message as non-fatal; any
-# other pg_restore error still aborts the script.
-set +e
-RESTORE_OUTPUT="$($COMPOSE exec -T db pg_restore -U "$DB_USER" -d "$DB_NAME" --clean --if-exists --no-owner --no-privileges < "$DB_DUMP" 2>&1)"
-RESTORE_EXIT=$?
-set -e
-echo "$RESTORE_OUTPUT"
-if [ "$RESTORE_EXIT" -ne 0 ]; then
-  UNEXPECTED="$(echo "$RESTORE_OUTPUT" | grep -E '^pg_restore: error:' | grep -v 'cannot drop inherited constraint' || true)"
-  if [ -n "$UNEXPECTED" ]; then
-    echo "[restore] ERROR: pg_restore reported unexpected errors:" >&2
-    echo "$UNEXPECTED" >&2
+if ! [[ $SET_ID =~ ^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}$ ]]; then
+  err "Not a set id: expected <UTC time>Z-<6 hex>, for example 20261112T020001Z-a1b2c3."
+  usage >&2
+  exit 2
+fi
+
+if [ "$YES" != 1 ]; then
+  printf "Restore set %s? This REPLACES the current database and every stored file. Type 'restore' to continue: " "$SET_ID"
+  ANSWER=''
+  read -r ANSWER || ANSWER=''
+  if [ "$ANSWER" != restore ]; then
+    echo
+    log 'Aborted. Nothing was changed.'
     exit 1
   fi
-  echo "[restore] Note: pg_restore exited non-zero on the known-benign pgboss.job_common partition warning; continuing."
 fi
 
-echo "[restore] Restoring uploads from $UPLOADS_TARBALL ..."
-$COMPOSE run --rm -T --no-deps --entrypoint sh app -c 'rm -rf /data/uploads/* /data/uploads/.[!.]* 2>/dev/null; tar xzf - -C /data/uploads' < "$UPLOADS_TARBALL"
+# The real volume names (a project name or a `name:` in the compose file changes them).
+if ! CONFIG_JSON=$($COMPOSE config --format json 2>/dev/null); then
+  err "Could not read the compose configuration (docker compose config --format json)."
+  exit 6
+fi
+volume_ok() { [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,254}$ ]]; }
+UPLOADS_VOLUME=$(printf '%s\n' "$CONFIG_JSON" | volume_name_from_config uploads_data) || UPLOADS_VOLUME=''
+BACKUPS_VOLUME=$(printf '%s\n' "$CONFIG_JSON" | volume_name_from_config backups_data) || BACKUPS_VOLUME=''
+unset CONFIG_JSON
+if ! volume_ok "$UPLOADS_VOLUME" || ! volume_ok "$BACKUPS_VOLUME"; then
+  err "The compose configuration names no uploads_data or backups_data volume. Nothing was stopped."
+  exit 6
+fi
+for volume in "$UPLOADS_VOLUME" "$BACKUPS_VOLUME"; do
+  if ! docker volume inspect "$volume" >/dev/null 2>&1; then
+    err "Volume $volume does not exist. Nothing was stopped. Check the project name and see $DOCS."
+    exit 6
+  fi
+done
 
-echo "[restore] Starting app and worker..."
-$COMPOSE start app worker
+HOLDER=''
+LOCK_HELD=0
+LEASE_HELD=0
+RELEASED=0
+STOPPED=0
+DONE=0
+SET_PID=''
+SET_RC=''
+EXITING=0
+FINAL_RC=0
 
-echo "[restore] Waiting for /api/health ..."
-HEALTHY=""
+release() {
+  [ "$LOCK_HELD" = 1 ] && [ "$RELEASED" = 0 ] || return 0
+  RELEASED=1
+  if ! backup_step aida-restore-release \
+    'r=0; lease_release "$1" || r=1; restore_lock_release "$1" || r=1; exit "$r"' \
+    "$HOLDER" >/dev/null; then
+    err "Could not release the restore lock or the lease of $HOLDER. Once nothing restores any more,"
+    err "remove the lock with: ./scripts/restore.sh --break-stale-lock $HOLDER (after 900 s)."
+    return 1
+  fi
+}
+
+start_services() {
+  if ! $COMPOSE start backup app worker; then
+    err "Could not start backup, app and worker; start them with: docker compose up -d"
+    return 1
+  fi
+}
+
+# The single trap: it decides every outcome that is not the success path.
+on_exit() {
+  local rc=$?
+  local why=$1 touched
+  if [ "$EXITING" = 1 ]; then
+    exit "$FINAL_RC"
+  fi
+  EXITING=1
+  trap '' INT TERM HUP
+  set +e
+  case $why in
+    INT) rc=130 ;;
+    TERM) rc=143 ;;
+    HUP) rc=129 ;;
+  esac
+  if [ -n "$SET_PID" ]; then
+    kill -TERM "$SET_PID" 2>/dev/null
+    wait "$SET_PID" 2>/dev/null
+    SET_PID=''
+  fi
+  if [ "$DONE" = 1 ]; then
+    : # the success path released the locks and started the services
+  elif [ "$STOPPED" = 1 ]; then
+    [ "$rc" != 0 ] || rc=1
+    touched=$(backup_step aida-restore-touched \
+      'd=$(restore_lock_dir); if [ -f "$d/target-touched" ]; then head -c 16 "$d/target-touched"; fi') ||
+      touched='unreadable'
+    touched=$(printf '%s' "$touched" | tr -d '[:space:]')
+    release
+    case $touched in
+      '')
+        err "The restore stopped before it changed anything (exit ${SET_RC:-$rc}): nothing was changed."
+        if start_services; then
+          err "backup, app and worker were started again."
+        fi
+        ;;
+      database)
+        err "The restore failed or was interrupted in the database step (exit ${SET_RC:-$rc})."
+        err "The database may be partly restored; the uploads volume is untouched."
+        err "backup, app and worker were left stopped. See $DOCS, before you start anything."
+        ;;
+      uploads)
+        err "The restore failed or was interrupted in the uploads step (exit ${SET_RC:-$rc})."
+        err "The database is restored; the uploads volume may be partly restored."
+        err "backup, app and worker were left stopped. See $DOCS, before you start anything."
+        ;;
+      *)
+        err "The restore failed (exit ${SET_RC:-$rc}) and its state could not be read."
+        err "backup, app and worker were left stopped. See $DOCS, before you start anything."
+        ;;
+    esac
+  else
+    release
+  fi
+  FINAL_RC=$rc
+  exit "$rc"
+}
+trap 'on_exit EXIT' EXIT
+trap 'on_exit INT' INT
+trap 'on_exit TERM' TERM
+trap 'on_exit HUP' HUP
+
+# The restore lock (on the backups volume, so it survives the database replacement), with a new
+# random holder. The set must exist before anything else happens.
+set +e
+out=$(backup_step aida-restore-lock \
+  'h=$(new_restore_holder) || exit 1; if [ ! -d "$BACKUP_DIR/$1" ] || [ -L "$BACKUP_DIR/$1" ]; then echo set-missing; exit 4; fi; if restore_lock_acquire "$h"; then echo "holder=$h"; exit 0; fi; echo "held-by=$(restore_lock_holder || echo unknown) age=$(restore_lock_age || echo unknown)"; exit 3' \
+  "$SET_ID")
+rc=$?
+set -e
+case $rc in
+  0) ;;
+  3)
+    holder=$(printf '%s\n' "$out" | sed -n 's/^held-by=\([^ ]*\) age=\([^ ]*\)$/\1/p')
+    age=$(printf '%s\n' "$out" | sed -n 's/^held-by=\([^ ]*\) age=\([^ ]*\)$/\2/p')
+    err "Another restore holds the restore lock: holder ${holder:-unknown}, last heartbeat ${age:-unknown}s ago."
+    err "If that restore is no longer running, see --break-stale-lock in $DOCS. Nothing was stopped."
+    exit 3
+    ;;
+  4)
+    err "Set $SET_ID was not found in the backups volume. Nothing was stopped."
+    exit 4
+    ;;
+  *)
+    err "Could not take the restore lock (exit $rc). Is the db service running? Nothing was stopped."
+    exit 1
+    ;;
+esac
+HOLDER=$(printf '%s\n' "$out" | sed -n 's/^holder=\(restore-[0-9a-f]\{32\}\)$/\1/p' | head -n 1)
+if [ -z "$HOLDER" ]; then
+  err "The restore lock step printed no holder. Nothing was stopped; see $DOCS."
+  exit 1
+fi
+LOCK_HELD=1
+log "Restore lock taken: $HOLDER"
+
+# The backup lease with the same holder: a running backup holds it.
+set +e
+backup_step aida-restore-lease \
+  "r=\$(lease_acquire \"\$1\" $LEASE_TTL_SECONDS) || exit 1; [ \"\$r\" = acquired ] || exit 3" \
+  "$HOLDER" >/dev/null
+rc=$?
+set -e
+case $rc in
+  0) LEASE_HELD=1 ;;
+  3)
+    err "a backup is running; retry after it finishes. Nothing was stopped."
+    exit 3
+    ;;
+  *)
+    err "Could not take the backup lease (exit $rc). Is the db service running? Nothing was stopped."
+    exit 1
+    ;;
+esac
+
+log "Stopping backup, app and worker..."
+STOPPED=1
+$COMPOSE stop backup app worker
+
+log "Restoring set $SET_ID..."
+$COMPOSE run --rm --no-deps -T --entrypoint sh -e "RESTORE_HOLDER=$HOLDER" \
+  -e UPLOADS_DIR=/restore/uploads -v "$UPLOADS_VOLUME:/restore/uploads" \
+  backup /opt/aida-backup/aida-restore-set.sh "/backups/$SET_ID" </dev/null &
+SET_PID=$!
+set +e
+wait "$SET_PID"
+SET_RC=$?
+set -e
+SET_PID=''
+if [ "$SET_RC" -ne 0 ]; then
+  exit "$SET_RC"
+fi
+
+# Success: release first, so the backup service never starts into a held restore lock.
+release || :
+DONE=1
+log "Starting backup, app and worker..."
+start_services || :
+log "Waiting for the app probe (up to 60 s)..."
+healthy=0
 for _ in $(seq 1 30); do
-  if OUTPUT="$($COMPOSE exec -T app wget -qO- http://127.0.0.1:3000/api/health 2>/dev/null)"; then
-    HEALTHY="$OUTPUT"
+  if $COMPOSE exec -T app wget -qO- http://127.0.0.1:3000/api/health/probe </dev/null >/dev/null 2>&1; then
+    healthy=1
     break
   fi
   sleep 2
 done
-
-if [ -n "$HEALTHY" ]; then
-  echo "[restore] Healthy:"
-  echo "$HEALTHY"
+if [ "$healthy" = 1 ]; then
+  log "The app answers its probe."
 else
-  echo "[restore] WARNING: app did not report healthy within 60s. Check: docker compose logs app" >&2
+  err "WARNING: the app did not answer its probe within 60 s. Check: docker compose logs app"
 fi
-
-echo "[restore] Done."
+log "Done: set $SET_ID restored."
+exit 0

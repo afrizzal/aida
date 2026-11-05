@@ -133,39 +133,95 @@ Treat the copy like the database itself: it holds every workspace's tickets, con
 ## Restore
 
 ```bash
-./scripts/restore.sh <db-dump> <uploads-tarball>
+docker compose run --rm --no-deps -T --entrypoint ls backup -1 /backups   # list the sets
+./scripts/restore.sh <setId>
 ```
 
-Example, using the files a backup just produced:
+Example: `./scripts/restore.sh 20261112T020001Z-a1b2c3`. The `db` service must be running.
 
-```bash
-./scripts/restore.sh ./backups/aida-db-20260728T225848Z.dump ./backups/aida-uploads-20260728T225848Z.tar.gz
-```
+**This is destructive.** It replaces the entire current database and the entire contents of the uploads volume with one set from the backups volume. There is no undo other than restoring a different set. Unless you pass `--yes`, the script asks you to type `restore` before it touches anything.
 
-**This is destructive.** It replaces the entire current database and the entire contents of the uploads volume with the contents of the backup files. There is no undo other than restoring a different backup. Unless you pass `--yes`, the script prompts for an explicit `restore` confirmation before touching anything.
+**Before you restore:**
+
+- **`APP_ENCRYPTION_KEY` must be the one from the install that made the set** (keep `BETTER_AUTH_SECRET` with it). Credentials stored in Settings are encrypted with it; with another key they cannot be read after the restore and must be entered again, and with another `BETTER_AUTH_SECRET` every session ends.
+- **Restoring copies tenant data.** A set holds every workspace's tickets, contacts, users and files. Restoring it into an instance gives that instance all of them, and replaces whatever the instance held.
+- **A running backup makes the restore refuse.** Wait until `docker compose logs backup` shows the run ended, then try again.
 
 What it does, in order:
 
-1. Stops `app` and `worker` (prevents concurrent writes and pg-boss job pickup mid-restore).
-2. Restores the database with `pg_restore --clean --if-exists --no-owner --no-privileges`.
-3. Wipes and re-extracts the uploads volume from the tarball.
-4. Starts `app` and `worker` again.
-5. Polls `GET /api/health` (inside the `app` container) for up to 60 seconds and prints the result.
+1. Checks the set id and, without `--yes`, asks for the confirmation.
+2. Finds the real names of the `uploads_data` and `backups_data` volumes from `docker compose config --format json` (a project name or a `name:` changes them) and checks each with `docker volume inspect`. A missing volume stops it with exit code 6; nothing is stopped.
+3. Takes the **restore lock** in one-off containers of the `backup` service: a directory `.restore-lock` on the backups volume holding a new random holder (`restore-` and 32 hex characters) and a heartbeat. It lives on the backups volume, so it survives the database replacement. Then it takes the backup lease with the same holder, so a backup that is running makes the restore refuse before anything is stopped, and a backup that starts later sees the lock and skips (`backup skipped: restore in progress`).
+4. Stops `backup`, `app` and `worker` (no writes, no job pickup, no backup while it runs).
+5. Runs `scripts/backup/aida-restore-set.sh` in a one-off `backup` container as user 1000:1000, with the uploads volume mounted read-write at `/restore/uploads`. It renews the lock's heartbeat every 60 seconds and stops when the lock names another holder.
+   - **Validation, before anything is written** (the lines say `[restore] validation: <reason>`, then `set failed validation`, exit code 4): the set directory holds exactly the four files; the set id equals the directory name and the manifest's `setId`; the sha256 and size of `db.dump`, `uploads.tar.gz` and `uploads.sha256` equal the manifest's (`<file> checksum`); `pg_restore --list` reads the dump (`dump`); every archive member is a regular file named `<organizationId>/<storageKey>` (`member name`, `member type`: no absolute path, `..`, link, device, FIFO, odd name or volume marker); the archive is extracted into `.restore-staging-<holder>` on the backups volume, and the extracted files must equal the checksum list exactly with every checksum matching (`staged checksum`); the dump must hold the uploads volume identity (`volume identity missing from the dump`).
+   - **Target checks** (exit code 6, nothing written): it runs as 1000:1000; the uploads target is a mount point (`uploads target is not a mount point`); every entry in it is owned by 1000:1000 (`uploads target holds an entry not owned by 1000:1000`; see below).
+   - **Database step** (exit code 7 on failure): `pg_restore --clean --if-exists --no-owner --no-privileges` into the database, then the `backup:lease` row the dump carried in is removed.
+   - **Uploads step** (exit code 8 on failure): removes the volume's current entries one by one (never the volume itself), copies the extracted files in (directories 0755, files 0644, owned by 1000:1000), checks every copied file against `uploads.sha256`, and writes the volume marker `.aida-uploads-volume` from the restored database's identity, so the next backup and the file cleanup recognise the volume. Then it checks that every entry is owned by 1000:1000 and that a probe file can be created, read and removed.
+   - The staging directory is removed on every exit.
+6. On success: releases the lease and the lock, starts `backup`, `app` and `worker`, and polls the app's probe (`/api/health/probe`, inside the `app` container) for up to 60 seconds; a probe that does not answer is a warning only.
+
+**Refusals before anything is stopped** (the set and the instance are untouched, nothing to clean up):
+
+| Message | Exit code | What to do |
+|---|---|---|
+| `Another restore holds the restore lock: holder <holder>, last heartbeat <N>s ago.` | 3 | Wait for that restore. If it is no longer running, see [A restore lock left behind](#a-restore-lock-left-behind). |
+| `a backup is running; retry after it finishes.` | 3 | Wait for the backup run to end, then run the restore again. |
+| `Volume <name> does not exist.` | 6 | Run the script from the same checkout and project name as the running stack. |
+| `Set <setId> was not found in the backups volume.` | 4 | List the sets (above) and check the id. |
+
+### What a failure leaves behind
+
+The set script records which target it is about to write to (`target-touched` in the lock: `database`, then `uploads`) immediately before its first write to it. The wrapper reads that record on every failure and on Ctrl-C, `TERM` or `HUP`, always releases its own lease and lock, and acts on it:
+
+| Where it stopped | Exit code | Database | Uploads volume | `backup`, `app`, `worker` |
+|---|---|---|---|---|
+| Validation (`set failed validation`) | 4 | unchanged | unchanged | started again; the message says nothing was changed |
+| Target check | 6 | unchanged | unchanged | started again; the message says nothing was changed |
+| Database step | 7, or a signal | may be partly restored | untouched | **left stopped**; the message names the database step |
+| Uploads step | 8, or a signal | restored | may be partly restored (files missing) | **left stopped**; the message names the uploads step |
+
+After a failure in the database or the uploads step, do not start the services on the half-restored data. Read the lines before the message, fix the cause, and run the restore again, with the same set or another one: it replaces the database and the uploads volume again from the start. `docker compose up -d` starts everything on whatever state is there, if you decide to keep it. The restore never removes a Docker volume and never runs `docker compose down`.
+
+### Ownership of the restored files
+
+`app` and `worker` run as UID and GID 1000, so the restore runs as 1000:1000 too, extracts with `--no-same-owner`, and writes every restored file and directory as 1000:1000. It refuses (exit code 6, nothing written) when the uploads volume already holds an entry not owned by 1000:1000. That happens on an install whose uploads volume was written by an older release that ran as root: change its ownership first as described in [Upgrading an install whose containers ran as root](#upgrading-an-install-whose-containers-ran-as-root), then restore. After copying, the restore checks that every entry is owned by 1000:1000 and that a probe file can be created, read and removed, so the app can read and write the restored uploads.
+
+### What the checks prove, and what they do not
+
+The checks detect a corrupted set and a partly tampered one: a changed dump, archive or checksum list whose manifest was not changed with it, an archive whose files differ from the checksum list, and any unsafe archive member. The manifest is **not signed**, so they do not detect a set forged consistently, manifest included, by someone who can write to the backups volume. They prove integrity, not authenticity: keep the backups volume and every copy off the host as protected as the database itself.
+
+### A restore lock left behind
+
+The lock is never taken over automatically, even when it is old: a restore that paused (a suspended terminal, a slow disk) must not find another restore writing over it. A lock stays behind only when the restore that held it was killed without its trap running (a lost host, `kill -9`). Its heartbeat then stops. When the heartbeat is older than 900 seconds, remove the lock with the holder from the refusal message:
+
+```bash
+./scripts/restore.sh --break-stale-lock restore-<32 hex>
+```
+
+It removes the lock only when the stored holder matches and the heartbeat is older than 900 seconds; otherwise it refuses with exit code 3 and says why (no lock, another holder, a heartbeat that is too recent). It starts nothing: if the restore it belonged to stopped in the database or uploads step, run the restore again first. Never remove `.restore-lock` by hand while a restore might be running.
+
+### Notes on `pg_restore`
 
 **On the `AuditEvent` append-only trigger:** the database carries a trigger (`aida_audit_event_no_update_delete`) that raises an error on `UPDATE`/`DELETE` against `AuditEvent` rows — this is intentional (audit integrity). Restore is unaffected: `pg_restore --clean` issues `DROP TABLE`, not `DELETE`, so the trigger never fires during a restore. **Never** try to prune audit rows yourself with a manual `DELETE` — it will raise, by design. If you need audit retention policy, that's a product feature request, not a DB workaround.
 
-**On benign restore warnings:** `pg_restore` can print warnings when restoring into a non-empty database, and in particular it always logs one specific ignorable error — a `cannot drop inherited constraint` message against `pgboss.job_common` (pg-boss's job table is declaratively partitioned; this is a known `pg_dump`/`pg_restore` limitation with declarative partitioning, not a real problem). `restore.sh` recognizes this exact message and continues; any other `pg_restore` error still aborts the script and surfaces as a failure. If you ever see the script abort, treat it as real — this is only a runbook note about the one case that is not.
+**On benign restore warnings:** `pg_restore` can print warnings when restoring into a non-empty database, and one specific error is known to be harmless: `cannot drop inherited constraint` against `pgboss.job_common` (pg-boss's job table is declaratively partitioned; this is a known `pg_dump`/`pg_restore` limitation with declarative partitioning). The restore treats exactly that message as non-fatal and says so (`only the known benign pg-boss partition message; continuing`); any other `pg_restore` error fails the database step, and its `pg_restore: error:` lines are printed.
 
 ## Restore to a new server
 
 Moving AIDA to new hardware (disk failure, migration, etc.):
 
 1. **Install Docker** (Docker Engine + Compose plugin) on the new server.
-2. **Clone the repo**: `git clone <your-fork-or-origin> && cd aida`.
+2. **Clone the repo**: `git clone <your-fork-or-origin> && cd aida`, at the release that made the set (or a later one).
 3. **Recreate `.env`.** Copy your old `.env` across, or recreate it from `.env.example`. **`BETTER_AUTH_SECRET` and `APP_ENCRYPTION_KEY` MUST be the exact same values as the old server.** If they differ, existing user sessions become invalid and — more importantly — every stored IMAP/SMTP/LLM credential becomes permanently undecryptable (they're encrypted with `APP_ENCRYPTION_KEY`; there is no recovery path for a lost key other than re-entering every credential from scratch).
-4. **Start the database only**: `docker compose up -d db`. It **must** be the `pgvector/pgvector:pg16` image already pinned in `docker-compose.yml` — a stock `postgres:16` image cannot load a dump containing `CREATE EXTENSION vector`, and restore will fail.
-5. **Run the restore**: `./scripts/restore.sh <db-dump> <uploads-tarball> --yes` (the `db` service from step 4 satisfies the script's preflight check; `app`/`worker` don't need to exist yet — `stop`/`start` on services that were never created is a no-op).
-6. **Bring up the full stack**: `docker compose up -d`.
+4. **Start a fresh, empty instance**: `docker compose up -d --build`. This creates the volumes with the ownership the services need, prepares the backups volume (`backup-init`) and migrates an empty database. The database **must** be the `pgvector/pgvector:pg16` image already pinned in `docker-compose.yml` — a stock `postgres:16` image cannot load a dump containing `CREATE EXTENSION vector`.
+5. **Copy the set into the backups volume**, from the tar stream made as in [Copying backups off the host](#copying-backups-off-the-host):
+
+   ```bash
+   docker compose run --rm --no-deps -T --entrypoint tar backup -C /backups -xf - < aida-backup-<setId>.tar
+   ```
+
+6. **Run the restore**: `./scripts/restore.sh <setId> --yes`. It replaces the empty instance's database and uploads with the set and starts `backup`, `app` and `worker` again.
 7. **Verify**: `curl http://localhost/api/health` should return `{"status":"ok",...}`.
 8. **Point DNS** at the new host and set `DOMAIN` in `.env` to your real domain, then `docker compose up -d caddy` — Caddy will automatically obtain a fresh Let's Encrypt certificate for the domain once ports 80/443 are reachable from the internet.
 
@@ -179,14 +235,16 @@ docker compose up -d
 
 The one-shot `migrate` service runs `prisma migrate deploy` automatically before `app`/`worker` start (it's gated on `db` being healthy, and `app`/`worker` are gated on `migrate` completing successfully) — **no manual migration step is needed**.
 
-**Take a backup first**: `./scripts/backup.sh` before every upgrade. If something goes wrong, roll back by checking out the previous git tag and restoring the pre-upgrade dump:
+**Take a backup first**: `./scripts/backup.sh` before every upgrade, and note the set id on its `backup succeeded` line. If something goes wrong, roll back by checking out the previous git tag and restoring the pre-upgrade set:
 
 ```bash
 git checkout <previous-tag>
 docker compose build
-./scripts/restore.sh ./backups/<pre-upgrade-db-dump> ./backups/<pre-upgrade-uploads-tarball> --yes
+./scripts/restore.sh <pre-upgrade-setId> --yes
 docker compose up -d
 ```
+
+This form needs a previous tag that already has set-based backups (this release or later). Releases before it took a database dump and an uploads tarball as two files, and their own `restore.sh` takes those two files.
 
 ### Upgrading an install whose containers ran as root
 
@@ -478,7 +536,11 @@ The boot guard found that the database URL the service received disagrees with `
 Let's Encrypt needs to reach the server on ports 80 and 443 from the public internet to complete the ACME challenge — check your firewall/security group and that `DOMAIN` in `.env` resolves (DNS) to this server's public IP. `docker compose logs caddy` shows the ACME error detail.
 
 **Attachments are missing after a restore.**
-The uploads tarball wasn't restored — either `restore.sh` was run with the wrong (or a database-only) backup, or the tarball argument was omitted. `restore.sh` always requires both a `DB_DUMP` and an `UPLOADS_TARBALL` argument; there is no way to restore only the database through the script (by design — a partial restore would silently reintroduce the exact "lost every attachment" failure mode this runbook warns about).
+`restore.sh` restores the database and the uploads volume from one set together, and there is no way to restore only the database through it (by design: a partial restore would silently reintroduce the exact "lost every attachment" failure mode this runbook warns about). A published set has every file its database refers to, because a backup refuses to publish a set with a missing file (category `verification`), and the restore checks every copied file against the set's checksum list. So missing attachments after a restore usually mean one of these:
+
+- the restore stopped in the uploads step (exit code 8, `backup`, `app` and `worker` left stopped): see [What a failure leaves behind](#what-a-failure-leaves-behind) and run the restore again;
+- the stack runs with another uploads volume than the one restored, for example after a change of the Compose project name: the restore uses the volume names `docker compose config` reports from the directory you run it in, so run it from the stack's own checkout;
+- the database was restored by hand (`pg_restore` of `db.dump` alone), which restores no file: run `restore.sh` with the set instead.
 
 **Database connection exhaustion / "too many connections".**
 `app`'s pool (`DB_POOL_MAX=10`) plus `worker`'s pool (`DB_POOL_MAX=5`) must stay comfortably under Postgres's `max_connections` (default 100). If you've scaled `app`/`worker` replicas or added other Postgres clients, check `SELECT count(*) FROM pg_stat_activity;` against the `max_connections` setting before raising either pool size.

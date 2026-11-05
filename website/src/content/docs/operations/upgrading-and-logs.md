@@ -65,14 +65,17 @@ docker compose up -d
 The one-shot `migrate` service runs `prisma migrate deploy` automatically before `app`/`worker`
 start — **there is no manual migration step**.
 
-To roll back, check out the previous git tag and restore the pre-upgrade dump:
+To roll back, check out the previous git tag and restore the set taken before the upgrade:
 
 ```bash
 git checkout <previous-tag>
 docker compose build
-./scripts/restore.sh ./backups/<pre-upgrade-db-dump> ./backups/<pre-upgrade-uploads-tarball> --yes
+./scripts/restore.sh <pre-upgrade-setId> --yes
 docker compose up -d
 ```
+
+This needs a previous tag that already has set-based backups; older releases' own `restore.sh`
+takes a database dump and an uploads tarball instead.
 
 ## Logs
 
