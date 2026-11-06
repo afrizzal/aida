@@ -30,3 +30,13 @@ Recorded unchanged from `09-REVIEW-d.md`; not fixed in F2 (F2 fixed d-CR-1, d-WR
 - **d-IN-3:** `backup-init` cannot repair a mode drift on a mount point already owned by 1000 (no `CAP_FOWNER`), so `docker compose up` fails on its dependency; skip `chmod` for a 1000-owned mount or print the documented fix.
 - **d-IN-4:** the bind-mounted `scripts/backup` directory is empty when the install path is not shared with the Docker VM (Docker Desktop, Colima), and `backup` then restarts in a loop; add a troubleshooting line or fail early.
 - **d-IN-5:** `backup.sh` exit code 1 is ambiguous: `docker compose run`'s own failures (1, 125 to 127) pass through as the run's code; map them to one documented code.
+
+## From the Phase 9 code review, part b (fix batch F3)
+
+Recorded unchanged from `09-REVIEW-b.md`; not fixed in F3 (F3 fixed b-WR-1, b-WR-2 and b-WR-5 under K143, b-WR-3, b-WR-4 under K144, and b-IN-1).
+
+- **b-IN-2:** a lease lost (or a failed retention) after the publish rename reports a failed run although `<setId>` is complete in the backups volume; `on_lease_lost` could set `PUBLISHED=1` when the set directory exists and log that the set was published before the status. Since K143 such a run also writes a failed unrecorded record with no set id.
+- **b-IN-3:** retention orders sets by name only, so a set dated by a fast clock is never pruned, and any directory with a valid name counts as a set even without a `manifest.json` naming it.
+- **b-IN-4:** `tests/unit/file-delete-callers.test.ts` misses deletes through an alias (`const files = localFileStorage`, an inferred `deps.fileStore`, an aliased `unlink` import from `node:fs`).
+- **b-IN-5:** the deleter requires a mount point plus the marker, the backup only the marker; the backup could also check `mountpoint -q` or the device of the uploads directory against its parent.
+- **b-IN-6:** the window between `fence_open` and `lease_acquire` is covered only by verification; a `fence_alive` check right after `lease_acquire` would fail the run early with `file fence unavailable`.
