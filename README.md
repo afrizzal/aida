@@ -49,7 +49,7 @@ Most helpdesk software treats AI as a paywalled add-on with per-resolution fees,
 
 ## Quick start
 
-**With the installer** (one host with Docker Compose, `curl`, `tar` and `openssl`). Download
+**With the installer** (one host with Docker Compose v2, `curl`, `tar` and `openssl`; the legacy Compose v1 binary `docker-compose` is not supported). Download
 `scripts/install.sh` from the tagged release, read it, then run it:
 
 ```bash

@@ -50,12 +50,12 @@
 # failed; 9 the target database has migrations the set does not contain (K142); 129, 130, 143
 # interrupted by HUP, INT, TERM.
 #
-# Legacy compose binary: COMPOSE_CMD="docker-compose" ./scripts/restore.sh <setId> (it must
-# support `config --format json`). This script never reads .env itself: compose passes the
+# Requires Docker Compose v2 (`docker compose`, which has `config --format json`); the legacy
+# Compose v1 binary is not supported. This script never reads .env itself: compose passes the
 # database settings to the backup service.
 set -euo pipefail
 
-COMPOSE="${COMPOSE_CMD:-docker compose}"
+COMPOSE="docker compose"
 LEASE_TTL_SECONDS=900
 STALE_LOCK_SECONDS=900
 # d-WR-1: how long the trap waits for the restore container to be gone (1 to 600 s).

@@ -1,6 +1,6 @@
 # Operations
 
-The day-two runbook for a self-hosted AIDA instance: backups, restore, upgrades, logs, health checks, and every environment variable. Written for a single-server operator, not a platform team — every command here runs against the shipped `docker-compose.yml` as-is.
+The day-two runbook for a self-hosted AIDA instance: backups, restore, upgrades, logs, health checks, and every environment variable. Written for a single-server operator, not a platform team — every command here runs against the shipped `docker-compose.yml` as-is, with Docker Compose v2 (the `docker compose` command; the legacy Compose v1 binary is not supported).
 
 ## Backups
 
@@ -112,11 +112,7 @@ docker compose run --rm --no-deps --entrypoint rm backup /backups/status-unrecor
 
 This takes one backup now, outside the schedule, in a one-off container of the `backup` service (as 1000:1000, the same script and settings). It requires the `db` service to be running (`docker compose up -d db`), runs `backup-init` first (it exits at once on a prepared volume), and exits with the run's code: 0 succeeded, 2 failed, 3 skipped, 5 outcome not recorded; 1 means its own preflight failed. The new set lands in `backups_data` like a scheduled one and counts towards `BACKUP_RETENTION`. Releases before this one took an output directory argument; the script now refuses one, because sets live in the volume.
 
-If you use the legacy `docker-compose` binary instead of the `docker compose` plugin:
-
-```bash
-COMPOSE_CMD="docker-compose" ./scripts/backup.sh
-```
+`backup.sh` and `restore.sh` call `docker compose`, which needs Docker Compose v2: the legacy Compose v1 binary cannot read `docker-compose.yml` (it nests an interpolation in a default value) and has no `config --format json`, so it is not supported.
 
 ### Copying backups off the host
 
@@ -224,7 +220,7 @@ It removes the lock only when the stored holder matches and the heartbeat is old
 
 Moving AIDA to new hardware (disk failure, migration, etc.):
 
-1. **Install Docker** (Docker Engine + Compose plugin) on the new server.
+1. **Install Docker** (Docker Engine + the Docker Compose v2 plugin) on the new server.
 2. **Clone the repo**: `git clone <your-fork-or-origin> && cd aida`, at the release that made the set or a later one (never an earlier one: migrations only go forward).
 3. **Recreate `.env`.** Copy your old `.env` across, or recreate it from `.env.example`. **`BETTER_AUTH_SECRET` and `APP_ENCRYPTION_KEY` MUST be the exact same values as the old server.** If they differ, existing user sessions become invalid and — more importantly — every stored IMAP/SMTP/LLM credential becomes permanently undecryptable (they're encrypted with `APP_ENCRYPTION_KEY`; there is no recovery path for a lost key other than re-entering every credential from scratch).
 4. **Start only the database and the backups volume**: `docker compose up -d db backup-init`. This creates the volumes with the ownership the services need and prepares the backups volume (`backup-init`). It does not run `migrate`, so the database stays empty and the restore accepts it whatever release you cloned (see [Which database a set can be restored into](#which-database-a-set-can-be-restored-into)). The database **must** be the `pgvector/pgvector:pg16` image already pinned in `docker-compose.yml` — a stock `postgres:16` image cannot load a dump containing `CREATE EXTENSION vector`.

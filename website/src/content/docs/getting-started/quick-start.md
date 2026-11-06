@@ -9,7 +9,8 @@ configure a provider later from Settings.
 
 ## Prerequisites
 
-- Docker and Docker Compose
+- Docker and Docker Compose v2 (the `docker compose` command; the legacy Compose v1 binary is not
+  supported)
 - About 2 GB of free RAM
 - Ports **80** and **443** free on the host
 - (Optional) An API key for OpenAI or Anthropic, or a running [Ollama](https://ollama.com) instance

@@ -16,8 +16,8 @@
 # is running; nothing was touched), 5 the outcome could not be recorded in the database (see
 # docs/OPERATIONS.md). 1 means the preflight failed and nothing ran.
 #
-# Legacy compose binary support:
-#   COMPOSE_CMD="docker-compose" ./scripts/backup.sh
+# Requires Docker Compose v2 (`docker compose`). The legacy Compose v1 binary (`docker-compose`)
+# cannot read docker-compose.yml (nested interpolation in a default value) and is not supported.
 #
 # This script never reads .env itself: compose passes the database settings to the service.
 set -eu
@@ -25,7 +25,7 @@ set -eu
 usage() {
   echo "Usage: ./scripts/backup.sh"
   echo "Takes one backup now. Sets are written to the backups_data volume, one directory per set."
-  echo "Legacy compose binary: COMPOSE_CMD=\"docker-compose\" ./scripts/backup.sh"
+  echo "Requires Docker Compose v2 (docker compose)."
 }
 
 case "${1:-}" in
@@ -43,7 +43,7 @@ case "${1:-}" in
     ;;
 esac
 
-COMPOSE="${COMPOSE_CMD:-docker compose}"
+COMPOSE="docker compose"
 
 # Preflight: the db service must already be up (this script never starts it, so it never races a
 # not-yet-ready Postgres).
