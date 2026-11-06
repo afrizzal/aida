@@ -20,6 +20,8 @@ const PAGE_POINTS: readonly E2EFaultPoint[] = [
   "ticket-detail-page",
   "contacts-page",
   "contact-detail-page",
+  "kb-page",
+  "settings-backups-page",
 ];
 
 /** A cookies() result holding the fault cookie with the given value (or none). */

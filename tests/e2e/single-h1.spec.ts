@@ -414,6 +414,24 @@ test.describe
           point: "contact-detail-page",
           copy: "Couldn't load contacts.",
         },
+        {
+          // No error.tsx under /kb: the app-level src/app/(app)/error.tsx (K147, review c-WR-02).
+          route: "/kb",
+          state: "error (app-level boundary)",
+          url: "/kb",
+          h1: "Knowledge Base",
+          point: "kb-page",
+          copy: "Couldn't load this page.",
+        },
+        {
+          // No error.tsx under /settings: the app-level boundary, inside the app shell.
+          route: "/settings/backups",
+          state: "error (app-level boundary)",
+          url: "/settings/backups",
+          h1: "Settings",
+          point: "settings-backups-page",
+          copy: "Couldn't load this page.",
+        },
       ];
       for (const row of errorRows) {
         await test.step(`${row.state}: ${row.url}`, async () => {
@@ -424,6 +442,9 @@ test.describe
           await page.goto(row.url);
           await expect(page.getByRole("main").getByText(row.copy)).toBeVisible();
           await expectSingleH1(page, row.h1);
+          // The error state keeps the app shell: the sidebar and the top bar are still there.
+          await expect(page.locator("header")).toHaveCount(1);
+          await expect(page.getByRole("button", { name: "Search" })).toBeVisible();
           await context.clearCookies({ name: FAULT_COOKIE });
         });
         rendered.set(row.route, [...(rendered.get(row.route) ?? []), row.state]);

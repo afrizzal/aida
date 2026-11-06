@@ -8,6 +8,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { UserMenu } from "@/components/user-menu";
 import { isApplePlatform, subscribeNever } from "@/lib/keyboard/platform";
+import { getPageTitle } from "@/lib/navigation/page-title";
 
 interface TopBarUser {
   name: string;
@@ -16,20 +17,6 @@ interface TopBarUser {
 
 interface TopBarProps {
   user: TopBarUser;
-}
-
-const pageTitles: Record<string, string> = {
-  "/tickets": "Tickets",
-  "/contacts": "Contacts",
-  "/kb": "Knowledge Base",
-  "/settings": "Settings",
-};
-
-function getPageTitle(pathname: string): string {
-  for (const [prefix, title] of Object.entries(pageTitles)) {
-    if (pathname.startsWith(prefix)) return title;
-  }
-  return "AIDA";
 }
 
 /**

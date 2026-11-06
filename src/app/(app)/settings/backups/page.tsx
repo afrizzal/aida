@@ -13,6 +13,7 @@ import {
 import { prisma } from "@/lib/db";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import { isAdminRole } from "@/lib/membership";
+import { e2eFault } from "@/lib/testing/e2e-fault";
 
 // Reads the database at request time (the last backup run) — must never be statically prerendered.
 export const dynamic = "force-dynamic";
@@ -38,6 +39,7 @@ const CALLOUT =
  * reads nothing. No button, no form: backups are configured on the server.
  */
 export default async function BackupsSettingsPage() {
+  await e2eFault("settings-backups-page"); // inert outside the E2E server (src/lib/testing/e2e-fault.ts)
   const role = await getOrgRole();
   const canView = isAdminRole(role);
 

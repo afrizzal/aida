@@ -25,6 +25,9 @@ export const E2E_FAULT_POINTS = [
   "ticket-detail-page",
   "contacts-page",
   "contact-detail-page",
+  // Pages with no error.tsx of their own: the app-level src/app/(app)/error.tsx renders (K147).
+  "kb-page",
+  "settings-backups-page",
   "tickets-list-delay",
 ] as const;
 
