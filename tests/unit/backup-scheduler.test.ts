@@ -4,9 +4,14 @@
 // arithmetic, so these cases run the real script with the host's `sh`. The loop itself is checked
 // only for what needs no clock: an invalid schedule stops it with exit 2, and BACKUP_ENABLED=false
 // keeps it up without running a backup until TERM. No container is started.
+//
+// K143 (F3, b-WR-5): `--run-once <limit> <killGrace>` runs a fake aida-backup.sh, copied next to
+// the real scheduler.sh and lib.sh, under the scheduler's bound on one run.
 import { spawn, spawnSync } from "node:child_process";
+import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 const SCRIPT = path.resolve(__dirname, "../../scripts/backup/scheduler.sh");
 const DAY = 86_400;
@@ -130,6 +135,101 @@ describe("scheduler.sh loop mode", () => {
     expect(await exited).toBe(0);
     expect(stdout).toBe(
       "[backup] backups disabled (BACKUP_ENABLED=false)\n[backup] scheduler stopped\n",
+    );
+  });
+});
+
+describe("scheduler.sh bounds its wait on a run (K143, b-WR-5)", () => {
+  const dirs: string[] = [];
+  afterEach(async () => {
+    for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true });
+  });
+
+  /** A copy of scheduler.sh and lib.sh with a fake aida-backup.sh next to them. */
+  async function withFakeBackup(body: string): Promise<string> {
+    const dir = await mkdtemp(path.join(tmpdir(), "aida-scheduler-"));
+    dirs.push(dir);
+    const src = path.resolve(__dirname, "../../scripts/backup");
+    await copyFile(path.join(src, "scheduler.sh"), path.join(dir, "scheduler.sh"));
+    await copyFile(path.join(src, "lib.sh"), path.join(dir, "lib.sh"));
+    await writeFile(path.join(dir, "aida-backup.sh"), body);
+    return path.join(dir, "scheduler.sh");
+  }
+
+  function runOnce(script: string, limit: string, grace: string) {
+    const started = Date.now();
+    const run = spawnSync("sh", [script, "--run-once", limit, grace], {
+      encoding: "utf8",
+      env: BASE_ENV,
+      timeout: 60_000,
+    });
+    return { ...run, seconds: (Date.now() - started) / 1000 };
+  }
+
+  const UNRECORDED = /^AIDA_BACKUP_STATUS_UNRECORDED (\{.*\})$/;
+
+  it("a run that ignores TERM is killed after the limit plus the grace, and the scheduler prints the unrecorded line for it", async () => {
+    const script = await withFakeBackup(
+      "trap '' TERM\necho '[backup] fake: started'\nsleep 30 >/dev/null 2>&1\n",
+    );
+    const run = runOnce(script, "1", "1");
+    expect(run.seconds).toBeLessThan(15);
+    expect(run.status).toBe(137);
+    expect(run.stdout).toBe(
+      [
+        "[backup] fake: started",
+        "[backup] scheduled backup still running after 1s; stopping it",
+        "[backup] scheduled backup did not stop; killing it",
+        "[backup] scheduled backup ended by signal 9",
+        "[backup] backup status not recorded",
+        "[backup] backup status record file not written",
+        "",
+      ].join("\n"),
+    );
+    // Only the unrecorded line (a shell may also report the killed job on stderr).
+    const lines = run.stderr.split("\n").filter((l) => l.startsWith("AIDA_BACKUP_STATUS_"));
+    expect(lines).toHaveLength(1);
+    const match = UNRECORDED.exec(lines[0] as string);
+    expect(match).not.toBeNull();
+    expect(JSON.parse((match as RegExpExecArray)[1] as string)).toEqual({
+      finishedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/),
+      result: "failed",
+      setId: null,
+      category: "unknown",
+    });
+  });
+
+  it("a run that handles TERM ends on it with its own exit code and records its own outcome", async () => {
+    const script = await withFakeBackup(
+      "trap 'echo \"[backup] fake: recorded\"; exit 2' TERM\nsleep 30 >/dev/null 2>&1 &\nwait $!\n",
+    );
+    const run = runOnce(script, "1", "20");
+    expect(run.seconds).toBeLessThan(15);
+    expect(run.status).toBe(2);
+    expect(run.stdout).toBe(
+      "[backup] scheduled backup still running after 1s; stopping it\n[backup] fake: recorded\n",
+    );
+    expect(run.stderr).toBe("");
+  });
+
+  it("a run that ends within the limit is not touched", async () => {
+    const script = await withFakeBackup("echo '[backup] fake: done'\nexit 3\n");
+    const run = runOnce(script, "30", "30");
+    expect(run.seconds).toBeLessThan(10);
+    expect(run.status).toBe(3);
+    expect(run.stdout).toBe("[backup] fake: done\n");
+    expect(run.stderr).toBe("");
+  });
+
+  it("an invalid BACKUP_MAX_RUN_SECONDS stops the loop with exit 2 before any run", () => {
+    const run = spawnSync("sh", [SCRIPT], {
+      encoding: "utf8",
+      env: { ...BASE_ENV, BACKUP_ENABLED: "true", BACKUP_MAX_RUN_SECONDS: "0" },
+      timeout: 10_000,
+    });
+    expect(run.status).toBe(2);
+    expect(run.stdout).toBe(
+      "[backup] invalid BACKUP_MAX_RUN_SECONDS: use whole seconds, 1 to 999999\n",
     );
   });
 });

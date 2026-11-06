@@ -18,6 +18,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@/generated/prisma/client";
 import type { FileStorage } from "@/lib/attachments/file-storage";
@@ -555,9 +556,29 @@ async function expectFailedRun(
   result: RunResult,
   category: string,
   line: string,
-  /** "none" for a run that lost its lease: it writes no status at all (D-04, P6; plan 09-13). */
-  status: "recorded" | "none" = "recorded",
+  /**
+   * The set id of a run that lost its lease: it writes no backup:lastRun (D-04, P6; plan 09-13),
+   * but K143 (F3) makes it leave the unrecorded line and status-unrecorded-<setId>.json, exit 5.
+   */
+  leaseLostSetId?: string,
 ): Promise<void> {
+  if (leaseLostSetId !== undefined) {
+    expect(result.exitCode, result.stdout).toBe(5);
+    expectQuietOutput({ ...result, stderr: "" });
+    expect(result.stdout).toContain(line);
+    expect(result.stdout).toContain(`[backup] backup failed: ${category}`);
+    const lines = result.stderr.split("\n").filter((l) => l !== "");
+    expect(lines).toHaveLength(1);
+    const unrecorded = /^AIDA_BACKUP_STATUS_UNRECORDED (\{.*\})$/.exec(lines[0] as string);
+    expect(unrecorded, result.stderr).not.toBeNull();
+    const record = { finishedAt: expect.any(String), result: "failed", setId: null, category };
+    expect(JSON.parse((unrecorded as RegExpExecArray)[1] as string)).toEqual(record);
+    const file = `status-unrecorded-${leaseLostSetId}.json`;
+    expect(await entries(c.backups)).toEqual([file]);
+    expect(JSON.parse(await readFile(path.join(c.backups, file), "utf8"))).toEqual(record);
+    expect(await lastRun()).toBeNull();
+    return;
+  }
   expect(result.exitCode, result.stdout).toBe(2);
   expectQuietOutput(result);
   expect(result.stdout).toContain(line);
@@ -565,10 +586,6 @@ async function expectFailedRun(
   expect(await publishedSets(c)).toEqual([]);
   // Nothing published and the run's own temporary directory removed.
   expect(await entries(c.backups)).toEqual([]);
-  if (status === "none") {
-    expect(await lastRun()).toBeNull();
-    return;
-  }
   expect(await lastRun()).toEqual({
     finishedAt: expect.any(String),
     result: "failed",
@@ -887,7 +904,7 @@ describe("U-12 fence with the real script", () => {
   );
 
   it(
-    "G3 paused: with the runner container paused past its lease TTL, the frozen fence session still blocks the sweep; after unpause the run aborts on lease loss, publishes nothing, and the next sweep deletes",
+    "G3 paused: with the runner container paused past its lease TTL, the frozen fence session still blocks the sweep; after unpause the run aborts on lease loss, publishes nothing, leaves the unrecorded line and file (K143), and the next sweep deletes",
     async () => {
       const c = await newCase();
       const w = await seedFour(c);
@@ -921,7 +938,7 @@ describe("U-12 fence with the real script", () => {
 
       await run.go("after-dump");
       const result = await run.done;
-      await expectFailedRun(c, result, "unknown", "[backup] backup aborted: lease lost", "none");
+      await expectFailedRun(c, result, "unknown", "[backup] backup aborted: lease lost", setId);
       expect(await leaseValue()).toBeNull();
       expect(await fence.fenceLocks()).toEqual([]);
       expect(await fence.backendsNamed(BACKUP_FENCE)).toEqual([]);
@@ -1145,7 +1162,7 @@ describe("U-12 fence with the real script", () => {
 
       await run.go("after-archive");
       const result = await run.done;
-      await expectFailedRun(c, result, "unknown", "[backup] backup aborted: lease lost", "none");
+      await expectFailedRun(c, result, "unknown", "[backup] backup aborted: lease lost", setId);
       expect(
         await prisma.systemSetting.findUniqueOrThrow({ where: { key: "backup:lease" } }),
       ).toEqual(takenOver);
@@ -1160,6 +1177,99 @@ describe("U-12 fence with the real script", () => {
       });
       expect(await exists(fileOf(c, w.orgId, loose))).toBe(true);
       await prisma.$executeRaw`DELETE FROM "SystemSetting" WHERE key = 'backup:lease'`;
+    },
+    CASE_TIMEOUT,
+  );
+});
+
+// ---------------------------------------------------------------------------------------------
+// K143 (F3, b-WR-1, b-WR-2): the lease renewal follows the run. A killed main shell lets the lease
+// expire; one transient renewal error is retried within the lease margin.
+
+describe("K143 run liveness with the real script", () => {
+  it(
+    "main killed: with only the script's main shell killed (kill -9 inside the runner) the renewal stops, the lease expires within one TTL, the fence session ends and the next sweep deletes",
+    async () => {
+      const c = await newCase();
+      const w = await seedFour(c);
+      const loose = await queuedLooseFile(c, w);
+      const r = activeRunner();
+      const run = runIn(c, { pauseAt: ["after-dump"], env: { BACKUP_LEASE_TTL_SECONDS: "6" } });
+      await run.waitReached("after-dump");
+      const setId = await tmpSetId(c);
+      expect(await leaseValue()).toEqual({ holder: setId, expiresAt: expect.any(String) });
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      expect(await sweep(c)).toEqual({
+        deleted: 0,
+        missing: 0,
+        failed: 0,
+        skipped: "backup-archiving",
+      });
+
+      const pid = await run.mainPid("after-dump");
+      const killed = await r.exec(["sh", "-c", `kill -9 ${pid}`]);
+      expect(killed.exitCode, killed.stderr).toBe(0);
+      const result = await run.done;
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stdout).not.toContain("backup succeeded");
+
+      // The fence session ends with the main shell (its statement FIFO lost the only writer).
+      await waitFor(
+        async () => (await fence.backendsNamed(BACKUP_FENCE)).length === 0,
+        "fence session gone",
+      );
+      // No renewal after the kill: the lease expires within one TTL (6 s) and stays expired.
+      await waitFor(async () => !(await leaseActive()), "lease expired", 12_000);
+      const expired = await leaseValue();
+      expect(expired).toEqual({ holder: setId, expiresAt: expect.any(String) });
+      await new Promise((res) => setTimeout(res, 4_500));
+      expect(await leaseValue()).toEqual(expired);
+      expect(await fence.fenceLocks()).toEqual([]);
+
+      expect(await sweep(c)).toEqual({ deleted: 1, missing: 0, failed: 0 });
+      expect(await exists(fileOf(c, w.orgId, loose))).toBe(false);
+      // The killed run released nothing itself: its expired lease row is removed here.
+      await prisma.$executeRaw`DELETE FROM "SystemSetting" WHERE key = 'backup:lease'`;
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "one renewal error: with new connections to the database refused across one renewal, the renewal retries, the run keeps its lease, logs the retry and succeeds",
+    async () => {
+      const c = await newCase();
+      await seedFour(c);
+      const run = runIn(c, { pauseAt: ["after-dump"], env: { BACKUP_LEASE_TTL_SECONDS: "15" } });
+      await run.waitReached("after-dump");
+      const setId = await tmpSetId(c);
+      // Start right after a confirmed renewal (every 5 s), so the refusal covers the next one.
+      const first = (await leaseValue())?.expiresAt;
+      await waitFor(async () => (await leaseValue())?.expiresAt !== first, "a renewal", 10_000);
+      const rows = await prisma.$queryRaw<{ db: string }[]>`SELECT current_database() AS db`;
+      const db = (rows[0] as { db: string }).db;
+      expect(db).toMatch(/^[A-Za-z0-9_]+$/);
+      // Postgres refuses this from a session on the same database: the shared one issues it.
+      const admin = new pg.Client({ connectionString: savedEnv.DATABASE_URL });
+      await admin.connect();
+      try {
+        await admin.query(`ALTER DATABASE "${db}" WITH ALLOW_CONNECTIONS false`);
+        try {
+          await new Promise((res) => setTimeout(res, 6_500));
+        } finally {
+          await admin.query(`ALTER DATABASE "${db}" WITH ALLOW_CONNECTIONS true`);
+        }
+      } finally {
+        await admin.end();
+      }
+      expect(await leaseActive()).toBe(true);
+      expect(await leaseValue()).toEqual({ holder: setId, expiresAt: expect.any(String) });
+
+      await run.go("after-dump");
+      const result = await run.done;
+      expect(result.stdout).toContain("[backup] lease renewal failed; retrying");
+      expect(await expectSucceededRun(c, result)).toBe(setId);
+      await expectConsistentSet(c, setId);
+      expect(await leaseValue()).toBeNull();
     },
     CASE_TIMEOUT,
   );

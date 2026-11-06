@@ -150,13 +150,14 @@ describe("backup: the scheduled service runs as 1000:1000 (D-01, U-16)", () => {
     expect(INIT).not.toMatch(/DATABASE_URL|PGPASSWORD|postgres(ql)?:\/\//);
   });
 
-  it("passes the five operator settings with their defaults and the two fixed directories", () => {
+  it("passes the six operator settings with their defaults and the two fixed directories", () => {
     const env = environment(BACKUP);
     expect(env.BACKUP_ENABLED).toBe(interpolated("BACKUP_ENABLED:-true"));
     expect(env.BACKUP_SCHEDULE).toBe(interpolated("BACKUP_SCHEDULE:-02:00"));
     expect(env.BACKUP_RETENTION).toBe(interpolated("BACKUP_RETENTION:-7"));
     expect(env.BACKUP_LEASE_TTL_SECONDS).toBe(interpolated("BACKUP_LEASE_TTL_SECONDS:-900"));
     expect(env.BACKUP_FENCE_WAIT_SECONDS).toBe(interpolated("BACKUP_FENCE_WAIT_SECONDS:-300"));
+    expect(env.BACKUP_MAX_RUN_SECONDS).toBe(interpolated("BACKUP_MAX_RUN_SECONDS:-21600"));
     expect(env.BACKUP_DIR).toBe("/backups");
     expect(env.UPLOADS_DIR).toBe("/data/uploads");
     expect(Object.keys(env).sort()).toEqual(
@@ -165,6 +166,7 @@ describe("backup: the scheduled service runs as 1000:1000 (D-01, U-16)", () => {
         "BACKUP_ENABLED",
         "BACKUP_FENCE_WAIT_SECONDS",
         "BACKUP_LEASE_TTL_SECONDS",
+        "BACKUP_MAX_RUN_SECONDS",
         "BACKUP_RETENTION",
         "BACKUP_SCHEDULE",
         "PGDATABASE",

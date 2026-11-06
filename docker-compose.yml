@@ -204,9 +204,10 @@ services:
       BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
       BACKUP_SCHEDULE: ${BACKUP_SCHEDULE:-02:00}
       BACKUP_RETENTION: ${BACKUP_RETENTION:-7}
-      # Advanced: see docs/OPERATIONS.md "Backups" before changing these two.
+      # Advanced: see docs/OPERATIONS.md "Backups" before changing these three.
       BACKUP_LEASE_TTL_SECONDS: ${BACKUP_LEASE_TTL_SECONDS:-900}
       BACKUP_FENCE_WAIT_SECONDS: ${BACKUP_FENCE_WAIT_SECONDS:-300}
+      BACKUP_MAX_RUN_SECONDS: ${BACKUP_MAX_RUN_SECONDS:-21600}
       BACKUP_DIR: /backups
       UPLOADS_DIR: /data/uploads
     volumes:

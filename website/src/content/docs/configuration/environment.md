@@ -37,6 +37,7 @@ This table covers exactly the variables in `.env.example` — nothing more, noth
 | `BACKUP_RETENTION` | No | `7` | Number of successful backup sets kept in the `backups_data` volume, 1 to 9999. Older sets are removed after each successful run. |
 | `BACKUP_LEASE_TTL_SECONDS` | No | `900` | Advanced. Lifetime in seconds of the lease a backup holds while deletions of stored files wait; renewed every third of it. A run that cannot renew it aborts (`backup aborted: lease lost`). |
 | `BACKUP_FENCE_WAIT_SECONDS` | No | `300` | Advanced. Seconds a backup waits for a file deletion in progress before it fails with `file fence busy`. |
+| `BACKUP_MAX_RUN_SECONDS` | No | `21600` | Advanced. The longest one backup run may take, 1 to 999999 seconds; past it the run fails with `backup aborted: run deadline passed`. |
 
 AIDA trusts X-Forwarded-For only because the shipped Caddy overwrites it with the address of the
 connecting peer. Anyone putting a CDN or another proxy in front of Caddy must follow

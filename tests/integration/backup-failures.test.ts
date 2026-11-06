@@ -340,6 +340,23 @@ async function unrecordedFiles(c: Case): Promise<string[]> {
   return (await entries(c.backups)).filter((name) => UNRECORDED_FILE.test(name));
 }
 
+/**
+ * A TCP listener inside the runner (which shares the database container's network) that accepts
+ * connections into its backlog and never answers, as a paused or frozen `db` does. It lives 150 s.
+ */
+const HUNG_PORT = "55439";
+const HUNG_PID_FILE = "/tmp/aida-hung-listener.pid";
+const HUNG_LISTENER = `rm -f ${HUNG_PID_FILE}
+nohup perl -MIO::Socket::INET -e '
+  my $s = IO::Socket::INET->new(LocalAddr => "127.0.0.1", LocalPort => ${HUNG_PORT},
+    Listen => 64, ReuseAddr => 1) or exit 1;
+  open(my $f, ">", "${HUNG_PID_FILE}") or exit 1; print $f "$$\\n"; close $f;
+  sleep 150;' </dev/null >/dev/null 2>&1 &
+i=0
+while [ "$i" -lt 100 ]; do [ -s ${HUNG_PID_FILE} ] && exit 0; i=$((i + 1)); sleep 0.1; done
+exit 1`;
+const STOP_HUNG_LISTENER = `[ -s ${HUNG_PID_FILE} ] && kill "$(cat ${HUNG_PID_FILE})"; rm -f ${HUNG_PID_FILE}`;
+
 /** A status record written by an earlier run, to prove a later run leaves it unchanged. */
 const EARLIER_STATUS = JSON.stringify({
   finishedAt: "2026-01-01T00:00:00.000Z",
@@ -418,6 +435,35 @@ describe("failure categories with real causes (P11)", () => {
         result: "failed",
         setId: null,
         category: "dump",
+      });
+      expect(await unrecordedFiles(c)).toEqual([]);
+      expect(unrecordedLines(result)).toEqual([]);
+      expect(result.stderr).toBe("");
+      expect(await publishedSets(c)).toEqual([]);
+      expect(await tmpDirs(c)).toEqual([]);
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "run deadline (K143): a dump waiting on a held ACCESS EXCLUSIVE lock is stopped at BACKUP_MAX_RUN_SECONDS 8; the run logs the deadline, exits 2 and records failed, category unknown",
+    async () => {
+      const c = await newCase();
+      const t0 = Date.now();
+      const result = await runWithAttachmentLocked(c, {
+        BACKUP_DUMP_LOCK_TIMEOUT: "300s",
+        BACKUP_MAX_RUN_SECONDS: "8",
+      });
+      const seconds = (Date.now() - t0) / 1000;
+      expect(seconds, result.stdout).toBeLessThan(45);
+      expect(result.exitCode, result.stdout).toBe(2);
+      expect(result.stdout).toContain("[backup] backup aborted: run deadline passed");
+      expect(result.stdout).toContain("[backup] backup failed: unknown");
+      expect(await lastRun()).toEqual({
+        finishedAt: expect.stringMatching(FINISHED_AT),
+        result: "failed",
+        setId: null,
+        category: "unknown",
       });
       expect(await unrecordedFiles(c)).toEqual([]);
       expect(unrecordedLines(result)).toEqual([]);
@@ -535,6 +581,43 @@ describe("failure categories with real causes (P11)", () => {
   );
 
   it(
+    "hung connect (K143): with PGPORT at a listener that accepts and never answers, PGCONNECT_TIMEOUT (default 10 s) bounds every connect; the run ends within 60 s, exits 5, prints the stderr line and writes status-unrecorded-<setId>.json",
+    async () => {
+      const c = await newCase();
+      await seedEarlierStatus();
+      const r = activeRunner();
+      const started = await r.exec(["sh", "-c", HUNG_LISTENER]);
+      expect(started.exitCode, started.stderr).toBe(0);
+      try {
+        const t0 = Date.now();
+        const result = await runIn(c, { env: { PGPORT: HUNG_PORT } }).done;
+        const seconds = (Date.now() - t0) / 1000;
+        expect(seconds, result.stdout).toBeLessThan(60);
+        expect(result.exitCode, result.stdout).toBe(5);
+        expect(result.stdout).toContain("[backup] database not reachable");
+        expect(result.stdout).toContain("[backup] backup failed: unknown");
+        expect(result.stdout).toContain("[backup] backup status not recorded");
+        expect(await lastRunRaw()).toBe(EARLIER_STATUS);
+        const lines = unrecordedLines(result);
+        expect(lines).toEqual([
+          {
+            finishedAt: expect.stringMatching(FINISHED_AT),
+            result: "failed",
+            setId: null,
+            category: "unknown",
+          },
+        ]);
+        const files = await unrecordedFiles(c);
+        expect(files).toHaveLength(1);
+        expect(await entries(c.backups)).toEqual(files);
+      } finally {
+        await r.exec(["sh", "-c", STOP_HUNG_LISTENER]);
+      }
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
     "both unwritable: with the database unreachable and the backups directory read-only the run prints the stderr line, writes no file and exits 5",
     async () => {
       const c = await newCase();
@@ -590,13 +673,14 @@ describe("failure categories with real causes (P11)", () => {
   );
 
   it(
-    "lease lost writes no status: with the holder overwritten at after-archive the run exits 2, writes no backup:lastRun and no unrecorded file",
+    "lease lost writes no backup:lastRun: with the holder overwritten at after-archive the run exits 5 and leaves the unrecorded line and status-unrecorded-<setId>.json instead (K143: never silent)",
     async () => {
       const c = await newCase();
       const run = runIn(c, { pauseAt: ["after-archive"] });
       await run.waitReached("after-archive");
       const [tmp] = await tmpDirs(c);
       expect(tmp).toMatch(/^\.tmp-/);
+      const setId = (tmp as string).slice(".tmp-".length);
       await prisma.$executeRaw`
         UPDATE "SystemSetting"
         SET value = json_build_object(
@@ -607,13 +691,22 @@ describe("failure categories with real causes (P11)", () => {
         WHERE key = 'backup:lease'`;
       await run.go("after-archive");
       const result = await run.done;
-      expect(result.exitCode, result.stdout).toBe(2);
+      expect(result.exitCode, result.stdout).toBe(5);
       expect(result.stdout).toContain("[backup] backup aborted: lease lost");
       expect(result.stdout).toContain("[backup] backup failed: unknown");
       expect(await lastRun()).toBeNull();
-      expect(await unrecordedFiles(c)).toEqual([]);
-      expect(unrecordedLines(result)).toEqual([]);
-      expect(result.stderr).toBe("");
+      const record = {
+        finishedAt: expect.stringMatching(FINISHED_AT),
+        result: "failed",
+        setId: null,
+        category: "unknown",
+      };
+      expect(unrecordedLines(result)).toEqual([record]);
+      expect(result.stderr.split("\n").filter((l) => l !== "")).toHaveLength(1);
+      expect(await unrecordedFiles(c)).toEqual([`status-unrecorded-${setId}.json`]);
+      expect(
+        JSON.parse(await readFile(path.join(c.backups, `status-unrecorded-${setId}.json`), "utf8")),
+      ).toEqual(record);
       expect(await publishedSets(c)).toEqual([]);
       expect(await tmpDirs(c)).toEqual([]);
       const lease = await prisma.systemSetting.findUniqueOrThrow({

@@ -24,6 +24,7 @@ A **complete** AIDA backup has two parts, and both are required to restore an in
 | `BACKUP_RETENTION` | `7` | How many successful sets are kept, 1 to 9999. After each successful run, older sets are removed. Failed runs never count and never remove a set. |
 | `BACKUP_LEASE_TTL_SECONDS` | `900` | Advanced. How long the backup's lease lasts before it must be renewed (the run renews it every third of this time). |
 | `BACKUP_FENCE_WAIT_SECONDS` | `300` | Advanced. How long a run waits for a file deletion that is in progress before it gives up with `file fence busy`. |
+| `BACKUP_MAX_RUN_SECONDS` | `21600` | Advanced. The longest one run may take (6 hours), 1 to 999999. A step still running at that point is stopped and the run fails with `backup aborted: run deadline passed`; the scheduler stops a run that is still there 180 seconds later. |
 
 Change a setting in `.env`, then recreate the service: `docker compose up -d backup`. The exact time of the next run is in the log (`[backup] next backup in <seconds>s`). A run that is exactly due when the previous one ends waits for the next day; there is never a second run in the same minute.
 
@@ -88,13 +89,16 @@ These lines appear in `docker compose logs backup`:
 
 - **`backup skipped: lease held`** (exit code 3): another backup is running, for example a manual run that overlaps the schedule. Nothing was touched; the next scheduled run tries again.
 - **`backup skipped: restore in progress`** (exit code 3): a restore holds its lock (`.restore-lock` in the backups volume). Nothing more is published, no set is removed and no status is recorded.
-- **`backup aborted: lease lost`**: the run could no longer renew its lease (the database became unreachable, or the container was paused past `BACKUP_LEASE_TTL_SECONDS`). Nothing is published and no status is recorded, because the run can no longer prove deletions were waiting. The next scheduled run tries again.
+- **`backup aborted: lease lost`**: the run could no longer renew its lease (another holder took it, the container was paused past `BACKUP_LEASE_TTL_SECONDS`, or the database stayed unreachable until only a third of the lease was left). Nothing is published. The run does not write the status in Settings, because it can no longer prove deletions were waiting, but it records its outcome as in "When the outcome cannot be recorded" below (exit code 5). The next scheduled run tries again.
+- **`lease renewal failed; retrying`**: one renewal of the lease failed, for example while the database restarted. The run retries every few seconds and continues when a retry succeeds; it gives up only when a third of the lease is left (`backup aborted: lease lost`).
+- **`backup aborted: run deadline passed`**: the run took longer than `BACKUP_MAX_RUN_SECONDS`, for example a dump or archive step that hung. The step was stopped and the run fails with category `unknown`. Database connects give up after 10 seconds (`PGCONNECT_TIMEOUT`), so an unreachable database fails a run quickly instead of hanging it.
+- **`scheduled backup still running after <seconds>s; stopping it`** and **`scheduled backup did not stop; killing it`**: the scheduler's own limit (the run's deadline plus 180 seconds) was reached. A run that had to be killed could not record anything itself, so the scheduler prints the `AIDA_BACKUP_STATUS_UNRECORDED` line for it (without a set id). If a run is killed in any other way, its lease is no longer renewed and expires within `BACKUP_LEASE_TTL_SECONDS`, so file deletions resume and the next run proceeds.
 - **`file fence busy`**: a file deletion held the fence for longer than `BACKUP_FENCE_WAIT_SECONDS`. The run fails with category `unknown`; the next one tries again.
 - **`uploads volume not verified`**: see the identity marker above. The run fails with category `unknown` before any dump.
 - **`database not reachable`**: the run could not reach `db`. Its failure usually cannot be recorded either (exit code 5, below).
 - **`backup retention incomplete`**: the new set was published, but an old set could not be removed. The run still counts as succeeded.
 
-**When the outcome cannot be recorded** (exit code 5), the database was unreachable when the run tried to write its status, so Settings → Backups still shows the previous run. The outcome is kept in two places instead:
+**When the outcome cannot be recorded** (exit code 5), the database was unreachable when the run tried to write its status, or the run lost its lease, so Settings → Backups still shows the previous run. The outcome is kept in two places instead:
 
 - one stderr line in the service log, `AIDA_BACKUP_STATUS_UNRECORDED {"finishedAt":...,"result":...,"setId":...,"category":...}`. Find it with `docker compose logs backup | grep AIDA_BACKUP_STATUS_UNRECORDED`;
 - a file `status-unrecorded-<setId>.json` with the same four fields in the backups volume, one per run. AIDA never removes these files; delete each one once you have dealt with it:
@@ -502,6 +506,7 @@ Every variable in `.env.example`, and nothing else. `Required` means the app wil
 | `BACKUP_RETENTION` | No | `7` | Number of successful backup sets kept in the `backups_data` volume, 1 to 9999. Older sets are removed after each successful run. |
 | `BACKUP_LEASE_TTL_SECONDS` | No | `900` | Advanced. Lifetime in seconds of the lease a backup holds while deletions of stored files wait; renewed every third of it. A run that cannot renew it aborts (`backup aborted: lease lost`). |
 | `BACKUP_FENCE_WAIT_SECONDS` | No | `300` | Advanced. Seconds a backup waits for a file deletion in progress before it fails with `file fence busy`. |
+| `BACKUP_MAX_RUN_SECONDS` | No | `21600` | Advanced. The longest one backup run may take, 1 to 999999 seconds; past it the run fails with `backup aborted: run deadline passed`. |
 
 ### Demo mode
 

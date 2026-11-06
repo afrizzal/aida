@@ -15,9 +15,19 @@
 # option, so it behaves the same in the container and on a developer's machine. The moment a run
 # is due is never counted twice: at exactly HH:MM:00 the next run is the following day.
 #
-# Test mode (no environment, no side effect):
+#   BACKUP_MAX_RUN_SECONDS  the run's own deadline (aida-backup.sh, default 21600). The scheduler
+#                    waits at most that plus 180 s (the run's cleanup grace) for a run. Then the
+#                    run gets TERM, and KILL 30 s later if it is still there (K143). A run that ended
+#                    on a signal recorded nothing itself, so the scheduler prints the
+#                    `AIDA_BACKUP_STATUS_UNRECORDED` line for it (lib.sh status_unrecorded).
+#
+# Test modes:
 #   scheduler.sh --next-delay HH:MM <nowEpoch>
-# prints only the delay in seconds (1 to 86400) and exits 0; an invalid HH:MM or epoch exits 2.
+# prints only the delay in seconds (1 to 86400) and exits 0; an invalid HH:MM or epoch exits 2
+# (no environment, no side effect).
+#   scheduler.sh --run-once <limitSeconds> <killGraceSeconds>
+# runs aida-backup.sh from its own directory once, now, under that bound, and exits with the run's
+# exit code.
 set -eu
 
 LC_ALL=C
@@ -65,19 +75,36 @@ if [ "${1:-}" = "--next-delay" ]; then
   next_delay "$2" "$3" || exit 2
   exit 0
 fi
-if [ "$#" -ne 0 ]; then
+RUN_ONCE=0
+if [ "${1:-}" = "--run-once" ]; then
+  [ "$#" -eq 3 ] || exit 2
+  for _a in "$2" "$3"; do
+    case $_a in
+      '' | *[!0-9]* | 0?*) exit 2 ;;
+    esac
+  done
+  [ "$2" -ge 1 ] || exit 2
+  RUN_ONCE=1
+elif [ "$#" -ne 0 ]; then
   log 'scheduler: unexpected argument (usage: scheduler.sh, or scheduler.sh --next-delay HH:MM <nowEpoch>)'
   exit 2
 fi
 
 SCHEDULER_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 BACKUP_SCRIPT=$SCHEDULER_DIR/aida-backup.sh
+# shellcheck source=scripts/backup/lib.sh
+. "$SCHEDULER_DIR/lib.sh"
 BACKUP_ENABLED=${BACKUP_ENABLED:-true}
 BACKUP_SCHEDULE=${BACKUP_SCHEDULE:-02:00}
+BACKUP_MAX_RUN_SECONDS=${BACKUP_MAX_RUN_SECONDS:-21600}
 
 CHILD=''
+WATCHDOG=''
 on_stop() {
   trap '' TERM INT HUP
+  if [ -n "$WATCHDOG" ]; then
+    kill "$WATCHDOG" 2>/dev/null || :
+  fi
   if [ -n "$CHILD" ]; then
     # A running backup gets TERM so its own trap releases the lease and the fence.
     kill -TERM "$CHILD" 2>/dev/null || :
@@ -96,6 +123,52 @@ pause_for() {
   CHILD=''
 }
 
+# run_backup <limitSeconds> <killGraceSeconds>: runs aida-backup.sh and waits for it, at most
+# <limit> seconds (K143). Then the run gets TERM, so its trap records the outcome and releases the
+# lease and the fence, and KILL <killGrace> seconds later. A run that ended on a signal recorded
+# nothing itself: one unrecorded line is printed here. Returns the run's exit code.
+run_backup() {
+  sh "$BACKUP_SCRIPT" &
+  CHILD=$!
+  # The watchdog polls once a second and ends by itself within a second of the run, so it is
+  # never killed mid-step and leaves no sleeping process behind.
+  (
+    _wd_i=0
+    while [ "$_wd_i" -lt "$1" ]; do
+      sleep 1 </dev/null >/dev/null 2>&1 || :
+      kill -0 "$CHILD" 2>/dev/null || exit 0
+      _wd_i=$((_wd_i + 1))
+    done
+    log "scheduled backup still running after ${1}s; stopping it"
+    kill -TERM "$CHILD" 2>/dev/null || exit 0
+    _wd_i=0
+    while [ "$_wd_i" -lt "$2" ]; do
+      sleep 1 </dev/null >/dev/null 2>&1 || :
+      kill -0 "$CHILD" 2>/dev/null || exit 0
+      _wd_i=$((_wd_i + 1))
+    done
+    log 'scheduled backup did not stop; killing it'
+    kill -KILL "$CHILD" 2>/dev/null || :
+  ) &
+  WATCHDOG=$!
+  _rb_rc=0
+  wait "$CHILD" || _rb_rc=$?
+  CHILD=''
+  wait "$WATCHDOG" 2>/dev/null || :
+  WATCHDOG=''
+  if [ "$_rb_rc" -gt 128 ]; then
+    log "scheduled backup ended by signal $((_rb_rc - 128))"
+    status_unrecorded - failed - unknown || :
+  fi
+  return "$_rb_rc"
+}
+
+if [ "$RUN_ONCE" = 1 ]; then
+  _rc=0
+  run_backup "$2" "$3" || _rc=$?
+  exit "$_rc"
+fi
+
 if [ "$BACKUP_ENABLED" != true ]; then
   if [ "$BACKUP_ENABLED" = false ]; then
     log 'backups disabled (BACKUP_ENABLED=false)'
@@ -111,6 +184,13 @@ if ! schedule_seconds "$BACKUP_SCHEDULE" >/dev/null; then
   log 'invalid BACKUP_SCHEDULE: use HH:MM, 24-hour UTC, for example 02:00'
   exit 2
 fi
+case $BACKUP_MAX_RUN_SECONDS in
+  '' | *[!0-9]* | 0*) BACKUP_MAX_RUN_SECONDS=bad ;;
+esac
+if [ "$BACKUP_MAX_RUN_SECONDS" = bad ] || [ "${#BACKUP_MAX_RUN_SECONDS}" -gt 6 ]; then
+  log 'invalid BACKUP_MAX_RUN_SECONDS: use whole seconds, 1 to 999999'
+  exit 2
+fi
 
 log "scheduler: daily at $BACKUP_SCHEDULE UTC"
 while :; do
@@ -118,11 +198,8 @@ while :; do
   _delay=$(next_delay "$BACKUP_SCHEDULE" "$_now")
   log "next backup in ${_delay}s"
   pause_for "$_delay"
-  sh "$BACKUP_SCRIPT" &
-  CHILD=$!
   _rc=0
-  wait "$CHILD" || _rc=$?
-  CHILD=''
+  run_backup "$((BACKUP_MAX_RUN_SECONDS + 180))" 30 || _rc=$?
   case $_rc in
     0) ;;
     3) log 'scheduled backup skipped (exit 3)' ;;

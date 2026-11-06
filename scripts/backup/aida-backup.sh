@@ -26,10 +26,20 @@
 # .tmp-<setId> unless it was published.
 #
 # Status ownership (D-04, P6): a run that never held the lease writes `backup:lastRun` directly;
-# a run that holds it writes through fenced_action; a run that lost it writes nothing and logs
-# 'backup aborted: lease lost'. When the status write fails, lib.sh status_unrecorded prints
+# a run that holds it writes through fenced_action; a run that lost it writes no `backup:lastRun`
+# and logs 'backup aborted: lease lost'. When the status write fails, or the run lost its lease
+# (K143: every abort leaves a record), lib.sh status_unrecorded prints
 # `AIDA_BACKUP_STATUS_UNRECORDED <json>` on stderr, writes BACKUP_DIR/status-unrecorded-<setId>.json
 # when it can, and the run exits 5.
+#
+# Run deadline (K143): a run may take BACKUP_MAX_RUN_SECONDS. psql, pg_dump, pg_restore, find and
+# tar run under lib.sh `bounded`, so a hung one ends at the deadline and the run fails with
+# 'backup aborted: run deadline passed' and a recorded status. Every libpq connect gives up after
+# PGCONNECT_TIMEOUT seconds (lib.sh, default 10). The lease renewal stops when the main script is
+# gone, so a killed run's lease expires within one TTL; it also stops renewing
+# BACKUP_RUN_GRACE_SECONDS after the deadline (the run makes no progress) and signals the run. A
+# renewal error is retried every few seconds until a third of the TTL is left on the lease; only a
+# confirmed lost lease or running out of that margin aborts the run.
 #
 # Restore lock (review Q3): fenced_action re-checks `.restore-lock` inside its locked session
 # immediately before publish, retention and the status write; on a lock the run exits 3 with
@@ -38,13 +48,15 @@
 #
 # Exit codes: 0 succeeded, 2 failed, 3 skipped (another run holds the lease, or a restore is in
 # progress; nothing touched),
-# 5 the status could not be recorded (the outcome is in the stderr line and the per-set file).
+# 5 the status could not be recorded, or the run lost its lease (the outcome is in the stderr line
+# and the per-set file).
 #
 # Settings (environment):
 #   BACKUP_DIR (default /backups), UPLOADS_DIR (default /data/uploads),
 #   BACKUP_RETENTION (7, the number of successful sets kept, 1 to 9999),
 #   BACKUP_LEASE_TTL_SECONDS (900), BACKUP_FENCE_WAIT_SECONDS (300),
-#   BACKUP_DUMP_LOCK_TIMEOUT (300s), BACKUP_APP_VERSION_FILE
+#   BACKUP_DUMP_LOCK_TIMEOUT (300s), BACKUP_MAX_RUN_SECONDS (21600, 1 to 999999),
+#   PGCONNECT_TIMEOUT (10), BACKUP_APP_VERSION_FILE
 #   (default /opt/aida-backup-meta/package.json; its top-level "version", else "unknown").
 #   Tests only: BACKUP_TEST_PAUSE_DIR, BACKUP_TEST_PAUSE_MAX_SECONDS (lib.sh pause_point).
 set -eu
@@ -67,6 +79,12 @@ BACKUP_LEASE_TTL_SECONDS=${BACKUP_LEASE_TTL_SECONDS:-900}
 BACKUP_FENCE_WAIT_SECONDS=${BACKUP_FENCE_WAIT_SECONDS:-300}
 BACKUP_DUMP_LOCK_TIMEOUT=${BACKUP_DUMP_LOCK_TIMEOUT:-300s}
 BACKUP_APP_VERSION_FILE=${BACKUP_APP_VERSION_FILE:-/opt/aida-backup-meta/package.json}
+BACKUP_MAX_RUN_SECONDS=${BACKUP_MAX_RUN_SECONDS:-21600}
+# After the deadline: the time the exit trap gets for its own database calls, and the time after
+# which the lease renewal stops (it must outlast that cleanup).
+BACKUP_CLEANUP_SECONDS=60
+BACKUP_RUN_GRACE_SECONDS=120
+BACKUP_RUN_DEADLINE=''
 
 RUN_TMP=''
 SET_ID=''
@@ -99,6 +117,10 @@ on_exit() {
   trap '' USR1 INT TERM HUP
   set +e
   stop_renewal
+  # The exit path's own database calls get a short bound of their own (K143).
+  if is_uint "$BACKUP_RUN_DEADLINE"; then
+    BACKUP_RUN_DEADLINE=$(($(date -u +%s) + BACKUP_CLEANUP_SECONDS))
+  fi
   if [ "$SKIPPED" = 1 ]; then
     _rc=3
   elif [ "$OUTCOME" = succeeded ]; then
@@ -117,6 +139,12 @@ on_exit() {
           log 'backup aborted: lease lost'
           ;;
       esac
+    fi
+    # K143: a run that lost its lease writes no backup:lastRun (another holder may own the row
+    # now), but it never ends silently: the unrecorded line and the per-set file record it.
+    if [ "$_rc" = 2 ] && [ "$LEASE_LOST" = 1 ] && [ "$STATUS_UNRECORDED" = 0 ]; then
+      STATUS_UNRECORDED=1
+      status_unrecorded "${SET_ID:--}" failed - "$CATEGORY" || log 'backup status not recorded'
     fi
     if [ "$_rc" = 2 ]; then
       log "backup failed: $CATEGORY"
@@ -145,6 +173,10 @@ fail() {
 
 # A failed step: a write probe in the set directory tells a storage failure from the step's own.
 step_failed() {
+  if deadline_passed; then
+    log 'backup aborted: run deadline passed'
+    fail unknown
+  fi
   _sf_dir=${SET_TMP:-$BACKUP_DIR}
   if ! (printf 'probe\n' >"$_sf_dir/.write-probe") 2>/dev/null; then
     fail storage
@@ -163,7 +195,11 @@ restore_skip() {
 on_lease_lost() {
   trap '' USR1
   LEASE_LOST=1
-  log 'backup aborted: lease lost'
+  if [ -n "$RUN_TMP" ] && [ -e "$RUN_TMP/deadline.passed" ]; then
+    log 'backup aborted: run deadline passed'
+  else
+    log 'backup aborted: lease lost'
+  fi
   # A restore replaces the database (and with it the lease row) only under its restore lock.
   if restore_lock_present; then restore_skip; fi
   fail unknown
@@ -197,21 +233,55 @@ write_status() {
   return 5
 }
 
+# renew_loop: renews the lease every TTL/3 (K143, b-WR-1, b-WR-2).
+# - The main script is gone (killed): it stops at once, so the lease expires within one TTL.
+# - BACKUP_RUN_GRACE_SECONDS past the run deadline: it stops renewing and signals the run.
+# - A renewal error (psql failed) is retried every _rl_retry seconds while more than TTL/3 would
+#   be left on the lease, counted from the last confirmed renewal; each attempt is bounded by that
+#   point. A confirmed 0 rows (another holder, or expired) or the end of that margin is lost.
 renew_loop() {
+  # The fence FIFO's write end belongs to the main shell alone: once main is gone the fence
+  # session must see end of input (a redirection on the background call did not close it).
+  exec 7>&-
   _rl_interval=$((BACKUP_LEASE_TTL_SECONDS / 3))
   [ "$_rl_interval" -ge 1 ] || _rl_interval=1
+  _rl_retry=$((_rl_interval / 5))
+  [ "$_rl_retry" -ge 1 ] || _rl_retry=1
+  [ "$_rl_retry" -le 5 ] || _rl_retry=5
+  _rl_stop=$((BACKUP_RUN_DEADLINE + BACKUP_RUN_GRACE_SECONDS))
+  _rl_ok=$(date -u +%s)
+  _rl_wait=$_rl_interval
   _rl_sleep=''
   trap 'kill "$_rl_sleep" 2>/dev/null; exit 0' TERM
   while :; do
-    sleep "$_rl_interval" &
+    sleep "$_rl_wait" &
     _rl_sleep=$!
     wait "$_rl_sleep" || :
-    _rl_count=$(lease_renew "$SET_ID" "$BACKUP_LEASE_TTL_SECONDS") || _rl_count=error
-    if [ "$_rl_count" != 1 ]; then
-      : >"$RUN_TMP/lease.lost"
+    kill -0 "$MAIN_PID" 2>/dev/null || exit 0
+    _rl_now=$(date -u +%s)
+    if [ "$_rl_now" -ge "$_rl_stop" ]; then
+      : >"$RUN_TMP/deadline.passed"
       kill -s USR1 "$MAIN_PID" 2>/dev/null || :
       exit 0
     fi
+    _rl_giveup=$((_rl_ok + BACKUP_LEASE_TTL_SECONDS - _rl_interval))
+    _rl_count=$(
+      BACKUP_RUN_DEADLINE=$_rl_giveup
+      lease_renew "$SET_ID" "$BACKUP_LEASE_TTL_SECONDS"
+    ) || _rl_count=error
+    if [ "$_rl_count" = 1 ]; then
+      _rl_ok=$_rl_now
+      _rl_wait=$_rl_interval
+      continue
+    fi
+    if [ "$_rl_count" = error ] && [ $(($(date -u +%s) + _rl_retry)) -lt "$_rl_giveup" ]; then
+      log 'lease renewal failed; retrying'
+      _rl_wait=$_rl_retry
+      continue
+    fi
+    : >"$RUN_TMP/lease.lost"
+    kill -s USR1 "$MAIN_PID" 2>/dev/null || :
+    exit 0
   done
 }
 
@@ -232,7 +302,7 @@ app_version() {
 # Every <organizationId>/<storageKey> the dump references in table $1 (column $2 holds the key,
 # or for Setting the `branding:logo` row's JSON value), one per line.
 referenced_from_dump() {
-  pg_restore --data-only --table="$1" --file=- "$SET_TMP/db.dump" \
+  bounded pg_restore --data-only --table="$1" --file=- "$SET_TMP/db.dump" \
     >"$RUN_TMP/copy-$1.txt" 2>>"$BACKUP_ERRLOG" || return 1
   awk -F '\t' -v mode="$2" '
     BEGIN { inside = 0; seen = 0; org = 0; key = 0; skey = 0; val = 0 }
@@ -298,16 +368,19 @@ valid_set_id "$SET_ID" || {
   fail unknown
 }
 
-for _n in "$BACKUP_LEASE_TTL_SECONDS" "$BACKUP_FENCE_WAIT_SECONDS" "$BACKUP_RETENTION"; do
+for _n in "$BACKUP_LEASE_TTL_SECONDS" "$BACKUP_FENCE_WAIT_SECONDS" "$BACKUP_RETENTION" \
+  "$BACKUP_MAX_RUN_SECONDS"; do
   is_uint "$_n" && [ "$_n" -ge 1 ] || {
     log 'invalid setting'
     fail unknown
   }
 done
-[ "${#BACKUP_RETENTION}" -le 4 ] || {
+[ "${#BACKUP_RETENTION}" -le 4 ] && [ "${#BACKUP_MAX_RUN_SECONDS}" -le 6 ] || {
   log 'invalid setting'
   fail unknown
 }
+BACKUP_RUN_DEADLINE=$(($(date -u +%s) + BACKUP_MAX_RUN_SECONDS))
+export BACKUP_RUN_DEADLINE
 printf '%s\n' "$BACKUP_DUMP_LOCK_TIMEOUT" | grep -Eqx '[0-9]{1,6}(ms|s|min)?' || {
   log 'invalid setting'
   fail unknown
@@ -358,7 +431,8 @@ if [ "$_lease" != acquired ]; then
 fi
 LEASE_HELD=1
 
-renew_loop >/dev/null 2>&1 7>&- &
+# The renewal's log lines (fixed text) reach the run's output; its errors go nowhere.
+renew_loop 2>/dev/null 7>&- &
 RENEW_PID=$!
 
 pause_point after-fence || fail unknown
@@ -371,7 +445,7 @@ if ! mkdir -- "$SET_TMP" 2>>"$BACKUP_ERRLOG"; then
 fi
 printf '%s\n' "$SET_ID" >"$SET_TMP/holder" 2>>"$BACKUP_ERRLOG" || fail storage
 
-if ! PGAPPNAME="$BACKUP_APPLICATION_NAME" pg_dump -Fc \
+if ! bounded env PGAPPNAME="$BACKUP_APPLICATION_NAME" pg_dump -Fc \
   --lock-wait-timeout="$BACKUP_DUMP_LOCK_TIMEOUT" -f "$SET_TMP/db.dump" 2>>"$BACKUP_ERRLOG"; then
   step_failed dump
 fi
@@ -381,14 +455,14 @@ pause_point after-dump || fail unknown
 
 # Archivable files: regular files at <organizationId>/<storageKey>. Every other entry (the marker,
 # other names, links, nested directories) is counted as skipped and never archived.
-(cd -- "$UPLOADS_DIR" && find . -mindepth 2 -maxdepth 2 -type f -regextype posix-extended \
+(cd -- "$UPLOADS_DIR" && bounded find . -mindepth 2 -maxdepth 2 -type f -regextype posix-extended \
   -regex "$MEMBER_FIND_RE" -printf '%P\n') >"$RUN_TMP/files.raw" 2>>"$BACKUP_ERRLOG" ||
   step_failed archive
 sort -u "$RUN_TMP/files.raw" >"$RUN_TMP/files.list" || step_failed archive
-(cd -- "$UPLOADS_DIR" && find . -mindepth 1 -maxdepth 1 -regextype posix-extended \
+(cd -- "$UPLOADS_DIR" && bounded find . -mindepth 1 -maxdepth 1 -regextype posix-extended \
   ! \( -type d -regex "$MEMBER_DIR_FIND_RE" \) -printf 'x\n') >"$RUN_TMP/skipped-top.raw" \
   2>>"$BACKUP_ERRLOG" || step_failed archive
-(cd -- "$UPLOADS_DIR" && find . -mindepth 2 -maxdepth 2 -regextype posix-extended \
+(cd -- "$UPLOADS_DIR" && bounded find . -mindepth 2 -maxdepth 2 -regextype posix-extended \
   -regex "$MEMBER_DIR_FIND_RE/.*" ! \( -type f -regex "$MEMBER_FIND_RE" \) -printf 'x\n') \
   >"$RUN_TMP/skipped-inner.raw" 2>>"$BACKUP_ERRLOG" || step_failed archive
 SKIPPED_ENTRIES=$(($(wc -l <"$RUN_TMP/skipped-top.raw") + $(wc -l <"$RUN_TMP/skipped-inner.raw")))
@@ -398,7 +472,7 @@ pause_point after-list || fail unknown
 # A listed file that no committed row references may vanish meanwhile (U-13): tar exit 1 (a
 # file changed or vanished) is accepted, 2 or more fails the set.
 set +e
-tar -czf "$SET_TMP/uploads.tar.gz" --ignore-failed-read --no-recursion --verbatim-files-from \
+bounded tar -czf "$SET_TMP/uploads.tar.gz" --ignore-failed-read --no-recursion --verbatim-files-from \
   -C "$UPLOADS_DIR" -T "$RUN_TMP/files.list" 2>>"$BACKUP_ERRLOG"
 _tar_rc=$?
 set -e
@@ -409,10 +483,10 @@ cat >"$RUN_TMP/sum-member.sh" <<'EOF'
 _h=$(sha256sum) || exit 1
 printf '%s  %s\n' "${_h%% *}" "$TAR_FILENAME"
 EOF
-tar -xzf "$SET_TMP/uploads.tar.gz" --to-command="sh $RUN_TMP/sum-member.sh" \
+bounded tar -xzf "$SET_TMP/uploads.tar.gz" --to-command="sh $RUN_TMP/sum-member.sh" \
   >"$RUN_TMP/sums.raw" 2>>"$BACKUP_ERRLOG" || step_failed archive
 sort -k 2 "$RUN_TMP/sums.raw" >"$SET_TMP/uploads.sha256" || step_failed archive
-tar -tzf "$SET_TMP/uploads.tar.gz" >"$RUN_TMP/members.raw" 2>>"$BACKUP_ERRLOG" ||
+bounded tar -tzf "$SET_TMP/uploads.tar.gz" >"$RUN_TMP/members.raw" 2>>"$BACKUP_ERRLOG" ||
   step_failed archive
 sort "$RUN_TMP/members.raw" >"$RUN_TMP/members.list" || step_failed archive
 awk '{ print $2 }' "$SET_TMP/uploads.sha256" | sort >"$RUN_TMP/summed.list" ||
@@ -465,8 +539,8 @@ cat >"$SET_TMP/manifest.json" 2>>"$BACKUP_ERRLOG" <<EOF || step_failed storage
   }
 }
 EOF
-pg_restore --list "$SET_TMP/db.dump" >/dev/null 2>>"$BACKUP_ERRLOG" || step_failed dump
-tar -tzf "$SET_TMP/uploads.tar.gz" >/dev/null 2>>"$BACKUP_ERRLOG" || step_failed archive
+bounded pg_restore --list "$SET_TMP/db.dump" >/dev/null 2>>"$BACKUP_ERRLOG" || step_failed dump
+bounded tar -tzf "$SET_TMP/uploads.tar.gz" >/dev/null 2>>"$BACKUP_ERRLOG" || step_failed archive
 [ "$(($(wc -l <"$SET_TMP/uploads.sha256")))" -eq "$ARCHIVED_FILES" ] || step_failed archive
 [ -s "$SET_TMP/manifest.json" ] || step_failed storage
 

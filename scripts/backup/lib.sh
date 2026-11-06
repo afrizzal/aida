@@ -76,8 +76,32 @@ valid_lease_holder() {
   valid_set_id "$1" || valid_restore_holder "$1"
 }
 
+# K143: every libpq connection (psql, pg_dump, pg_restore, the fence session) gives up on a
+# connect that gets no answer, for example a paused or unreachable `db`, after this many seconds.
+PGCONNECT_TIMEOUT=${PGCONNECT_TIMEOUT:-10}
+export PGCONNECT_TIMEOUT
+
+# True once BACKUP_RUN_DEADLINE (UTC epoch seconds, set by aida-backup.sh) has passed.
+deadline_passed() {
+  is_uint "${BACKUP_RUN_DEADLINE:-}" || return 1
+  [ "$(date -u +%s)" -ge "$BACKUP_RUN_DEADLINE" ]
+}
+
+# bounded <command...>: runs the command. While BACKUP_RUN_DEADLINE is set and timeout(1)
+# exists, the command gets TERM at the deadline (at least 1 s from now) and KILL 10 s later,
+# so a hung psql, pg_dump, pg_restore, find or tar cannot hold a run past its deadline (K143).
+bounded() {
+  if is_uint "${BACKUP_RUN_DEADLINE:-}" && command -v timeout >/dev/null 2>&1; then
+    _bd_left=$((BACKUP_RUN_DEADLINE - $(date -u +%s)))
+    [ "$_bd_left" -ge 1 ] || _bd_left=1
+    timeout -k 10 "$_bd_left" "$@"
+  else
+    "$@"
+  fi
+}
+
 psql_q() {
-  PGAPPNAME="$BACKUP_APPLICATION_NAME" psql -X -q -t -A -v ON_ERROR_STOP=1 "$@" \
+  bounded env PGAPPNAME="$BACKUP_APPLICATION_NAME" psql -X -q -t -A -v ON_ERROR_STOP=1 "$@" \
     2>>"${BACKUP_ERRLOG:-/dev/null}"
 }
 
@@ -584,7 +608,9 @@ pause_point() {
   esac
   _pp_max=${BACKUP_TEST_PAUSE_MAX_SECONDS:-120}
   is_uint "$_pp_max" || return 1
-  : >"$BACKUP_TEST_PAUSE_DIR/$1.reached" || return 1
+  # The file holds the main script's process id (dash keeps $$ in subshells), so a test can kill
+  # that process alone (K143).
+  printf '%s\n' "$$" >"$BACKUP_TEST_PAUSE_DIR/$1.reached" || return 1
   _pp_limit=$((_pp_max * 10))
   _pp_i=0
   while [ ! -e "$BACKUP_TEST_PAUSE_DIR/$1.go" ]; do

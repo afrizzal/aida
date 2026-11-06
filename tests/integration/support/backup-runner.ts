@@ -145,6 +145,11 @@ export interface BackupRun {
   go(point: PausePoint): Promise<void>;
   /** Releases every pause point (teardown after a failed case). */
   releaseAll(): Promise<void>;
+  /**
+   * The process id (inside the runner) of the script's main shell, read from the point's
+   * `.reached` file (lib.sh pause_point writes `$$`). Call after waitReached(point).
+   */
+  mainPid(point: PausePoint): Promise<number>;
 }
 
 export interface BackupRunner {
@@ -295,6 +300,17 @@ export async function startBackupRunner(opts: StartBackupRunnerOptions): Promise
           await prepared;
           for (const point of PAUSE_POINTS) {
             await writeFile(path.join(hostPauseDir, `${point}.go`), "");
+          }
+        },
+        async mainPid(point) {
+          await prepared;
+          const deadline = Date.now() + 10_000;
+          for (;;) {
+            const text = await readFile(path.join(hostPauseDir, `${point}.reached`), "utf8");
+            if (/^[0-9]+\n$/.test(text)) return Number(text.trim());
+            if (Date.now() >= deadline)
+              throw new Error(`backup-runner: no pid in ${point}.reached`);
+            await new Promise((r) => setTimeout(r, 50));
           }
         },
       };
