@@ -22,7 +22,8 @@
 // with pg_try_advisory_lock_shared (false: refused "backup-archiving"; a backup waiting for the
 // exclusive side also makes it false, so a sweep never starves a backup); read the lease on the
 // same connection (active: unlock, refused "backup-lease"); any connection error before the
-// select: refused "fence-unavailable". The lock is released in the background after the run's
+// select: refused "fence-unavailable"; an earlier handle of the same provider not yet closed:
+// refused "delete-pending" without connecting (K144). The lock is released in the background after the run's
 // transaction ended and every tracked delete settled. A connection drop after the select logs one
 // line; deletes in flight continue, which is harmless because every key the run selected was
 // dereferenced and enqueued before any backup the run did not see took the fence (G6).
@@ -120,7 +121,8 @@ export type FenceRefusalReason =
   | "uploads-unverified"
   | "backup-archiving"
   | "backup-lease"
-  | "fence-unavailable";
+  | "fence-unavailable"
+  | "delete-pending";
 
 export type FenceRefusal = { refused: FenceRefusalReason };
 
@@ -218,8 +220,25 @@ function createHandle(conn: pg.Client, state: FenceConnectionState): DeleteFence
   };
 }
 
+/** K144: the one fence connection a provider may hold at a time. */
+interface FenceSlot {
+  taken: boolean;
+  /** The held handle's `closed`, once open() handed it out. */
+  closed: Promise<void> | null;
+}
+
+/** How long open() waits for the previous handle to finish closing before it refuses. */
+export const FENCE_SLOT_WAIT_MS = 2_000;
+
+async function settlesWithin(work: Promise<void>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([work, new Promise<void>((resolve) => (timer = setTimeout(resolve, ms)))]);
+  clearTimeout(timer);
+}
+
 async function openDeleteFence(
   opts: DeleteFenceProviderOptions,
+  slot: FenceSlot,
 ): Promise<DeleteFence | FenceRefusal> {
   // Step 1: the uploads volume. A directory that is not a mount point gets no identity written.
   const mountCheck = opts.isMountPoint ?? isMountPoint;
@@ -240,10 +259,41 @@ async function openDeleteFence(
     log("fence unavailable: no database connection string");
     return { refused: "fence-unavailable" };
   }
+  // K144 (b-WR-4): while an earlier run's handle has not closed (a tracked delete is still
+  // pending), no second connection and no second shared lock: the run is refused without
+  // connecting. A hung delete therefore holds one fence connection, not one per sweep tick. A
+  // handle that is only finishing its unlock gets FENCE_SLOT_WAIT_MS first.
+  if (slot.taken && slot.closed) await settlesWithin(slot.closed, FENCE_SLOT_WAIT_MS);
+  if (slot.taken) return { refused: "delete-pending" };
+  slot.taken = true;
+  slot.closed = null;
+  let handedOver = false;
+  try {
+    const handle = await connectDeleteFence({ ...opts, connectionString: opts.connectionString });
+    if (!("refused" in handle)) {
+      handedOver = true;
+      slot.closed = handle.closed;
+      void handle.closed.then(() => {
+        slot.taken = false;
+        slot.closed = null;
+      });
+    }
+    return handle;
+  } finally {
+    if (!handedOver) slot.taken = false;
+  }
+}
+
+async function connectDeleteFence(
+  opts: DeleteFenceProviderOptions & { connectionString: string },
+): Promise<DeleteFence | FenceRefusal> {
   const state: FenceConnectionState = { held: false, lost: false };
   const conn = new pg.Client({
     connectionString: opts.connectionString,
     application_name: DELETE_FENCE_APPLICATION_NAME,
+    // Neither the connect nor a fence statement may hang a sweep (b-WR-4).
+    connectionTimeoutMillis: 10_000,
+    statement_timeout: 30_000,
   });
   conn.on("error", (err) => {
     if (state.lost) return;
@@ -275,7 +325,12 @@ async function openDeleteFence(
   return createHandle(conn, state);
 }
 
-/** The sweep's fence: open() before the select, track() every delete, close() after the run. */
+/**
+ * The sweep's fence: open() before the select, track() every delete, close() after the run. One
+ * provider holds at most one fence connection at a time (K144): open() refuses "delete-pending"
+ * while its previous handle has not closed. The worker keeps one provider per process.
+ */
 export function createDeleteFenceProvider(opts: DeleteFenceProviderOptions): DeleteFenceProvider {
-  return { open: () => openDeleteFence(opts) };
+  const slot: FenceSlot = { taken: false, closed: null };
+  return { open: () => openDeleteFence(opts, slot) };
 }

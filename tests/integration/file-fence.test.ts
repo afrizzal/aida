@@ -330,6 +330,57 @@ describe("U-12 fence interleavings", () => {
     }
   });
 
+  it("K144 hung delete over several sweep ticks: one provider (one worker process) holds one fence connection; later ticks are refused delete-pending without connecting, and the tick after the delete settles deletes the rest", async () => {
+    const { orgId, keys } = await queuedFiles(4);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const gate = deferred<void>();
+    const hanging: FileStorage = {
+      save: (p) => storage.save(p),
+      read: (p) => storage.read(p),
+      async delete(p) {
+        await gate.promise;
+        await storage.delete(p);
+      },
+    };
+    const tracked = trackFence(testFenceProvider(dir));
+    const tick = () =>
+      sweepProjectFileCleanup({
+        client: prisma,
+        fence: tracked.fence,
+        storage: hanging,
+        now: T0,
+        ioBudgetMs: 300,
+      });
+    const deleteFences = async () =>
+      (await fenceLocks()).filter((l) => l.applicationName === "aida-delete-fence");
+    try {
+      expect(await tick()).toEqual({ deleted: 0, missing: 0, failed: 1 });
+      expect(await deleteFences()).toHaveLength(1);
+      for (let i = 0; i < 3; i += 1) {
+        expect(await tick()).toEqual({
+          deleted: 0,
+          missing: 0,
+          failed: 0,
+          skipped: "delete-pending",
+        });
+        expect(await deleteFences()).toHaveLength(1);
+      }
+      expect(tracked.handles).toHaveLength(1);
+      expect(await rowKeys(orgId)).toEqual(keys);
+
+      gate.resolve();
+      await tracked.allClosed();
+      expect(await fenceLocks()).toEqual([]);
+      expect(await tick()).toEqual({ deleted: 3, missing: 0, failed: 0 });
+      await tracked.allClosed();
+      expect(tracked.handles).toHaveLength(2);
+      expect(await fenceLocks()).toEqual([]);
+    } finally {
+      gate.resolve();
+      await tracked.allClosed();
+    }
+  });
+
   it("G5 crash: the backup's session is gone and its lease expired, so the next sweep deletes again", async () => {
     const { orgId, keys } = await queuedFiles(2);
     const backup = await emulator();

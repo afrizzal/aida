@@ -14,14 +14,22 @@
 import { localFileStorage, uploadsRoot } from "../../attachments/local-file-storage";
 import { prisma } from "../../db";
 import { type FileCleanupSweepResult, sweepProjectFileCleanup } from "../../projects/file-cleanup";
-import { createDeleteFenceProvider } from "../../storage/file-fence";
+import { createDeleteFenceProvider, type DeleteFenceProvider } from "../../storage/file-fence";
+
+// K144 (F3, b-WR-4): one provider per worker process, so a run whose delete still hangs keeps the
+// only fence connection, and every later run is refused "delete-pending" until it settles.
+let fenceProvider: DeleteFenceProvider | null = null;
 
 /** The pg-boss handler; the scheduled payload is empty and is not read. */
 export async function projectFileCleanupHandler(_jobs?: unknown): Promise<FileCleanupSweepResult> {
-  const fence = createDeleteFenceProvider({
+  fenceProvider ??= createDeleteFenceProvider({
     connectionString: process.env.DATABASE_URL,
     uploadsDir: uploadsRoot(),
     client: prisma,
   });
-  return sweepProjectFileCleanup({ client: prisma, storage: localFileStorage, fence });
+  return sweepProjectFileCleanup({
+    client: prisma,
+    storage: localFileStorage,
+    fence: fenceProvider,
+  });
 }

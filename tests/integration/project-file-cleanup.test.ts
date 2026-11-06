@@ -43,9 +43,14 @@ beforeAll(async () => {
   dir = await testUploadsDir("aida-project-cleanup-");
   previousUploadsDir = process.env.UPLOADS_DIR;
   process.env.UPLOADS_DIR = dir;
-  fence = testFenceProvider(dir);
   storage = (await import("@/lib/attachments/local-file-storage")).localFileStorage;
   handler = (await import("@/lib/worker/jobs/project-file-cleanup")).projectFileCleanupHandler;
+});
+
+// One provider holds one fence connection at a time (K144): a case whose timed-out delete is still
+// settling in the background must not refuse the next case's sweep, so each case gets its own.
+beforeEach(() => {
+  fence = testFenceProvider(dir);
 });
 
 afterAll(async () => {
@@ -316,7 +321,9 @@ describe("project file cleanup sweep edge cases", () => {
     const sweep2Seen: string[] = [];
     const sweep2Run = sweepProjectFileCleanup({
       client: prisma,
-      fence,
+      // A second worker process has its own fence provider; one provider holds one fence
+      // connection at a time (K144), so the same provider would refuse "delete-pending".
+      fence: testFenceProvider(dir),
       now: T0,
       limit: 100,
       storage: stubStorage(async (key) => {
