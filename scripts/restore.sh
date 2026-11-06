@@ -35,7 +35,10 @@
 #   7. on success: the lease and the lock are released, backup, app and worker are started, and
 #      the app's probe is polled for up to 60 s (a warning only).
 #
-# One trap on EXIT, INT, TERM and HUP decides every other outcome. It always releases this
+# One trap on EXIT, INT, TERM and HUP decides every other outcome. Once the set script was
+# started, it first stops and removes its one-off container by its exact name (aida-<holder>) and
+# waits until `docker ps -a` no longer lists it (RESTORE_CONTAINER_WAIT_SECONDS, default 60); if
+# it is still listed, the lock is kept and nothing is started (d-WR-1). Otherwise it releases this
 # restore's own lease and lock. After a failure before `target-touched` exists nothing was
 # changed, so it starts backup, app and worker again. Once `target-touched` exists (a failure or a
 # signal in the database or uploads step) it leaves them stopped and says which step failed and
@@ -55,6 +58,13 @@ set -euo pipefail
 COMPOSE="${COMPOSE_CMD:-docker compose}"
 LEASE_TTL_SECONDS=900
 STALE_LOCK_SECONDS=900
+# d-WR-1: how long the trap waits for the restore container to be gone (1 to 600 s).
+CONTAINER_WAIT_SECONDS="${RESTORE_CONTAINER_WAIT_SECONDS:-60}"
+if ! [[ $CONTAINER_WAIT_SECONDS =~ ^[0-9]{1,3}$ ]] || [ "$CONTAINER_WAIT_SECONDS" -lt 1 ] ||
+  [ "$CONTAINER_WAIT_SECONDS" -gt 600 ]; then
+  printf '[restore] RESTORE_CONTAINER_WAIT_SECONDS must be 1 to 600.\n' >&2
+  exit 2
+fi
 DOCS='docs/OPERATIONS.md, Restore'
 
 usage() {
@@ -219,6 +229,8 @@ STOPPED=0
 DONE=0
 SET_PID=''
 SET_RC=''
+SET_STARTED=0
+RESTORE_CONTAINER=''
 EXITING=0
 FINAL_RC=0
 
@@ -239,6 +251,31 @@ start_services() {
     err "Could not start backup, app and worker; start them with: docker compose up -d"
     return 1
   fi
+}
+
+# d-WR-1: true when no container named exactly $RESTORE_CONTAINER is listed (running or not).
+# A failed `docker ps` counts as listed.
+container_gone() {
+  local names
+  names=$(docker ps -a --filter "name=^/${RESTORE_CONTAINER}\$" --format '{{.Names}}' 2>/dev/null) ||
+    return 1
+  [ -z "$names" ]
+}
+
+# d-WR-1: the client (SET_PID) is not the container. Stop and remove the one-off restore container
+# by its exact name, then wait until it is no longer listed. Fails when it is still listed after
+# CONTAINER_WAIT_SECONDS.
+remove_restore_container() {
+  local waited=0
+  docker stop -t 30 "$RESTORE_CONTAINER" >/dev/null 2>&1
+  docker rm -f "$RESTORE_CONTAINER" >/dev/null 2>&1
+  while ! container_gone; do
+    if [ "$waited" -ge "$CONTAINER_WAIT_SECONDS" ]; then
+      return 1
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
 }
 
 # The single trap: it decides every outcome that is not the success path.
@@ -263,6 +300,13 @@ on_exit() {
   fi
   if [ "$DONE" = 1 ]; then
     : # the success path released the locks and started the services
+  elif [ "$SET_STARTED" = 1 ] && ! remove_restore_container; then
+    # The restore container may still write: keep the lock (its heartbeat stays fresh, so
+    # --break-stale-lock refuses while it runs) and start nothing.
+    [ "$rc" != 0 ] || rc=1
+    err "The restore container $RESTORE_CONTAINER is still listed after ${CONTAINER_WAIT_SECONDS} s (exit ${SET_RC:-$rc})."
+    err "backup, app and worker were left stopped and the restore lock $HOLDER was kept. Check:"
+    err "docker ps -a --filter name=$RESTORE_CONTAINER; once it is gone, see --break-stale-lock in $DOCS."
   elif [ "$STOPPED" = 1 ]; then
     [ "$rc" != 0 ] || rc=1
     touched=$(backup_step aida-restore-touched \
@@ -335,6 +379,7 @@ if [ -z "$HOLDER" ]; then
   exit 1
 fi
 LOCK_HELD=1
+RESTORE_CONTAINER="aida-$HOLDER"
 log "Restore lock taken: $HOLDER"
 
 # The backup lease with the same holder: a running backup holds it.
@@ -383,7 +428,8 @@ STOPPED=1
 $COMPOSE stop backup app worker
 
 log "Restoring set $SET_ID..."
-$COMPOSE run --rm --no-deps -T --entrypoint sh -e "RESTORE_HOLDER=$HOLDER" \
+SET_STARTED=1
+$COMPOSE run --rm --no-deps -T --name "$RESTORE_CONTAINER" --entrypoint sh -e "RESTORE_HOLDER=$HOLDER" \
   -e UPLOADS_DIR=/restore/uploads -v "$UPLOADS_VOLUME:/restore/uploads" \
   backup /opt/aida-backup/aida-restore-set.sh "/backups/$SET_ID" </dev/null &
 SET_PID=$!

@@ -192,6 +192,8 @@ The set script records which target it is about to write to (`target-touched` in
 | Database step | 7, or a signal | may be partly restored | untouched | **left stopped**; the message names the database step |
 | Uploads step | 8, or a signal | restored | may be partly restored (files missing) | **left stopped**; the message names the uploads step |
 
+Before it reads that record, the wrapper stops and removes the one-off restore container by its exact name (`aida-restore-<32 hex>`, the holder with an `aida-` prefix) and waits until `docker ps -a` no longer lists it, because the `docker compose run` client can exit while its container keeps running. Only then does it release the lock or start anything. If the container is still listed after 60 seconds (`RESTORE_CONTAINER_WAIT_SECONDS`, 1 to 600), the message names it: the lock is kept and nothing is started. Check `docker ps -a --filter name=aida-restore-`, and once it is gone, see [A restore lock left behind](#a-restore-lock-left-behind).
+
 After a failure in the database or the uploads step, do not start the services on the half-restored data. Read the lines before the message, fix the cause, and run the restore again, with the same set or another one: it replaces the database and the uploads volume again from the start. `docker compose up -d` starts everything on whatever state is there, if you decide to keep it. The restore never removes a Docker volume and never runs `docker compose down`.
 
 ### Ownership of the restored files

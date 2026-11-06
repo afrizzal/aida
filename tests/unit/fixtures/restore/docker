@@ -12,6 +12,8 @@
 #   FAKE_SET_EXIT         exit code of the set script step (default 0)
 #   FAKE_SET_MODE         `hang`: the set script step waits until it is signalled
 #   FAKE_RELEASE_EXIT     exit code of the release step (default 0)
+#   FAKE_CONTAINER_LISTED how many `ps -a` calls still list the restore container (default 0),
+#                         or `stuck`: every call lists it (d-WR-1)
 #   FAKE_BREAK_EXIT       exit code of the break-stale-lock step (default 0)
 #   FAKE_BREAK_OUTPUT     its output (default nothing)
 #
@@ -81,6 +83,32 @@ EOF
     [ "$*" = 'compose exec -T app wget -qO- http://127.0.0.1:3000/api/health/probe' ] ||
       unexpected "$@"
     printf '{"status":"ok"}\n'
+    exit 0
+    ;;
+  'stop -t' | 'rm -f')
+    # d-WR-1: the one-off restore container, by its exact name only.
+    case "$*" in
+      'stop -t 30 aida-restore-'* | 'rm -f aida-restore-'*) ;;
+      *) unexpected "$@" ;;
+    esac
+    [ "$#" -eq "$([ "$1" = stop ] && echo 4 || echo 3)" ] || unexpected "$@"
+    exit 0
+    ;;
+  'ps -a')
+    [ "$#" -eq 6 ] && [ "$3" = --filter ] && [ "$5" = --format ] && [ "$6" = '{{.Names}}' ] ||
+      unexpected "$@"
+    case "$4" in
+      'name=^/aida-restore-'*'$') ;;
+      *) unexpected "$@" ;;
+    esac
+    _name=${4#name=^/}
+    _name=${_name%\$}
+    _count_file="$FAKE_DOCKER_LOG.ps-count"
+    _n=$(($(cat "$_count_file" 2>/dev/null || echo 0) + 1))
+    printf '%s\n' "$_n" >"$_count_file"
+    if [ "${FAKE_CONTAINER_LISTED:-0}" = stuck ] || [ "$_n" -le "${FAKE_CONTAINER_LISTED:-0}" ]; then
+      printf '%s\n' "$_name"
+    fi
     exit 0
     ;;
   'compose run') ;;

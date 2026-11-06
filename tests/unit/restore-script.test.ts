@@ -79,6 +79,9 @@ function steps(calls: string[]): string[] {
     if (call === "compose config --format json") return "config";
     if (call.startsWith("volume inspect ")) return `inspect ${call.split(" ")[2]}`;
     if (call === "compose stop backup app worker") return "stop";
+    if (call.startsWith("stop -t 30 ")) return "ctr-stop";
+    if (call.startsWith("rm -f ")) return "ctr-rm";
+    if (call.startsWith("ps -a ")) return "ctr-ps";
     if (call === "compose start backup app worker") return "start";
     if (call.startsWith("compose exec -T app wget")) return "health";
     if (call.startsWith("compose run ")) {
@@ -109,7 +112,7 @@ function expectNoDestructiveCall(run: Run): void {
 }
 
 /** The exact set-script call (D-05 key link: uploads volume read-write at /restore/uploads). */
-const SET_CALL = `compose run --rm --no-deps -T --entrypoint sh -e RESTORE_HOLDER=${HOLDER} -e UPLOADS_DIR=/restore/uploads -v aida_uploads_data:/restore/uploads backup /opt/aida-backup/aida-restore-set.sh /backups/${SET_ID}`;
+const SET_CALL = `compose run --rm --no-deps -T --name aida-${HOLDER} --entrypoint sh -e RESTORE_HOLDER=${HOLDER} -e UPLOADS_DIR=/restore/uploads -v aida_uploads_data:/restore/uploads backup /opt/aida-backup/aida-restore-set.sh /backups/${SET_ID}`;
 
 /** The read-only migration check (K142), run before anything is stopped. */
 const CHECK_CALL = `compose run --rm --no-deps -T --entrypoint sh -e RESTORE_HOLDER=${HOLDER} backup /opt/aida-backup/aida-restore-set.sh --check-schema /backups/${SET_ID}`;
@@ -154,7 +157,7 @@ describe("scripts/restore.sh: outcome rules", () => {
       "stop",
       "set",
     ]);
-    expect(s.slice(8)).toEqual(["touched", "release", "start"]);
+    expect(s.slice(8)).toEqual(["ctr-stop", "ctr-rm", "ctr-ps", "touched", "release", "start"]);
     expect(count(s, "start")).toBe(1);
     expect(run.stderr).toContain("nothing was changed");
     expectNoDestructiveCall(run);
@@ -168,7 +171,15 @@ describe("scripts/restore.sh: outcome rules", () => {
       const run = restore([SET_ID, "--yes"], { FAKE_SET_EXIT: code, FAKE_TOUCHED: touched });
       expect(run.status).toBe(Number(code));
       const s = steps(run.calls);
-      expect(s.slice(6)).toEqual(["stop", "set", "touched", "release"]);
+      expect(s.slice(6)).toEqual([
+        "stop",
+        "set",
+        "ctr-stop",
+        "ctr-rm",
+        "ctr-ps",
+        "touched",
+        "release",
+      ]);
       expect(count(s, "start")).toBe(0);
       expect(run.stderr).toContain(`${step} step`);
       expect(run.stderr).toContain("left stopped");
@@ -201,13 +212,129 @@ describe("scripts/restore.sh: outcome rules", () => {
     const s = steps(calls);
     expect(code).not.toBe(0);
     expect(code).not.toBeNull();
-    expect(s.slice(s.indexOf("set"))).toEqual(["set", "touched", "release"]);
+    expect(s.slice(s.indexOf("set"))).toEqual([
+      "set",
+      "ctr-stop",
+      "ctr-rm",
+      "ctr-ps",
+      "touched",
+      "release",
+    ]);
     expect(count(s, "start")).toBe(0);
     expect(stderr).toContain("database step");
     expect(stderr).toContain("left stopped");
     expect(stderr).toContain("docs/OPERATIONS.md, Restore");
     expectNoDestructiveCall({ status: code, stdout: "", stderr, calls });
   }, 30_000);
+});
+
+/** The exact calls on the one-off restore container (d-WR-1). */
+const CONTAINER = `aida-${HOLDER}`;
+const CONTAINER_CALLS = {
+  stop: `stop -t 30 ${CONTAINER}`,
+  rm: `rm -f ${CONTAINER}`,
+  ps: `ps -a --filter name=^/${CONTAINER}$ --format {{.Names}}`,
+};
+
+describe("scripts/restore.sh: the restore container is gone before the lock is released or anything starts (d-WR-1)", () => {
+  it("validation failure while the container is still listed by two polls: stopped and removed by its exact name, services started only after the poll that no longer lists it", () => {
+    const run = restore([SET_ID, "--yes"], {
+      FAKE_SET_EXIT: "4",
+      FAKE_CONTAINER_LISTED: "2",
+      RESTORE_CONTAINER_WAIT_SECONDS: "10",
+    });
+    expect(run.status, run.stderr).toBe(4);
+    const s = steps(run.calls);
+    expect(s.slice(s.indexOf("set"))).toEqual([
+      "set",
+      "ctr-stop",
+      "ctr-rm",
+      "ctr-ps",
+      "ctr-ps",
+      "ctr-ps",
+      "touched",
+      "release",
+      "start",
+    ]);
+    const tail = run.calls.slice(s.indexOf("set") + 1, s.indexOf("set") + 6);
+    expect(tail).toEqual([
+      CONTAINER_CALLS.stop,
+      CONTAINER_CALLS.rm,
+      CONTAINER_CALLS.ps,
+      CONTAINER_CALLS.ps,
+      CONTAINER_CALLS.ps,
+    ]);
+    expect(s.indexOf("release")).toBeGreaterThan(s.lastIndexOf("ctr-ps"));
+    expect(s.indexOf("start")).toBeGreaterThan(s.lastIndexOf("ctr-ps"));
+    expect(run.stderr).toContain("nothing was changed");
+    expectNoDestructiveCall(run);
+  });
+
+  it("TERM while the set script hangs and the container outlives its client for two polls: nothing starts before the container is gone", async () => {
+    const log = logFile();
+    const child = spawn("/bin/bash", [SCRIPT, SET_ID, "--yes"], {
+      cwd: ROOT,
+      env: env(log, {
+        FAKE_SET_MODE: "hang",
+        FAKE_CONTAINER_LISTED: "2",
+        RESTORE_CONTAINER_WAIT_SECONDS: "10",
+      }),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+    const exited = new Promise<number | null>((resolve) => child.on("exit", (c) => resolve(c)));
+    const deadline = Date.now() + 15_000;
+    while (!steps(readCalls(log)).includes("set")) {
+      if (Date.now() > deadline) throw new Error("the set script step never started");
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    await new Promise((r) => setTimeout(r, 300));
+    child.kill("SIGTERM");
+    const code = await exited;
+    const calls = readCalls(log);
+    const s = steps(calls);
+    expect(code).toBe(143);
+    expect(s.slice(s.indexOf("set"))).toEqual([
+      "set",
+      "ctr-stop",
+      "ctr-rm",
+      "ctr-ps",
+      "ctr-ps",
+      "ctr-ps",
+      "touched",
+      "release",
+      "start",
+    ]);
+    expect(s.indexOf("start")).toBeGreaterThan(s.lastIndexOf("ctr-ps"));
+    expectNoDestructiveCall({ status: code, stdout: "", stderr, calls });
+  }, 30_000);
+
+  it("container still listed when the wait ends: the lock is kept, nothing is started, the message names the container", () => {
+    const run = restore([SET_ID, "--yes"], {
+      FAKE_SET_EXIT: "4",
+      FAKE_CONTAINER_LISTED: "stuck",
+      RESTORE_CONTAINER_WAIT_SECONDS: "2",
+    });
+    expect(run.status).toBe(4);
+    const s = steps(run.calls);
+    expect(s.slice(s.indexOf("set"), s.indexOf("set") + 3)).toEqual(["set", "ctr-stop", "ctr-rm"]);
+    expect(count(s, "ctr-ps")).toBe(3);
+    expect(count(s, "touched")).toBe(0);
+    expect(count(s, "release")).toBe(0);
+    expect(count(s, "start")).toBe(0);
+    expect(run.stderr).toContain(`The restore container ${CONTAINER} is still listed`);
+    expect(run.stderr).toContain(`the restore lock ${HOLDER} was kept`);
+    expectNoDestructiveCall(run);
+  });
+
+  it("a wait setting outside 1 to 600: usage error, no docker call", () => {
+    const run = restore([SET_ID, "--yes"], { RESTORE_CONTAINER_WAIT_SECONDS: "0" });
+    expect(run.status).toBe(2);
+    expect(run.calls).toEqual([]);
+  });
 });
 
 describe("scripts/restore.sh: refusals before anything is stopped", () => {
