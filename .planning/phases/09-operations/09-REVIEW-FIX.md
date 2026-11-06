@@ -260,3 +260,143 @@ Only this integration file was run, because it is the only one F2 changed. The f
 - **The direction not covered by K142.** The check refuses only a target that is newer than the set. A set that is newer than the running code, restored into an empty or older database, passes. The docs say that migrations go only forward and that a set must not be restored into an earlier release, but no check compares the manifest's app version with the running release.
 - **No minimum Compose v2 point version.** The docs say "Docker Compose v2" without a number. No minimum version for `config --format json` was checked.
 - **Manual items:** none for this batch (no UI change).
+
+## F3
+
+**Date:** 2026-11-12. **Scope:** part b (`09-REVIEW-b.md`): b-WR-1, b-WR-2 and b-WR-5 (K143), b-WR-3, b-WR-4 (K144) and b-IN-1. The other part b info items are in `deferred-items.md`. **Where it ran:** the main checkout on `v2/run-loop`, no worktree, as the dispatch asked. Runs used `AIDA_TEST_RUN_ID=mwdkqusq-9cbe91704e915c46` and the Colima `DOCKER_HOST` (`colima status` exit 0 and `docker info` exit 0 first). One test process ran at a time, and exit codes were read without a pipe. For each red run the old file (a scratch copy taken before the first edit, or the version at the previous F3 commit) or a one-line mutation was swapped in. The new file was then restored with `cp` and checked with `cmp` (exit 0 every time). **Result:** 6 of 6 in-scope findings fixed, in 4 fix commits. The K143 and K144 changes are logic changes and **require human verification**.
+
+### b-WR-1, b-WR-2, b-WR-5 / K143: run deadline, a renewal that follows the run, bounded connects
+
+**Change.**
+- `scripts/backup/lib.sh`:
+  - exports `PGCONNECT_TIMEOUT` (default 10) for every libpq connection: psql, `pg_dump`, `pg_restore` and the fence session. Restore gets it too, because it sources `lib.sh`;
+  - adds `deadline_passed` and `bounded`. While `BACKUP_RUN_DEADLINE` is set, `bounded` runs a command under `timeout -k 10 <seconds left>`;
+  - runs `psql_q` under `bounded`;
+  - `pause_point` writes the main shell's pid into `<point>.reached` (test only).
+- `scripts/backup/aida-backup.sh`, the deadline:
+  - new setting `BACKUP_MAX_RUN_SECONDS`, default 21600, 1 to 999999; the run deadline is set after validation;
+  - `pg_dump`, the three `find` calls, the three `tar` calls and both `pg_restore` calls run under `bounded`;
+  - a step that fails after the deadline logs `backup aborted: run deadline passed` and fails with category `unknown`;
+  - the exit trap gets 60 s of its own for its database calls, and the status is recorded through `fenced_action`.
+- `aida-backup.sh`, `renew_loop`:
+  - closes the fence FIFO's write end (`exec 7>&-`) and stops at once when `kill -0` on the main shell fails;
+  - stops renewing 120 s after the deadline and signals the run (`deadline.passed`, then `backup aborted: run deadline passed`);
+  - retries a psql error every `TTL/15` seconds (1 to 5) and logs `lease renewal failed; retrying`, until a third of the TTL would be left on the lease, counted from the last confirmed renewal. Each attempt is bounded by that point;
+  - counts as lost only a confirmed 0 rows or the end of that margin;
+  - its stdout now reaches the run's log.
+- `aida-backup.sh`, a run that lost its lease still writes no `backup:lastRun`. It now prints the `AIDA_BACKUP_STATUS_UNRECORDED` line, writes `status-unrecorded-<setId>.json` and exits 5. Before, it exited 2 with no record, which 09-13 had pinned in a test. K143 ("never silence") overrides that, and the two existing tests were changed to match.
+- `scripts/backup/scheduler.sh`:
+  - sources `lib.sh` and validates `BACKUP_MAX_RUN_SECONDS` (exit 2 on an invalid value);
+  - waits at most the deadline plus 180 s for a run. A watchdog that polls once a second then sends TERM, and KILL 30 s later. A run that ended on a signal makes the scheduler log `scheduled backup ended by signal N` and print the unrecorded line, with no set id;
+  - new test mode `--run-once <limit> <killGrace>`.
+- `docker-compose.yml`, `.env.example`, `docs/OPERATIONS.md` (settings tables, the "When a run does not complete" lines, exit 5) and the website environment page gain `BACKUP_MAX_RUN_SECONDS`. `tests/unit/compose-backup.test.ts` pins it.
+
+**Tests:**
+- `tests/unit/backup-scheduler.test.ts`, 4 new cases:
+  - a fake run that ignores TERM is killed (exit 137, the four scheduler lines and one unrecorded line);
+  - a fake run that handles TERM ends with its own code 2;
+  - a run within the limit is not touched;
+  - an invalid `BACKUP_MAX_RUN_SECONDS` exits 2.
+- `tests/integration/backup-consistency.test.ts`, describe "K143 run liveness":
+  - *main killed*: only the main shell is killed (`sh -c 'kill -9 <pid>'` inside the runner) at `after-dump` with TTL 6. Then the fence session ends, the lease expires and stays expired for 4.5 s more, and the next sweep deletes the queued file;
+  - *one renewal error*: right after a confirmed renewal (TTL 15), connections to the isolated database are refused for 6.5 s (`ALTER DATABASE ... ALLOW_CONNECTIONS false`, issued from the shared database). The run then logs the retry, keeps its lease and succeeds with a consistent set.
+- `backup-consistency`, existing cases changed: G3 and takeover now expect exit 5, the unrecorded line and the per-set file.
+- `tests/integration/backup-failures.test.ts`:
+  - *hung connect*: a listener inside the runner accepts and never answers. The run ends within 60 s with exit 5, `database not reachable`, the unrecorded line and the per-set file, and `backup:lastRun` is unchanged;
+  - *run deadline*: a dump waits on a held ACCESS EXCLUSIVE lock (lock timeout 300s, `BACKUP_MAX_RUN_SECONDS` 8). The run ends within 45 s with exit 2, `backup aborted: run deadline passed` and a recorded failed status;
+  - the lease-lost case now expects exit 5 and the record.
+
+**Runs:**
+- Unit, old `scheduler.sh`: exit 1, 4 failed, 26 passed (30).
+  - The loop-mode case hung for 134 s, because the old scheduler started its daily loop. I stopped that process (my own `sh` process) with TERM, and its spawn now has a 10 s timeout.
+  - The first green runs failed twice: the fakes' `sleep` held stdout open, and a watchdog kill race left a sleep orphaned. That led to the polling watchdog.
+  - Green: exit 0, 30 passed (30).
+- Integration `backup-consistency -t "K143"`, old `aida-backup.sh` with the new `lib.sh`:
+  - the first red attempt had two red runs for the wrong reason. `kill` is not a binary in the image (exit 127), and Postgres refuses `ALLOW_CONNECTIONS false` from a session on the same database. I fixed the tests and repeated the red run;
+  - repeated red: exit 1, 3 failed, 16 skipped (19). G3 has no unrecorded line. *Main killed*: after 15 s the fence session was still there, and afterEach found the lease row. The old orphaned renewer kept the fence FIFO open and renewed the lease. *Renewal error*: the run aborted with `lease lost` and no retry line;
+  - takeover's earlier red: exit 1 on the same line;
+  - green: exit 0, 4 passed, 15 skipped. After the `exec 7>&-` change: exit 0, 5 passed, 14 skipped (G2 included).
+- Integration `backup-failures -t "hung connect|lease lost writes"`, old `lib.sh` and old `aida-backup.sh`: exit 1, 2 failed, 17 skipped (19). The hung run took 149.9 s and ended only when the listener exited; the lease-lost case expected 5 and got 2. Green: exit 0, 2 passed.
+- Integration `backup-failures -t "run deadline"`, old `aida-backup.sh`: exit 1, 1 failed, 19 skipped (20), after 120.3 s: the dump outlasted the test's 120 s transaction. Green: exit 0, 1 passed.
+
+**Commit:** `f1b00ad` fix(09-F3): b-WR-1, b-WR-2, b-WR-5 run deadline, renewal follows the run, bounded connects (K143)
+
+### b-WR-3: the missing files and their rows are named
+
+**Change.** `referenced_from_dump` now also emits `<Table> <row id>` for each reference (the `id` column; a missing one fails verification). If verification finds missing members, `log_missing` runs before the exit trap removes `RUN_TMP`. In key order it prints up to 20 lines, `[backup] missing: <organizationId>/<storageKey> (<Table> <id>[, ...])`, then `[backup] missing: N more not listed`. Only members and row ids that match their expected shape are printed; anything else prints as "an entry of unexpected shape". No file content and no other column is printed. `docs/OPERATIONS.md` (the `verification` row) describes the lines and the remedy.
+
+**Tests** (`backup-consistency`, "verification covers every stored-file kind"):
+- the three negative controls (ticket attachment, task attachment, logo) now assert the exact line with the referencing row's id;
+- a new cap case removes 23 referenced files and expects 20 lines, in key order, and `3 more not listed`.
+
+**Runs:** red, `aida-backup.sh` at `f1b00ad`: exit 1, 4 failed, 16 skipped (20); no `missing:` line. Green: exit 0, 4 passed.
+
+**Commit:** `c9661ec` fix(09-F3): b-WR-3 name the missing files and their rows when verification fails
+
+### b-WR-4 / K144: one fence connection while a delete is pending
+
+**Change.** In `src/lib/storage/file-fence.ts`:
+- each provider has one slot. While its previous handle has not closed, `open()` waits up to `FENCE_SLOT_WAIT_MS` (2 s, for a handle that is only finishing its unlock). It then refuses with the new reason `delete-pending` without connecting;
+- the fence client gets `connectionTimeoutMillis` 10 s and `statement_timeout` 30 s;
+- the worker job keeps one provider per process.
+
+The slot belongs to the provider, not the module. The Phase 14 overlap test runs two sweeps at once in one process, standing for two workers, so its sweep 2 now gets its own provider. `project-file-cleanup.test.ts` also creates a fresh provider for each case.
+
+**Test** (`tests/integration/file-fence.test.ts`, new case K144): four sweep ticks through one provider over a delete that hangs (ioBudget 300 ms):
+- tick 1 gives `failed: 1`;
+- ticks 2 to 4 each give `skipped: "delete-pending"`;
+- exactly one `aida-delete-fence` lock is held after every tick, and only one handle was opened;
+- after the delete settles, no lock is held, and the next tick deletes the other 3.
+
+**Runs:**
+- Red, original `file-fence.ts`: exit 1, 1 failed, 14 skipped (15). Tick 2 opened a second connection and returned `failed: 1`.
+- Green: exit 0, 1 passed.
+- The first full `project-file-cleanup` run after the change failed: exit 1, 1 failed, 10 passed (11). In the EACCES case, back-to-back sweeps were refused while the previous handle was still unlocking. The 2 s wait and the fresh provider per case fixed it: exit 0, 11 passed.
+
+**Commit:** `89c0df1` fix(09-F3): b-WR-4 one fence connection per sweep provider while a delete is pending (K144)
+
+### b-IN-1: one rule for organization folders starting with `-`
+
+**Change.** `lib.sh` defines the member shape once (`MEMBER_ORG_RE`, `MEMBER_KEY_RE`, `MEMBER_PATH_RE`), and the organization part never starts with `-`. The backup's find patterns and its post-archive check use it, and `member_list_ok` already used `MEMBER_PATH_RE`. Both sides now refuse such a folder: the backup counts it as skipped instead of archiving it into a set that restore refuses.
+
+**Test** (`backup-consistency`, "archive tolerance and odd entries"): a folder `-<orgId>` holding one file. `member_list_ok` refuses the member (exit 1), and the backup publishes without it: it is in neither the archive nor `uploads.sha256`, and `skippedEntries` is 2.
+
+**Runs:** red, mutation `MEMBER_ORG_RE` back to the old `[A-Za-z0-9_-]{1,64}`: exit 1, 1 failed, 20 skipped (21); the member was archived. Green: exit 0, 1 passed.
+
+**Commit:** `881425e` fix(09-F3): b-IN-1 one rule for organization folders starting with '-' in backup and restore
+
+### Other part b info items
+
+b-IN-2 to b-IN-6 are recorded unchanged in `deferred-items.md`, one line each with the finding id.
+
+**Commit:** `8a25915` docs(09-F3): record part b info items not fixed in F3
+
+### Final checks
+
+| Command | Exit | Counts |
+|---|---|---|
+| `pnpm lint` | 0 | 671 files, 1 warning, pre-existing (`tests/unit/container-config.test.ts:160`) |
+| `pnpm typecheck` | 0 | 0 errors |
+| `pnpm test` | 0 | 95 files, 1676 tests passed |
+| integration `backup-consistency.test.ts` | 0 | 21 passed |
+| integration `backup-failures.test.ts` | 0 | 20 passed |
+| integration `backup-restore-roundtrip.test.ts` | 0 | 22 passed |
+| integration `file-fence.test.ts` | 0 | 15 passed |
+| integration `project-file-cleanup.test.ts` | 0 | 11 passed |
+
+Containers:
+- F3 started no container by hand. The integration files' helpers started their rule-J runner containers (`startBackupRunner`) and removed them.
+- The existing G3 case paused and unpaused its own runner, through the helper.
+- The new *main killed* case killed one process inside the runner; no container was killed.
+- After the runs, `docker ps -a` showed no container carrying the run id.
+
+### Not done, and limits
+
+- **Children of a killed run.** The scheduler's KILL ends only the script's shell. A child that still hangs (for example `pg_dump`) ends at its own `bounded` deadline, not at the KILL. The orphaned renewer stops at its next tick, at most TTL/3 later. This was shown for `kill -9`. No test kills the shell while a bounded child hangs.
+- **Steps outside `bounded`.** `sha256sum`, `sort`, `stat` and the manifest write on the backups volume are bounded only by the renewer's stop 120 s past the deadline and by the scheduler. A hang in one of them was not tested. `bounded` needs `timeout(1)`, which is in the image (the deadline case passed in it). Without it, commands run unbounded.
+- **Restore has no deadline.** `aida-restore-set.sh` gets `PGCONNECT_TIMEOUT` through `lib.sh`, but no run deadline.
+- **K144 is per process.** Two worker processes would each hold one fence connection. The single-server deployment runs one worker.
+- **Docs.** The website's backup-and-restore page was not changed for the new log lines. Only `docs/OPERATIONS.md` and the website environment page were.
+- **Real Compose not exercised.** The scheduler's watchdog was tested only with a fake run on the host's `sh` (bash in POSIX mode on macOS), not inside the `backup` service. The compose change was checked only by the unit pin.
+- **Human verification:** K143 (renewal margin, deadline, the lease-lost exit 5) and K144 (slot semantics, the 2 s wait) are logic changes.
+- **Manual items:** none for this batch (no UI change).
