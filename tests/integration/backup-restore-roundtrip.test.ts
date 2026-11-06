@@ -1023,7 +1023,7 @@ describe("a target at a newer schema is refused before any write (K142, d-CR-1, 
         `ALTER TABLE "organization" ADD COLUMN "k142Extra" TEXT;
          CREATE TABLE "K142Extra" ("id" TEXT PRIMARY KEY,
            "organizationId" TEXT NOT NULL REFERENCES "organization"("id"));
-         INSERT INTO "K142Extra" ("id", "organizationId") SELECT 'k142-1', "id" FROM "organization";
+         INSERT INTO "K142Extra" ("id", "organizationId") SELECT 'k142-' || "id", "id" FROM "organization";
          INSERT INTO "_prisma_migrations" ("id", "checksum", "migration_name", "started_at",
            "finished_at", "applied_steps_count")
            VALUES ('00000000-0000-4000-8000-000000000142', 'k142', '29991231000000_k142_extra',
