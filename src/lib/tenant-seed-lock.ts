@@ -26,9 +26,23 @@ const LOCK_STATEMENT = `SELECT pg_advisory_xact_lock(${TENANT_SEED_LOCK_KEY_SQL}
 export interface TenantSeedLockOptions {
   /** How long to wait for another holder before giving up (default 120 s). */
   lockTimeoutMs?: number;
+  /** How long to wait for a pooled connection to open the transaction (default 30 s). */
+  maxWaitMs?: number;
   /** Upper bound of the open transaction that holds the lock (default 600 s). */
   transactionTimeoutMs?: number;
 }
+
+/**
+ * The waits at server start (review a-WR-2, K146), passed only from src/instrumentation.ts.
+ * register() runs bootstrapFromEnv and then the demo boot before Next serves a request, so each
+ * waits at most 10 s for a pooled connection and 10 s for the lock: at most 40 s in total on the
+ * lock and the pool, plus the time of a bootstrap or demo seed that does run. A wait that ends
+ * logs one line, and the app starts without that step.
+ */
+export const BOOT_TENANT_SEED_LOCK_OPTIONS = {
+  lockTimeoutMs: 10_000,
+  maxWaitMs: 10_000,
+} as const satisfies TenantSeedLockOptions;
 
 /** The lock was not acquired within `lockTimeoutMs`; nothing was read or written. */
 export class TenantSeedLockTimeout extends Error {
@@ -59,7 +73,7 @@ export async function withTenantSeedLock<T>(
   fn: (tx: Prisma.TransactionClient) => Promise<T>,
   opts: TenantSeedLockOptions = {},
 ): Promise<T> {
-  const { lockTimeoutMs = 120_000, transactionTimeoutMs = 600_000 } = opts;
+  const { lockTimeoutMs = 120_000, maxWaitMs = 30_000, transactionTimeoutMs = 600_000 } = opts;
   try {
     return await prisma.$transaction(
       async (tx) => {
@@ -69,7 +83,7 @@ export async function withTenantSeedLock<T>(
         await tx.$executeRawUnsafe(LOCK_STATEMENT);
         return fn(tx);
       },
-      { maxWait: 30_000, timeout: transactionTimeoutMs },
+      { maxWait: maxWaitMs, timeout: transactionTimeoutMs },
     );
   } catch (err) {
     if (isLockTimeout(err)) throw new TenantSeedLockTimeout();

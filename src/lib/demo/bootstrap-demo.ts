@@ -11,8 +11,12 @@
 // and no write. Every outcome and every error ends in one log line and a normal return.
 // ---------------------------------------------------------------------------
 import { runGuardedDemoSeed } from "@/lib/demo/tenant-guard";
+import type { TenantSeedLockOptions } from "@/lib/tenant-seed-lock";
 
-export async function bootstrapDemoMode(): Promise<void> {
+/** register() passes the short boot waits (BOOT_TENANT_SEED_LOCK_OPTIONS, review a-WR-2). */
+export async function bootstrapDemoMode(
+  lockOptions: Pick<TenantSeedLockOptions, "lockTimeoutMs" | "maxWaitMs"> = {},
+): Promise<void> {
   if (process.env.DEMO_MODE !== "true") return;
 
   // Logged before anything else so the warning appears even if seeding below fails.
@@ -21,7 +25,7 @@ export async function bootstrapDemoMode(): Promise<void> {
   );
 
   try {
-    const outcome = await runGuardedDemoSeed({ caller: "demo-boot" });
+    const outcome = await runGuardedDemoSeed({ caller: "demo-boot", ...lockOptions });
     switch (outcome.kind) {
       case "seeded":
         console.info(

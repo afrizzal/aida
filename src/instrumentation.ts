@@ -16,11 +16,14 @@ export async function register() {
     // One log line, never a boot failure; the limiter keeps failing closed (review b-IN-b7).
     const { warnIfRateLimitPepperUnsafe } = await import("@/lib/rate-limit/pepper-check");
     warnIfRateLimitPepperUnsafe();
+    // Both steps take the tenant seed lock with the short boot waits, so the app serves within
+    // a stated time (K146): see BOOT_TENANT_SEED_LOCK_OPTIONS. Neither step throws.
+    const { BOOT_TENANT_SEED_LOCK_OPTIONS } = await import("@/lib/tenant-seed-lock");
     const { bootstrapFromEnv } = await import("@/lib/bootstrap");
-    await bootstrapFromEnv();
+    await bootstrapFromEnv(BOOT_TENANT_SEED_LOCK_OPTIONS);
     // Demo mode is a no-op unless DEMO_MODE === "true"; imported lazily so the demo
     // fixtures never load in a normal production boot.
     const { bootstrapDemoMode } = await import("@/lib/demo/bootstrap-demo");
-    await bootstrapDemoMode();
+    await bootstrapDemoMode(BOOT_TENANT_SEED_LOCK_OPTIONS);
   }
 }

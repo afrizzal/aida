@@ -141,8 +141,10 @@ export type GuardedDemoSeedOutcome =
 export interface GuardedDemoSeedOptions {
   caller: DemoSeedCaller;
   hooks?: DemoSeedHooks;
-  /** Overrides the lock wait (tests); defaults to the lock module's 120 s. */
+  /** Overrides the lock wait (the boot and tests); defaults to the lock module's 120 s. */
   lockTimeoutMs?: number;
+  /** Overrides the pooled-connection wait (the boot); defaults to the lock module's 30 s. */
+  maxWaitMs?: number;
 }
 
 /**
@@ -202,7 +204,10 @@ export async function runGuardedDemoSeed(
           durationMs: Date.now() - started,
         };
       },
-      opts.lockTimeoutMs === undefined ? {} : { lockTimeoutMs: opts.lockTimeoutMs },
+      {
+        ...(opts.lockTimeoutMs === undefined ? {} : { lockTimeoutMs: opts.lockTimeoutMs }),
+        ...(opts.maxWaitMs === undefined ? {} : { maxWaitMs: opts.maxWaitMs }),
+      },
     );
   } catch (err) {
     if (err instanceof TenantSeedLockTimeout) return { kind: "lock-timeout", caller };

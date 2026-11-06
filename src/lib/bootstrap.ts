@@ -1,6 +1,10 @@
 import { auth } from "./auth";
 import { prisma } from "./db";
-import { TenantSeedLockTimeout, withTenantSeedLock } from "./tenant-seed-lock";
+import {
+  type TenantSeedLockOptions,
+  TenantSeedLockTimeout,
+  withTenantSeedLock,
+} from "./tenant-seed-lock";
 
 /** The writes of createFirstOrgAndAdmin, in order; each is committed on its own. */
 export type BootstrapStage = "admin-user" | "organization" | "setup-complete";
@@ -72,11 +76,15 @@ export async function createFirstOrgAndAdmin(
  * the first organization + admin if no user exists.
  * Called once at server start via src/instrumentation.ts register(), before the demo boot, so
  * with ADMIN_* set a real workspace exists first and the demo boot then refuses (09-02, U-17).
- * The user count and the create run under the tenant seed lock that `pnpm db:seed` and the
- * DEMO_MODE boot take too (D-17); a lock timeout logs one line and returns, so boot never blocks.
- * NEVER logs the password.
+ * The user count and the create run under the tenant seed lock that `pnpm db:seed`, the
+ * DEMO_MODE boot and the /setup wizard take too (D-17, K145). It never stops the server from
+ * starting (K146, review a-WR-2): a lock timeout logs one line, and any other failure (a pool
+ * or transaction timeout, a dropped connection) logs one fixed line naming only the error class
+ * and its code, never the message (it can quote the email), and returns. register() passes the
+ * short boot waits (BOOT_TENANT_SEED_LOCK_OPTIONS); with no options the lock module's defaults
+ * apply. NEVER logs the password.
  */
-export async function bootstrapFromEnv(): Promise<void> {
+export async function bootstrapFromEnv(lockOptions: TenantSeedLockOptions = {}): Promise<void> {
   const email = process.env.ADMIN_EMAIL;
   const password = process.env.ADMIN_PASSWORD;
   const name = process.env.ADMIN_NAME ?? "Admin";
@@ -93,7 +101,7 @@ export async function bootstrapFromEnv(): Promise<void> {
         // createFirstOrgAndAdmin already logged the specific failure reason via console.error —
         // swallow here so a headless-bootstrap failure can never block server startup.
       }
-    });
+    }, lockOptions);
   } catch (err) {
     if (err instanceof TenantSeedLockTimeout) {
       console.error(
@@ -101,6 +109,16 @@ export async function bootstrapFromEnv(): Promise<void> {
       );
       return;
     }
-    throw err;
+    console.error(
+      `[bootstrap] Skipped the headless admin bootstrap after an error (${describeError(err)}); the app starts without it.`,
+    );
   }
+}
+
+/** The error's class and, when it has the shape of one, its code; never the message. */
+function describeError(err: unknown): string {
+  const name =
+    err instanceof Error && /^[A-Za-z0-9_]{1,64}$/.test(err.name) ? err.name : "unknown error";
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === "string" && /^[A-Z0-9_]{1,16}$/.test(code) ? `${name}, ${code}` : name;
 }

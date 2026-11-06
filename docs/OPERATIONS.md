@@ -527,6 +527,10 @@ A refusal never deletes, renames or changes anything, and the demo boot never st
 
 **`DEMO_MODE` together with `ADMIN_EMAIL` and `ADMIN_PASSWORD`.** The headless admin bootstrap runs first at boot. On an empty database it creates a real workspace for `ADMIN_EMAIL`, and the demo boot then finds a workspace that is not the demo and refuses. Set one or the other, not both.
 
+**Boot never waits long on the lock.** At start-up the headless admin bootstrap and then the demo boot each wait at most 10 seconds for a database connection and 10 seconds for the lock, so `app` waits at most 40 seconds in total before it serves, plus the time of a bootstrap or demo seed that does run. When a wait ends, or the bootstrap fails for any other reason, the step logs one line (`[bootstrap] Skipped the headless admin bootstrap ...` or `[demo] Skipped the demo seed ...`; the bootstrap line names only the error class, never the email or the password) and the app starts without it. Run the seed or restart `app` again once the other run has finished.
+
+**`DEMO_ADMIN_EMAIL` and `DEMO_AGENT_EMAIL` must differ.** When they are the same address (case does not matter), the demo boot and `pnpm db:seed` refuse before any write, with one line, and `pnpm db:seed` exits 1.
+
 **The seed's writes are not one transaction.** The demo accounts, the organization and each ticket commit on their own, and the completion marker is written last. A seed that stops part-way (a crash, a killed container, a database restart) leaves those rows and no marker; from then on both the boot and `pnpm db:seed` refuse that database as an incomplete demo.
 
 **Recovering from an incomplete or unwanted demo** is a manual step, by design; nothing in AIDA deletes it for you:
