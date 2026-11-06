@@ -6,7 +6,9 @@
 // shared with the DEMO_MODE boot) classifies the database before any write:
 //   - empty (no organization and no user): seed, exit 0;
 //   - the complete marked demo workspace: print "already seeded", exit 0;
-//   - an incomplete demo or any other workspace: refuse, write nothing, exit 1.
+//   - an incomplete demo or any other workspace: refuse, write nothing, exit 1;
+//   - DEMO_ADMIN_EMAIL and DEMO_AGENT_EMAIL the same address: refuse before any read or write,
+//     exit 1 (review a-WR-3).
 // The seed never deletes anything (owner decision 2026-11-11 item 3) and never prints a
 // password (D-18).
 //
@@ -44,6 +46,11 @@ async function main(): Promise<void> {
       case "refused-foreign":
         console.log(
           "[seed] Refusing to seed: this database already holds a workspace that is not the demo; nothing written. Seed a new, separate database instead (docs/OPERATIONS.md, Demo mode).",
+        );
+        break;
+      case "refused-config":
+        console.log(
+          "[seed] Refusing to seed: DEMO_ADMIN_EMAIL and DEMO_AGENT_EMAIL are the same address; nothing written. Set two different addresses.",
         );
         break;
       case "lock-timeout":

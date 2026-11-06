@@ -43,6 +43,10 @@ const SEED_FOREIGN_LINE =
   "[seed] Refusing to seed: this database already holds a workspace that is not the demo; nothing written.";
 const SEED_PARTIAL_LINE =
   "[seed] Refusing to seed: this database holds an incomplete demo workspace (no completion marker); nothing written.";
+const CONFIG_LINE =
+  "[demo] Refusing to seed: DEMO_ADMIN_EMAIL and DEMO_AGENT_EMAIL are the same address; nothing written.";
+const SEED_CONFIG_LINE =
+  "[seed] Refusing to seed: DEMO_ADMIN_EMAIL and DEMO_AGENT_EMAIL are the same address; nothing written.";
 
 /** The committed writes of a demo seed, in order (W1 to W6 in the 09-02 SUMMARY). */
 const CRASH_STAGES = [
@@ -264,6 +268,31 @@ describe("DEMO_MODE boot behind the tenant seed guard (09-02, AIDA-37)", () => {
       );
     }
   });
+
+  it(
+    "equal admin and agent demo emails (different case): the seed CLI and the demo boot each refuse before any write, every table count unchanged (a-WR-3)",
+    async () => {
+      const base = makeGuardEnv();
+      const guard = { ...base, agentEmail: base.adminEmail.toUpperCase() };
+      await withDatabase(async (db) => {
+        const before = await countAllTables(db.url);
+        expect(before["public.user"]).toBe(0);
+
+        const cli = await runSeedScript(db.url, guard);
+        expect(cli.code).toBe(1);
+        expect(cli.stdout).toContain(SEED_CONFIG_LINE);
+        expectQuietRefusal(cli, guard);
+        expect(await countAllTables(db.url)).toEqual(before);
+
+        const boot = await runDriver(db.url, guard, ["demo-boot"]);
+        expect(boot.results).toEqual([{ mode: "demo-boot", outcome: "returned" }]);
+        expect(boot.output).toContain(CONFIG_LINE);
+        expectQuietRefusal(boot, guard);
+        expect(await countAllTables(db.url)).toEqual(before);
+      });
+    },
+    CASE_TIMEOUT,
+  );
 
   describe("crash per stage: no marker, demo-partial, and both paths refuse afterwards (U-04)", () => {
     for (const stage of CRASH_STAGES) {

@@ -135,6 +135,7 @@ export type GuardedDemoSeedOutcome =
   | { kind: "already-seeded"; caller: DemoSeedCaller }
   | { kind: "refused-partial"; caller: DemoSeedCaller }
   | { kind: "refused-foreign"; caller: DemoSeedCaller }
+  | { kind: "refused-config"; caller: DemoSeedCaller }
   | { kind: "lock-timeout"; caller: DemoSeedCaller };
 
 export interface GuardedDemoSeedOptions {
@@ -145,13 +146,26 @@ export interface GuardedDemoSeedOptions {
 }
 
 /**
- * Classifies, then seeds only an empty database. Returns without a write for every other
- * classification. Errors from the seed itself propagate (no marker is written then).
+ * True when the configured admin and agent demo emails are the same address after
+ * lower-casing (review a-WR-3). The seed would sign up the admin, create the organization and
+ * set setupComplete, then fail on the second sign-up with no marker: a permanent demo-partial
+ * database that nothing may delete (U-04). So it is refused before any write.
+ */
+export function demoIdentitiesCollide(env: Env = process.env): boolean {
+  return demoIdentityEmails(env).length < 2;
+}
+
+/**
+ * Checks the demo configuration, then classifies, then seeds only an empty database. Returns
+ * without a write for every other classification. Errors from the seed itself propagate (no
+ * marker is written then).
  */
 export async function runGuardedDemoSeed(
   opts: GuardedDemoSeedOptions,
 ): Promise<GuardedDemoSeedOutcome> {
   const { caller, hooks } = opts;
+  // Before the lock and before any read or write: a configuration that cannot finish a seed.
+  if (demoIdentitiesCollide()) return { kind: "refused-config", caller };
   try {
     return await withTenantSeedLock(
       async (tx): Promise<GuardedDemoSeedOutcome> => {

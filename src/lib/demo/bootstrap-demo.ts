@@ -43,6 +43,11 @@ export async function bootstrapDemoMode(): Promise<void> {
           "[demo] Refusing to seed: this database already holds a workspace that is not the demo; nothing written. Point DEMO_MODE at a new, separate database instead (docs/OPERATIONS.md, Demo mode).",
         );
         return;
+      case "refused-config":
+        console.error(
+          "[demo] Refusing to seed: DEMO_ADMIN_EMAIL and DEMO_AGENT_EMAIL are the same address; nothing written. Set two different addresses.",
+        );
+        return;
       case "lock-timeout":
         console.error(
           "[demo] Skipped the demo seed: another seed holds the tenant seed lock; nothing written.",
