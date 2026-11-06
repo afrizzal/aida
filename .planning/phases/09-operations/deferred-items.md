@@ -40,3 +40,13 @@ Recorded unchanged from `09-REVIEW-b.md`; not fixed in F3 (F3 fixed b-WR-1, b-WR
 - **b-IN-4:** `tests/unit/file-delete-callers.test.ts` misses deletes through an alias (`const files = localFileStorage`, an inferred `deps.fileStore`, an aliased `unlink` import from `node:fs`).
 - **b-IN-5:** the deleter requires a mount point plus the marker, the backup only the marker; the backup could also check `mountpoint -q` or the device of the uploads directory against its parent.
 - **b-IN-6:** the window between `fence_open` and `lease_acquire` is covered only by verification; a `fence_alive` check right after `lease_acquire` would fail the run early with `file fence unavailable`.
+
+## From the Phase 9 code review, part a (fix batch F4)
+
+Recorded unchanged from `09-REVIEW.md`; not fixed in F4 (F4 fixed a-WR-1 under K145, a-WR-2 under K146, a-WR-3, a-IN-2 and a-IN-6).
+
+- **a-IN-1:** no test proves that pg and the Prisma schema engine decode an encoded reserved-character password the way `parseDatabaseUrl` does; the deferred stack proof (U-15) is the only coverage, and a cheap `pg-connection-string` unit check could stand in until then.
+- **a-IN-3:** the 600 s transaction bound of the tenant seed lock can roll back the marker write of a slow but healthy seed and leave a permanent demo-partial database; raise the bound for the guarded seed or log the transaction timeout as its own line.
+- **a-IN-4:** the version gate runs the pull request's own copy of `scripts/check-version.mjs`; run the base's copy, or state in LAUNCH.md that the check is advisory and Code Owner review protects it.
+- **a-IN-5:** `check-version.mjs` is neither linted nor typechecked (Biome includes no `mjs`), the workflow's shell logic has no test, and the `\r`/`\n` replacements in `shown()` cannot match.
+- **a-IN-7:** the "bootstrapFromEnv and a seed CLI started together" case passes without the lock when the timing does not overlap, and no integration case runs `bootstrapFromEnv` against a held lock (F4's a-WR-2 unit test covers the timeout branch and the boot bound in-process only).
