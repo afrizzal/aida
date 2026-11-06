@@ -12,6 +12,9 @@
 # Usage (values as in your .env):
 #   POSTGRES_USER=aida POSTGRES_PASSWORD='...' POSTGRES_DB=aida sh scripts/database-url.sh
 #
+# Give it the real password. A $ in POSTGRES_PASSWORD must be single-quoted or written $$ in
+# .env, because Compose reads an unquoted or double-quoted $name there as a variable.
+#
 # POSIX sh with od and tr only (BSD and GNU). Never prints a value on an error path.
 set -eu
 
