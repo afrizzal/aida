@@ -352,6 +352,30 @@ test.describe("Workspace logo", () => {
     expect(await storedLogo()).toBeNull();
   });
 
+  test("remove with no logo left: another admin removed it first, so no success message (review c-IN-05)", async ({
+    page,
+    baseURL,
+  }) => {
+    await withAdminApi(baseURL, (api) => setLogo(api, LOGO_A));
+
+    await page.goto("/settings/branding");
+    await expect(logoCard(page).getByRole("button", { name: "Remove logo" })).toBeVisible();
+    // Another admin removes the logo while this page still shows it; the DELETE below then
+    // answers { ok: true, removed: false }.
+    await withAdminApi(baseURL, (api) => clearLogo(api));
+    expect(await storedLogo()).toBeNull();
+
+    await logoCard(page).getByRole("button", { name: "Remove logo" }).click();
+    const dialog = page.getByRole("dialog", { name: "Remove the workspace logo?" });
+    await dialog.getByRole("button", { name: "Remove logo" }).click();
+    await expect(page.getByText("There was no logo to remove.")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Logo removed.")).toHaveCount(0);
+    await expect(dialog).toBeHidden();
+    // The refresh shows the card's no-logo state.
+    await expect(logoCard(page).getByText(COPY.empty)).toBeVisible({ timeout: 15_000 });
+    await expect(logoCard(page).getByRole("button", { name: "Upload logo" })).toBeVisible();
+  });
+
   test("fallback: a logo that fails to load falls back to the Sparkles box", async ({
     page,
     baseURL,

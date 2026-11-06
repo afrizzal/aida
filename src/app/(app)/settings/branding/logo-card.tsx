@@ -142,9 +142,12 @@ export function LogoCard({ logoUrl, canEdit }: LogoCardProps) {
         setRemoveError(REMOVE_FAILED);
         return;
       }
+      // { ok: true, removed: false }: another admin removed the logo first (review c-IN-05).
+      const result = (await response.json().catch(() => null)) as { removed?: unknown } | null;
       setRemoveOpen(false);
       setError(null);
-      toast.success("Logo removed.");
+      if (result?.removed === false) toast("There was no logo to remove.");
+      else toast.success("Logo removed.");
       startRefresh(() => router.refresh());
     } catch {
       setRemoveError(REMOVE_FAILED);
