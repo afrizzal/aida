@@ -158,3 +158,105 @@ The full integration suite was not run. Only the two logo integration files were
 - **Fixtures:** the JPEG and WebP fixtures are complete in structure only. Their compressed bytes do not decode. The PNG fixture decodes.
 - **Animated WebP (c-IN-04):** WebP `ANMF` frames are accepted when they are larger than their 16-byte frame header. Refusing animated WebP is deferred.
 - **`.next`:** moved once to the Trash folder `aida-next-1794487643` because of next-o1 (details under c-WR-02).
+
+## F2
+
+**Date:** 2026-11-12. **Scope:** part d (`09-REVIEW-d.md`): d-CR-1 (K142), d-WR-1, d-WR-2, d-WR-3, d-WR-4 (covered by the d-CR-1 test). The part d info items are in `deferred-items.md`. **Where it ran:** the main checkout on `v2/run-loop`, no worktree, as the dispatch asked. Runs used `AIDA_TEST_RUN_ID=mwdk1k2d-f4394c6bcae9055b` and the Colima `DOCKER_HOST` (`colima status` exit 0, `docker info` exit 0 first), one test process at a time, exit codes read without a pipe. Red runs swapped in the old file with `git show <rev>:<path>`, then restored it with `cp` from a scratch copy and checked it with `cmp` (exit 0 every time). **Result:** 5 of 5 in-scope findings fixed, 7 commits. Requires human verification for d-CR-1 and d-WR-1 (logic changes; the real-Compose path is not exercised, see the limits).
+
+### d-CR-1 / K142: a restore into a database with migrations the set lacks is refused
+
+**Change.**
+- `scripts/backup/aida-restore-set.sh` gets `check_schema`, which runs right after `db.dump`'s checksum and `pg_restore --list`, before the uploads validation and before anything is staged or written. It reads every `migration_name` in the dump's `_prisma_migrations` (`pg_restore --data-only --table=_prisma_migrations`; a name outside `[A-Za-z0-9_.-]+` fails validation, exit 4). It also reads every migration name in the target's `public._prisma_migrations`, in any state. A target without that table (an empty database) gives an empty list. If the target has a name the dump lacks, the script prints `refused: the target database has N applied migration(s) that the set does not contain (a newer schema), first: <name>` plus the two supported paths, and exits 9. A new mode, `--check-schema <setDir>`, runs only the lock check, the set and dump checks and this comparison, then exits.
+- `scripts/restore.sh` runs `--check-schema` in a one-off `backup` container after the lock and the lease and before `compose stop`. Exit 9 gives `Refused: the target database has migrations that set <setId> does not contain (a newer schema). Nothing was stopped or changed.` and exit 9. Any other non-zero exit is passed through with "Nothing was stopped or changed". In both cases the trap releases the lock and the lease, and nothing is stopped or started.
+- Docs (`docs/OPERATIONS.md`, `website/.../operations/backup-and-restore.md`, `upgrading-and-logs.md`):
+  - a new section, "Which database a set can be restored into", with the two supported paths: a database of the set's own release, or an empty database followed by the target release's `migrate deploy`;
+  - the new step 4 and an exit-9 row in the refusals table;
+  - "Restore to a new server" now starts only `db backup-init`, so the database stays empty. Then it restores and runs `docker compose up -d --build`, so `migrate` applies every migration newer than the set;
+  - the Upgrading rollback first takes a backup of the current state, checks out the previous tag, builds, removes the `app`, `worker` and `backup` containers (`docker compose rm -s -f`, volumes stay), empties the database (`dropdb --force` and then `createdb` in the `db` container), restores and runs `up -d`.
+
+**Tests.**
+- `tests/integration/backup-restore-roundtrip.test.ts`, new describe "a target at a newer schema is refused before any write". The case restores the base set into a fresh target (exit 0, so the rows are real). It then applies one extra migration: a `_prisma_migrations` row `29991231000000_k142_extra`, a `K142Extra` table with a foreign key to `organization` and one row per organization, and a new `organization` column. Then it restores the set again. It expects exit 9 and the refusal line, no `restoring the database`, and these unchanged: the full table inventory (row counts of every table), the uploads volume entries and the `_prisma_migrations` rows (id, name, checksum). It also expects no `target-touched`, no staging directory, and the lock still held.
+- `tests/unit/restore-script.test.ts`: the fake docker answers `--check-schema` (`FAKE_CHECK_EXIT`). The step lists now include `check` between `lease` and `stop`, and the success case pins the exact check call. New cases: check exit 9 and check exit 6 each give the same exit code, the sequence `lock, lease, check, release`, no `stop`, no set run and no `start`.
+
+**Runs:**
+- Red, integration, old set script (`-t "newer schema"`): exit 1, 1 failed, 21 skipped (22). `expected 7 to be 9`. The old script ran `pg_restore --clean` and failed with `cannot drop table public.organization because other objects depend on it`, which is the review's scenario 1. After the test fix in `3bef0ca`, the red run was repeated with the same result: exit 1, `expected 7 to be 9`.
+- Green, integration (same filter): exit 0, 1 passed, 21 skipped (22).
+- Red, unit, old `restore.sh`: exit 1, 6 failed, 14 passed (20). Green: exit 0, 20 passed (20).
+- The docs-reading unit files `part-a-gate-check` and `restore-script`: exit 0, 2 files, 105 passed.
+
+**Commits:** `d37fa7f` fix(09-F2): d-CR-1 refuse a restore into a database with migrations the set lacks (K142); `3bef0ca` fix(09-F2): d-CR-1 seed one extra row per organization in the K142 case. The first full run of the integration file failed in the new case (`duplicate key ... "K142Extra_pkey"`), because the shared base set holds several organizations. The fix was the test's own seed id; the code was not changed.
+
+### d-WR-1: the trap removes the restore container by its exact name before it releases anything
+
+**Change.** In `scripts/restore.sh`:
+- the set script now runs as `compose run ... --name aida-<holder>`;
+- on every exit other than success, once that run has started, the trap first kills and waits for the client as before. Then it runs `docker stop -t 30 aida-<holder>` and `docker rm -f aida-<holder>`, and polls `docker ps -a --filter name=^/aida-<holder>$` once a second until the name is no longer listed. A failed `ps` counts as listed. Only after that does it read `target-touched`, release the lock or start services;
+- if the container is still listed after `RESTORE_CONTAINER_WAIT_SECONDS` (default 60, 1 to 600; another value is a usage error, exit 2), the trap keeps the lock, starts nothing and names the container. While the container runs, its heartbeat keeps the lock fresh, so `--break-stale-lock` keeps refusing;
+- `docs/OPERATIONS.md` ("What a failure leaves behind") describes this.
+
+**Tests** (`tests/unit/restore-script.test.ts`, fake docker: exact-name `stop -t 30`, `rm -f`, `ps -a`, and `FAKE_CONTAINER_LISTED`, a number of polls or `stuck`):
+- validation failure with the container listed by two polls: `set, ctr-stop, ctr-rm, ctr-ps x3, touched, release, start`, with the exact calls pinned and `release` and `start` after the last poll;
+- TERM while the set script hangs, with the container listed by two polls: exit 143, the same order, nothing started before the poll that no longer lists it;
+- container still listed when the wait ends (2 s): exit 4, 3 polls, no `touched`, no `release`, no `start`, and the message names the container and the kept lock;
+- a wait setting of 0: exit 2 and no docker call.
+
+The existing step lists gained the three container steps.
+
+**Runs:** red, old `restore.sh`: exit 1, 9 failed, 15 passed (24). 4 of the failures are in the new d-WR-1 describe. Green: exit 0, 24 passed (24).
+
+**Commit:** `2dcc8a9` fix(09-F2): d-WR-1 the restore trap removes the restore container by name before releasing anything
+
+### d-WR-2: Docker Compose v2 is required
+
+**Change:**
+- `scripts/backup.sh` and `scripts/restore.sh` set `COMPOSE="docker compose"` and no longer read `COMPOSE_CMD`. Their headers, and the `--help` of `backup.sh`, state that Compose v2 is required;
+- `docs/OPERATIONS.md` replaces the `COMPOSE_CMD="docker-compose"` block with that requirement and its reason, and states it in the intro and in "Restore to a new server" step 1;
+- `README.md` (installer prerequisites) and the website quick-start prerequisites say "Docker Compose v2".
+
+**Test:** new `tests/unit/compose-v2-required.test.ts`:
+- it runs `backup.sh` with `COMPOSE_CMD=docker-compose` against a fake `docker` (no `docker-compose` on PATH) and expects exit 0 with every call starting `compose `;
+- it checks that the two scripts, OPERATIONS.md and the website backup page neither set `COMPOSE_CMD` nor run `docker-compose`, and that OPERATIONS.md, the README and the quick-start page say "Docker Compose v2".
+
+**Runs:**
+- Red, old files: exit 1, 2 failed (2). The first assertion fails because `backup.sh` said "The 'db' service is not running": `docker-compose` was not found. The pin regex was then narrowed, so that naming the legacy binary to say it is unsupported is allowed. The red run was repeated with all five files swapped to their old versions (exit 1, 2 failed), and the files were restored and checked with `cmp`.
+- Green: exit 0, 2 passed. Run together with `restore-script`, `install-script` and `part-a-gate-check`, everything else passed.
+
+**Commits:** `017db5b` fix(09-F2): d-WR-2 require Docker Compose v2 and drop the docker-compose option; `0a19100` fix(09-F2): d-WR-2, d-WR-3 give the new script tests a complete ProcessEnv. `pnpm typecheck` refused the two new test files because their spawn env had no `NODE_ENV`.
+
+### d-WR-3: the documented off-host copy runs under umask 077
+
+**Change.** The copy line in `docs/OPERATIONS.md` and the website backup page is now `(umask 077 && docker compose run --rm --no-deps -T --entrypoint tar backup -C /backups -cf - <setId> > aida-backup-<setId>.tar)`. A sentence follows it: the file is mode 0600 and holds tenant data, so store it encrypted or on access-controlled storage.
+
+**Test:** new `tests/unit/offhost-copy-umask.test.ts`. For each of the two pages it takes the one documented line, fills in `<setId>`, runs it under `umask 022` in bash against a fake `docker` that writes a few bytes, and expects the file to be mode `600`.
+
+**Runs:** red, old docs: exit 1, 2 failed (2), `expected '644' to be '600'`. Green: exit 0, 2 passed (with the d-WR-2 file: 2 files, 4 passed).
+
+**Commit:** `44457df` fix(09-F2): d-WR-3 run the documented off-host copy under umask 077 (and `0a19100` above)
+
+### d-WR-4: no test could fail for d-CR-1
+
+The K142 integration case above covers it. It restores into a database at a newer schema, and on the old script it fails: exit 7 instead of the refusal. The review's further SP-2 items (a stack B one release ahead, B's own uploads volume mounted, a HUP during validation on real Compose) were not added to `09-STACK-PROOFS.md`. They need a real compose stack, which U-15 and this dispatch's run rules exclude.
+
+### Part d info items
+
+d-IN-1 to d-IN-5 are recorded unchanged in `deferred-items.md`, one line each with the finding id. None was fixed: each touches the compose file, the installer or the backup exit codes, beyond a small testable change in this batch.
+
+**Commit:** `e2256da` docs(09-F2): record part d info items not fixed in F2
+
+### Final checks
+
+| Command | Exit | Counts |
+|---|---|---|
+| `pnpm lint` | 0 | 671 files, 1 warning, pre-existing: `tests/unit/container-config.test.ts:160`, a file F2 did not touch |
+| `pnpm typecheck` | 0 | 0 errors (a first run gave exit 2 for the two new test files; fixed in `0a19100`) |
+| `pnpm test` | 0 | 95 files, 1672 tests passed |
+| `vitest --config vitest.integration.config.ts tests/integration/backup-restore-roundtrip.test.ts` (full) | 0 | 22 passed (first full run: exit 1, 1 failed, 21 passed, fixed in `3bef0ca`) |
+
+Only this integration file was run, because it is the only one F2 changed. The full integration suite was not run. After the runs, `docker ps -a` and `docker volume ls` showed no container or volume labelled with the run id and no `aida-restore-*` container. F2 created no container or volume outside the test helpers (rule J) and removed none by hand.
+
+### Not done, and limits
+
+- **Real Compose not exercised.** The wrapper's new behaviour was checked only against the fake `docker`. Three things are therefore unproven on real Compose and Docker: the `--check-schema` one-off run, `compose run --name`, and the `docker ps -a` name filter with its leading `/`. The same holds for the new doc steps: `docker compose up -d db backup-init` on a new server, and `docker compose rm -s -f app worker backup` followed by `dropdb --force`/`createdb` in the rollback. It is unproven too that `compose stop` and `compose start` behave as described when those containers do not exist: `restore.sh` is expected to report that it could not start them, and the docs say so. These belong with SP-2 (U-15).
+- **The direction not covered by K142.** The check refuses only a target that is newer than the set. A set that is newer than the running code, restored into an empty or older database, passes. The docs say that migrations go only forward and that a set must not be restored into an earlier release, but no check compares the manifest's app version with the running release.
+- **No minimum Compose v2 point version.** The docs say "Docker Compose v2" without a number. No minimum version for `config --format json` was checked.
+- **Manual items:** none for this batch (no UI change).
