@@ -20,3 +20,13 @@ Recorded unchanged from `09-REVIEW-c.md`; not fixed in F1 (F1 fixed c-CR-01, c-W
 - **c-IN-06:** the organization id in a valid status page's logo URL is accepted as is (orchestrator disposition); the review suggests one line in `docs/SECURITY.md` next to the logo cache note.
 - **c-IN-07:** the Backups tab shows the instance-wide backup status to every workspace's admins; note it in D-04 and `docs/OPERATIONS.md`, or gate it on an instance-operator check once one exists.
 - **c-IN-08:** the logo route handlers rely on SameSite=Lax only (no Origin check as server actions get); refuse a present `Origin` that differs from the app origin, or `Sec-Fetch-Site` other than `same-origin`, before the gate.
+
+## From the Phase 9 code review, part d (fix batch F2)
+
+Recorded unchanged from `09-REVIEW-d.md`; not fixed in F2 (F2 fixed d-CR-1, d-WR-1, d-WR-2 and d-WR-3; d-WR-4 is covered by the d-CR-1 test).
+
+- **d-IN-1:** the `backup` service has none of `backup-init`'s hardening (no `cap_drop`, `no-new-privileges` or read-only root) and keeps full outbound network although it only talks to `db`.
+- **d-IN-2:** `install.sh upgrade` overwrites local edits to shipped files (`Caddyfile`, `docker-compose.yml`) without notice and does not take the backup it recommends.
+- **d-IN-3:** `backup-init` cannot repair a mode drift on a mount point already owned by 1000 (no `CAP_FOWNER`), so `docker compose up` fails on its dependency; skip `chmod` for a 1000-owned mount or print the documented fix.
+- **d-IN-4:** the bind-mounted `scripts/backup` directory is empty when the install path is not shared with the Docker VM (Docker Desktop, Colima), and `backup` then restarts in a loop; add a troubleshooting line or fail early.
+- **d-IN-5:** `backup.sh` exit code 1 is ambiguous: `docker compose run`'s own failures (1, 125 to 127) pass through as the run's code; map them to one documented code.
