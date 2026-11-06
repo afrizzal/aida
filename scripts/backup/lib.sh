@@ -31,10 +31,16 @@ BACKUP_APPLICATION_NAME='aida-backup'
 # The ISO 8601 pattern of the deleter's lease check (file-fence.ts ISO_TIMESTAMP_SOURCE).
 LEASE_ISO_RE='^([0-9]{4})-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9])(\.[0-9]{1,6})?(Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$'
 
-# Archive members: <organizationId>/<storageKey>, the shape local-file-storage.ts writes. Find
-# matches the whole path, so the patterns below carry the leading "./".
-MEMBER_DIR_FIND_RE='\./[A-Za-z0-9_-]{1,64}'
-MEMBER_FIND_RE='\./[A-Za-z0-9_-]{1,64}/[a-z0-9]+\.[a-z0-9]{1,8}'
+# Archive members: <organizationId>/<storageKey>, the shape local-file-storage.ts writes. One rule
+# for backup and restore (b-IN-1): the organization part is 1 to 64 of [A-Za-z0-9_-] and never
+# starts with "-", so a folder the restore would refuse is skipped by the backup (and a row that
+# references a file in it fails verification) instead of being published. Find matches the whole
+# path, so the find patterns carry the leading "./".
+MEMBER_ORG_RE='[A-Za-z0-9_][A-Za-z0-9_-]{0,63}'
+MEMBER_KEY_RE='[a-z0-9]+\.[a-z0-9]{1,8}'
+MEMBER_PATH_RE="$MEMBER_ORG_RE/$MEMBER_KEY_RE"
+MEMBER_DIR_FIND_RE="\\./$MEMBER_ORG_RE"
+MEMBER_FIND_RE="\\./$MEMBER_PATH_RE"
 
 log() {
   printf '[backup] %s\n' "$1"
@@ -432,9 +438,7 @@ restore_lock_break_stale() {
   restore_lock_release "$1" || return 4
 }
 
-# Archive members of a set (plan 09-10, the shape aida-backup.sh archives): one
-# <organizationId>/<storageKey> path. The organization part never starts with "-".
-MEMBER_PATH_RE='[A-Za-z0-9_-]{1,64}/[a-z0-9]+\.[a-z0-9]{1,8}'
+# Archive members of a set (plan 09-10): MEMBER_PATH_RE above, the shape aida-backup.sh archives.
 
 # valid_member_path <path>: true for one member path of the shape above (no absolute path, no
 # "..", no ".", no leading "-", no control character or newline, never the volume marker).

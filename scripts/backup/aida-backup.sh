@@ -495,7 +495,7 @@ sort "$RUN_TMP/members.raw" >"$RUN_TMP/members.list" || step_failed archive
 awk '{ print $2 }' "$SET_TMP/uploads.sha256" | sort >"$RUN_TMP/summed.list" ||
   step_failed archive
 cmp -s "$RUN_TMP/members.list" "$RUN_TMP/summed.list" || step_failed archive
-if grep -Evx '[A-Za-z0-9_-]{1,64}/[a-z0-9]+\.[a-z0-9]{1,8}' "$RUN_TMP/members.list" >/dev/null; then
+if grep -Evx "$MEMBER_PATH_RE" "$RUN_TMP/members.list" >/dev/null; then
   step_failed archive
 fi
 ARCHIVED_FILES=$(($(wc -l <"$RUN_TMP/members.list")))

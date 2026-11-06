@@ -773,6 +773,42 @@ async function referencingRow(orgId: string, key: string): Promise<string> {
 
 describe("archive tolerance and odd entries (U-13, T-09-21)", () => {
   it(
+    "b-IN-1: an organization folder whose name starts with '-' is skipped by the backup, as the restore's member check refuses it",
+    async () => {
+      const c = await newCase();
+      const w = await seedFour(c);
+      const dashOrg = `-${w.orgId}`.slice(0, 64);
+      const key = newKey("txt");
+      await mkdir(path.join(c.uploads, dashOrg));
+      await writeFile(path.join(c.uploads, dashOrg, key), "dash folder\n");
+      const member = `${dashOrg}/${key}`;
+
+      // The restore side (lib.sh member_list_ok) refuses the member.
+      const check = await activeRunner().exec([
+        "sh",
+        "-c",
+        '. /opt/aida-backup/lib.sh; f=$(mktemp); printf "%s\\n" "$1" >"$f"; member_list_ok "$f"; rc=$?; rm -f "$f"; exit "$rc"',
+        "member-check",
+        member,
+      ]);
+      expect(check.exitCode, check.stderr).toBe(1);
+
+      // The backup side skips it: not archived, counted as skipped, the set publishes.
+      const result = await runIn(c).done;
+      const setId = await expectSucceededRun(c, result);
+      await expectConsistentSet(c, setId);
+      expect((await readSums(c, setId)).has(member)).toBe(false);
+      expect((await archiveHashes(c, setId)).has(member)).toBe(false);
+      expect((await readManifest(c, setId)).counts).toEqual({
+        referencedFiles: 4,
+        archivedFiles: 4,
+        skippedEntries: 2,
+      });
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
     "U-13: a file no row references, removed at after-list, leaves the run succeeded and is in neither the archive nor uploads.sha256",
     async () => {
       const c = await newCase();
