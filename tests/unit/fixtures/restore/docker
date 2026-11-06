@@ -8,6 +8,7 @@
 #   FAKE_LOCK_OUTPUT      its output (default holder=restore-0123456789abcdef0123456789abcdef)
 #   FAKE_LEASE_EXIT       exit code of the lease step (default 0)
 #   FAKE_TOUCHED          what the target-touched read prints (default: nothing)
+#   FAKE_CHECK_EXIT       exit code of the set script's --check-schema step (default 0)
 #   FAKE_SET_EXIT         exit code of the set script step (default 0)
 #   FAKE_SET_MODE         `hang`: the set script step waits until it is signalled
 #   FAKE_RELEASE_EXIT     exit code of the release step (default 0)
@@ -89,6 +90,9 @@ esac
 # compose run: only one-off containers of the backup service, removed when they exit.
 has --rm && has --no-deps && has -T && has backup || unexpected "$@"
 
+if has /opt/aida-backup/aida-restore-set.sh && has --check-schema; then
+  exit "${FAKE_CHECK_EXIT:-0}"
+fi
 if has /opt/aida-backup/aida-restore-set.sh; then
   if [ "${FAKE_SET_MODE:-}" = hang ]; then
     trap 'exit 143' TERM INT HUP

@@ -65,14 +65,23 @@ docker compose up -d
 The one-shot `migrate` service runs `prisma migrate deploy` automatically before `app`/`worker`
 start — **there is no manual migration step**.
 
-To roll back, check out the previous git tag and restore the set taken before the upgrade:
+To roll back, check out the previous git tag and restore the set taken before the upgrade into
+an empty database. The upgrade has already migrated the database to the new release, so a
+restore into it is refused (exit code 9):
 
 ```bash
+./scripts/backup.sh                                   # a set of the current state, in case you need it
 git checkout <previous-tag>
 docker compose build
+docker compose rm -s -f app worker backup             # containers only; the volumes stay
+docker compose exec -T db sh -c 'dropdb -U "$POSTGRES_USER" --force "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
 ./scripts/restore.sh <pre-upgrade-setId> --yes
 docker compose up -d
 ```
+
+The `dropdb` line empties the new release's database: run it only once the set ids are noted.
+`restore.sh` then says it could not start `backup`, `app` and `worker` (their containers were
+removed); `docker compose up -d` creates them from the previous release.
 
 This needs a previous tag that already has set-based backups; older releases' own `restore.sh`
 takes a database dump and an uploads tarball instead.

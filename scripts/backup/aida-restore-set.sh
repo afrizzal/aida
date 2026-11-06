@@ -2,7 +2,9 @@
 # scripts/backup/aida-restore-set.sh: validate one backup set, then restore it (Phase 9 plan
 # 09-10, AIDA-33; D-05, U-14, U-16, reviews P5, Q3, Q4, Q7, R3).
 #
-# Usage: aida-restore-set.sh <setDir>     (<setDir> is BACKUP_DIR/<setId>)
+# Usage: aida-restore-set.sh [--check-schema] <setDir>     (<setDir> is BACKUP_DIR/<setId>)
+#   --check-schema  only steps 1 and 2a below (read only), then exit; scripts/restore.sh runs it
+#                   before it stops any service (K142)
 #
 # Runs in the pgvector/pgvector:pg16 image as user 1000:1000 (the app's node user, U-16), started
 # by scripts/restore.sh in a one-off container of the `backup` service. Settings (environment):
@@ -22,8 +24,15 @@
 #   2. validation, writing only to the staging directory BACKUP_DIR/.restore-staging-<holder>:
 #      the set directory holds exactly db.dump, uploads.tar.gz, uploads.sha256 and manifest.json
 #      as regular files; the set id equals the directory name and the manifest's setId; the
-#      sha256 and size of each part equal the manifest's (a forged checksum list fails);
-#      `pg_restore --list` reads the dump; every archive member is a regular file whose path is
+#      sha256 and size of db.dump equal the manifest's; `pg_restore --list` reads the dump;
+#   2a. migrations (K142, d-CR-1, read only): every migration name in the target's
+#      public._prisma_migrations (any state) is also in the dump's _prisma_migrations. A target
+#      without that table (an empty database) passes. Else 'refused: the target database has N
+#      applied migration(s) that the set does not contain', exit 9, nothing written: pg_restore
+#      --clean drops only the dump's objects, so a newer schema would be left half dropped or
+#      older than the running code;
+#   2b. the sha256 and size of uploads.tar.gz and uploads.sha256 equal the manifest's (a forged
+#      checksum list fails); every archive member is a regular file whose path is
 #      <organizationId>/<storageKey> (lib.sh MEMBER_PATH_RE, no leading "-", no duplicate; this
 #      rejects absolute paths, "..", ".", control characters, newlines and the volume marker);
 #      extraction into staging with --no-same-owner and --no-same-permissions; the staged file
@@ -47,8 +56,9 @@
 #   Then exit 0. It never removes a Docker volume. It leaves the restore lock in place on every
 #   exit (scripts/restore.sh owns its release) and always removes its own staging directory.
 #
-# Exit codes: 0 restored, 2 usage, 3 restore lock not held or lost, 4 validation, 6 target check,
-# 7 database step, 8 uploads step.
+# Exit codes: 0 restored (or, with --check-schema, the check passed), 2 usage, 3 restore lock not
+# held or lost, 4 validation, 6 target check, 7 database step, 8 uploads step, 9 the target
+# database has migrations the set does not contain (K142).
 #
 # Log lines are fixed text, prefixed [restore]; tool error output goes to a file in the run's
 # private temporary directory. The one exception: when pg_restore fails, its own `pg_restore:
@@ -152,6 +162,12 @@ fail_uploads() {
   exit 8
 }
 
+fail_schema() {
+  rlog "refused: $1"
+  rlog 'restore into a database of the release the set came from, or into an empty database and then run the target release migrate deploy (docs/OPERATIONS.md, Restore)'
+  exit 9
+}
+
 # True while BACKUP_DIR/.restore-lock still names this run's holder (a read only: the heartbeat
 # loop is the only writer of the heartbeat file).
 holder_ok() {
@@ -230,8 +246,80 @@ dump_volume_id() {
   ' "$RUN_TMP/copy-SystemSetting.txt"
 }
 
+# K142 (d-CR-1): the migration names in the dump's _prisma_migrations, sorted and unique, in
+# RUN_TMP/dump-migrations.txt. No such table in the dump: an empty list. A name that is not
+# [A-Za-z0-9_.-]+, or a COPY block without a migration_name column: failure.
+dump_migrations() {
+  pg_restore --data-only --table=_prisma_migrations --file=- "$SET_DIR/db.dump" \
+    >"$RUN_TMP/copy-migrations.txt" 2>>"$BACKUP_ERRLOG" || return 1
+  awk -F '\t' '
+    BEGIN { inside = 0; col = 0; bad = 0 }
+    !inside && /^COPY / {
+      h = $0
+      sub(/^[^(]*\(/, "", h)
+      sub(/\) FROM stdin;$/, "", h)
+      c = split(h, cols, ", ")
+      for (i = 1; i <= c; i++) {
+        name = cols[i]
+        gsub(/"/, "", name)
+        if (name == "migration_name") col = i
+      }
+      if (col == 0) { bad = 1; exit }
+      inside = 1
+      next
+    }
+    inside && $0 == "\\." { inside = 0; next }
+    inside {
+      if ($col !~ /^[A-Za-z0-9_.-]+$/) { bad = 1; exit }
+      print $col
+    }
+    END { if (bad) exit 3 }
+  ' "$RUN_TMP/copy-migrations.txt" >"$RUN_TMP/dump-migrations.raw" || return 1
+  sort -u "$RUN_TMP/dump-migrations.raw" >"$RUN_TMP/dump-migrations.txt"
+}
+
+# The migration names recorded in the target's public._prisma_migrations (any state: a failed or
+# rolled-back migration may have left schema changes too), sorted and unique, in
+# RUN_TMP/target-migrations.txt. No such table (an empty database): an empty list. Read only.
+target_migrations() {
+  _has_table=$(psql_q -c "SELECT to_regclass('public._prisma_migrations') IS NOT NULL") ||
+    return 1
+  case $_has_table in
+    f) : >"$RUN_TMP/target-migrations.txt" ;;
+    t)
+      psql_q -c 'SELECT DISTINCT migration_name FROM public._prisma_migrations' \
+        >"$RUN_TMP/target-migrations.raw" || return 1
+      sort -u "$RUN_TMP/target-migrations.raw" >"$RUN_TMP/target-migrations.txt"
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+# K142: refuse (exit 9, nothing written) when the target holds an applied migration the dump
+# does not. pg_restore --clean drops only the dump's own objects, so a newer target schema would
+# be left half dropped (a table the dump does not have still references one it drops) or end up
+# older than the running code (compose start does not run migrate).
+check_schema() {
+  [ -n "${PGDATABASE:-}" ] || fail_target 'no target database'
+  dump_migrations || fail_validation 'migration list in the dump'
+  target_migrations || fail_target 'could not read the migrations of the target database'
+  comm -23 "$RUN_TMP/target-migrations.txt" "$RUN_TMP/dump-migrations.txt" \
+    >"$RUN_TMP/extra-migrations.txt" || fail_target 'could not compare the migrations'
+  if [ -s "$RUN_TMP/extra-migrations.txt" ]; then
+    _extra_n=$(($(wc -l <"$RUN_TMP/extra-migrations.txt")))
+    _extra_first=$(head -n 1 "$RUN_TMP/extra-migrations.txt")
+    fail_schema "the target database has $_extra_n applied migration(s) that the set does not contain (a newer schema), first: $_extra_first"
+  fi
+  rlog 'target migrations: all in the set'
+}
+
+CHECK_ONLY=0
+if [ "$#" -eq 2 ] && [ "$1" = --check-schema ]; then
+  CHECK_ONLY=1
+  shift
+fi
 if [ "$#" -ne 1 ]; then
-  rlog 'usage: aida-restore-set.sh <setDir>'
+  rlog 'usage: aida-restore-set.sh [--check-schema] <setDir>'
   exit 2
 fi
 if ! is_uint "$RESTORE_HEARTBEAT_SECONDS" || [ "$RESTORE_HEARTBEAT_SECONDS" -lt 1 ] ||
@@ -282,10 +370,16 @@ _mid=$(sed -n -E 's/^  "setId": "([0-9]{8}T[0-9]{6}Z-[0-9a-f]{6})",$/\1/p' "$MAN
 [ "$_mid" = "$SET_ID" ] || fail_validation 'manifest set id'
 
 check_part db.dump
+pg_restore --list "$SET_DIR/db.dump" >/dev/null 2>>"$BACKUP_ERRLOG" || fail_validation 'dump'
+
+# K142: the target's migrations against the dump's (read only). --check-schema stops here.
+check_schema
+if [ "$CHECK_ONLY" = 1 ]; then
+  exit 0
+fi
+
 check_part uploads.tar.gz
 check_part uploads.sha256
-
-pg_restore --list "$SET_DIR/db.dump" >/dev/null 2>>"$BACKUP_ERRLOG" || fail_validation 'dump'
 
 ARCHIVE="$SET_DIR/uploads.tar.gz"
 SUMS="$SET_DIR/uploads.sha256"

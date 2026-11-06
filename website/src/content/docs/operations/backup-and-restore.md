@@ -76,8 +76,10 @@ set. Unless you pass `--yes`, it asks you to type `restore` before it touches an
 every workspace's data in the set into this instance.
 
 It takes a restore lock on the backups volume and the backup lease, so a second restore or a
-running backup makes it refuse before anything is stopped. Then it stops `backup`, `app` and
-`worker` and validates the **whole set before it writes anything**: every checksum against the
+running backup makes it refuse before anything is stopped. It also refuses, before anything is
+stopped or written (exit code 9), when the target database has an applied migration that the
+set does not contain: see [Which database a set can be restored into](#which-database-a-set-can-be-restored-into).
+Then it stops `backup`, `app` and `worker` and validates the **whole set before it writes anything**: every checksum against the
 manifest, every archive member (regular files named `<organizationId>/<storageKey>` only), and
 the extracted files against the checksum list. Only then does it restore the database and the
 uploads volume, as the app's user (1000:1000), and write the volume marker from the restored
@@ -88,18 +90,37 @@ the uploads step fails, the services are **left stopped** and the message names 
 restore again. The checks detect corruption and partial tampering, not a set forged consistently
 including its unsigned manifest.
 
+## Which database a set can be restored into
+
+`pg_restore --clean` replaces only the objects in the dump, and the restart after a restore does
+not run `migrate`, so a database at a newer schema than the set would be left half dropped or
+older than its code. The restore therefore refuses a target database with a migration the set's
+dump does not contain, unless the database is empty. The supported paths:
+
+- **Into a database of the release the set came from.**
+- **Into an empty database, then the target release's `migrate deploy`:** restore, then run
+  `docker compose up -d --build` with the release you want; its `migrate` service applies every
+  migration newer than the set.
+
+Migrations only go forward: a set made by a later release cannot be restored into an earlier one.
+
 ## Restoring onto a new server
 
-1. Install Docker and clone the repository on the new server.
+1. Install Docker and clone the repository on the new server, at the release that made the set
+   or a later one.
 2. Recreate `.env`. **`BETTER_AUTH_SECRET` and `APP_ENCRYPTION_KEY` must be the exact same
    values as the old server** — losing either makes existing sessions invalid and every stored
    IMAP/SMTP/LLM credential permanently undecryptable.
-3. Start a fresh, empty instance with `docker compose up -d --build`. The database image **must
+3. Start only the database and the backups volume with `docker compose up -d db backup-init`.
+   This does not run `migrate`, so the database stays empty. The database image **must
    be `pgvector/pgvector:pg16`** — a stock `postgres:16` image can't load a dump containing
    `CREATE EXTENSION vector`.
 4. Copy the set into the backups volume:
    `docker compose run --rm --no-deps -T --entrypoint tar backup -C /backups -xf - < aida-backup-<setId>.tar`.
-5. Run `./scripts/restore.sh <setId> --yes`.
+5. Run `./scripts/restore.sh <setId> --yes`. `backup`, `app` and `worker` do not exist yet, so
+   it says it could not start them; that is expected here.
+6. Run `docker compose up -d --build`. Its `migrate` service applies every migration newer than
+   the set, then the services start.
 
 ## Full runbook
 

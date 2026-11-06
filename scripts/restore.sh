@@ -24,12 +24,15 @@
 #      (random holder restore-<32 hex> from lib.sh new_restore_holder; held: exit 3, with the
 #      holder and the heartbeat age) and then the backup lease with the same holder (a running
 #      backup: the lock is released, exit 3, nothing stopped);
-#   4. `docker compose stop backup app worker`;
-#   5. scripts/backup/aida-restore-set.sh runs in a one-off `backup` container as 1000:1000 with
+#   4. a one-off `backup` container runs `aida-restore-set.sh --check-schema` (read only, K142):
+#      the target database holds a migration the set does not contain (a newer schema): exit 9,
+#      nothing stopped or changed. An empty target database passes;
+#   5. `docker compose stop backup app worker`;
+#   6. scripts/backup/aida-restore-set.sh runs in a one-off `backup` container as 1000:1000 with
 #      the uploads volume mounted read-write at /restore/uploads. It validates the whole set before
 #      it writes anything, and writes `.restore-lock/target-touched` (`database`, then `uploads`)
 #      immediately before its first write to each target;
-#   6. on success: the lease and the lock are released, backup, app and worker are started, and
+#   7. on success: the lease and the lock are released, backup, app and worker are started, and
 #      the app's probe is polled for up to 60 s (a warning only).
 #
 # One trap on EXIT, INT, TERM and HUP decides every other outcome. It always releases this
@@ -41,7 +44,8 @@
 # Exit codes: 0 restored; 1 aborted or another error; 2 usage; 3 a restore lock or a running
 # backup refused the restore (or --break-stale-lock refused); 4 the set failed validation; 6 a
 # volume or the restore target failed its check; 7 the database step failed; 8 the uploads step
-# failed; 129, 130, 143 interrupted by HUP, INT, TERM.
+# failed; 9 the target database has migrations the set does not contain (K142); 129, 130, 143
+# interrupted by HUP, INT, TERM.
 #
 # Legacy compose binary: COMPOSE_CMD="docker-compose" ./scripts/restore.sh <setId> (it must
 # support `config --format json`). This script never reads .env itself: compose passes the
@@ -349,6 +353,28 @@ case $rc in
   *)
     err "Could not take the backup lease (exit $rc). Is the db service running? Nothing was stopped."
     exit 1
+    ;;
+esac
+
+# K142 (d-CR-1): refuse a target database that holds a migration the set does not contain (a
+# newer schema). Read only, in a one-off container, before anything is stopped.
+log "Checking the migrations of the target database against set $SET_ID..."
+set +e
+$COMPOSE run --rm --no-deps -T --entrypoint sh -e "RESTORE_HOLDER=$HOLDER" \
+  backup /opt/aida-backup/aida-restore-set.sh --check-schema "/backups/$SET_ID" </dev/null
+rc=$?
+set -e
+case $rc in
+  0) ;;
+  9)
+    err "Refused: the target database has migrations that set $SET_ID does not contain (a newer schema)."
+    err "Nothing was stopped or changed. Restore into a database of the release the set came from, or"
+    err "into an empty database and then run the target release's migrate deploy. See $DOCS."
+    exit 9
+    ;;
+  *)
+    err "The migration check of set $SET_ID failed (exit $rc). Nothing was stopped or changed. See $DOCS."
+    exit "$rc"
     ;;
 esac
 

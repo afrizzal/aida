@@ -82,6 +82,7 @@ function steps(calls: string[]): string[] {
     if (call === "compose start backup app worker") return "start";
     if (call.startsWith("compose exec -T app wget")) return "health";
     if (call.startsWith("compose run ")) {
+      if (call.includes("/opt/aida-backup/aida-restore-set.sh --check-schema")) return "check";
       if (call.includes("/opt/aida-backup/aida-restore-set.sh")) return "set";
       for (const name of ["lock", "lease", "touched", "release", "break"]) {
         if (call.includes(` aida-restore-${name} `) || call.endsWith(` aida-restore-${name}`))
@@ -110,6 +111,9 @@ function expectNoDestructiveCall(run: Run): void {
 /** The exact set-script call (D-05 key link: uploads volume read-write at /restore/uploads). */
 const SET_CALL = `compose run --rm --no-deps -T --entrypoint sh -e RESTORE_HOLDER=${HOLDER} -e UPLOADS_DIR=/restore/uploads -v aida_uploads_data:/restore/uploads backup /opt/aida-backup/aida-restore-set.sh /backups/${SET_ID}`;
 
+/** The read-only migration check (K142), run before anything is stopped. */
+const CHECK_CALL = `compose run --rm --no-deps -T --entrypoint sh -e RESTORE_HOLDER=${HOLDER} backup /opt/aida-backup/aida-restore-set.sh --check-schema /backups/${SET_ID}`;
+
 describe("scripts/restore.sh: outcome rules", () => {
   it("success: stop before the set script, start exactly once after it, lock and lease released, exit 0", () => {
     const run = restore([SET_ID, "--yes"]);
@@ -120,6 +124,7 @@ describe("scripts/restore.sh: outcome rules", () => {
       "inspect aida_backups_data",
       "lock",
       "lease",
+      "check",
       "stop",
       "set",
       "release",
@@ -127,6 +132,7 @@ describe("scripts/restore.sh: outcome rules", () => {
       "health",
     ]);
     expect(run.calls).toContain(SET_CALL);
+    expect(run.calls).toContain(CHECK_CALL);
     const release = run.calls[steps(run.calls).indexOf("release")] as string;
     expect(release).toContain(HOLDER);
     expect(run.calls[steps(run.calls).indexOf("lease")]).toContain(HOLDER);
@@ -138,16 +144,17 @@ describe("scripts/restore.sh: outcome rules", () => {
     const run = restore([SET_ID, "--yes"], { FAKE_SET_EXIT: "4" });
     expect(run.status).toBe(4);
     const s = steps(run.calls);
-    expect(s.slice(0, 7)).toEqual([
+    expect(s.slice(0, 8)).toEqual([
       "config",
       "inspect aida_uploads_data",
       "inspect aida_backups_data",
       "lock",
       "lease",
+      "check",
       "stop",
       "set",
     ]);
-    expect(s.slice(7)).toEqual(["touched", "release", "start"]);
+    expect(s.slice(8)).toEqual(["touched", "release", "start"]);
     expect(count(s, "start")).toBe(1);
     expect(run.stderr).toContain("nothing was changed");
     expectNoDestructiveCall(run);
@@ -161,7 +168,7 @@ describe("scripts/restore.sh: outcome rules", () => {
       const run = restore([SET_ID, "--yes"], { FAKE_SET_EXIT: code, FAKE_TOUCHED: touched });
       expect(run.status).toBe(Number(code));
       const s = steps(run.calls);
-      expect(s.slice(5)).toEqual(["stop", "set", "touched", "release"]);
+      expect(s.slice(6)).toEqual(["stop", "set", "touched", "release"]);
       expect(count(s, "start")).toBe(0);
       expect(run.stderr).toContain(`${step} step`);
       expect(run.stderr).toContain("left stopped");
@@ -231,6 +238,25 @@ describe("scripts/restore.sh: refusals before anything is stopped", () => {
     expect(run.stderr).toContain("a backup is running; retry after it finishes");
     expectNoDestructiveCall(run);
   });
+
+  for (const [code, says] of [
+    ["9", "Refused: the target database has migrations that set"],
+    ["6", "The migration check of set"],
+  ] as const) {
+    it(`migration check exit ${code} (K142): the lock and lease are released, exit ${code}, no stop, no set run and no start`, () => {
+      const run = restore([SET_ID, "--yes"], { FAKE_CHECK_EXIT: code });
+      expect(run.status).toBe(Number(code));
+      const s = steps(run.calls);
+      expect(s.slice(3)).toEqual(["lock", "lease", "check", "release"]);
+      expect(run.calls[s.indexOf("check")]).toBe(CHECK_CALL);
+      expect(count(s, "stop")).toBe(0);
+      expect(count(s, "set")).toBe(0);
+      expect(count(s, "start")).toBe(0);
+      expect(run.stderr).toContain(says);
+      expect(run.stderr).toContain("Nothing was stopped or changed");
+      expectNoDestructiveCall(run);
+    });
+  }
 
   for (const volume of ["aida_uploads_data", "aida_backups_data"]) {
     it(`missing volume ${volume}: exit 6, nothing locked or stopped`, () => {

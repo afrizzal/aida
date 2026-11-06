@@ -152,14 +152,15 @@ What it does, in order:
 1. Checks the set id and, without `--yes`, asks for the confirmation.
 2. Finds the real names of the `uploads_data` and `backups_data` volumes from `docker compose config --format json` (a project name or a `name:` changes them) and checks each with `docker volume inspect`. A missing volume stops it with exit code 6; nothing is stopped.
 3. Takes the **restore lock** in one-off containers of the `backup` service: a directory `.restore-lock` on the backups volume holding a new random holder (`restore-` and 32 hex characters) and a heartbeat. It lives on the backups volume, so it survives the database replacement. Then it takes the backup lease with the same holder, so a backup that is running makes the restore refuse before anything is stopped, and a backup that starts later sees the lock and skips (`backup skipped: restore in progress`).
-4. Stops `backup`, `app` and `worker` (no writes, no job pickup, no backup while it runs).
-5. Runs `scripts/backup/aida-restore-set.sh` in a one-off `backup` container as user 1000:1000, with the uploads volume mounted read-write at `/restore/uploads`. It renews the lock's heartbeat every 60 seconds and stops when the lock names another holder.
+4. Checks the target database's migrations against the set, read only, in a one-off `backup` container (`aida-restore-set.sh --check-schema`): when the database holds a migration that the set's dump does not contain (a newer schema), it refuses with exit code 9 before anything is stopped. An empty database passes. See [Which database a set can be restored into](#which-database-a-set-can-be-restored-into).
+5. Stops `backup`, `app` and `worker` (no writes, no job pickup, no backup while it runs).
+6. Runs `scripts/backup/aida-restore-set.sh` in a one-off `backup` container as user 1000:1000, with the uploads volume mounted read-write at `/restore/uploads`. It renews the lock's heartbeat every 60 seconds and stops when the lock names another holder.
    - **Validation, before anything is written** (the lines say `[restore] validation: <reason>`, then `set failed validation`, exit code 4): the set directory holds exactly the four files; the set id equals the directory name and the manifest's `setId`; the sha256 and size of `db.dump`, `uploads.tar.gz` and `uploads.sha256` equal the manifest's (`<file> checksum`); `pg_restore --list` reads the dump (`dump`); every archive member is a regular file named `<organizationId>/<storageKey>` (`member name`, `member type`: no absolute path, `..`, link, device, FIFO, odd name or volume marker); the archive is extracted into `.restore-staging-<holder>` on the backups volume, and the extracted files must equal the checksum list exactly with every checksum matching (`staged checksum`); the dump must hold the uploads volume identity (`volume identity missing from the dump`).
    - **Target checks** (exit code 6, nothing written): it runs as 1000:1000; the uploads target is a mount point (`uploads target is not a mount point`); every entry in it is owned by 1000:1000 (`uploads target holds an entry not owned by 1000:1000`; see below).
    - **Database step** (exit code 7 on failure): `pg_restore --clean --if-exists --no-owner --no-privileges` into the database, then the `backup:lease` row the dump carried in is removed.
    - **Uploads step** (exit code 8 on failure): removes the volume's current entries one by one (never the volume itself), copies the extracted files in (directories 0755, files 0644, owned by 1000:1000), checks every copied file against `uploads.sha256`, and writes the volume marker `.aida-uploads-volume` from the restored database's identity, so the next backup and the file cleanup recognise the volume. Then it checks that every entry is owned by 1000:1000 and that a probe file can be created, read and removed.
    - The staging directory is removed on every exit.
-6. On success: releases the lease and the lock, starts `backup`, `app` and `worker`, and polls the app's probe (`/api/health/probe`, inside the `app` container) for up to 60 seconds; a probe that does not answer is a warning only.
+7. On success: releases the lease and the lock, starts `backup`, `app` and `worker`, and polls the app's probe (`/api/health/probe`, inside the `app` container) for up to 60 seconds; a probe that does not answer is a warning only.
 
 **Refusals before anything is stopped** (the set and the instance are untouched, nothing to clean up):
 
@@ -169,6 +170,16 @@ What it does, in order:
 | `a backup is running; retry after it finishes.` | 3 | Wait for the backup run to end, then run the restore again. |
 | `Volume <name> does not exist.` | 6 | Run the script from the same checkout and project name as the running stack. |
 | `Set <setId> was not found in the backups volume.` | 4 | List the sets (above) and check the id. |
+| `Refused: the target database has migrations that set <setId> does not contain (a newer schema).` | 9 | The database belongs to a later release than the set. See [Which database a set can be restored into](#which-database-a-set-can-be-restored-into). |
+
+### Which database a set can be restored into
+
+`pg_restore --clean` drops and recreates only the objects that are in the dump, and the restart after a restore does not run `migrate`. A database at a newer schema than the set would be left half dropped (a table the dump does not know still references one it drops) or end up older than the code that runs on it. So the restore refuses, before it stops anything or writes anything, when the target database has an applied migration (a row in `_prisma_migrations`) that the set's dump does not contain, unless the database is empty. Two paths are supported:
+
+- **Into a database of the release the set came from.** Run the release that made the set; its database has the same migrations as the dump, and the restore replaces it.
+- **Into an empty database, then the target release's `migrate deploy`.** Restore into a database that has no tables yet, then run `docker compose up -d --build` with the release you want: its one-shot `migrate` service runs `prisma migrate deploy`, which applies every migration newer than the set. [Restore to a new server](#restore-to-a-new-server) and the rollback under [Upgrading](#upgrading) show the commands.
+
+Migrations only go forward: a set made by a later release cannot be restored into an earlier release.
 
 ### What a failure leaves behind
 
@@ -212,18 +223,19 @@ It removes the lock only when the stored holder matches and the heartbeat is old
 Moving AIDA to new hardware (disk failure, migration, etc.):
 
 1. **Install Docker** (Docker Engine + Compose plugin) on the new server.
-2. **Clone the repo**: `git clone <your-fork-or-origin> && cd aida`, at the release that made the set (or a later one).
+2. **Clone the repo**: `git clone <your-fork-or-origin> && cd aida`, at the release that made the set or a later one (never an earlier one: migrations only go forward).
 3. **Recreate `.env`.** Copy your old `.env` across, or recreate it from `.env.example`. **`BETTER_AUTH_SECRET` and `APP_ENCRYPTION_KEY` MUST be the exact same values as the old server.** If they differ, existing user sessions become invalid and — more importantly — every stored IMAP/SMTP/LLM credential becomes permanently undecryptable (they're encrypted with `APP_ENCRYPTION_KEY`; there is no recovery path for a lost key other than re-entering every credential from scratch).
-4. **Start a fresh, empty instance**: `docker compose up -d --build`. This creates the volumes with the ownership the services need, prepares the backups volume (`backup-init`) and migrates an empty database. The database **must** be the `pgvector/pgvector:pg16` image already pinned in `docker-compose.yml` — a stock `postgres:16` image cannot load a dump containing `CREATE EXTENSION vector`.
+4. **Start only the database and the backups volume**: `docker compose up -d db backup-init`. This creates the volumes with the ownership the services need and prepares the backups volume (`backup-init`). It does not run `migrate`, so the database stays empty and the restore accepts it whatever release you cloned (see [Which database a set can be restored into](#which-database-a-set-can-be-restored-into)). The database **must** be the `pgvector/pgvector:pg16` image already pinned in `docker-compose.yml` — a stock `postgres:16` image cannot load a dump containing `CREATE EXTENSION vector`.
 5. **Copy the set into the backups volume**, from the tar stream made as in [Copying backups off the host](#copying-backups-off-the-host):
 
    ```bash
    docker compose run --rm --no-deps -T --entrypoint tar backup -C /backups -xf - < aida-backup-<setId>.tar
    ```
 
-6. **Run the restore**: `./scripts/restore.sh <setId> --yes`. It replaces the empty instance's database and uploads with the set and starts `backup`, `app` and `worker` again.
-7. **Verify**: `curl http://localhost/api/health` should return `{"status":"ok",...}`.
-8. **Point DNS** at the new host and set `DOMAIN` in `.env` to your real domain, then `docker compose up -d caddy` — Caddy will automatically obtain a fresh Let's Encrypt certificate for the domain once ports 80/443 are reachable from the internet.
+6. **Run the restore**: `./scripts/restore.sh <setId> --yes`. It fills the empty database and the uploads volume from the set. `backup`, `app` and `worker` do not exist yet, so it says it could not start them; that is expected here.
+7. **Start the instance**: `docker compose up -d --build`. The one-shot `migrate` service runs this release's `prisma migrate deploy`, which applies every migration newer than the set (none when you cloned the set's own release), and then `app`, `worker` and `backup` start.
+8. **Verify**: `curl http://localhost/api/health` should return `{"status":"ok",...}`.
+9. **Point DNS** at the new host and set `DOMAIN` in `.env` to your real domain, then `docker compose up -d caddy` — Caddy will automatically obtain a fresh Let's Encrypt certificate for the domain once ports 80/443 are reachable from the internet.
 
 ## Upgrading
 
@@ -237,14 +249,19 @@ docker compose up -d
 
 The one-shot `migrate` service runs `prisma migrate deploy` automatically before `app`/`worker` start (it's gated on `db` being healthy, and `app`/`worker` are gated on `migrate` completing successfully) — **no manual migration step is needed**.
 
-**Take a backup first**: `./scripts/backup.sh` before every upgrade, and note the set id on its `backup succeeded` line. If something goes wrong, roll back by checking out the previous git tag and restoring the pre-upgrade set:
+**Take a backup first**: `./scripts/backup.sh` before every upgrade, and note the set id on its `backup succeeded` line. If something goes wrong, roll back to the previous git tag and restore the pre-upgrade set into an empty database. The upgrade has already migrated the database to the new release, so a restore into it is refused (exit code 9, see [Which database a set can be restored into](#which-database-a-set-can-be-restored-into)):
 
 ```bash
+./scripts/backup.sh                                   # a set of the current state, in case you need it
 git checkout <previous-tag>
 docker compose build
+docker compose rm -s -f app worker backup             # containers only; the volumes stay
+docker compose exec -T db sh -c 'dropdb -U "$POSTGRES_USER" --force "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
 ./scripts/restore.sh <pre-upgrade-setId> --yes
 docker compose up -d
 ```
+
+The `dropdb` line empties the database of the new release. Run it only after the set ids are noted, because everything in the database after the pre-upgrade set is then only in the set the first line made. `restore.sh` says it could not start `backup`, `app` and `worker` (their containers were removed, so no new-release container runs on the old schema); `docker compose up -d` then creates them from the previous release and its `migrate` finds nothing to apply.
 
 This form needs a previous tag that already has set-based backups (this release or later). Releases before it took a database dump and an uploads tarball as two files, and their own `restore.sh` takes those two files.
 

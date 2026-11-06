@@ -1002,6 +1002,65 @@ describe("unsafe targets are refused before any write (U-16, Q7)", () => {
   );
 });
 
+describe("a target at a newer schema is refused before any write (K142, d-CR-1, d-WR-4)", () => {
+  it(
+    "one extra migration (a table with a foreign key to organization, a new column): exit 9, rows, migrations and volume unchanged",
+    async () => {
+      const target = await newTargetDatabase();
+      const runner = await newRestoreRunner(target);
+      const { c, setId } = await copyOfBase(runner);
+
+      // The target first holds the set's own data, so the row counts are not all zero.
+      const first = newHolder();
+      await acquireLock(runner, c, first);
+      const seeded = await runRestore(runner, c, setId, first).done;
+      expect(seeded.exitCode, `${seeded.stdout}\n${seeded.stderr}`).toBe(0);
+      await releaseLock(runner, c, first);
+
+      // One migration the set does not contain, as a later release would apply it.
+      await query(
+        target,
+        `ALTER TABLE "organization" ADD COLUMN "k142Extra" TEXT;
+         CREATE TABLE "K142Extra" ("id" TEXT PRIMARY KEY,
+           "organizationId" TEXT NOT NULL REFERENCES "organization"("id"));
+         INSERT INTO "K142Extra" ("id", "organizationId") SELECT 'k142-1', "id" FROM "organization";
+         INSERT INTO "_prisma_migrations" ("id", "checksum", "migration_name", "started_at",
+           "finished_at", "applied_steps_count")
+           VALUES ('00000000-0000-4000-8000-000000000142', 'k142', '29991231000000_k142_extra',
+             now(), now(), 1);`,
+      );
+      const migrations = () =>
+        query<{ id: string; migration_name: string; checksum: string }>(
+          target,
+          'SELECT "id", "migration_name", "checksum" FROM "_prisma_migrations" ORDER BY "id"',
+        );
+      const extraRows = await query<{ n: string }>(target, 'SELECT count(*) AS n FROM "K142Extra"');
+      expect(Number(extraRows[0]?.n)).toBeGreaterThan(0);
+      const migrationsBefore = await migrations();
+      expect(migrationsBefore.map((m) => m.migration_name)).toContain("29991231000000_k142_extra");
+
+      const holder = newHolder();
+      await acquireLock(runner, c, holder);
+      const before = await snapshot(runner, target);
+      expect(Object.values(before.inventory).some((n) => n > 0)).toBe(true);
+      const result = await runRestore(runner, c, setId, holder).done;
+      expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(9);
+      expectRestoreLog(result);
+      expect(result.stdout).toContain(
+        "[restore] refused: the target database has 1 applied migration(s) that the set does not contain (a newer schema), first: 29991231000000_k142_extra",
+      );
+      expect(result.stdout).not.toContain("restoring the database");
+      expect(await snapshot(runner, target)).toEqual(before);
+      expect(await migrations()).toEqual(migrationsBefore);
+      expect(await targetTouched(runner, c)).toBeNull();
+      expect(await stagingDirs(c)).toEqual([]);
+      expect(await lockHolder(runner, c)).toBe(holder);
+      await releaseLock(runner, c, holder);
+    },
+    CASE_TIMEOUT,
+  );
+});
+
 describe("empty round trip (R3)", () => {
   it(
     "empty round trip: an install with the identity and its marker and no file backs up and restores, and the restored marker equals the restored identity",
