@@ -130,4 +130,18 @@ describe("public logo route", () => {
     // Another identity is not limited by it.
     expect((await call(orgId, version)).status).toBe(404);
   });
+
+  it("counts malformed requests too: the limiter runs before any parameter check (review c-IN-02)", async () => {
+    // If the limiter moved below the ORG_ID/VERSION check, malformed requests would never be
+    // counted and the 301st would still answer 404.
+    vi.spyOn(Date, "now").mockReturnValue(Date.now());
+    const { max } = PUBLIC_RATE_LIMITS.logo;
+    const ip = uniqueClientIp();
+    for (let i = 0; i < max; i += 1) {
+      expect((await call("../x", "not-a-version", ip)).status).toBe(404);
+    }
+    const limited = await call("../x", "not-a-version", ip);
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toEqual({ error: "rate_limited" });
+  });
 });
