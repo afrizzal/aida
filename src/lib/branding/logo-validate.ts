@@ -8,8 +8,16 @@
 // Last, the width and height are read from the image header by hand (no image package and no
 // decode): PNG IHDR, the first JPEG frame header (SOF0 to SOF15 except DHT, JPG and DAC), WebP
 // `VP8 `, `VP8L` and `VP8X`. A header that cannot be read is unreadable, and either side above
-// LOGO_MAX_PIXELS is too_many_pixels. No pixel is decoded, so a decompression bomb costs nothing
-// here; the browser decodes at most a 1024 x 1024 image.
+// LOGO_MAX_PIXELS is too_many_pixels. Then the file must hold image data consistent with its
+// format (review c-WR-01), still without decoding a pixel: a PNG's chunks are framed within the
+// file, start with IHDR and reach IEND after at least one non-empty IDAT (an `acTL` chunk, APNG,
+// is not_image); a JPEG has a start of scan after its frame header, scan data, then an end of image;
+// a WebP's chunks fit inside its RIFF size, which fits in the file, a `VP8 ` chunk holds its whole
+// first partition, a `VP8L` chunk holds data after its header, and `VP8X` is followed by an image
+// chunk. A file cut after its header (a partial download or an interrupted export) is unreadable,
+// so the user sees the "could not be read" copy instead of a logo that renders as an empty box.
+// No pixel is decoded, so a decompression bomb costs nothing here; the browser decodes at most a
+// 1024 x 1024 image.
 //
 // Relative imports only.
 import { fileTypeFromBuffer } from "file-type";
@@ -119,6 +127,97 @@ function webpSize(b: Buffer): Size | null {
   return null;
 }
 
+type Structure = "complete" | "incomplete" | "animated";
+
+/** PNG chunks framed within the file: IHDR first, a non-empty IDAT, then IEND. */
+function pngStructure(b: Buffer): Structure {
+  let i = PNG_SIGNATURE.length;
+  let first = true;
+  let sawImageData = false;
+  while (i + 12 <= b.length) {
+    const length = b.readUInt32BE(i);
+    const type = b.toString("latin1", i + 4, i + 8);
+    const end = i + 12 + length; // length, type, data, CRC
+    if (length > 0x7fffffff || end > b.length) return "incomplete";
+    if (first && type !== "IHDR") return "incomplete";
+    first = false;
+    if (type === "acTL") return "animated";
+    if (type === "IDAT" && length > 0) sawImageData = true;
+    if (type === "IEND") return sawImageData ? "complete" : "incomplete";
+    i = end;
+  }
+  return "incomplete";
+}
+
+/** A JPEG frame header, then a start of scan with scan data, then an end of image (FF D9). */
+function jpegStructure(b: Buffer): Structure {
+  let i = 2;
+  let sawFrame = false;
+  while (i < b.length) {
+    if (b[i] !== 0xff) return "incomplete";
+    while (i < b.length && b[i] === 0xff) i++; // fill bytes
+    if (i >= b.length) return "incomplete";
+    const marker = b[i] as number;
+    i++;
+    if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+    if (marker === 0x00 || marker === 0xd9) return "incomplete";
+    if (i + 2 > b.length) return "incomplete";
+    const length = b.readUInt16BE(i);
+    if (length < 2 || i + length > b.length) return "incomplete";
+    if (marker === 0xda) {
+      if (!sawFrame) return "incomplete";
+      // Inside scan data an FF byte is followed by a stuffed 00 or a restart marker, so the first
+      // FF D9 after at least one byte of scan data is the end of the image.
+      const scanStart = i + length;
+      const eoi = b.indexOf(Buffer.from([0xff, 0xd9]), scanStart + 1);
+      return eoi === -1 ? "incomplete" : "complete";
+    }
+    if (isFrameHeader(marker)) sawFrame = true;
+    i += length;
+  }
+  return "incomplete";
+}
+
+/** WebP chunks inside a RIFF size that fits the file, with image data in a `VP8 ` or `VP8L` chunk. */
+function webpStructure(b: Buffer): Structure {
+  if (b.length < 12) return "incomplete";
+  const riffEnd = 8 + b.readUInt32LE(4);
+  if (riffEnd > b.length || riffEnd < 12) return "incomplete";
+  let i = 12;
+  let sawImage = false;
+  while (i + 8 <= riffEnd) {
+    const fourcc = b.toString("latin1", i, i + 4);
+    const size = b.readUInt32LE(i + 4);
+    const data = i + 8;
+    if (data + size > riffEnd) return "incomplete";
+    if (fourcc === "VP8 ") {
+      // Frame tag: bit 0 clear for a key frame, bits 5 to 23 the first partition size, which
+      // follows the 10-byte frame header.
+      if (size < 10) return "incomplete";
+      const tag =
+        (b[data] as number) | ((b[data + 1] as number) << 8) | ((b[data + 2] as number) << 16);
+      const firstPartition = tag >>> 5;
+      if ((tag & 1) !== 0 || firstPartition === 0 || 10 + firstPartition > size)
+        return "incomplete";
+      sawImage = true;
+    } else if (fourcc === "VP8L") {
+      if (size <= 5) return "incomplete"; // signature and dimensions only
+      sawImage = true;
+    } else if (fourcc === "ANMF") {
+      if (size <= 16) return "incomplete"; // frame header only (animation policy: review c-IN-04)
+      sawImage = true;
+    }
+    i = data + size + (size % 2); // chunks are padded to an even length
+  }
+  return sawImage ? "complete" : "incomplete";
+}
+
+function structure(mimeType: LogoMimeType, b: Buffer): Structure {
+  if (mimeType === "image/png") return pngStructure(b);
+  if (mimeType === "image/jpeg") return jpegStructure(b);
+  return webpStructure(b);
+}
+
 function headerSize(mimeType: LogoMimeType, b: Buffer): Size | null {
   const size =
     mimeType === "image/png" ? pngSize(b) : mimeType === "image/jpeg" ? jpegSize(b) : webpSize(b);
@@ -148,5 +247,8 @@ export async function validateLogo(bytes: Uint8Array): Promise<LogoValidation> {
   if (size.width > LOGO_MAX_PIXELS || size.height > LOGO_MAX_PIXELS) {
     return { ok: false, code: "too_many_pixels" };
   }
+  const shape = structure(sniffed.mime, b);
+  if (shape === "animated") return { ok: false, code: "not_image" };
+  if (shape === "incomplete") return { ok: false, code: "unreadable" };
   return { ok: true, mimeType: sniffed.mime, width: size.width, height: size.height };
 }

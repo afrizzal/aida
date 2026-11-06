@@ -4,11 +4,15 @@ import { describe, expect, it } from "vitest";
 import { LOGO_MAX_BYTES, LOGO_MAX_PIXELS, validateLogo } from "@/lib/branding/logo-validate";
 import {
   jpegBytes,
+  jpegHeaderOnlyBytes,
   padTo,
   pngBytes,
+  pngHeaderOnlyBytes,
   webpVp8Bytes,
+  webpVp8HeaderOnlyBytes,
   webpVp8lBytes,
   webpVp8xBytes,
+  webpVp8xHeaderOnlyBytes,
 } from "../support/logo-images";
 
 function refusal(code: string) {
@@ -141,14 +145,59 @@ describe("validateLogo: unreadable input", () => {
   });
 
   it("refuses a JPEG cut inside its frame header as unreadable", async () => {
-    const jpeg = jpegBytes(300, 200);
-    expect(await validateLogo(jpeg.subarray(0, jpeg.length - 12))).toEqual(refusal("unreadable"));
+    // The header-only shape ends with the 19-byte frame header and EOI: cut 12 bytes from its end.
+    const cut = jpegHeaderOnlyBytes(300, 200).length - 12;
+    expect(await validateLogo(jpegBytes(300, 200).subarray(0, cut))).toEqual(refusal("unreadable"));
   });
 
   it("refuses a lossy WebP without the VP8 start code as unreadable", async () => {
     const webp = webpVp8Bytes(64, 64);
     webp[23] = 0x00;
     expect(await validateLogo(webp)).toEqual(refusal("unreadable"));
+  });
+});
+
+describe("validateLogo: image data consistent with the format (review c-WR-01)", () => {
+  it("refuses a PNG cut right after IHDR as unreadable", async () => {
+    // 8-byte signature + 25-byte IHDR chunk.
+    expect(await validateLogo(pngBytes(64, 32).subarray(0, 33))).toEqual(refusal("unreadable"));
+  });
+
+  it("refuses a header-only PNG (empty IDAT) as unreadable", async () => {
+    expect(await validateLogo(pngHeaderOnlyBytes(64, 32))).toEqual(refusal("unreadable"));
+  });
+
+  it("refuses a PNG without IEND as unreadable", async () => {
+    const png = pngBytes(64, 32);
+    expect(await validateLogo(png.subarray(0, png.length - 12))).toEqual(refusal("unreadable"));
+  });
+
+  it("refuses a PNG whose IDAT length runs past the end of the file as unreadable", async () => {
+    const png = pngBytes(64, 32);
+    expect(await validateLogo(png.subarray(0, png.length - 20))).toEqual(refusal("unreadable"));
+  });
+
+  it("refuses a header-only JPEG (no start of scan) as unreadable", async () => {
+    expect(await validateLogo(jpegHeaderOnlyBytes(300, 200))).toEqual(refusal("unreadable"));
+  });
+
+  it("refuses a JPEG cut after its start of scan (no end of image) as unreadable", async () => {
+    const jpeg = jpegBytes(300, 200);
+    expect(await validateLogo(jpeg.subarray(0, jpeg.length - 2))).toEqual(refusal("unreadable"));
+  });
+
+  it("refuses a header-only lossy WebP (VP8 frame header, no partition) as unreadable", async () => {
+    expect(await validateLogo(webpVp8HeaderOnlyBytes(64, 64))).toEqual(refusal("unreadable"));
+  });
+
+  it("refuses a VP8X WebP with no image chunk as unreadable", async () => {
+    expect(await validateLogo(webpVp8xHeaderOnlyBytes(64, 64))).toEqual(refusal("unreadable"));
+  });
+
+  it("refuses a WebP cut short of its RIFF size as unreadable", async () => {
+    for (const webp of [webpVp8Bytes(64, 64), webpVp8lBytes(64, 64), webpVp8xBytes(64, 64)]) {
+      expect(await validateLogo(webp.subarray(0, webp.length - 4))).toEqual(refusal("unreadable"));
+    }
   });
 });
 
