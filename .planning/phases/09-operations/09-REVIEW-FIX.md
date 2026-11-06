@@ -400,3 +400,133 @@ Containers:
 - **Real Compose not exercised.** The scheduler's watchdog was tested only with a fake run on the host's `sh` (bash in POSIX mode on macOS), not inside the `backup` service. The compose change was checked only by the unit pin.
 - **Human verification:** K143 (renewal margin, deadline, the lease-lost exit 5) and K144 (slot semantics, the 2 s wait) are logic changes.
 - **Manual items:** none for this batch (no UI change).
+
+## F4
+
+**Date:** 2026-11-12. **Scope:** part a (`09-REVIEW.md`): a-WR-1 (K145), a-WR-2 (K146), a-WR-3, a-IN-2 and a-IN-6. The other part a info items are in `deferred-items.md`. **Where it ran:** the main checkout on `v2/run-loop`, no worktree, as the dispatch asked. Runs used `AIDA_TEST_RUN_ID=mwdmf9mj-72630d119ae68b2b` and the Colima `DOCKER_HOST` (`colima status` exit 0 and `docker info` exit 0 first). One test process ran at a time, and exit codes were read without a pipe. For each red run the old file (a scratch copy taken before the first edit, or `git show HEAD:<path>`) was swapped in, and the new file was then restored with `cp` and checked with `cmp` (exit 0 every time). No code path deletes demo or tenant data; the only new outcomes are refusals that write nothing. **Result:** 5 of 5 in-scope findings fixed, 5 fix commits and 1 docs commit. a-WR-1 and a-WR-2 are logic changes and **require human verification**.
+
+### a-WR-3: equal admin and agent demo emails are refused before any write
+
+**Change.**
+- `src/lib/demo/tenant-guard.ts`: new `demoIdentitiesCollide(env)`, true when the two configured demo emails are the same address after lower-casing. `runGuardedDemoSeed` checks it first, before the lock and before any read or write, and returns the new outcome `refused-config`.
+- `src/lib/demo/bootstrap-demo.ts` logs one line for it: `[demo] Refusing to seed: DEMO_ADMIN_EMAIL and DEMO_AGENT_EMAIL are the same address; nothing written. Set two different addresses.` The boot returns normally.
+- `prisma/seed.ts` prints the `[seed]` form of that line and exits 1.
+- `docs/OPERATIONS.md` (Demo mode) states that the two addresses must differ.
+
+**Test.** New case in `tests/integration/demo-boot.test.ts`. The agent email is the admin email in upper case, on an empty database. The seed CLI exits 1 with the line, and the demo boot returns with its line. Both print no password and no delete advice, and the full table inventory is unchanged after each run.
+
+**Runs** (`-t "equal admin and agent"`):
+- Red, old `tenant-guard.ts`, `bootstrap-demo.ts` and `seed.ts`: exit 1, 1 failed, 20 skipped (21). The seed CLI printed `[bootstrap] Created admin: ...` instead of the refusal. That was the first of the three committed writes.
+- Green: exit 0, 1 passed, 20 skipped (21).
+
+**Commit:** `a21311b` fix(09-F4): a-WR-3 the demo guard refuses equal admin and agent demo emails before any write
+
+### a-WR-2 / K146: bootstrap failures never stop `register()`, and the boot lock waits are bounded
+
+**Change.**
+- `src/lib/tenant-seed-lock.ts`:
+  - new option `maxWaitMs`, the pooled-connection wait (default 30 s as before);
+  - new constant `BOOT_TENANT_SEED_LOCK_OPTIONS` = `{ lockTimeoutMs: 10_000, maxWaitMs: 10_000 }`.
+- `src/lib/bootstrap.ts`, `bootstrapFromEnv(lockOptions)`:
+  - a lock timeout still logs its one line;
+  - every other failure now logs `[bootstrap] Skipped the headless admin bootstrap after an error (<class>[, <code>]); the app starts without it.` and returns. The class and the code are printed only when they match a fixed shape. The message is never printed, because it can quote the email.
+- `runGuardedDemoSeed` passes `maxWaitMs` through, and `bootstrapDemoMode(lockOptions)` passes both waits.
+- `src/instrumentation.ts` passes `BOOT_TENANT_SEED_LOCK_OPTIONS` to both steps.
+
+**The stated bound** (in the constant's comment and in `docs/OPERATIONS.md`, Demo mode, "Boot never waits long on the lock"):
+- the bootstrap and the demo boot each wait at most 10 s for a connection and 10 s for the lock;
+- so `register()` waits at most 40 s in total before the app serves, plus the run time of a bootstrap or demo seed that does run.
+
+The seed CLI and other callers keep the 120 s and 30 s defaults.
+
+**Test.** New `tests/unit/boot-tenant-seed-lock.test.ts`. The real `instrumentation.ts`, `bootstrap.ts`, `bootstrap-demo.ts` and `tenant-guard.ts` run. Only `withTenantSeedLock`, the database, Better Auth, the demo data module and the pepper check are replaced. Three cases:
+- an injected `PrismaClientKnownRequestError` with code P2028, whose message quotes the email and the password: `register()` resolves, exactly the one fixed line is logged, and neither the email nor the password appears;
+- a non-Error rejection: `register()` resolves and logs `unknown error`;
+- with `DEMO_MODE=true` and a lock timeout on both steps: two lock calls, each with `{ lockTimeoutMs: 10000, maxWaitMs: 10000 }`, and the two skip lines.
+
+**Runs:**
+- Red, all five old source files swapped in: exit 1, 3 failed (3). Case 1 failed with "promise rejected ... instead of resolving", which is the review's scenario. Case 3 failed with `expected undefined to deeply equal { lockTimeoutMs: 10000, ... }`.
+- **Deviation during the red run.** The shell is zsh, so an unquoted `$F` list did not split. The scratch backup of the new files therefore failed, and the red swap overwrote them. The red result stands, because the old files were in place. I re-applied the same edits from the same script (identical diff stat, 59 insertions and 15 deletions over 5 files) and backed them up before going on. Every later loop used explicit paths.
+- Green: exit 0, 3 passed. `tsc` exit 0, Biome exit 0 after formatting the test file.
+
+**Commit:** `f694255` fix(09-F4): a-WR-2 bootstrap failures never stop register(), and boot lock waits are bounded (K146)
+
+### a-WR-1 / K145: the /setup wizard counts and creates under the tenant seed lock
+
+**Change.**
+- `src/app/(auth)/setup/actions.ts`: the user count, `signUpEmail`, `createOrganization` and the `setupComplete` upsert now run inside `withTenantSeedLock`. The count and the upsert go through the lock's transaction. The new `SETUP_TENANT_SEED_LOCK_OPTIONS` sets 10 s for the lock and 10 s for the pool.
+  - A `TenantSeedLockTimeout` returns `{ error: "Setup is busy right now. Please try again in a moment." }` and writes nothing.
+  - `redirect()` runs after the transaction has committed, outside the lock.
+- `src/lib/demo/identities.ts`: `createDemoIdentities` also refuses (throws) when any user exists, not only an organization, as the review's fix suggests. That narrows the window for any writer that still bypasses the lock.
+- The header of `tenant-seed-lock.ts` and the `docs/OPERATIONS.md` Demo mode paragraph now say that `/setup` takes the lock, waits up to 10 s and then answers busy, and that user sign-up outside `/setup` does not take it.
+
+**Test.** New `tests/integration/setup-seed-lock.test.ts`. `completeSetup` runs in-process through the real Better Auth and Postgres, with only `redirect` replaced, as in `auth-setup.test.ts`. The seed runs as a child through the demo driver. Each case gets its own database. Three cases:
+- **Held lock.** A pg client holds the lock and reads 0 users, which is the seed's "empty" view. `/setup` then shows up as a waiting advisory lock in `pg_locks` within 8 s, and no user or organization exists while the lock is held. After the release it redirects, and exactly the setup admin and `setup-org` exist.
+- **Busy.** A lock held past the setup wait: `/setup` answers busy in under 30 s and writes nothing.
+- **Contention.** The seed child queues on a held lock first, then `/setup` queues (2 waiters), then the lock is released. Exactly one organization exists. Either `/setup` redirected and the seed was `refused-foreign` (no marker, no tickets), or `/setup` answered already-completed or busy and the seed seeded the complete demo (marker, 30 tickets, only the demo users). The two never both happen.
+
+**Runs:**
+- Green attempts 1 to 3 failed for reasons in the test, not the code:
+  - `src/lib/db.ts` caches the pool and the client under `Symbol.for` keys, not `globalThis.prisma`, so the second and third cases still used the first database;
+  - `createIsolatedDatabase` keeps the current `DATABASE_URL` as its admin URL for `drop()`, so a drop in `afterAll` connected to an already dropped database.
+
+  The helper now ends and clears the cached pool, the client and pg-boss, and it creates each database from the shared URL.
+- Green: exit 0, 3 passed (3).
+- Red, old `actions.ts` (`git show HEAD:`): exit 1, 3 failed (3).
+  - Held lock and contention: `expected false to be true`, meaning `/setup` never waited on the lock.
+  - Busy: `expected 'NEXT_REDIRECT:/login?setup=complete' to deeply equal { error }`, meaning `/setup` created the workspace while the lock was held.
+
+**Commit:** `7f96635` fix(09-F4): a-WR-1 the /setup wizard counts and creates under the tenant seed lock (K145)
+
+### a-IN-2: a `$` in `POSTGRES_PASSWORD` is documented
+
+**Check first** (ad hoc, not committed). `docker compose -p aida-test-f4-envcheck config --format json` renders only and creates nothing. It ran with a scrubbed environment and four temporary env files:
+- `POSTGRES_PASSWORD=ab$cd` and `"ab$cd"`: every service gets `ab`;
+- `'ab$cd'` and `ab$$cd`: every service gets `ab$cd`. `config` prints a literal `$` back as `$$`, so the rendered value is `ab$$cd`, for `db` and for the app's `AIDA_EXPECT_DB_PASSWORD` alike.
+
+**Change.**
+- `.env.example` (under the `AIDA_DATABASE_URL` note) and the `POSTGRES_PASSWORD` row of `docs/OPERATIONS.md` explain the case: single-quote the value or write each `$` as `$$`, and pass the generator the real password, single-quoted in the shell.
+- The `docs/OPERATIONS.md` troubleshooting entry for the mismatch error names this cause.
+- The usage comment of `scripts/database-url.sh` says the same; its mode stays 100755.
+
+**Test.** New `tests/unit/env-dollar-docs.test.ts` pins the three files and the two examples. Red, old files: exit 1, 4 failed (4). Green: exit 0 together with `install-script`, `rate-limit-pepper-boot` and `db-url` (which run the generator): 4 files, 53 passed.
+
+**Commit:** `9a0907c` fix(09-F4): a-IN-2 document how Compose treats a $ in POSTGRES_PASSWORD
+
+### a-IN-6: LAUNCH.md item 3 matches the README
+
+**Change.** Item 3 now reads: no new widget or tracking image was added, and the existing badges stay. The CI badge loads from GitHub, and the license and docs badges are third-party images from `img.shields.io`. Replace them with plain links if no third-party image should load. The README is unchanged; replacing the badges is the owner's choice.
+
+**Check** (ad hoc shell check, not committed: if the README loads `img.shields.io`, LAUNCH.md must not say "No third-party widget" and must name `img.shields.io`). Red on the old LAUNCH.md: exit 1. Green: exit 0.
+
+**Commit:** `820fe5f` fix(09-F4): a-IN-6 LAUNCH.md says the README's shields.io badges are third-party images
+
+### Other part a info items
+
+a-IN-1, a-IN-3, a-IN-4, a-IN-5 and a-IN-7 are recorded unchanged in `deferred-items.md`, one line each with the finding id.
+
+**Commit:** `9a50293` docs(09-F4): record part a info items not fixed in F4
+
+### Final checks
+
+| Command | Exit | Counts |
+|---|---|---|
+| `pnpm lint` | 0 | 674 files, 1 warning, pre-existing (`tests/unit/container-config.test.ts:160`) |
+| `pnpm typecheck` | 0 | 0 errors |
+| `pnpm test` | 0 | 97 files, 1683 tests passed |
+| integration `seed-guard.test.ts` | 0 | 3 passed |
+| integration `demo-boot.test.ts` | 0 | 21 passed (the new a-WR-3 case included) |
+| integration `auth-bootstrap.test.ts` | 0 | 3 passed |
+| integration `auth-setup.test.ts` | 0 | 4 passed |
+| integration `setup-seed-lock.test.ts` (new) | 0 | 3 passed |
+
+The full integration suite was not run, only these five files. F4 started no container by hand: the integration global setup started its Testcontainers Postgres under the run id. The only Docker command outside the tests was the render-only `docker compose config` of a-IN-2, which creates nothing. F4 removed no container or volume.
+
+### Not done, and limits
+
+- **No held-lock integration case for `bootstrapFromEnv`.** The a-WR-2 timeout branch and the boot bound are proven in-process by the unit test, with `withTenantSeedLock` replaced. The real 10 s waits against a held lock in a child process were not run (a-IN-7, deferred).
+- **The 40 s bound excludes work.** It covers the waits only. A bootstrap or demo seed that gets the lock runs to its end, and the demo seed can take longer than the waits. The transaction bound (600 s, a-IN-3) is unchanged.
+- **The contention case takes one order.** Postgres grants the lock in queue order, and the seed child queues first, so the case always exercises "the seed wins, and `/setup` answers already-completed or busy". The other order is covered by the held-lock case. I did not check which branch each run took beyond the assertions.
+- **The `/setup` UI was not exercised.** The busy message reaches the form as an ordinary `{ error }` result, but no E2E run or manual check was made. The E2E global setup (next-o1) was not run, and `.next` was not moved.
+- **Human verification:** K145 (the setup flow under the lock, and the busy answer after 10 s) and K146 (the catch-all and the bound) are logic changes.
+- **`STATE.md`** was not touched, and no tool changed it. The untracked `.planning/state.json` was there before F4 and was left alone.
