@@ -2,7 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
-import { requireOrgAdmin } from "@/lib/authz";
+import { requireOrgAdminScope } from "@/lib/authz";
 import {
   type ConnectionTestResult,
   classifyConnectionError,
@@ -16,7 +16,6 @@ import {
   getEmbeddingSettings,
   saveEmbeddingSettings as persistEmbeddingSettings,
 } from "@/lib/rag/settings";
-import { getScopedDb } from "@/lib/session";
 
 /**
  * Persists the aiEnabled toggle to the org-scoped Setting table via scopedDb.
@@ -25,8 +24,7 @@ import { getScopedDb } from "@/lib/session";
  * domain model operations, so the Setting is always tenant-scoped. (D-15, D-18)
  */
 export async function setAiEnabled(enabled: boolean): Promise<{ ok: boolean }> {
-  await requireOrgAdmin();
-  const { db, orgId } = await getScopedDb();
+  const { db, orgId } = await requireOrgAdminScope();
 
   const existing = await db.setting.findFirst({ where: { key: "aiEnabled" } });
 
@@ -62,8 +60,7 @@ export interface LlmSettingsInput {
  * treats an empty/undefined key as "keep existing stored value" (mirrors saveEmailSettings).
  */
 export async function saveLlmSettings(input: LlmSettingsInput): Promise<{ ok: boolean }> {
-  await requireOrgAdmin();
-  const { db, orgId } = await getScopedDb();
+  const { db, orgId } = await requireOrgAdminScope();
 
   try {
     await persistLlmSettings(db, orgId, {
@@ -86,8 +83,7 @@ export async function saveLlmSettings(input: LlmSettingsInput): Promise<{ ok: bo
  * category and a correlation ID (D-25, F-08); the failure text is never echoed or logged.
  */
 export async function testLlmConnection(input: LlmSettingsInput): Promise<ConnectionTestResult> {
-  await requireOrgAdmin();
-  const { db } = await getScopedDb();
+  const { db } = await requireOrgAdminScope();
 
   const apiKey = input.apiKey || (await getLlmSettings(db)).apiKey;
 
@@ -133,8 +129,7 @@ export interface EmbeddingSettingsInput {
 export async function saveEmbeddingSettings(
   input: EmbeddingSettingsInput,
 ): Promise<{ ok: boolean }> {
-  await requireOrgAdmin();
-  const { db, orgId } = await getScopedDb();
+  const { db, orgId } = await requireOrgAdminScope();
 
   try {
     await persistEmbeddingSettings(db, orgId, {
@@ -159,8 +154,7 @@ export async function saveEmbeddingSettings(
 export async function testEmbeddingConnection(
   input: EmbeddingSettingsInput,
 ): Promise<ConnectionTestResult> {
-  await requireOrgAdmin();
-  const { db } = await getScopedDb();
+  const { db } = await requireOrgAdminScope();
 
   const apiKey = input.apiKey || (await getEmbeddingSettings(db)).apiKey;
 
@@ -193,8 +187,7 @@ export async function testEmbeddingConnection(
  * re-embed would leave the KB with mixed, non-comparable vector spaces). Admin-gated.
  */
 export async function reembedAllKb(): Promise<{ ok: boolean; count: number }> {
-  await requireOrgAdmin();
-  const { db, orgId } = await getScopedDb();
+  const { db, orgId } = await requireOrgAdminScope();
 
   const articles = await db.kbArticle.findMany({ select: { id: true } });
   for (const article of articles) {

@@ -1,11 +1,10 @@
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
-import { getOrgRole } from "@/lib/authz";
+import { getActiveOrgAccess } from "@/lib/authz";
 import { removeLogo, replaceLogo } from "@/lib/branding/logo-store";
 import { LOGO_MAX_BYTES } from "@/lib/branding/logo-validate";
 import { readBoundedFormData } from "@/lib/http/read-bounded-form-data";
 import { isAdminRole } from "@/lib/membership";
-import { getScopedDb } from "@/lib/session";
 
 // Logo upload, replace and remove (Phase 9 plan 09-05, AIDA-34, D-08). A route handler, not a
 // server action: Next's default server-action body limit (1 MB) is below a 1 MiB file plus the
@@ -43,16 +42,18 @@ function logFailure(operation: string, err: unknown): void {
 type AdminGate = { ok: true; orgId: string } | { ok: false; response: Response };
 
 async function requireLogoAdmin(): Promise<AdminGate> {
-  // getScopedDb() redirects (a thrown redirect) without a session and throws without an active
-  // organization; this fetch endpoint answers 401 JSON instead.
-  let orgId: string;
-  let role: string | null;
+  // One session read for both the organization and the role (K141): the role is the caller's role
+  // in exactly the organization this request then writes. getActiveOrgAccess() redirects (a
+  // thrown redirect) without a session; this fetch endpoint answers 401 JSON instead, and also
+  // without an active organization.
+  let access: Awaited<ReturnType<typeof getActiveOrgAccess>>;
   try {
-    ({ orgId } = await getScopedDb());
-    role = await getOrgRole();
+    access = await getActiveOrgAccess();
   } catch {
     return { ok: false, response: codeResponse("unauthorized", 401) };
   }
+  const { orgId, role } = access;
+  if (!orgId) return { ok: false, response: codeResponse("unauthorized", 401) };
   // Owner or admin of the active organization (one member row in it); a removed member has none.
   if (!isAdminRole(role)) return { ok: false, response: codeResponse("not_allowed", 403) };
   return { ok: true, orgId };

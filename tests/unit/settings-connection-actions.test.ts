@@ -11,8 +11,9 @@ import {
 // the raw failure text (hosts, IPs, URLs, credentials).
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-vi.mock("@/lib/authz", () => ({ requireOrgAdmin: vi.fn(async () => undefined) }));
-vi.mock("@/lib/session", () => ({ getScopedDb: vi.fn(async () => ({ db: {}, orgId: "org1" })) }));
+vi.mock("@/lib/authz", () => ({
+  requireOrgAdminScope: vi.fn(async () => ({ db: {}, orgId: "org1", role: "admin" })),
+}));
 vi.mock("@/lib/llm/settings", () => ({
   getLlmSettings: vi.fn(async () => ({ apiKey: "" })),
   saveLlmSettings: vi.fn(),

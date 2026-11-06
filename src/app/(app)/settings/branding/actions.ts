@@ -1,9 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireOrgAdmin } from "@/lib/authz";
+import { requireOrgAdminScope } from "@/lib/authz";
 import { MAX_WORKSPACE_NAME_LENGTH, saveBrandingSettings } from "@/lib/branding/settings";
-import { getScopedDb } from "@/lib/session";
 
 /**
  * Persists the workspace display name. Admin-gated (SECURITY.md: server-side authz on every
@@ -13,8 +12,7 @@ import { getScopedDb } from "@/lib/session";
 export async function saveBranding(input: {
   workspaceName: string;
 }): Promise<{ ok: boolean; error?: string }> {
-  await requireOrgAdmin();
-  const { db, orgId } = await getScopedDb();
+  const { db, orgId } = await requireOrgAdminScope();
 
   const workspaceName = input.workspaceName.trim();
   if (workspaceName.length > MAX_WORKSPACE_NAME_LENGTH) {

@@ -1,9 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireOrgAdmin } from "@/lib/authz";
+import { requireOrgAdminScope } from "@/lib/authz";
 import { createKbArticle, updateKbArticle } from "@/lib/kb/create-article";
-import { getScopedDb } from "@/lib/session";
 
 /** Shared shape for the create/update Server Actions below (mirrors kb-article-form's fields). */
 export interface KbArticleActionInput {
@@ -18,8 +17,7 @@ export interface KbArticleActionInput {
 export async function createKbArticleAction(
   input: KbArticleActionInput,
 ): Promise<{ ok: boolean; id?: string }> {
-  await requireOrgAdmin();
-  const { orgId } = await getScopedDb();
+  const { orgId } = await requireOrgAdminScope();
 
   if (!input.title.trim()) {
     return { ok: false };
@@ -42,8 +40,7 @@ export async function updateKbArticleAction(
   articleId: string,
   input: KbArticleActionInput,
 ): Promise<{ ok: boolean }> {
-  await requireOrgAdmin();
-  const { orgId } = await getScopedDb();
+  const { orgId } = await requireOrgAdminScope();
 
   if (!input.title.trim()) {
     return { ok: false };

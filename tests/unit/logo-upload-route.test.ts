@@ -6,16 +6,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-vi.mock("@/lib/session", () => ({ getScopedDb: vi.fn() }));
-vi.mock("@/lib/authz", () => ({ getOrgRole: vi.fn() }));
+vi.mock("@/lib/authz", () => ({ getActiveOrgAccess: vi.fn() }));
 vi.mock("@/lib/branding/logo-store", () => ({ replaceLogo: vi.fn(), removeLogo: vi.fn() }));
 
 import { revalidatePath } from "next/cache";
 import { DELETE, POST } from "../../src/app/api/settings/branding/logo/route";
-import { getOrgRole } from "../../src/lib/authz";
+import { getActiveOrgAccess } from "../../src/lib/authz";
 import { removeLogo, replaceLogo } from "../../src/lib/branding/logo-store";
 import { LOGO_MAX_BYTES } from "../../src/lib/branding/logo-validate";
-import { getScopedDb } from "../../src/lib/session";
 import { pngBytes } from "../support/logo-images";
 
 const URL = "http://localhost/api/settings/branding/logo";
@@ -28,10 +26,10 @@ function nextRedirect(): Error {
 }
 
 function signedInAs(role: string | null) {
-  vi.mocked(getScopedDb).mockResolvedValue({
+  vi.mocked(getActiveOrgAccess).mockResolvedValue({
     orgId: ORG_ID,
-  } as unknown as Awaited<ReturnType<typeof getScopedDb>>);
-  vi.mocked(getOrgRole).mockResolvedValue(role);
+    role,
+  } as unknown as Awaited<ReturnType<typeof getActiveOrgAccess>>);
 }
 
 function upload(parts: Record<string, Blob | string>): Request {
@@ -58,7 +56,7 @@ afterEach(() => {
 
 describe("logo route gate", () => {
   it("POST without a session answers 401 and reads no body", async () => {
-    vi.mocked(getScopedDb).mockRejectedValue(nextRedirect());
+    vi.mocked(getActiveOrgAccess).mockRejectedValue(nextRedirect());
     const request = upload({ file: pngFile() });
 
     const response = await POST(request);
@@ -95,7 +93,7 @@ describe("logo route gate", () => {
   });
 
   it("DELETE without a session answers 401 and by a member 403 not_allowed; nothing is removed", async () => {
-    vi.mocked(getScopedDb).mockRejectedValue(nextRedirect());
+    vi.mocked(getActiveOrgAccess).mockRejectedValue(nextRedirect());
     const anonymous = await DELETE();
     expect(anonymous.status).toBe(401);
     expect(await anonymous.json()).toEqual({ code: "unauthorized" });

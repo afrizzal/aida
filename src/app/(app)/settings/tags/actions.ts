@@ -1,15 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireOrgAdmin } from "@/lib/authz";
-import { getScopedDb } from "@/lib/session";
+import { requireOrgAdminScope } from "@/lib/authz";
 
 /**
  * Renames a tag globally within the workspace. Admin-gated.
  */
 export async function renameTag(id: string, name: string): Promise<{ ok: boolean }> {
-  await requireOrgAdmin();
-  const { db } = await getScopedDb();
+  const { db } = await requireOrgAdminScope();
 
   const trimmed = name.trim();
   if (!trimmed) return { ok: false };
@@ -25,8 +23,7 @@ export async function renameTag(id: string, name: string): Promise<{ ok: boolean
  * removes the tag from every ticket that had it. Admin-gated.
  */
 export async function deleteTag(id: string): Promise<{ ok: boolean }> {
-  await requireOrgAdmin();
-  const { db } = await getScopedDb();
+  const { db } = await requireOrgAdminScope();
 
   await db.tag.delete({ where: { id } });
 

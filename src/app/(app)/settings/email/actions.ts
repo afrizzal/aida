@@ -2,7 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
-import { requireOrgAdmin } from "@/lib/authz";
+import { requireOrgAdminScope } from "@/lib/authz";
 import {
   getEmailSettings,
   saveEmailSettings as persistEmailSettings,
@@ -18,7 +18,6 @@ import {
   classifyConnectionError,
   connectionErrorLogShape,
 } from "@/lib/connection-test/errors";
-import { getScopedDb } from "@/lib/session";
 
 /** Mirrors the Email settings form fields — ports/booleans arrive as form-native strings/booleans. */
 export interface EmailSettingsInput {
@@ -41,8 +40,7 @@ export interface EmailSettingsInput {
  * saveEmailSettings treats an empty/undefined password as "keep existing stored value".
  */
 export async function saveEmailSettings(input: EmailSettingsInput): Promise<{ ok: boolean }> {
-  await requireOrgAdmin();
-  const { db, orgId } = await getScopedDb();
+  const { db, orgId } = await requireOrgAdminScope();
 
   try {
     await persistEmailSettings(db, orgId, {
@@ -67,8 +65,7 @@ export async function saveEmailSettings(input: EmailSettingsInput): Promise<{ ok
 
 /** Toggles the whole channel on/off (D-26 — everything else keeps working with it off). */
 export async function setEmailChannelEnabled(enabled: boolean): Promise<{ ok: boolean }> {
-  await requireOrgAdmin();
-  const { db, orgId } = await getScopedDb();
+  const { db, orgId } = await requireOrgAdminScope();
 
   try {
     await persistEmailSettings(db, orgId, { enabled });
@@ -108,8 +105,7 @@ function requireHost(host: unknown): string {
  * never echoed or logged.
  */
 export async function testImapConnection(input: EmailSettingsInput): Promise<ConnectionTestResult> {
-  await requireOrgAdmin();
-  const { db } = await getScopedDb();
+  const { db } = await requireOrgAdminScope();
 
   const imapPassword = input.imapPassword || (await getEmailSettings(db)).imapPassword;
 
@@ -145,8 +141,7 @@ export async function testImapConnection(input: EmailSettingsInput): Promise<Con
  * validation-inside-try and categorized-failure contract as testImapConnection (D-25, F-08).
  */
 export async function testSmtpConnection(input: EmailSettingsInput): Promise<ConnectionTestResult> {
-  await requireOrgAdmin();
-  const { db } = await getScopedDb();
+  const { db } = await requireOrgAdminScope();
 
   const smtpPassword = input.smtpPassword || (await getEmailSettings(db)).smtpPassword;
 

@@ -3,8 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { CustomFieldType } from "@/generated/prisma/client";
 import { Prisma } from "@/generated/prisma/client";
-import { requireOrgAdmin } from "@/lib/authz";
-import { getScopedDb } from "@/lib/session";
+import { requireOrgAdminScope } from "@/lib/authz";
 
 interface CustomFieldInput {
   label: string;
@@ -25,8 +24,7 @@ function normalizeOptions(input: CustomFieldInput) {
 export async function createCustomField(
   input: CustomFieldInput,
 ): Promise<{ ok: boolean; error?: string }> {
-  await requireOrgAdmin();
-  const { db, orgId } = await getScopedDb();
+  const { db, orgId } = await requireOrgAdminScope();
 
   const label = input.label.trim();
   if (!label) return { ok: false, error: "Label is required" };
@@ -56,8 +54,7 @@ export async function updateCustomField(
   id: string,
   input: CustomFieldInput,
 ): Promise<{ ok: boolean; error?: string }> {
-  await requireOrgAdmin();
-  const { db } = await getScopedDb();
+  const { db } = await requireOrgAdminScope();
 
   const label = input.label.trim();
   if (!label) return { ok: false, error: "Label is required" };
@@ -81,8 +78,7 @@ export async function updateCustomField(
  * onDelete: Cascade, permanently removing per-ticket values for this field.
  */
 export async function deleteCustomField(id: string): Promise<{ ok: boolean }> {
-  await requireOrgAdmin();
-  const { db } = await getScopedDb();
+  const { db } = await requireOrgAdminScope();
 
   await db.customFieldDefinition.delete({ where: { id } });
 

@@ -2,9 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import type { TicketPriority } from "@/generated/prisma/client";
-import { requireOrgAdmin } from "@/lib/authz";
+import { requireOrgAdminScope } from "@/lib/authz";
 import { prisma } from "@/lib/db";
-import { getScopedDb, getSessionActor } from "@/lib/session";
+import { getSessionActor } from "@/lib/session";
 import { type AutoCloseSaveResult, saveAutoCloseDays } from "@/lib/tickets/auto-close-settings";
 
 interface SlaTargetInput {
@@ -21,8 +21,7 @@ interface SlaTargetInput {
  * compound-unique-but-not-single-field where clause on upsert.
  */
 export async function saveSlaTargets(input: SlaTargetInput[]): Promise<{ ok: boolean }> {
-  await requireOrgAdmin();
-  const { db, orgId } = await getScopedDb();
+  const { db, orgId } = await requireOrgAdminScope();
 
   for (const { priority, firstResponseHours, resolutionHours } of input) {
     const firstResponseTargetMinutes = Math.round(firstResponseHours * 60);
