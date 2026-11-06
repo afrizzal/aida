@@ -3,7 +3,11 @@
 import { redirect } from "next/navigation";
 import { z } from "zod/v4";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import {
+  SETUP_TENANT_SEED_LOCK_OPTIONS,
+  TenantSeedLockTimeout,
+  withTenantSeedLock,
+} from "@/lib/tenant-seed-lock";
 
 const setupSchema = z
   .object({
@@ -35,38 +39,54 @@ export async function completeSetup(input: SetupInput): Promise<SetupResult> {
 
   const { orgName, slug, adminName, email, password } = parsed.data;
 
-  // Race guard: if another request already completed setup, bail out
-  const existingUserCount = await prisma.user.count();
-  if (existingUserCount > 0) {
-    return { error: "Setup has already been completed. Please sign in." };
+  // The count and the create run under the tenant seed lock that `pnpm db:seed`, the DEMO_MODE
+  // boot and bootstrapFromEnv take (K145, review a-WR-1), so a seed that classified the database
+  // as empty cannot put demo data next to the workspace created here, and two setup requests
+  // cannot both pass the count. The waits are short (SETUP_TENANT_SEED_LOCK_OPTIONS); a held
+  // lock answers "busy" and writes nothing.
+  let result: SetupResult;
+  try {
+    result = await withTenantSeedLock(async (tx): Promise<SetupResult> => {
+      if ((await tx.user.count()) > 0) {
+        return { error: "Setup has already been completed. Please sign in." };
+      }
+
+      // 1. Create the admin user
+      const signUpResponse = await auth.api.signUpEmail({
+        body: { name: adminName, email, password },
+      });
+
+      if (!signUpResponse?.user?.id) {
+        return { error: "Failed to create admin account. The email may already be in use." };
+      }
+
+      const userId = signUpResponse.user.id;
+
+      // 2. Create the organization (system action — userId bypasses allowUserToCreateOrganization: false)
+      const orgResponse = await auth.api.createOrganization({
+        body: { name: orgName, slug, userId },
+      });
+
+      if (!orgResponse?.id) {
+        return { error: "Failed to create workspace. The URL slug may already be taken." };
+      }
+
+      // 3. Mark setup as complete globally (commits with the lock release)
+      await tx.systemSetting.upsert({
+        where: { key: "setupComplete" },
+        update: { value: "true" },
+        create: { key: "setupComplete", value: "true" },
+      });
+      return null;
+    }, SETUP_TENANT_SEED_LOCK_OPTIONS);
+  } catch (err) {
+    if (err instanceof TenantSeedLockTimeout) {
+      return { error: "Setup is busy right now. Please try again in a moment." };
+    }
+    throw err;
   }
+  if (result) return result;
 
-  // 1. Create the admin user
-  const signUpResponse = await auth.api.signUpEmail({
-    body: { name: adminName, email, password },
-  });
-
-  if (!signUpResponse?.user?.id) {
-    return { error: "Failed to create admin account. The email may already be in use." };
-  }
-
-  const userId = signUpResponse.user.id;
-
-  // 2. Create the organization (system action — userId bypasses allowUserToCreateOrganization: false)
-  const orgResponse = await auth.api.createOrganization({
-    body: { name: orgName, slug, userId },
-  });
-
-  if (!orgResponse?.id) {
-    return { error: "Failed to create workspace. The URL slug may already be taken." };
-  }
-
-  // 3. Mark setup as complete globally
-  await prisma.systemSetting.upsert({
-    where: { key: "setupComplete" },
-    update: { value: "true" },
-    create: { key: "setupComplete", value: "true" },
-  });
-
+  // Outside the lock: redirect() throws, and the transaction must commit first.
   redirect("/login?setup=complete");
 }

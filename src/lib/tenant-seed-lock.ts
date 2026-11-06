@@ -10,8 +10,9 @@
 //
 // What it is NOT: atomicity. The seed's other writes (Better Auth sign-up and organization
 // creation, createTicket, the KB writes) run on their own pooled connections and commit on their
-// own, so a crash mid-seed leaves those rows behind with no marker. The lock only serialises the
-// three paths above; the /setup wizard and user sign-up do not take it (stated limit).
+// own, so a crash mid-seed leaves those rows behind with no marker. The lock serialises the three
+// paths above and the /setup wizard (K145, review a-WR-1); user sign-up outside /setup does not
+// take it (stated limit).
 //
 // Relative imports only: src/lib/bootstrap.ts imports this module.
 // ---------------------------------------------------------------------------
@@ -40,6 +41,12 @@ export interface TenantSeedLockOptions {
  * logs one line, and the app starts without that step.
  */
 export const BOOT_TENANT_SEED_LOCK_OPTIONS = {
+  lockTimeoutMs: 10_000,
+  maxWaitMs: 10_000,
+} as const satisfies TenantSeedLockOptions;
+
+/** The waits of the /setup wizard's request (K145): a held lock answers "busy" after 10 s. */
+export const SETUP_TENANT_SEED_LOCK_OPTIONS = {
   lockTimeoutMs: 10_000,
   maxWaitMs: 10_000,
 } as const satisfies TenantSeedLockOptions;

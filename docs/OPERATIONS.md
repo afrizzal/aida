@@ -523,7 +523,7 @@ Demo mode (AIDA-22) turns a fresh `docker compose up` into an instantly explorab
 | An incomplete demo: demo accounts only, no completion marker (a seed that stopped part-way) | Refuses with one log line, writes nothing | Refuses, writes nothing, exit 1 |
 | Anything else (a real workspace, a non-demo user, a second organization) | Refuses with one log line, writes nothing | Refuses, writes nothing, exit 1 |
 
-A refusal never deletes, renames or changes anything, and the demo boot never stops the app from starting: every outcome, and every error, ends in one log line and a normal start. The seed CLI, the demo boot and the headless admin bootstrap take the same database lock, so two of them started together cannot both create a workspace; the `/setup` wizard and user sign-up do not take that lock.
+A refusal never deletes, renames or changes anything, and the demo boot never stops the app from starting: every outcome, and every error, ends in one log line and a normal start. The seed CLI, the demo boot and the headless admin bootstrap take the same database lock, and so does the `/setup` wizard, so two of them started together cannot both create a workspace. While a seed holds the lock, `/setup` waits up to 10 seconds and then answers "Setup is busy right now" without writing anything. User sign-up outside `/setup` does not take that lock.
 
 **`DEMO_MODE` together with `ADMIN_EMAIL` and `ADMIN_PASSWORD`.** The headless admin bootstrap runs first at boot. On an empty database it creates a real workspace for `ADMIN_EMAIL`, and the demo boot then finds a workspace that is not the demo and refuses. Set one or the other, not both.
 

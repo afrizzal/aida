@@ -26,7 +26,8 @@ export interface DemoIdentities {
 /**
  * Creates the demo org + admin + agent and returns their ids. Creates only, never adopts an
  * existing organization or user: it runs after the tenant guard classified the database as
- * empty, and throws if an organization exists anyway (the guard was bypassed).
+ * empty, and throws if an organization or a user exists anyway (the guard was bypassed by a
+ * writer that does not take the tenant seed lock, review a-WR-1).
  * Reads DEMO_ADMIN_EMAIL / DEMO_ADMIN_PASSWORD / DEMO_AGENT_EMAIL, falling back to the
  * documented defaults above. Never logs the password.
  */
@@ -37,9 +38,10 @@ export async function createDemoIdentities(hooks?: DemoSeedHooks): Promise<DemoI
   const agentEmail = process.env.DEMO_AGENT_EMAIL || DEMO_AGENT_EMAIL_DEFAULT;
 
   const existingOrg = await prisma.organization.findFirst({ select: { id: true } });
-  if (existingOrg) {
+  const existingUser = await prisma.user.findFirst({ select: { id: true } });
+  if (existingOrg || existingUser) {
     throw new Error(
-      "[demo] Refusing to create demo identities: an organization already exists (the tenant guard was bypassed).",
+      "[demo] Refusing to create demo identities: an organization or a user already exists (the tenant guard was bypassed).",
     );
   }
 
