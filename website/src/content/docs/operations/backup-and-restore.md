@@ -53,8 +53,11 @@ A backup on the same disk as the instance it protects doesn't survive a disk fai
 off the host yourself, for example:
 
 ```bash
-docker compose run --rm --no-deps -T --entrypoint tar backup -C /backups -cf - <setId> > aida-backup-<setId>.tar
+(umask 077 && docker compose run --rm --no-deps -T --entrypoint tar backup -C /backups -cf - <setId> > aida-backup-<setId>.tar)
 ```
+
+`umask 077` makes the file readable by you only (mode 0600). It holds every workspace's tickets,
+contacts and files: store it encrypted or on access-controlled storage.
 
 Keep `APP_ENCRYPTION_KEY` separately: it is not in any set, and without it the credentials stored
 in Settings cannot be read after a restore.

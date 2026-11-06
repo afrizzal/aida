@@ -119,10 +119,10 @@ This takes one backup now, outside the schedule, in a one-off container of the `
 A backup that lives on the same disk as the instance it protects does not survive a disk failure, and AIDA copies nothing anywhere by itself. Copy sets off the host as part of your own practice, for example one set as a tar stream:
 
 ```bash
-docker compose run --rm --no-deps -T --entrypoint tar backup -C /backups -cf - <setId> > aida-backup-<setId>.tar
+(umask 077 && docker compose run --rm --no-deps -T --entrypoint tar backup -C /backups -cf - <setId> > aida-backup-<setId>.tar)
 ```
 
-Treat the copy like the database itself: it holds every workspace's tickets, contacts and files, so keep it encrypted and readable only by the people who operate the instance.
+`umask 077` makes the file readable by you only (mode 0600) whatever your shell's umask; keep it. Treat the copy like the database itself: it holds every workspace's tickets, contacts and files, so store it encrypted or on access-controlled storage, readable only by the people who operate the instance.
 
 **Back up `APP_ENCRYPTION_KEY` separately.** It is not in any set. Credentials stored in Settings (IMAP and SMTP passwords, LLM provider keys) are encrypted with it, so a restore without the same key cannot read them; they would have to be entered again. Keep `BETTER_AUTH_SECRET` with it, or every session ends after a restore.
 
