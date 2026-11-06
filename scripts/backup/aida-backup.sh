@@ -299,13 +299,15 @@ app_version() {
   fi
 }
 
-# Every <organizationId>/<storageKey> the dump references in table $1 (column $2 holds the key,
-# or for Setting the `branding:logo` row's JSON value), one per line.
+# Every <organizationId>/<storageKey> the dump references in table $1 (mode $2: "table" when a
+# storageKey column holds the key, "setting" for the `branding:logo` row's JSON value), one per
+# line as "<organizationId>/<storageKey><TAB><table> <row id>" (b-WR-3: the row is named when the
+# file is missing).
 referenced_from_dump() {
   bounded pg_restore --data-only --table="$1" --file=- "$SET_TMP/db.dump" \
     >"$RUN_TMP/copy-$1.txt" 2>>"$BACKUP_ERRLOG" || return 1
-  awk -F '\t' -v mode="$2" '
-    BEGIN { inside = 0; seen = 0; org = 0; key = 0; skey = 0; val = 0 }
+  awk -F '\t' -v mode="$2" -v tbl="$1" '
+    BEGIN { inside = 0; seen = 0; org = 0; key = 0; skey = 0; val = 0; rid = 0 }
     !inside && /^COPY / {
       h = $0
       sub(/^[^(]*\(/, "", h)
@@ -318,6 +320,7 @@ referenced_from_dump() {
         if (c == "storageKey") skey = i
         if (c == "key") key = i
         if (c == "value") val = i
+        if (c == "id") rid = i
       }
       inside = 1
       seen = 1
@@ -326,21 +329,21 @@ referenced_from_dump() {
     inside && $0 == "\\." { inside = 0; next }
     inside {
       if (mode == "table") {
-        print $org "/" $skey
+        print $org "/" $skey "\t" tbl " " $rid
       } else if ($key == "branding:logo") {
         v = $val
         if (match(v, /"storageKey"[ ]*:[ ]*"[^"\\]*"/)) {
           s = substr(v, RSTART, RLENGTH)
           sub(/^"storageKey"[ ]*:[ ]*"/, "", s)
           sub(/"$/, "", s)
-          print $org "/" s
+          print $org "/" s "\t" tbl " " $rid
         } else {
-          print "!unreadable-logo-value"
+          print "!unreadable-logo-value\t" tbl " " $rid
         }
       }
     }
     END {
-      if (!seen || org == 0) exit 3
+      if (!seen || org == 0 || rid == 0) exit 3
       if (mode == "table" && skey == 0) exit 3
       if (mode == "setting" && (key == 0 || val == 0)) exit 3
     }
@@ -499,18 +502,48 @@ ARCHIVED_FILES=$(($(wc -l <"$RUN_TMP/members.list")))
 
 pause_point after-archive || fail unknown
 
+# b-WR-3: the missing members and the rows that reference them, at most MISSING_LOG_MAX lines and
+# a count of the rest, logged before the exit trap removes RUN_TMP. Only storage keys, organization
+# ids and row ids are printed, each checked against its expected shape first (no file content, no
+# other column); an entry of another shape is printed as "an entry of unexpected shape".
+MISSING_LOG_MAX=20
+log_missing() {
+  awk -F '\t' -v max="$MISSING_LOG_MAX" '
+    function member_ok(m) {
+      return m ~ /^[A-Za-z0-9_][A-Za-z0-9_-]*\/[a-z0-9]+\.[a-z0-9]+$/ && length(m) <= 138
+    }
+    function row_ok(r) {
+      return r ~ /^(Attachment|TaskAttachment|Setting) [A-Za-z0-9_-]+$/ && length(r) <= 80
+    }
+    NR == FNR { if (!($1 in want)) { want[$1] = 1; order[++n] = $1 }; next }
+    ($1 in want) {
+      r = row_ok($2) ? $2 : "a row of unexpected shape"
+      rows[$1] = (rows[$1] == "") ? r : rows[$1] ", " r
+    }
+    END {
+      shown = (n < max) ? n : max
+      for (i = 1; i <= shown; i++) {
+        m = order[i]
+        printf "[backup] missing: %s (%s)\n", (member_ok(m) ? m : "an entry of unexpected shape"), rows[m]
+      }
+      if (n > max) printf "[backup] missing: %d more not listed\n", n - max
+    }
+  ' "$RUN_TMP/missing.list" "$RUN_TMP/refs.rows"
+}
+
 # Every file the dump references must be in the archive with a checksum (D-02(4), U-14).
-: >"$RUN_TMP/refs.raw"
-referenced_from_dump Attachment table >>"$RUN_TMP/refs.raw" || step_failed verification
-referenced_from_dump TaskAttachment table >>"$RUN_TMP/refs.raw" || step_failed verification
-referenced_from_dump Setting setting >>"$RUN_TMP/refs.raw" || step_failed verification
-sort -u "$RUN_TMP/refs.raw" >"$RUN_TMP/refs.list" || step_failed verification
+: >"$RUN_TMP/refs.rows"
+referenced_from_dump Attachment table >>"$RUN_TMP/refs.rows" || step_failed verification
+referenced_from_dump TaskAttachment table >>"$RUN_TMP/refs.rows" || step_failed verification
+referenced_from_dump Setting setting >>"$RUN_TMP/refs.rows" || step_failed verification
+cut -f 1 "$RUN_TMP/refs.rows" | sort -u >"$RUN_TMP/refs.list" || step_failed verification
 REFERENCED_FILES=$(($(wc -l <"$RUN_TMP/refs.list")))
 comm -23 "$RUN_TMP/refs.list" "$RUN_TMP/summed.list" >"$RUN_TMP/missing.list" ||
   step_failed verification
 _missing=$(($(wc -l <"$RUN_TMP/missing.list")))
 if [ "$_missing" -ne 0 ]; then
   log "verification: $_missing referenced files missing from the archive"
+  log_missing || log 'verification: the missing files could not be listed'
   step_failed verification
 fi
 

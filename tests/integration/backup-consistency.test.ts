@@ -695,7 +695,8 @@ describe("verification covers every stored-file kind (U-14)", () => {
         const w = await seedFour(c);
         const run = runIn(c, { pauseAt: ["after-dump"] });
         await run.waitReached("after-dump");
-        await unlink(fileOf(c, w.orgId, w.keys[index] as string));
+        const key = w.keys[index] as string;
+        await unlink(fileOf(c, w.orgId, key));
         await run.go("after-dump");
         const result = await run.done;
         await expectFailedRun(
@@ -704,11 +705,71 @@ describe("verification covers every stored-file kind (U-14)", () => {
           "verification",
           "[backup] verification: 1 referenced files missing from the archive",
         );
+        // b-WR-3: the missing member and the row that references it are named.
+        expect(missingLines(result)).toEqual([
+          `[backup] missing: ${w.orgId}/${key} (${await referencingRow(w.orgId, key)})`,
+        ]);
       },
       CASE_TIMEOUT,
     );
   }
+
+  it(
+    "b-WR-3 cap: with 23 referenced files removed the run names 20 of them with their rows, in key order, and counts the other 3",
+    async () => {
+      const c = await newCase();
+      const w = await seedFour(c);
+      const removed: string[] = [];
+      for (let i = 0; i < 19; i += 1) removed.push(await addTicketAttachment(c, w));
+      removed.push(...w.keys);
+      const run = runIn(c, { pauseAt: ["after-dump"] });
+      await run.waitReached("after-dump");
+      for (const key of removed) await unlink(fileOf(c, w.orgId, key));
+      await run.go("after-dump");
+      const result = await run.done;
+      await expectFailedRun(
+        c,
+        result,
+        "verification",
+        "[backup] verification: 23 referenced files missing from the archive",
+      );
+      const members = removed.map((key) => `${w.orgId}/${key}`).sort();
+      const expected: string[] = [];
+      for (const member of members.slice(0, 20)) {
+        const key = member.slice(w.orgId.length + 1);
+        expected.push(`[backup] missing: ${member} (${await referencingRow(w.orgId, key)})`);
+      }
+      expected.push("[backup] missing: 3 more not listed");
+      expect(missingLines(result)).toEqual(expected);
+      // No file content and no other column: each line is a member, a table name and a row id.
+      for (const line of missingLines(result).slice(0, 20)) {
+        expect(line).toMatch(
+          /^\[backup\] missing: [A-Za-z0-9_-]+\/[a-z0-9]+\.[a-z0-9]+ \((Attachment|TaskAttachment|Setting) [A-Za-z0-9_-]+\)$/,
+        );
+      }
+    },
+    CASE_TIMEOUT,
+  );
 });
+
+function missingLines(result: RunResult): string[] {
+  return result.stdout.split("\n").filter((line) => line.startsWith("[backup] missing: "));
+}
+
+/** "<Table> <id>" of the one row in the case's world that references the key. */
+async function referencingRow(orgId: string, key: string): Promise<string> {
+  const found: string[] = [];
+  for (const row of await prisma.attachment.findMany({ where: { storageKey: key } }))
+    found.push(`Attachment ${row.id}`);
+  for (const row of await prisma.taskAttachment.findMany({ where: { storageKey: key } }))
+    found.push(`TaskAttachment ${row.id}`);
+  const logo = await prisma.setting.findUnique({
+    where: { organizationId_key: { organizationId: orgId, key: "branding:logo" } },
+  });
+  if (logo?.value.includes(`"${key}"`)) found.push(`Setting ${logo.id}`);
+  expect(found).toHaveLength(1);
+  return found[0] as string;
+}
 
 describe("archive tolerance and odd entries (U-13, T-09-21)", () => {
   it(

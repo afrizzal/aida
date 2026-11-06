@@ -79,7 +79,7 @@ The uploads volume carries an identity marker that the worker writes the first t
 |---|---|---|
 | `dump` | `pg_dump` failed, for example a lock it could not get in time. | The `db` service and its log; long-running transactions. |
 | `archive` | The uploads archive could not be written, for example a file the backup user cannot read. | Ownership of the files in `uploads_data` (see [Upgrading an install whose containers ran as root](#upgrading-an-install-whose-containers-ran-as-root)). |
-| `verification` | A file the database refers to was missing from the archive. | The uploads volume: the set was refused on purpose. |
+| `verification` | A file the database refers to was missing from the archive. | The uploads volume: the set was refused on purpose. The log names up to 20 missing files with the rows that refer to them, `[backup] missing: <organizationId>/<storageKey> (<Attachment, TaskAttachment or Setting> <row id>)`, and counts the rest. Restore the file into `uploads_data`, or remove the row (or the logo) in the app, then run a backup again. |
 | `storage` | The backups volume could not be written or is full. | Free space on the host; the `backup-init` result. |
 | `unknown` | Anything else, including the cases in the next section. | The reason line before `backup failed: unknown`. |
 
