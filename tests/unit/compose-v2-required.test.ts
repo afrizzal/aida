@@ -38,6 +38,7 @@ describe("Compose v2 is required (d-WR-2)", () => {
     const run = spawnSync("/bin/sh", [path.join(ROOT, "scripts", "backup.sh")], {
       cwd: ROOT,
       env: {
+        NODE_ENV: "test",
         PATH: `${fake.dir}:/usr/bin:/bin`,
         HOME: os.tmpdir(),
         LC_ALL: "C",

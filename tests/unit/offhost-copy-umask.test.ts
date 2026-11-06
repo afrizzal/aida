@@ -40,7 +40,7 @@ describe("off-host copy of a set (d-WR-3)", () => {
       const command = copyCommand(file).replaceAll("<setId>", SET_ID);
       const run = spawnSync("/bin/bash", ["-c", `umask 022; ${command}`], {
         cwd: work,
-        env: { PATH: `${bin}:/usr/bin:/bin`, HOME: os.tmpdir(), LC_ALL: "C" },
+        env: { NODE_ENV: "test", PATH: `${bin}:/usr/bin:/bin`, HOME: os.tmpdir(), LC_ALL: "C" },
         encoding: "utf8",
         timeout: 30_000,
       });
