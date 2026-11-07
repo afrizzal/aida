@@ -177,3 +177,16 @@ Question `run-loop/codex/fase09-diff-tanya.md`, answer `fase09-diff-jawab.md` (l
 - **Codex 7 (MEDIUM):** the file-inventory "after commit" case is rewritten to reach the ambiguous-commit path of K148; the boot-bound test also measures a real held lock and pool wait with a short bound.
 
 Fix batch F5 (one round, `gsd-code-fixer`), then Codex round 2.
+
+## Codex diff critique round 2 dispositions (2026-11-12)
+
+Question `run-loop/codex/fase09-diff-r2-tanya.md`, answer `fase09-diff-r2-jawab.md` (log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`; export paths replaced by repo-relative paths). 4 HIGH, 2 MEDIUM; Codex: "belum siap". All accepted. Re-checked in the code: `scripts/restore.sh` takes the backup lease (`lease_acquire`, which inserts into `SystemSetting`) before the K150 schema check, so an empty target fails first; on success it releases the lease and lock before the K150 `migrate deploy`.
+
+- **K152 (Codex r2-1, HIGH):** the schema check and `--validate-only` run before any write to the target. The restore coordinates an empty target without writing to it (the lease is taken only once the target has the `SystemSetting` table, or the coordination for an empty target uses the restore lock alone, with the reason written). Test through the real wrapper on the fake `docker` and in the round trip: an empty target restores, and `--validate-only` writes nothing (row counts and table list before and after).
+- **K153 (Codex r2-2, HIGH):** the rollback runbook restores the database and `uploads_data` as a pair from the same set before any service starts; renaming the database back without its uploads is never offered.
+- **K154 (Codex r2-3, HIGH):** the restore keeps the lock and the lease until `migrate deploy` has finished; a failed migration leaves services stopped and the lock released only through the existing trap rules. Test on the fake `docker`: no lock release and no service start before the migrate call returns.
+- **K155 (Codex r2-4, HIGH):** K148 gets an enforced bound: every upload transaction that can reach the uncertain-commit path runs with a server-side limit (for example `SET LOCAL statement_timeout` and `idle_in_transaction_session_timeout`, or another Postgres 16 mechanism) that is provably shorter than the queue delay, and the sweep's reference check runs after that bound. The bound and the margin are stated in the code and in `docs/OPERATIONS.md`; a test shows a transaction held past the bound is aborted by the server.
+- **Codex r2-5 (MEDIUM):** the docs say exactly what `--validate-only` and the step-2 backup write (after K152, `--validate-only` writes nothing).
+- **Codex r2-6 (MEDIUM):** `docs/OPERATIONS.md` documents how an owner whose duplicate member rows deny them admin access repairs the rows safely.
+
+Fix batch F6, then Codex round 3 (the last).
