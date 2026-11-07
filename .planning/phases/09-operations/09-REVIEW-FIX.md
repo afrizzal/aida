@@ -713,3 +713,199 @@ Each was removed by the runners themselves. Afterwards `docker ps -a` and `docke
 - **Not run:** SP-1 to SP-3, including the new SP-2 "new server" scenario (waiting for the Phase 8.1 harness and the owner); the K149 runbook on a real stack; the E2E suite (next-o1 untouched, `.next` not moved).
 - **Human verification:** K148 (the commit-sent flags and the sweep's reference check), K150 (the empty and equal-history rules, migrate after an older set) and K151 are logic changes.
 - **`STATE.md`** was not touched, and no tool changed it. The untracked `.planning/state.json` was there before F5 and was left alone.
+
+## F6
+
+**Date:** 2026-11-12. **Scope:** the Codex diff critique round 2 (`run-loop/codex/fase09-diff-r2-jawab.md`), as its dispositions in `09-REVIEW.md` state them: K152, K153, K154, K155 and the two MEDIUM items (Codex r2-5 and r2-6). **Where it ran:** the main checkout on `v2/run-loop`, no worktree (`workflow.use_worktrees: false`), as the dispatch asked. Runs used `AIDA_TEST_RUN_ID=mwdoupja-21cd289fb36ca940` and the Colima `DOCKER_HOST` (`colima status` exit 0 and `docker info` exit 0 first). One test process ran at a time, and exit codes were read without a pipe. For each red run the file at the previous commit (a scratch copy, or `git show HEAD:<file>`) or a mutation was swapped in. The new file was then restored with `cp` and checked with `cmp` (exit 0 every time). No code path deletes demo or tenant data. The runbooks rename databases and never drop one, and the r2-6 repair changes roles only. **Result:** 6 of 6 items fixed in 7 commits; one of them is a follow-up typecheck fix. K152, K154 and K155 are logic changes and **require human verification**. K155 is fixed with a stated limit: one window has no provable bound (see K155).
+
+### K152 (Codex r2-1): the schema check and `--validate-only` run before any write to the target
+
+**Change.**
+- `scripts/restore.sh`. The new order is:
+  1. take the restore lock (a directory on the backups volume, not a database write);
+  2. run the read-only `--check-schema`;
+  3. take the backup lease, but only when the check did not print `[restore] target database: empty`.
+- A truly empty target has no `SystemSetting` table, so no backup can hold or take a lease on it: a backup's first database step reads that table and fails. The restore lock alone keeps every backup out, because `aida-backup.sh` skips while the lock exists and its fenced actions refuse under it. The reason is written in the script, and the wrapper logs `... the restore lock alone coordinates this restore (no lease is written)`.
+- `--validate-only` takes no lease at all.
+- `release()` releases the lease only when it holds one.
+- `docs/OPERATIONS.md`, Restore: steps 3 to 5 describe the new order, the later steps are renumbered, and the `--validate-only` paragraph is updated.
+
+**Tests.**
+- `tests/unit/restore-script.test.ts` (fake `docker`): the existing order assertions now expect `lock, check, lease`. Four new cases:
+  - the check runs before the lease, and a check refusal takes no lease;
+  - an empty target: no lease step, the release has no `lease_release`, and the services start;
+  - an empty target with a validation failure: the lock alone is released and the services start again;
+  - `--validate-only` with exit 0, 4 and 9 runs no lease step.
+- `tests/integration/backup-restore-roundtrip.test.ts` runs the real `scripts/restore.sh` through a new bridge, `tests/integration/support/restore-bridge/docker`.
+  - The bridge turns each `compose run ... backup` step into `docker exec` as 1000:1000 in this case's rule-J restore runner. It answers config, inspect, stop, start, the probe and container-removal calls without touching the daemon.
+  - It maps `/backups/<setId>` to the case's subdirectory.
+  - Two new cases:
+    - a truly empty target (`public` and `pgboss` dropped) restores, exit 0, steps `lock, check, stop, set, release, start`. The migrations equal the release, the restored-volume checks pass, and no lock is left.
+    - `--validate-only` against a migrated target leaves the full table inventory and a write counter unchanged. The write counter is the sum of `n_tup_ins + n_tup_upd + n_tup_del` over `pg_stat_all_tables`, read 1.5 s after the run so that ended sessions are counted.
+
+**Runs:**
+- Unit green: exit 0, 34 passed (34). Unit red, old `restore.sh`: exit 1, 13 failed, 21 passed (34).
+- Round-trip green: exit 0, 2 passed (32 skipped). Round-trip red, old `restore.sh`: exit 1, 2 failed. The empty target failed with `Could not take the backup lease (exit 1)`; validate-only failed on the step order.
+- A second red run checked the write counter, with the assertions reordered so it is checked first: exit 1, `expected 44 to be 42` (the old wrapper inserted and then deleted the lease row).
+
+**Commit:** `b45899f` fix(09-F6): K152 the schema check and --validate-only run before any write to the target
+
+### K154 (Codex r2-3): the lock and the lease are held until `migrate deploy` has returned
+
+**Change.**
+- `scripts/restore.sh`, for an older set, after the set script succeeds:
+  1. `SET_OK=1`;
+  2. the lease is taken again with the same holder. The restored database has no lease row: `pg_restore` replaced `SystemSetting`, and the set script removed the row the dump carried;
+  3. `migrate` runs in the foreground;
+  4. only then are the lease and the lock released and backup, app and worker started.
+- A failed re-lease or a failed migrate exits 1 with its own message. A signal is handled after the migrate call returns, because bash defers the trap during a foreground command.
+- The trap has a new `SET_OK` branch. It releases the lease and the lock, starts nothing, and does not print the misleading "uploads step" text.
+- `docs/OPERATIONS.md`, Restore steps 8 and 9.
+
+**Tests.**
+- The fake `docker` appends `migrate-returned` when the migrate call ends (`FAKE_MIGRATE_SLEEP`), and `FAKE_LEASE_AGAIN_EXIT` answers the second lease step. Two existing unit cases were updated, and five are new:
+  - the order: release and start come only after `migrate-returned`;
+  - an empty target with an older set: no lease before the restore, the lease taken for migrate and released after;
+  - a failed migrate: exit 1, no start, release after `migrate-returned`;
+  - a refused re-lease: exit 1, no migrate;
+  - TERM during migrate: exit 143, release only after `migrate-returned`, no start.
+- Round trip, two new cases through the real wrapper and the bridge:
+  - The wrapper is copied byte for byte (asserted) into a scratch checkout under `.test-tmp/`. Its `prisma/migrations` holds the repository's names plus `29991231000000_k154_later`, so the set is older than that release.
+  - The bridge's migrate step records whether `.restore-lock` exists and reads the `backup:lease` row in the runner.
+  - Success: steps `lock, check, lease, stop, set, lease, migrate, migrate-returned, release, start`. During migrate, `lock=present` and the lease row names this restore's holder; afterwards there is no lock and no lease row.
+  - A failed migrate (bridge exit 1): exit 1, no start, `lock=present` during migrate, released after it.
+
+**Runs:**
+- Unit green: exit 0, 39 passed (39). Unit red, the K152 `restore.sh`: exit 1, 7 failed, 32 passed (39).
+- Round-trip green (K152 and K154 cases): exit 0, 4 passed. Round-trip red, the K152 `restore.sh` (run before the K152 commit with the same K154 block): exit 1, 2 failed, 2 passed.
+
+**Commits:**
+- `98b05f9` fix(09-F6): K154 the restore keeps the lock and the lease until migrate deploy has returned
+- `932fc17` fix(09-F6): K152 K154 the new restore test cases pass the typecheck. `NODE_ENV` was added to the bridge env and a case list was typed; no behaviour changed. `tsc` caught both errors after the two commits.
+
+### K155 (Codex r2-4): the server bounds an upload transaction whose commit outcome is unknown
+
+**Change.** `src/lib/attachments/uncertain-commit.ts`:
+- `boundUploadCommitInTx(tx)` runs `SELECT set_config('idle_in_transaction_session_timeout', '30s', true)`. The `true` makes it transaction-local (SET LOCAL).
+- It is the last statement of each of the four transactions that can reach the uncertain-commit path: public intake, follow-up, ticket messages and project attachments. It sits immediately before `commitSent = true`.
+- If the COMMIT has not reached the server 30 s after that statement, the server terminates the session and the transaction rolls back.
+- Constants:
+  - `UPLOAD_COMMIT_BOUND_SECONDS` = 30;
+  - the queue delay is unchanged at 15 minutes;
+  - `UNCERTAIN_COMMIT_MARGIN_SECONDS` = 870.
+- The flag, the error and the enqueue all come after the bound statement, and the queue row is due 15 minutes after the enqueue transaction's `now()`.
+- `file-cleanup.ts` notes this at the reference check.
+- `docs/OPERATIONS.md` has a new "Uploads whose save outcome is unknown" section that states the bound and the margin.
+
+**The limit, stated in the code and the docs:** a COMMIT the server has already started is not bounded by any PostgreSQL 16 setting.
+- Attempt 1 also set `statement_timeout` 30 s. The test of a COMMIT whose deferred trigger sleeps 120 s timed out at 120 s: green attempt 1 was exit 1, 1 failed, 3 passed.
+- That is because PostgreSQL disables the statement timer before the commit work. `transaction_timeout` exists only from PostgreSQL 17.
+- So `statement_timeout` was dropped from the bound, and a test now shows this behaviour.
+- AIDA's schema has no deferrable constraint or deferred trigger (tested), so that commit work runs no user code: it only writes and flushes the commit record. Its duration depends on the server's storage alone.
+- Following the dispatch: this window has **no provable bound**. The bound that is proven (30 s, the idle limit) covers everything up to the start of the COMMIT.
+
+**Tests.**
+- New `tests/unit/upload-commit-bound.test.ts`, 7 cases:
+  - in each of the four files, the statement before every `commitSent = true;` is `await boundUploadCommitInTx(tx);`;
+  - the exact SQL;
+  - bound 30 s, delay 15 min, margin 870 s;
+  - the helper runs exactly that statement.
+- New `tests/integration/upload-commit-bound.test.ts`, 5 cases on PostgreSQL 16:
+  - the bound is shorter than the delay;
+  - in a Prisma transaction the idle limit reads `30s` and is gone after the transaction;
+  - a pg session held idle after the bound statement is terminated by the server at 30 s or later (watched in `pg_stat_activity`), and a later COMMIT rejects;
+  - `statement_timeout` 1 s does not stop a COMMIT whose deferred trigger sleeps 3 s: the row commits;
+  - no deferrable constraint and no deferred non-internal trigger exist outside the system schemas.
+
+  The sessions use temporary objects only.
+
+**Runs:**
+- Unit green: exit 0, 13 passed, together with `file-delete-callers.test.ts`. Unit red, the four call sites at `HEAD`: exit 1, 4 failed, 3 passed (7).
+- Integration green (second attempt): exit 0, 5 passed (5). Integration red, a mutation `UPLOAD_COMMIT_BOUND_SQL = SELECT 1`: exit 1, 2 failed, 3 passed (5). The two failures were `expected '0' to be '30s'` and `the server never ended the idle session` after 45 s.
+- `file-delete-inventory.test.ts` and `project-file-cleanup.test.ts` with the bound in place: exit 0, 32 passed. The lost-commit proxy cases still pass.
+
+**Commit:** `8bcfd72` fix(09-F6): K155 an upload transaction with an unknown commit outcome is bounded by the server
+
+### K153 (Codex r2-2): a failed rollback restore is recovered by restoring the database and the uploads as a pair
+
+**Change (docs).** `docs/OPERATIONS.md`, Upgrading:
+- "If the restore in step 6 fails" no longer offers renaming `<db>_before_rollback` back, because the uploads volume may already be replaced. It says to start no service, and then to:
+  1. move the partly restored database aside as `<db>_failed_restore` and create an empty one (no drop);
+  2. `git checkout <new-tag>`, `docker compose build`, and `--validate-only` on the step 2 set;
+  3. `restore.sh <current-setId> --yes`, then `docker compose up -d`.
+- The same applies to a step 6 refusal (exit 4 or 6).
+- The paragraph after the runbook now says that the step 2 set holds the database and the uploads together, and that the renamed database is a second copy of the database only.
+
+**Test.** New `tests/unit/operations-rollback-docs.test.ts`, 2 cases:
+- the rename-back text is gone;
+- in that paragraph the order is checkout, validate, restore of `<current-setId>`, then `up -d`, with no `dropdb` or `DROP DATABASE`.
+
+**Runs:**
+- Green: exit 0, 2 passed. The first green run failed (exit 1, 2 failed) because of a bug in the test's section helper: the `# ` comment lines in the code blocks were taken as headings. The helper was fixed and run again.
+- Red, the docs at `HEAD`: exit 1, 2 failed (2).
+
+**Commit:** `54c727d` fix(09-F6): K153 the rollback runbook restores the database and the uploads as a pair
+
+### Codex r2-5: the docs say exactly what `--validate-only` and a backup write
+
+**Change (docs).**
+- **`--validate-only`** writes nothing to the database or the uploads volume. It takes only the restore lock, and no lease. Its only writes are `.restore-lock` and `.restore-staging-<holder>` on the backups volume, and it removes both.
+- **A new "What a backup writes" paragraph** under "Running a backup by hand":
+  - in the database, `backup:lease` (inserted, renewed, deleted) and `backup:lastRun`, nothing else;
+  - the uploads volume is only read;
+  - on the backups volume, the set through `.tmp-<setId>`;
+  - retention removes the sets beyond `BACKUP_RETENTION` (7 by default) and leftover `.tmp-<setId>` directories;
+  - `status-unrecorded-<setId>.json` when the outcome cannot be recorded.
+- **Rollback step 2.** The comment "both commands write nothing to the database" is replaced. The new comment also warns to keep the pre-upgrade set off the host or within the retention, and "Take a backup first" says the same.
+
+**Test.** 3 cases in `operations-rollback-docs.test.ts`.
+
+**Runs:**
+- Green: exit 0, 5 passed.
+- Red, the docs at `HEAD`: exit 1, 3 failed, 2 passed (5).
+
+**Commit:** `29c3209` fix(09-F6): Codex r2-5 the docs say exactly what --validate-only and a backup write
+
+### Codex r2-6: how an owner denied by duplicate member rows repairs them
+
+**Change (docs).** A new Troubleshooting entry, "An owner or admin is treated as a plain member of a workspace (duplicate member rows)":
+- the K151 rule (admin only when every row is owner or admin);
+- a read-only query that lists the duplicates;
+- the intended role is decided with another owner or admin of the workspace;
+- `./scripts/backup.sh` first;
+- one transaction that sets the one role on every row of that user in the workspace, with a `SELECT` check before `COMMIT`;
+- no row is removed. The duplicates stay until owner item 12.2-o4 adds the unique key.
+
+**Test.** 2 cases in `operations-rollback-docs.test.ts`: the rule and the query; and the order backup, then `BEGIN; UPDATE ...; SELECT ...; COMMIT;`, with no `DELETE`, `DROP` or `TRUNCATE`.
+
+**Runs:**
+- Green: exit 0, 7 passed.
+- Red, the docs at `HEAD`: exit 1, 2 failed, 5 passed (7).
+- The repair commands were not run against a database.
+
+**Commit:** `7cfd417` fix(09-F6): Codex r2-6 the docs say how an owner denied by duplicate member rows repairs them
+
+### Final checks
+
+| Command | Exit | Counts |
+|---|---|---|
+| `pnpm lint` | 0 | 683 files, 1 warning, pre-existing (`tests/unit/container-config.test.ts:160`) |
+| `pnpm typecheck` | 0 | 0 errors |
+| `pnpm test` | 0 | 100 files, 1716 tests passed |
+| `pnpm test:integration` (full, once) | 0 | 116 files, 1547 tests passed, 414.6 s |
+
+**Docker.** No container or volume was created by hand. All of them came from Testcontainers and the rule-J backup and restore runners, under the run id:
+- the integration global setup's Postgres;
+- the round-trip runner containers and named restore volumes, in the K152 and K154 green and red runs and the full suite.
+
+The bridge only runs `docker exec` into those runner containers, and the wrapper copy reached no other container. Each container and volume was removed by its runner. Afterwards `docker ps -a` and `docker volume ls` with `label=aida.test=1` listed nothing, and no container name held the run id. F6 ran no compose up, down, stop or build, built no image, ran no prune, and did not run `test:docker-cleanup`. `scripts/restore.sh` never ran against a compose project or a real volume.
+
+### Not done, and limits
+
+- **K155 window.** A COMMIT the server has already started has no PostgreSQL 16 timeout. The code and the docs state this as a limit, not as a proven bound. A real fix for that window would be coordination, for example recording the upload transaction's xid and having the sweep wait for `pg_xact_status`. That needs a schema change and a new disposition, so it was not done.
+- **The bridge is a test double of Compose.** The round trips prove the wrapper's real step order and its database writes against a real database, set script and volume. They do not prove `docker compose run` behaviour, which is still SP-2.
+- **The K154 round trip** uses a byte-identical copy of the wrapper in a scratch checkout, because the wrapper reads the release list from its own checkout. Its migrate step is the bridge's recorder, not `prisma migrate deploy`.
+- **The extra typecheck commit** (`932fc17`) belongs to K152 and K154.
+- **Not run:** SP-1 to SP-3; the K153 runbook and the r2-6 repair on a real stack; the E2E suite (next-o1 untouched, `.next` not moved).
+- **Human verification:** K152, K154 and K155 are logic changes.
+- **State files.** `STATE.md` was not touched, and no tool changed it. The untracked `.planning/state.json` was left alone. The orchestrator commit `ca7ba45` (re-dispatch note) landed on the branch during F6; it is not part of F6.
