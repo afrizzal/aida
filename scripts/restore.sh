@@ -42,10 +42,14 @@
 #      the uploads volume mounted read-write at /restore/uploads. It validates the whole set before
 #      it writes anything, and writes `.restore-lock/target-touched` (`database`, then `uploads`)
 #      immediately before its first write to each target;
-#   8. on success: the lease (when held) and the lock are released; when the set is older than
-#      this release (step 4 said so), the release's one-shot `migrate` service runs `prisma
-#      migrate deploy` first (K150; on a failure nothing is started, exit 1); then backup, app and
-#      worker are started, and the app's probe is polled for up to 60 s (a warning only).
+#   8. on success, when the set is older than this release (step 4 said so): the database
+#      replacement removed every lease row, so the lease is taken again with the same holder on
+#      the restored database, and the release's one-shot `migrate` service runs `prisma migrate
+#      deploy` while the restore lock and the lease are held (K150, K154). On a failure (or a
+#      signal, which bash handles once the foreground migrate call has returned) nothing is
+#      started, exit 1, and the trap releases the lease and the lock only after that call;
+#   9. then the lease (when held) and the lock are released, backup, app and worker are started,
+#      and the app's probe is polled for up to 60 s (a warning only).
 #
 # With --validate-only (K149, K152) it takes the restore lock only, runs the set script with
 # --validate-only (the whole set and the release check), releases the lock and exits with the set
@@ -275,6 +279,9 @@ DONE=0
 SET_PID=''
 SET_RC=''
 SET_STARTED=0
+# K154: 1 once the set script succeeded; from then on a failure is in the step after it (the
+# lease again, migrate deploy), and the trap releases the lease and the lock but starts nothing.
+SET_OK=0
 RESTORE_CONTAINER=''
 EXITING=0
 FINAL_RC=0
@@ -349,6 +356,14 @@ on_exit() {
   fi
   if [ "$DONE" = 1 ]; then
     : # the success path released the locks and started the services
+  elif [ "$SET_OK" = 1 ]; then
+    # K154: the set is restored and its container is gone (its client returned 0); the lease
+    # again or migrate deploy failed, or a signal came after the migrate call returned. Nothing
+    # is started on a database behind this release.
+    [ "$rc" != 0 ] || rc=1
+    release
+    err "The restore lock and the lease were released after the step that failed (exit $rc);"
+    err "backup, app and worker were left stopped. See $DOCS."
   elif [ "$SET_STARTED" = 1 ] && ! remove_restore_container; then
     # The restore container may still write: keep the lock (its heartbeat stays fresh, so
     # --break-stale-lock refuses while it runs) and start nothing.
@@ -534,12 +549,27 @@ if [ "$SET_RC" -ne 0 ]; then
   exit "$SET_RC"
 fi
 
-# Success: release first, so the backup service never starts into a held restore lock.
-release || :
-DONE=1
-# K150: an older set leaves the database behind this release; its migrate deploy runs before
-# app and worker start (compose start does not run the one-shot migrate service).
+SET_OK=1
+# K150, K154: an older set leaves the database behind this release; its migrate deploy runs
+# before app and worker start (compose start does not run the one-shot migrate service), while
+# the restore lock and the lease are held, so no other restore and no backup can start before
+# the migration has finished. pg_restore replaced SystemSetting, and the set script removed the
+# lease row the dump carried in, so this restore's lease is taken again on the restored database.
+# migrate runs in the foreground: a signal is handled by the trap once it has returned.
 if [ "$MIGRATE_AFTER" = 1 ]; then
+  set +e
+  backup_step aida-restore-lease \
+    "r=\$(lease_acquire \"\$1\" $LEASE_TTL_SECONDS) || exit 1; [ \"\$r\" = acquired ] || exit 3" \
+    "$HOLDER" >/dev/null
+  rc=$?
+  set -e
+  if [ "$rc" -ne 0 ]; then
+    err "Could not take the backup lease again on the restored database (exit $rc). The database"
+    err "holds the set's data at the set's migrations; migrate deploy was NOT run. Run: docker"
+    err "compose up -d (it runs migrate first) once no backup is running. See $DOCS."
+    exit 1
+  fi
+  LEASE_HELD=1
   log "The set is older than this release: running this release's migrate deploy..."
   if ! $COMPOSE run --rm --no-deps -T migrate </dev/null; then
     err "migrate deploy failed after the restore of set $SET_ID. The database holds the set's data at"
@@ -548,6 +578,9 @@ if [ "$MIGRATE_AFTER" = 1 ]; then
     exit 1
   fi
 fi
+# Then release, so the backup service never starts into a held restore lock.
+release || :
+DONE=1
 log "Starting backup, app and worker..."
 start_services || :
 log "Waiting for the app probe (up to 60 s)..."

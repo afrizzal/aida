@@ -77,6 +77,7 @@ function restore(args: string[], extra: Record<string, string> = {}, input = "")
 function steps(calls: string[]): string[] {
   return calls.map((call) => {
     if (call === "compose config --format json") return "config";
+    if (call === "migrate-returned") return "migrate-returned";
     if (call.startsWith("volume inspect ")) return `inspect ${call.split(" ")[2]}`;
     if (call === "compose stop backup app worker") return "stop";
     if (call.startsWith("stop -t 30 ")) return "ctr-stop";
@@ -493,15 +494,17 @@ describe("scripts/restore.sh: release migrations and validate-only (K149, K150)"
     expectNoDestructiveCall(run);
   });
 
-  it("an older set: migrate deploy runs after the set script and the release, before backup, app and worker start", () => {
+  it("an older set: migrate deploy runs after the set script and before the release, backup, app and worker start", () => {
     const run = restore([SET_ID, "--yes"], { FAKE_CHECK_OUTPUT: OLDER_LINE });
     expect(run.status, run.stderr).toBe(0);
     expect(steps(run.calls).slice(5)).toEqual([
       "lease",
       "stop",
       "set",
-      "release",
+      "lease",
       "migrate",
+      "migrate-returned",
+      "release",
       "start",
       "health",
     ]);
@@ -516,7 +519,13 @@ describe("scripts/restore.sh: release migrations and validate-only (K149, K150)"
     });
     expect(run.status).toBe(1);
     const s = steps(run.calls);
-    expect(s.slice(s.indexOf("set"))).toEqual(["set", "release", "migrate"]);
+    expect(s.slice(s.indexOf("set"))).toEqual([
+      "set",
+      "lease",
+      "migrate",
+      "migrate-returned",
+      "release",
+    ]);
     expect(count(s, "start")).toBe(0);
     expect(run.stderr).toContain("migrate deploy failed after the restore");
     expect(run.stderr).toContain("backup, app and worker were NOT started");
@@ -609,4 +618,108 @@ describe("scripts/restore.sh: nothing is written to the target before the schema
       expectNoDestructiveCall(run);
     }
   });
+});
+
+describe("scripts/restore.sh: the lock and the lease are held until migrate deploy returns (K154)", () => {
+  it("an older set: the lease is taken again on the restored database, and nothing is released or started before the migrate call returns", () => {
+    const run = restore([SET_ID, "--yes"], {
+      FAKE_CHECK_OUTPUT: OLDER_LINE,
+      FAKE_MIGRATE_SLEEP: "1",
+    });
+    expect(run.status, run.stderr).toBe(0);
+    const s = steps(run.calls);
+    const returned = s.indexOf("migrate-returned");
+    expect(returned).toBeGreaterThan(s.indexOf("migrate"));
+    expect(s.indexOf("release")).toBeGreaterThan(returned);
+    expect(s.indexOf("start")).toBeGreaterThan(returned);
+    expect(s.lastIndexOf("lease")).toBeGreaterThan(s.indexOf("set"));
+    expect(s.lastIndexOf("lease")).toBeLessThan(s.indexOf("migrate"));
+    expect(run.calls[s.indexOf("release")]).toContain("lease_release");
+    expectNoDestructiveCall(run);
+  });
+
+  it("an empty target with an older set: the restore holds no lease before, takes it on the restored database for migrate, and releases it after", () => {
+    const run = restore([SET_ID, "--yes"], {
+      FAKE_CHECK_OUTPUT: `${EMPTY_LINE}\n${OLDER_LINE}`,
+    });
+    expect(run.status, run.stderr).toBe(0);
+    const s = steps(run.calls);
+    expect(s.slice(3)).toEqual([
+      "lock",
+      "check",
+      "stop",
+      "set",
+      "lease",
+      "migrate",
+      "migrate-returned",
+      "release",
+      "start",
+      "health",
+    ]);
+    expect(run.calls[s.indexOf("release")]).toContain("lease_release");
+    expectNoDestructiveCall(run);
+  });
+
+  it("a failed migrate: exit 1, nothing started, the lock and the lease released by the trap only after the migrate call returned", () => {
+    const run = restore([SET_ID, "--yes"], {
+      FAKE_CHECK_OUTPUT: OLDER_LINE,
+      FAKE_MIGRATE_EXIT: "1",
+      FAKE_MIGRATE_SLEEP: "1",
+    });
+    expect(run.status).toBe(1);
+    const s = steps(run.calls);
+    expect(s.slice(s.indexOf("set"))).toEqual([
+      "set",
+      "lease",
+      "migrate",
+      "migrate-returned",
+      "release",
+    ]);
+    expect(count(s, "touched")).toBe(0);
+    expect(run.calls[s.indexOf("release")]).toContain("lease_release");
+    expect(run.stderr).toContain("backup, app and worker were NOT started");
+    expect(run.stderr).toContain("left stopped");
+    expect(run.stderr).not.toContain("uploads step");
+    expectNoDestructiveCall(run);
+  });
+
+  it("the lease cannot be taken again: exit 1, no migrate, nothing started, the lock released", () => {
+    const run = restore([SET_ID, "--yes"], {
+      FAKE_CHECK_OUTPUT: OLDER_LINE,
+      FAKE_LEASE_AGAIN_EXIT: "3",
+    });
+    expect(run.status).toBe(1);
+    const s = steps(run.calls);
+    expect(s.slice(s.indexOf("set"))).toEqual(["set", "lease", "release"]);
+    expect(run.stderr).toContain("migrate deploy was NOT run");
+    expectNoDestructiveCall(run);
+  });
+
+  it("TERM while migrate runs: the lock and the lease are released only after the migrate call returned, nothing started, exit 143", async () => {
+    const log = logFile();
+    const child = spawn("/bin/bash", [SCRIPT, SET_ID, "--yes"], {
+      cwd: ROOT,
+      env: env(log, { FAKE_CHECK_OUTPUT: OLDER_LINE, FAKE_MIGRATE_SLEEP: "2" }),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+    const exited = new Promise<number | null>((resolve) => child.on("exit", (c) => resolve(c)));
+    const deadline = Date.now() + 15_000;
+    while (!steps(readCalls(log)).includes("migrate")) {
+      if (Date.now() > deadline) throw new Error("the migrate step never started");
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    child.kill("SIGTERM");
+    const code = await exited;
+    const calls = readCalls(log);
+    const s = steps(calls);
+    expect(code).toBe(143);
+    expect(s.slice(s.indexOf("migrate"))).toEqual(["migrate", "migrate-returned", "release"]);
+    expect(count(s, "start")).toBe(0);
+    expect(stderr).toContain("left stopped");
+    expectNoDestructiveCall({ status: code, stdout: "", stderr, calls });
+  }, 30_000);
 });

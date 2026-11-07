@@ -25,7 +25,7 @@
 // One test process at a time (vitest.integration.config.ts, fileParallelism: false).
 import { execFile, execFileSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1376,6 +1376,29 @@ async function emptyTarget(): Promise<IsolatedDatabase> {
   return target;
 }
 
+/**
+ * A copy of the real wrapper (byte for byte) in a scratch checkout whose prisma/migrations holds
+ * this repository's migrations plus one later name, so the set is older than that release.
+ */
+async function wrapperWithLaterMigration(): Promise<string> {
+  const root = await makeTestDir(testRoot, "checkout-");
+  await mkdir(path.join(root, "scripts"));
+  const copy = path.join(root, "scripts", "restore.sh");
+  await copyFile(WRAPPER, copy);
+  await chmod(copy, 0o755);
+  for (const name of [...(await releaseMigrations()).split(" "), "29991231000000_k154_later"]) {
+    await mkdir(path.join(root, "prisma", "migrations", name), { recursive: true });
+  }
+  expect(await readFile(copy)).toEqual(await readFile(WRAPPER));
+  return copy;
+}
+
+function holderOf(run: WrapperRun): string {
+  const match = /Restore lock taken: (restore-[0-9a-f]{32})/.exec(run.stdout);
+  if (!match) throw new Error(`no holder in the wrapper output: ${run.stdout}\n${run.stderr}`);
+  return match[1] as string;
+}
+
 describe("K152: through the real wrapper, nothing is written to the target before the schema check", () => {
   it(
     "a truly empty target restores through scripts/restore.sh (exit 0) under the restore lock alone",
@@ -1431,6 +1454,65 @@ describe("K152: through the real wrapper, nothing is written to the target befor
       ]);
       expect(await lockHolder(runner, c)).toBeNull();
       expect(await stagingDirs(c)).toEqual([]);
+    },
+    CASE_TIMEOUT,
+  );
+});
+
+describe("K154: through the real wrapper, the lock and the lease are held until migrate deploy returns", () => {
+  it(
+    "an older set: migrate runs while the restore lock and this restore's lease are held, both are released after it returns, then the services start",
+    async () => {
+      const target = await newTargetDatabase();
+      const runner = await newRestoreRunner(target);
+      const { c, setId } = await copyOfBase(runner);
+      const wrapper = await wrapperWithLaterMigration();
+      const run = await runWrapper(runner, c, setId, "--yes", { wrapper });
+      expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
+      const s = wrapperSteps(run.calls).filter((x) => x !== "other");
+      expect(s).toEqual([
+        "lock",
+        "check",
+        "lease",
+        "stop",
+        "set",
+        "lease",
+        "migrate",
+        "migrate-returned",
+        "release",
+        "start",
+      ]);
+      const holder = holderOf(run);
+      expect(run.migrate[0]).toBe("lock=present");
+      expect(run.migrate[1]).toMatch(new RegExp(`^lease=\\{"holder" ?: ?"${holder}"`));
+      expect(await lockHolder(runner, c)).toBeNull();
+      expect(await leaseRows(target)).toBe(0);
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "an older set whose migrate fails: exit 1, nothing started, the lock and the lease released only after the migrate call returned",
+    async () => {
+      const target = await newTargetDatabase();
+      const runner = await newRestoreRunner(target);
+      const { c, setId } = await copyOfBase(runner);
+      const wrapper = await wrapperWithLaterMigration();
+      const run = await runWrapper(runner, c, setId, "--yes", { wrapper, migrateExit: 1 });
+      expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(1);
+      const s = wrapperSteps(run.calls).filter((x) => x !== "other");
+      expect(s.slice(s.indexOf("set"))).toEqual([
+        "set",
+        "lease",
+        "migrate",
+        "migrate-returned",
+        "release",
+      ]);
+      expect(s).not.toContain("start");
+      expect(run.migrate[0]).toBe("lock=present");
+      expect(run.stderr).toContain("backup, app and worker were NOT started");
+      expect(await lockHolder(runner, c)).toBeNull();
+      expect(await leaseRows(target)).toBe(0);
     },
     CASE_TIMEOUT,
   );

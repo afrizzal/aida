@@ -12,6 +12,10 @@
 #   FAKE_CHECK_OUTPUT     its output (default nothing; K150: the `set migrations:` line)
 #   FAKE_VALIDATE_EXIT    exit code of the set script's --validate-only step (default 0, K149)
 #   FAKE_MIGRATE_EXIT     exit code of `compose run --rm --no-deps -T migrate` (default 0, K150)
+#   FAKE_MIGRATE_SLEEP    seconds that call takes (default 0.3); when it returns it appends the
+#                         line `migrate-returned` to the log (K154)
+#   FAKE_LEASE_AGAIN_EXIT exit code of the second lease step, after the set script (default 0,
+#                         K154)
 #   FAKE_SET_EXIT         exit code of the set script step (default 0)
 #   FAKE_SET_MODE         `hang`: the set script step waits until it is signalled
 #   FAKE_RELEASE_EXIT     exit code of the release step (default 0)
@@ -120,6 +124,8 @@ esac
 
 # K150: the release's one-shot migrate service, exactly this call.
 if [ "$*" = 'compose run --rm --no-deps -T migrate' ]; then
+  sleep "${FAKE_MIGRATE_SLEEP:-0.3}"
+  printf 'migrate-returned\n' >>"$FAKE_DOCKER_LOG"
   exit "${FAKE_MIGRATE_EXIT:-0}"
 fi
 
@@ -148,6 +154,10 @@ if has aida-restore-lock; then
   exit "${FAKE_LOCK_EXIT:-0}"
 fi
 if has aida-restore-lease; then
+  _lease_file="$FAKE_DOCKER_LOG.lease-count"
+  _ln=$(($(cat "$_lease_file" 2>/dev/null || echo 0) + 1))
+  printf '%s\n' "$_ln" >"$_lease_file"
+  if [ "$_ln" -ge 2 ]; then exit "${FAKE_LEASE_AGAIN_EXIT:-0}"; fi
   exit "${FAKE_LEASE_EXIT:-0}"
 fi
 if has aida-restore-touched; then
