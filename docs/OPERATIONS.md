@@ -631,6 +631,30 @@ Check `DATABASE_URL` construction: Compose builds the services' URL from `POSTGR
 **`app`, `worker` or `migrate` exits at start-up with `DATABASE_URL ... does not match POSTGRES_PASSWORD` or `DATABASE_URL could not be parsed`.**
 The boot guard found that the database URL the service received disagrees with `POSTGRES_USER`, `POSTGRES_PASSWORD` or `POSTGRES_DB` (the message names which: user, password or database), or that the URL does not parse. The usual cause is a password with a URL-reserved character such as `/ @ : # ?` or `%`, which breaks the URL Compose builds, or an `AIDA_DATABASE_URL` left over from an earlier password. A `$` in an unquoted or double-quoted `POSTGRES_PASSWORD` in `.env` is another cause: Compose cuts the value at the `$`, while the generator encoded the whole password (see the `POSTGRES_PASSWORD` row in the [Environment variable reference](#environment-variable-reference)). The message never contains either value. Fix: run `POSTGRES_USER=... POSTGRES_PASSWORD='...' POSTGRES_DB=... sh scripts/database-url.sh` with the values from your `.env`, replace the `AIDA_DATABASE_URL` line in `.env` with its output (or remove that line when the password is URL-safe), then `docker compose up -d`. The lines are prefixed `[migrate]` or `[boot]`; read them with `docker compose logs migrate` or `docker compose logs app`.
 
+**An owner or admin is treated as a plain member of a workspace (duplicate member rows).**
+The `member` table has no unique key on the workspace and the user yet, so one user can hold two rows in one workspace, for example `owner` and `member` after a demotion that left the old row behind. AIDA then grants admin access only when **every** row of that user in that workspace is `owner` or `admin`; otherwise it treats the user as a member. It never picks the higher role, because the extra row may be the deliberate one. To repair it:
+
+1. Find the duplicates (read only):
+
+   ```bash
+   docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT \"organizationId\", \"userId\", array_agg(role ORDER BY id) AS roles FROM member GROUP BY 1, 2 HAVING count(*) > 1"'
+   ```
+
+2. Decide the intended role for each user listed with another owner or admin of that workspace, never from the rows alone.
+3. Take a backup first: `./scripts/backup.sh`.
+4. Give every row of that user in that workspace the one intended role (`owner`, `admin` or `member`), in one transaction, and check the result before you commit. Replace the three values:
+
+   ```bash
+   docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -v org=<organizationId> -v usr=<userId> -v role=<role>' <<'SQL'
+   BEGIN;
+   UPDATE member SET role = :'role' WHERE "organizationId" = :'org' AND "userId" = :'usr';
+   SELECT id, role FROM member WHERE "organizationId" = :'org' AND "userId" = :'usr' ORDER BY id;
+   COMMIT;
+   SQL
+   ```
+
+The next request of that user reads the rows again; no restart is needed. This changes roles only and removes no row; the duplicate rows stay until the unique key exists (owner item 12.2-o4), and they do no harm while their roles agree.
+
 **Worker heartbeat is stale (`/api/health`'s `worker.lastRunAt` isn't advancing).**
 `docker compose logs worker` — look for a crash loop or an unhandled exception. `docker compose ps worker` — confirm the container is actually `Up`, not restarting.
 

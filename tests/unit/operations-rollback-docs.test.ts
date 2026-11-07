@@ -69,3 +69,29 @@ describe("Codex r2-5: the docs say exactly what --validate-only and a backup wri
     expect(upgrading).toContain("The backup writes only its lease and its status");
   });
 });
+
+describe("Codex r2-6: the docs say how an owner denied by duplicate member rows is repaired", () => {
+  const troubleshooting = section("## Troubleshooting");
+  const start = troubleshooting.indexOf("(duplicate member rows)");
+  const repair = troubleshooting.slice(
+    start,
+    troubleshooting.indexOf("**Worker heartbeat is stale"),
+  );
+
+  it("explains the conservative rule and finds the duplicates read only", () => {
+    expect(start).toBeGreaterThan(0);
+    expect(repair).toContain(
+      "only when **every** row of that user in that workspace is `owner` or `admin`",
+    );
+    expect(repair).toContain("GROUP BY 1, 2 HAVING count(*) > 1");
+  });
+
+  it("decides with another admin, backs up first, and changes roles in one transaction without deleting a row", () => {
+    expect(repair).toContain("with another owner or admin of that workspace");
+    expect(repair.indexOf("./scripts/backup.sh")).toBeLessThan(repair.indexOf("BEGIN;"));
+    expect(repair).toMatch(
+      /BEGIN;\n\s*UPDATE member SET role = :'role'[^\n]*\n\s*SELECT id, role[^\n]*\n\s*COMMIT;/,
+    );
+    expect(repair).not.toMatch(/DELETE|DROP|TRUNCATE/);
+  });
+});
