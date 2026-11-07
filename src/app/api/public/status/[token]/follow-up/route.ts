@@ -4,6 +4,7 @@ import {
   MAX_FILES_PER_REQUEST,
   MAX_REQUEST_BODY_BYTES,
 } from "@/lib/attachments/constants";
+import { queueStagedFilesAfterUncertainCommit } from "@/lib/attachments/uncertain-commit";
 import {
   removeStoredUploads,
   storeValidatedUploads,
@@ -107,6 +108,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
   // auto-reopen (D-04) applies to the effective ticket; triggeredReopen is set true ONLY on the
   // reopening message, in the same transaction as the status write (Phase 11, D-17).
   let outcome: "ok" | "unavailable";
+  // K148: set when the callback has written every row and returns, so COMMIT is sent next. An
+  // error after that point has an unknown outcome: the files are queued, never unlinked.
+  let commitSent = false;
   try {
     outcome = await prisma.$transaction(async (tx) => {
       const resolved = await resolveReplyTicket(tx, ticket.organizationId, ticket.id);
@@ -144,9 +148,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
           },
         });
       }
+      commitSent = true;
       return "ok";
     });
   } catch (err) {
+    if (commitSent) {
+      await queueStagedFilesAfterUncertainCommit(
+        ticket.organizationId,
+        stored.map((s) => s.storageKey),
+      );
+      throw err;
+    }
     await discard();
     if (err instanceof ReplyTicketChangedError) {
       return NextResponse.json({ error: "TICKET_CHANGED" }, { status: 409 });

@@ -18,6 +18,7 @@
 import type { FileStorage } from "../attachments/file-storage";
 import { buildStorageKey, localFileStorage } from "../attachments/local-file-storage";
 import { saveStagedFiles } from "../attachments/staged-files";
+import { queueStagedFilesAfterUncertainCommit } from "../attachments/uncertain-commit";
 import {
   type UploadCandidate,
   type ValidatedUpload,
@@ -246,6 +247,11 @@ export async function uploadTaskAttachments(
   );
 
   let result: ProjectResult<{ attachments: TaskAttachmentView[] }>;
+  // K148: set when the callback has written every row and returns, so COMMIT is sent next. A
+  // throw or a mapped database error after that point has an unknown outcome: the files are
+  // queued for the reference-checked sweep, never unlinked. A refusal raised inside the callback
+  // leaves it false and keeps the immediate discard.
+  let commitSent = false;
   try {
     result = await runProjectTransaction(actor, "uploadTaskAttachments", async (tx) => {
       const access = await requireTask(tx, actor, taskId, {
@@ -287,13 +293,18 @@ export async function uploadTaskAttachments(
         });
         attachments.push(row);
       }
+      commitSent = true;
       return { attachments };
     });
   } catch (err) {
-    await staged.discard();
+    if (commitSent) await queueStagedFilesAfterUncertainCommit(actor.orgId, staged.saved);
+    else await staged.discard();
     throw err;
   }
-  if (!result.ok) await staged.discard();
+  if (!result.ok) {
+    if (commitSent) await queueStagedFilesAfterUncertainCommit(actor.orgId, staged.saved);
+    else await staged.discard();
+  }
   return result;
 }
 

@@ -92,13 +92,14 @@ describe("U-13 inventory of stored-file deletion", () => {
     expect(users).toEqual(["src/lib/attachments/local-file-storage.ts"]);
   });
 
-  it("the deletion queue is enqueued by the project attachment delete, the task and project hard delete and the logo store (replace and remove, plan 09-05)", () => {
+  it("the deletion queue is enqueued by the project attachment delete, the task and project hard delete, the logo store (replace and remove, plan 09-05) and the staged uploads after an unknown commit outcome (K148)", () => {
     const callers = files
       .filter((f) => f.rel !== "src/lib/projects/file-cleanup.ts")
       .filter((f) => /\benqueueFileCleanupInTx\s*\(/.test(f.code))
       .map((f) => f.rel)
       .sort();
     expect(callers).toEqual([
+      "src/lib/attachments/uncertain-commit.ts",
       "src/lib/branding/logo-store.ts",
       "src/lib/projects/attachments.ts",
       "src/lib/projects/delete.ts",

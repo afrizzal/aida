@@ -9,9 +9,14 @@
 // Failure injection: a test-only table "aida_test_inject_failure" and BEFORE INSERT triggers on
 // "Attachment", "TaskAttachment" (by originalFilename) and "ProjectActivity" (by entityId) raise
 // inside the caller's own statement for a marker a case registers; all are created in beforeAll
-// and dropped in afterAll. A failure after commit is a throwing NextResponse.json for the route's
-// success body, the only step after its commit. The session and the queue are test doubles
-// (as tests/integration/ticket-merge.test.ts); everything else is real.
+// and dropped in afterAll. A failure after commit (K148, Codex diff critique round 1, findings 1
+// and 7) is a COMMIT whose reply is lost: the app's pg pool connects through a TCP proxy
+// (tests/support/lost-commit-proxy.ts) that, once armed, lets the server commit the connection's
+// INSERT into "Attachment" or "TaskAttachment" and then drops the reply and the connection. The
+// caller sees an error with an unknown outcome while the rows are committed; the case checks that
+// every referenced file stays and that the keys are queued, delayed, for the reference-checked
+// sweep. The session and the queue are test doubles (as tests/integration/ticket-merge.test.ts);
+// everything else is real.
 import { randomUUID } from "node:crypto";
 import { readdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
@@ -25,7 +30,13 @@ const env = await vi.hoisted(async () => {
   const previousUploadsDir = process.env.UPLOADS_DIR;
   process.env.UPLOADS_DIR = dir;
   if (!process.env.RATE_LIMIT_PEPPER) process.env.RATE_LIMIT_PEPPER = "delete-inventory-test";
-  return { dir, previousUploadsDir };
+  // The pool of src/lib/db.ts is built from DATABASE_URL at import, so the proxy starts first.
+  const { startLostCommitProxy } = await import("../support/lost-commit-proxy");
+  const previousDatabaseUrl = process.env.DATABASE_URL;
+  if (!previousDatabaseUrl) throw new Error("DATABASE_URL is not set by the global setup");
+  const proxy = await startLostCommitProxy(previousDatabaseUrl);
+  process.env.DATABASE_URL = proxy.url;
+  return { dir, previousUploadsDir, proxy, previousDatabaseUrl };
 });
 
 const routeEnv = vi.hoisted(() => ({
@@ -50,7 +61,6 @@ vi.mock("@/lib/queue/boss-client", () => ({
   getBoss: async () => ({ send: async () => "job" }),
 }));
 
-import { NextResponse } from "next/server";
 import { POST as intakePost } from "@/app/api/public/intake/route";
 import { POST as followUpPost } from "@/app/api/public/status/[token]/follow-up/route";
 import { POST as messagesPost } from "@/app/api/tickets/[id]/messages/route";
@@ -113,6 +123,8 @@ afterAll(async () => {
   if (env.previousUploadsDir === undefined) delete process.env.UPLOADS_DIR;
   else process.env.UPLOADS_DIR = env.previousUploadsDir;
   await rm(env.dir, { recursive: true, force: true });
+  process.env.DATABASE_URL = env.previousDatabaseUrl;
+  await env.proxy.close();
 });
 
 afterEach(() => {
@@ -126,15 +138,33 @@ async function injectFailureFor(marker: string): Promise<void> {
   await prisma.$executeRawUnsafe(`INSERT INTO "${INJECT_TABLE}" (marker) VALUES ($1)`, marker);
 }
 
-/** The route's success body throws: a failure after the referencing commit. */
-function failAfterCommit(): void {
-  const original = NextResponse.json.bind(NextResponse);
-  vi.spyOn(NextResponse, "json").mockImplementation(((body: unknown, init?: ResponseInit) => {
-    if (body && typeof body === "object" && (body as { ok?: unknown }).ok === true) {
-      throw new Error("injected failure after commit");
-    }
-    return original(body, init);
-  }) as never);
+/**
+ * Runs `work` with the proxy armed for `table`: the server commits the INSERT's work and the
+ * reply to that commit is lost. Returns the error the caller saw.
+ */
+async function withLostCommit(table: string, work: () => Promise<unknown>): Promise<unknown> {
+  const lostBefore = env.proxy.lost;
+  env.proxy.arm(table);
+  let caught: unknown = null;
+  try {
+    await work();
+  } catch (err) {
+    caught = err;
+  }
+  expect(env.proxy.lost).toBe(lostBefore + 1);
+  expect(caught).not.toBeNull();
+  return caught;
+}
+
+/** The queue rows of the keys: present, and not due before the K148 delay (at least 10 min). */
+async function expectQueuedDelayed(orgId: string, keys: readonly string[]): Promise<void> {
+  const rows = await prisma.$queryRaw<{ storageKey: string; delayed: boolean }[]>`
+    SELECT "storageKey", "nextAttemptAt" > now() + interval '10 minutes' AS delayed
+    FROM "ProjectFileCleanup"
+    WHERE "organizationId" = ${orgId} AND "storageKey" = ANY(${[...keys]}::text[])
+  `;
+  expect(rows.map((r) => r.storageKey).sort()).toEqual([...keys].sort());
+  for (const row of rows) expect(row.delayed).toBe(true);
 }
 
 /** The stored file names of one organization (empty when its directory does not exist). */
@@ -282,13 +312,10 @@ describe("public intake (removeStoredUploads)", () => {
     expect(await prisma.attachment.count({ where: { originalFilename: name } })).toBe(0);
   });
 
-  it("after commit: a failure after the attachment insert committed leaves every referenced file in place", async () => {
+  it("after commit: the attachment insert committed and its reply was lost; every referenced file stays and is queued, not unlinked (K148)", async () => {
     vi.spyOn(prisma.organization, "findFirstOrThrow").mockResolvedValue(org as never);
-    failAfterCommit();
     const names = [marker(), marker()];
-    await expect(intakePost(intakeRequest(names.map(pngFile)))).rejects.toThrow(
-      "injected failure after commit",
-    );
+    await withLostCommit("Attachment", () => intakePost(intakeRequest(names.map(pngFile))));
     const rows = await prisma.attachment.findMany({
       where: { organizationId: org.id, originalFilename: { in: names } },
       select: { storageKey: true },
@@ -296,6 +323,10 @@ describe("public intake (removeStoredUploads)", () => {
     expect(rows).toHaveLength(2);
     const files = await filesOf(org.id);
     for (const row of rows) expect(files).toContain(row.storageKey);
+    await expectQueuedDelayed(
+      org.id,
+      rows.map((r) => r.storageKey),
+    );
   });
 });
 
@@ -336,10 +367,9 @@ describe("status follow-up (removeStoredUploads through discard)", () => {
     expect(await prisma.attachment.count({ where: { originalFilename: name } })).toBe(0);
   });
 
-  it("after commit: a failure after the message and its attachments committed leaves every referenced file in place", async () => {
-    failAfterCommit();
+  it("after commit: the message and its attachments committed and the COMMIT reply was lost; every referenced file stays and is queued, not unlinked (K148)", async () => {
     const names = [marker(), marker()];
-    await expect(followUp(names.map(pngFile))).rejects.toThrow("injected failure after commit");
+    await withLostCommit("Attachment", () => followUp(names.map(pngFile)));
     const rows = await prisma.attachment.findMany({
       where: { organizationId: orgId, originalFilename: { in: names } },
       select: { storageKey: true },
@@ -347,6 +377,10 @@ describe("status follow-up (removeStoredUploads through discard)", () => {
     expect(rows).toHaveLength(2);
     const files = await filesOf(orgId);
     for (const row of rows) expect(files).toContain(row.storageKey);
+    await expectQueuedDelayed(
+      orgId,
+      rows.map((r) => r.storageKey),
+    );
   });
 });
 
@@ -399,19 +433,20 @@ describe("ticket messages route (staged discard)", () => {
     expect(await filesOf(t.orgId)).toEqual([]);
   });
 
-  it("after commit: a failure after the message and its attachments committed leaves every referenced file in place", async () => {
+  it("after commit: the message and its attachments committed and the COMMIT reply was lost; every referenced file stays and is queued, not unlinked (K148)", async () => {
     const t = await agentTicket();
-    failAfterCommit();
     const names = [marker(), marker()];
-    await expect(post(t.ticketId, names.map(pngFile))).rejects.toThrow(
-      "injected failure after commit",
-    );
+    await withLostCommit("Attachment", () => post(t.ticketId, names.map(pngFile)));
     const rows = await prisma.attachment.findMany({
       where: { organizationId: t.orgId, originalFilename: { in: names } },
       select: { storageKey: true },
     });
     expect(rows).toHaveLength(2);
     expect(await filesOf(t.orgId)).toEqual(rows.map((r) => r.storageKey).sort());
+    await expectQueuedDelayed(
+      t.orgId,
+      rows.map((r) => r.storageKey),
+    );
   });
 });
 
@@ -467,6 +502,23 @@ describe("project attachments (uploadTaskAttachments discard)", () => {
       uploadTaskAttachments(w.actor, w.task.id, [candidate("c.png"), candidate("d.png")]),
     ).rejects.toThrow("injected failure in upload");
     expect(await filesOf(w.orgId)).toEqual([kept[0]?.storageKey]);
+  });
+
+  it("after commit: the attachment rows committed and the COMMIT reply was lost; every referenced file stays and is queued, not unlinked (K148)", async () => {
+    const w = await projectWorld();
+    await withLostCommit("TaskAttachment", () =>
+      uploadTaskAttachments(w.actor, w.task.id, [candidate("e.png"), candidate("f.png")]),
+    );
+    const rows = await prisma.taskAttachment.findMany({
+      where: { organizationId: w.orgId, taskId: w.task.id },
+      select: { storageKey: true },
+    });
+    expect(rows).toHaveLength(2);
+    expect(await filesOf(w.orgId)).toEqual(rows.map((r) => r.storageKey).sort());
+    await expectQueuedDelayed(
+      w.orgId,
+      rows.map((r) => r.storageKey),
+    );
   });
 });
 

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { ALLOWED_MIME, MAX_BYTES } from "@/lib/attachments/constants";
 import { buildStorageKey, localFileStorage } from "@/lib/attachments/local-file-storage";
 import { saveStagedFiles } from "@/lib/attachments/staged-files";
+import { queueStagedFilesAfterUncertainCommit } from "@/lib/attachments/uncertain-commit";
 import { recordAuditEvent } from "@/lib/audit/record-audit-event";
 import { getEmailSettings } from "@/lib/channels/email/settings";
 import { resolveActiveProvider } from "@/lib/llm/active-provider";
@@ -104,6 +105,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   );
 
   let outcome: { ok: true; messageId: string } | { ok: false; error: string };
+  // K148: set when the callback has written every row and returns, so COMMIT is sent next. An
+  // error after that point has an unknown outcome: the files are queued, never unlinked.
+  let commitSent = false;
   try {
     outcome = await db.$transaction(async (tx) => {
       const observer = getAgentMessageObserver();
@@ -158,10 +162,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         });
       }
 
+      commitSent = true;
       return { ok: true as const, messageId: message.id };
     });
   } catch (err) {
-    await staged.discard();
+    if (commitSent) await queueStagedFilesAfterUncertainCommit(orgId, staged.saved);
+    else await staged.discard();
     throw err;
   }
 

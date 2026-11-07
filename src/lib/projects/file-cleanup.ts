@@ -36,6 +36,12 @@
 //   only after the transaction ended and every tracked delete settled, including one the I/O
 //   budget already reported as ETIMEDOUT. ENOENT counts as done only inside such a verified run.
 //
+// K148 (Codex diff critique round 1, finding 1): the sweep deletes a queued key only when no
+// committed row references it (Attachment, TaskAttachment, or a setting such as the logo), checked
+// inside the run's transaction and inside the fence; a referenced key's queue row is removed and
+// its file kept. Staged uploads whose transaction outcome is unknown (an error after COMMIT was
+// sent) are queued here with a delay instead of being unlinked (src/lib/attachments/uncertain-commit.ts).
+//
 // Relative imports only: the worker bundles this module.
 import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "../../generated/prisma/client";
@@ -54,17 +60,29 @@ const MINUTE_MS = 60_000;
 /**
  * Inserts one ProjectFileCleanup row per storage key of the organization, inside the caller's
  * transaction. A key already queued for the organization is left as it is. Returns the number of
- * rows inserted.
+ * rows inserted. `delayMinutes` (K148) makes the rows due that many minutes after the database's
+ * now instead of at once; without it the column default (now) applies.
  */
 export async function enqueueFileCleanupInTx(
   tx: Prisma.TransactionClient,
   orgId: string,
   storageKeys: readonly string[],
+  options: { delayMinutes?: number } = {},
 ): Promise<number> {
   const keys = [...new Set(storageKeys)];
   if (keys.length === 0) return 0;
   const ids = keys.map(() => randomUUID());
-  const inserted = await tx.$queryRaw<{ id: string }[]>`
+  const delayMinutes = Math.max(0, Math.floor(options.delayMinutes ?? 0));
+  const inserted =
+    delayMinutes > 0
+      ? await tx.$queryRaw<{ id: string }[]>`
+    INSERT INTO "ProjectFileCleanup" (id, "organizationId", "storageKey", "nextAttemptAt")
+    SELECT k.id, ${orgId}, k.key, now() + make_interval(mins => ${delayMinutes}::int)
+    FROM unnest(${ids}::text[], ${keys}::text[]) AS k(id, key)
+    ON CONFLICT ("organizationId", "storageKey") DO NOTHING
+    RETURNING id
+  `
+      : await tx.$queryRaw<{ id: string }[]>`
     INSERT INTO "ProjectFileCleanup" (id, "organizationId", "storageKey")
     SELECT k.id, ${orgId}, k.key
     FROM unnest(${ids}::text[], ${keys}::text[]) AS k(id, key)
@@ -72,6 +90,31 @@ export async function enqueueFileCleanupInTx(
     RETURNING id
   `;
   return inserted.length;
+}
+
+/**
+ * True when a committed row of the organization still references the storage key (K148): a ticket
+ * attachment, a project task attachment, or a setting whose value holds the key as a JSON string
+ * (the logo setting stores `{"storageKey": "<key>", ...}`). The setting test matches the quoted key
+ * anywhere in any setting of the organization, so it can only err towards keeping a file.
+ */
+async function storageKeyReferenced(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+  storageKey: string,
+): Promise<boolean> {
+  const quoted = JSON.stringify(storageKey);
+  const rows = await tx.$queryRaw<{ referenced: boolean }[]>`
+    SELECT (
+      EXISTS (SELECT 1 FROM "Attachment"
+              WHERE "organizationId" = ${orgId} AND "storageKey" = ${storageKey})
+      OR EXISTS (SELECT 1 FROM "TaskAttachment"
+                 WHERE "organizationId" = ${orgId} AND "storageKey" = ${storageKey})
+      OR EXISTS (SELECT 1 FROM "Setting"
+                 WHERE "organizationId" = ${orgId} AND strpos(value, ${quoted}) > 0)
+    ) AS referenced
+  `;
+  return rows[0]?.referenced === true;
 }
 
 export interface FileCleanupSweepResult {
@@ -83,6 +126,11 @@ export interface FileCleanupSweepResult {
   failed: number;
   /** Set when the fence refused the run: nothing was selected, deleted or changed (U-12). */
   skipped?: FenceRefusalReason;
+  /**
+   * Rows removed WITHOUT deleting the file because a committed row still references the key
+   * (K148). Present only when at least one row was kept this way.
+   */
+  kept?: number;
 }
 
 export interface FileCleanupSweepOptions {
@@ -121,6 +169,14 @@ function errorCode(err: unknown): string {
 /** The retry delay after a failure, from the attempts recorded before it. */
 export function fileCleanupBackoffMinutes(previousAttempts: number): number {
   return Math.min(2 ** Math.max(0, previousAttempts), PROJECT_FILE_CLEANUP_MAX_BACKOFF_MINUTES);
+}
+
+function logKept(key: string): void {
+  try {
+    console.warn(`[project-file-cleanup] file kept, a row still references it: key=${key}`);
+  } catch {
+    // Logging never changes the sweep's outcome.
+  }
 }
 
 function logFailure(key: string, code: string): void {
@@ -227,6 +283,18 @@ async function sweepInsideFence(
       const remaining = deadline - Date.now();
       // Out of budget: the rows not reached stay as they are for the next run.
       if (remaining <= 0) break;
+      // K148: a queued key that a committed row still references is live (for example a staged
+      // upload queued after a COMMIT whose reply was lost, although the COMMIT took effect). Its
+      // queue row is removed and the file is never deleted; a later dereference queues it again.
+      if (await storageKeyReferenced(tx, row.organizationId, row.storageKey)) {
+        await tx.$executeRaw`
+          DELETE FROM "ProjectFileCleanup"
+          WHERE id = ${row.id} AND "organizationId" = ${row.organizationId}
+        `;
+        result.kept = (result.kept ?? 0) + 1;
+        logKept(row.storageKey);
+        continue;
+      }
       let code: string | null = null;
       let outOfBudget = false;
       try {

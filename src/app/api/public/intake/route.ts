@@ -4,6 +4,7 @@ import {
   MAX_FILES_PER_REQUEST,
   MAX_REQUEST_BODY_BYTES,
 } from "@/lib/attachments/constants";
+import { queueStagedFilesAfterUncertainCommit } from "@/lib/attachments/uncertain-commit";
 import {
   removeStoredUploads,
   storeValidatedUploads,
@@ -88,6 +89,12 @@ export async function POST(request: Request) {
   // A failure after the files are stored (ticket creation, attachment rows) removes them, then
   // the error propagates unchanged (D-24).
   let ticket: Awaited<ReturnType<typeof createTicket>>;
+  // K148: the attachment insert runs in its own transaction, and this is set when that callback
+  // has inserted the rows and returns, so COMMIT is sent next. An error from then on has an
+  // unknown outcome (the rows may have committed with the reply lost): the files are queued for
+  // the reference-checked sweep, never unlinked. An error inside the callback (a failed insert)
+  // leaves it false and keeps the immediate removal.
+  let commitSent = false;
   try {
     ticket = await createTicket(org.id, {
       subject,
@@ -105,23 +112,25 @@ export async function POST(request: Request) {
         orderBy: { createdAt: "asc" },
       });
       if (initialMessage) {
-        await prisma.attachment.createMany({
-          data: stored.map((s) => ({
-            organizationId: org.id,
-            messageId: initialMessage.id,
-            storageKey: s.storageKey,
-            originalFilename: s.originalFilename,
-            mimeType: s.mimeType,
-            sizeBytes: s.sizeBytes,
-          })),
+        await prisma.$transaction(async (tx) => {
+          await tx.attachment.createMany({
+            data: stored.map((s) => ({
+              organizationId: org.id,
+              messageId: initialMessage.id,
+              storageKey: s.storageKey,
+              originalFilename: s.originalFilename,
+              mimeType: s.mimeType,
+              sizeBytes: s.sizeBytes,
+            })),
+          });
+          commitSent = true;
         });
       }
     }
   } catch (err) {
-    await removeStoredUploads(
-      org.id,
-      stored.map((s) => s.storageKey),
-    );
+    const keys = stored.map((s) => s.storageKey);
+    if (commitSent) await queueStagedFilesAfterUncertainCommit(org.id, keys);
+    else await removeStoredUploads(org.id, keys);
     throw err;
   }
 

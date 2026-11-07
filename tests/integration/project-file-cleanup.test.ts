@@ -25,8 +25,15 @@ import { PROJECT_FILE_CLEANUP_MAX_ATTEMPTS } from "@/lib/projects/contract";
 import { enqueueFileCleanupInTx, sweepProjectFileCleanup } from "@/lib/projects/file-cleanup";
 import type { DeleteFenceProvider } from "@/lib/storage/file-fence";
 import { testFenceProvider, testUploadsDir, trackFence } from "../support/file-fence-fixtures";
+import { seedTicket } from "../support/inbox-fixtures";
 import { backendPid, type Deferred, deferred } from "../support/lock-wait";
-import { seedFileCleanup, seedOrgWithMembers } from "../support/project-fixtures";
+import {
+  seedAttachment,
+  seedFileCleanup,
+  seedOrgWithMembers,
+  seedProject,
+  seedTask,
+} from "../support/project-fixtures";
 
 vi.mock("@/lib/storage/uploads-volume", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/storage/uploads-volume")>()),
@@ -516,5 +523,108 @@ describe("b-IN-05: bounded sweep", () => {
       await tracked.allClosed();
     }
     expect(tracked.handles).toHaveLength(1);
+  });
+});
+
+describe("K148: the sweep deletes a queued key only when no committed row references it", () => {
+  /** An organization with an owner, a project task and a ticket whose first message exists. */
+  async function referenceWorld() {
+    const org = await seedOrgWithMembers(prisma, ["owner"]);
+    const owner = org.users[0]?.id as string;
+    const project = await seedProject(prisma, org.orgId, {
+      createdByUserId: owner,
+      managerUserIds: [owner],
+    });
+    const task = await seedTask(prisma, org.orgId, project.id, { createdByUserId: owner });
+    const ticket = await seedTicket(org.orgId);
+    const message = await prisma.message.findFirstOrThrow({
+      where: { ticketId: ticket.id },
+      select: { id: true },
+    });
+    return { orgId: org.orgId, owner, taskId: task.id, messageId: message.id };
+  }
+
+  async function storedAndQueued(orgId: string, ext = "png"): Promise<string> {
+    const key = newKey(ext);
+    await storage.save({ orgId, key, data: Buffer.from(`bytes of ${key}`) });
+    await seedFileCleanup(prisma, orgId, key, { nextAttemptAt: T0 });
+    return key;
+  }
+
+  it("a key referenced by an Attachment, a TaskAttachment or the logo setting keeps its file, and its queue row is removed; an unreferenced key is deleted", async () => {
+    const w = await referenceWorld();
+    const ticketKey = await storedAndQueued(w.orgId);
+    await prisma.attachment.create({
+      data: {
+        organizationId: w.orgId,
+        messageId: w.messageId,
+        storageKey: ticketKey,
+        originalFilename: "ticket.png",
+        mimeType: "image/png",
+        sizeBytes: 10,
+      },
+    });
+    const taskKey = await storedAndQueued(w.orgId);
+    await seedAttachment(prisma, w.orgId, w.taskId, {
+      uploadedByUserId: w.owner,
+      storageKey: taskKey,
+    });
+    const logoKey = await storedAndQueued(w.orgId);
+    await prisma.setting.create({
+      data: {
+        organizationId: w.orgId,
+        key: "brandingLogo",
+        value: JSON.stringify({ storageKey: logoKey, mimeType: "image/png", version: 1 }),
+      },
+    });
+    const freeKey = await storedAndQueued(w.orgId);
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = await sweepProjectFileCleanup({ client: prisma, fence, storage, now: T0 });
+    expect(result).toEqual({ deleted: 1, missing: 0, failed: 0, kept: 3 });
+    for (const key of [ticketKey, taskKey, logoKey]) {
+      expect(await fileExists(w.orgId, key)).toBe(true);
+      expect(await cleanupRow(w.orgId, key)).toBeNull();
+      expect(warn).toHaveBeenCalledWith(
+        `[project-file-cleanup] file kept, a row still references it: key=${key}`,
+      );
+    }
+    expect(await fileExists(w.orgId, freeKey)).toBe(false);
+    expect(await cleanupRow(w.orgId, freeKey)).toBeNull();
+  });
+
+  it("a reference in another organization does not keep the file", async () => {
+    const a = await referenceWorld();
+    const b = await referenceWorld();
+    const key = await storedAndQueued(a.orgId);
+    // The same key name stored and referenced in organization B.
+    await storage.save({ orgId: b.orgId, key, data: Buffer.from("b's file") });
+    await seedAttachment(prisma, b.orgId, b.taskId, { uploadedByUserId: b.owner, storageKey: key });
+
+    const result = await sweepProjectFileCleanup({ client: prisma, fence, storage, now: T0 });
+    expect(result).toEqual({ deleted: 1, missing: 0, failed: 0 });
+    expect(await fileExists(a.orgId, key)).toBe(false);
+    expect(await fileExists(b.orgId, key)).toBe(true);
+  });
+
+  it("a key queued after an unknown commit outcome waits for the delay before the sweep looks", async () => {
+    const w = await referenceWorld();
+    const key = newKey("png");
+    await storage.save({ orgId: w.orgId, key, data: Buffer.from("staged") });
+    const { queueStagedFilesAfterUncertainCommit, UNCERTAIN_COMMIT_CLEANUP_DELAY_MINUTES } =
+      await import("@/lib/attachments/uncertain-commit");
+    await queueStagedFilesAfterUncertainCommit(w.orgId, [key]);
+    const [row] = await prisma.$queryRaw<{ waitMs: number }[]>`
+      SELECT (EXTRACT(EPOCH FROM ("nextAttemptAt" - now())) * 1000)::float8 AS "waitMs"
+      FROM "ProjectFileCleanup" WHERE "organizationId" = ${w.orgId} AND "storageKey" = ${key}
+    `;
+    expect(row?.waitMs).toBeGreaterThan((UNCERTAIN_COMMIT_CLEANUP_DELAY_MINUTES - 1) * MINUTE);
+    // Without an injected clock the sweep reads the database clock: the row is not due yet.
+    expect(await sweepProjectFileCleanup({ client: prisma, fence, storage })).toEqual({
+      deleted: 0,
+      missing: 0,
+      failed: 0,
+    });
+    expect(await fileExists(w.orgId, key)).toBe(true);
   });
 });
