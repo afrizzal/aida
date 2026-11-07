@@ -312,11 +312,27 @@ docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d postgres -v ON_ERRO
 docker compose up -d
 ```
 
-Because the writers stop in step 1 before the backup in step 2, that set holds the whole state of the new release up to the stop, and the database renamed in step 5 holds the same state. Nothing written after the pre-upgrade set is lost while either of them is kept.
+Because the writers stop in step 1 before the backup in step 2, that set holds the whole state of the new release up to the stop, database and uploads together. The database renamed in step 5 holds the same database state, but not the uploads: the restore in step 6 replaces the uploads volume. So the step 2 set is what brings the new release back, and the renamed database is a second copy of its database only. Nothing written after the pre-upgrade set is lost while the step 2 set is kept.
 
 `restore.sh` says it could not start `backup`, `app` and `worker` (their containers were removed in step 4, so no new-release container runs on the old schema); `docker compose up -d` then creates them from the previous release and its `migrate` finds nothing to apply.
 
-**If the restore in step 6 fails**, the empty database may be partly restored and the renamed one is untouched. To go back to the new release: rename the partly restored database out of the way (`ALTER DATABASE "<db>" RENAME TO "<db>_failed_restore"`, as in step 5), rename `<db>_before_rollback` back to `<db>`, `git checkout` the new release, and run `docker compose up -d --build`. No step of this procedure drops a database.
+**If the restore in step 6 fails**, do not start any service, and do not rename `<db>_before_rollback` back: a restore that failed in its uploads step has already replaced files in the uploads volume, so that database no longer matches the uploads volume, and its attachments could point at files that are gone or different. Go back to the new release by restoring the step 2 set instead: it holds the database **and** the uploads of the new release, taken together while nothing wrote, and the restore replaces both as a pair before anything starts:
+
+```bash
+# a. Move the partly restored database out of the way and create an empty one (no drop).
+docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "ALTER DATABASE \"$POSTGRES_DB\" RENAME TO \"${POSTGRES_DB}_failed_restore\"" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
+
+# b. The new release, and a check that it can restore the step 2 set (nothing is changed yet).
+git checkout <new-tag>
+docker compose build
+./scripts/restore.sh <current-setId> --validate-only
+
+# c. Restore the database and the uploads of the step 2 set together, then start the new release.
+./scripts/restore.sh <current-setId> --yes
+docker compose up -d
+```
+
+The same applies when the restore in step 6 stopped before it changed anything (exit code 4 or 6): the steps above bring the new release back from its own set. If step c fails as well, nothing is started: read its message, fix the cause and run step c again, as in [What a failure leaves behind](#what-a-failure-leaves-behind). No step of this procedure drops a database; `<db>_before_rollback` and `<db>_failed_restore` stay until you remove them.
 
 **Once the previous release runs correctly**, the renamed `<db>_before_rollback` database is no longer needed by AIDA. It still holds the new release's data and takes disk space; removing it is your decision, after you have kept the step 2 set wherever you keep backups.
 
