@@ -530,3 +530,186 @@ The full integration suite was not run, only these five files. F4 started no con
 - **The `/setup` UI was not exercised.** The busy message reaches the form as an ordinary `{ error }` result, but no E2E run or manual check was made. The E2E global setup (next-o1) was not run, and `.next` was not moved.
 - **Human verification:** K145 (the setup flow under the lock, and the busy answer after 10 s) and K146 (the catch-all and the bound) are logic changes.
 - **`STATE.md`** was not touched, and no tool changed it. The untracked `.planning/state.json` was there before F4 and was left alone.
+
+## F5
+
+**Date:** 2026-11-12. **Scope:** the Codex diff critique round 1 (`run-loop/codex/fase09-diff-jawab.md`), as its dispositions in `09-REVIEW.md` state them: K148, K149, K150, K151 and the three MEDIUM items (Codex 5, 6 and 7). **Where it ran:** the main checkout on `v2/run-loop`, no worktree, as the dispatch asked. Runs used `AIDA_TEST_RUN_ID=mwdn8wng-d147a7eb3687780d` and the Colima `DOCKER_HOST` (`colima status` exit 0 and `docker info` exit 0 first). One test process ran at a time, and exit codes were read without a pipe. For each red run the old file (a scratch copy taken before the first edit, equal to `HEAD`) or a mutation was swapped in, and the new file was then restored with `cp` and checked with `cmp` (exit 0 every time). No code path deletes demo or tenant data: the K148 sweep removes a queued file only when no row references it, inside the fence, and the K149 runbook renames a database instead of dropping it. **Result:** 7 of 7 items fixed in 7 commits. K148, K150 and K151 are logic changes and **require human verification**.
+
+### K151 (Codex 4): `getActiveOrgAccess` reads member rows conservatively
+
+**Change.** `src/lib/authz.ts`: `getActiveOrgAccess` uses `findConservativeMembership` (every row of the user in the organization, in id order; admin only when every row is owner or admin) instead of an unordered `findFirst`. `requireOrgAdminScope`, `getOrgRole` and `requireOrgAdmin` inherit it. The unit test `tests/unit/org-access-single-read.test.ts` replaced `member.findFirst` with `member.findMany`; its cases are unchanged.
+
+**Test.** New `tests/integration/authz-conservative-membership.test.ts`, on the real database. Only the session read is replaced. One user has two member rows in one organization: admin and member, member and admin, owner and member, each with the extra row's id sorting before and after the first. Each must give role `member`, and `requireOrgAdminScope` must throw. Controls: two admin-level rows stay admin; a single member row is refused and a single admin row allowed; no row in the active organization gives `null`.
+
+**Runs:**
+- Red, old `authz.ts`: exit 1, 4 failed, 5 passed (9). The admin-first and owner-first orders returned the admin role.
+- Green: exit 0, 9 passed (9). The changed unit test: exit 0, 5 passed.
+
+**Commit:** `0999a21` fix(09-F5): K151 getActiveOrgAccess reads member rows conservatively
+
+### Codex 6: the demo boot and the seed CLI never log the raw exception message
+
+**Change.** The class-and-code helper of the bootstrap moved to `src/lib/error-shape.ts` (`describeErrorShape`). The class is printed only when it is a plain identifier of up to 64 characters, else `unknown error`. The code is printed only when it is upper-case letters, digits and `_`, up to 16 characters. Both failure lines now use it:
+- `src/lib/demo/bootstrap-demo.ts`: `[demo] Demo seeding failed (<class>[, <code>]); nothing else is logged about it. The app starts without the demo.`
+- `prisma/seed.ts`: `[seed] Failed (<class>[, <code>]); nothing else is logged about it.` (exit 1 as before).
+
+**Test.** New `tests/unit/demo-seed-error-log.test.ts`. The real `bootstrap-demo.ts` and `seed.ts` run, with `runGuardedDemoSeed` rejecting with a Prisma-like error whose message holds a password and a database URL. Four cases: the demo boot logs the exact fixed line and resolves; a non-Error rejection logs `unknown error`; the seed CLI logs the fixed line and calls `process.exit(1)`; an error whose name and code hold the secret is reduced to `unknown error`. No case prints the secret or `postgresql://`.
+
+**Runs:**
+- Red, old files: exit 1, 4 failed (4). For example the seed printed `[seed] Failed: message Pw-k6-...`.
+- Green: exit 0, 7 passed (with `boot-tenant-seed-lock.test.ts`, 3 cases, which also covers the moved helper).
+
+**Commit:** `b9f10b1` fix(09-F5): Codex 6 the demo boot and the seed CLI log the error class and code, never the message
+
+### K148 (Codex 1) and Codex 7 part 1: staged files after an unknown commit outcome are queued, never unlinked
+
+**Change.**
+- New `src/lib/attachments/uncertain-commit.ts`: `queueStagedFilesAfterUncertainCommit(orgId, keys)` puts the keys into the one deletion queue (`ProjectFileCleanup`), due `UNCERTAIN_COMMIT_CLEANUP_DELAY_MINUTES` = 15 minutes later, so a COMMIT still in flight settles before the sweep looks. It never throws and never unlinks. If the queue insert also fails, the files stay on disk and one line names the organization, the key count and the error code.
+- `enqueueFileCleanupInTx` has a new `delayMinutes` option. Without it the column default applies, as before.
+- Each of the four paths sets a flag when its referencing callback has written every row and returns, so COMMIT is sent next. An error after that point queues the keys. A refusal, or an error inside the callback, keeps the immediate discard. The four paths:
+  - public intake. Its attachment insert now runs in its own `$transaction`, so a failing insert is told apart from a lost commit;
+  - status follow-up;
+  - ticket messages;
+  - project attachments. Here a mapped database error after the callback is also treated as unknown.
+- `sweepProjectFileCleanup` checks, inside its transaction and inside the fence, whether a committed row of the organization still references each queued key:
+  - an `Attachment` or a `TaskAttachment` with the key;
+  - any `Setting` whose value holds the key as a JSON string (the logo).
+
+  A referenced key's queue row is removed, its file is kept, a warn line is written, and the result gets `kept: N`, set only when N > 0. An unreferenced key is deleted as before.
+- `tests/unit/file-delete-callers.test.ts` lists the new enqueue caller.
+
+**Test (Codex 7 part 1).** `tests/integration/file-delete-inventory.test.ts`:
+- The app's pg pool now connects through a new TCP proxy (`tests/support/lost-commit-proxy.ts`). Once armed with a table, it watches the next connection that sends an `INSERT INTO "public"."<table>"`. It holds that connection's server frames until a ReadyForQuery with status idle, which means the server has committed. It then drops that reply and destroys both sockets. So the server commits and the caller sees only a broken connection.
+- The old "after commit" cases (a throwing `NextResponse.json`, which ran after the cleanup `catch`) are replaced by lost-commit cases for intake, follow-up and ticket messages (`Attachment`), plus a new one for project attachments (`TaskAttachment`). Each asserts:
+  - that exactly one reply was lost;
+  - that the call failed;
+  - that the rows are committed;
+  - that every referenced file is still on disk;
+  - that every key is queued with `nextAttemptAt` more than 10 minutes ahead.
+- `tests/integration/project-file-cleanup.test.ts` has three new sweep cases:
+  - keys referenced by an `Attachment`, a `TaskAttachment` and the logo setting are kept with their queue rows removed, and a free key is deleted (`{ deleted: 1, missing: 0, failed: 0, kept: 3 }`);
+  - a reference in another organization does not keep the file (control);
+  - a key queued through the helper is not due for the delay and survives a sweep on the database clock.
+
+**Runs:**
+- Inventory green, attempt 1: exit 1, 1 failed, 17 passed (18). The intake case "a failure before the attachment insert commits" failed: the injected trigger failure in the autocommit `createMany` counted as an unknown outcome, so the files were queued instead of removed. Fixed by running that insert in its own transaction, as described above.
+- Inventory green: exit 0, 18 passed (18).
+- Inventory red, the four old call sites swapped in: exit 1, 4 failed, 14 passed (18). All four lost-commit cases failed, for example `expected [] to include '<key>.png'`: the file was unlinked while its committed row exists.
+- Sweep green: exit 0, 14 passed (14).
+- Sweep red, old `file-cleanup.ts`: exit 1, 2 failed, 12 passed (14). The reference case and the delay case failed; the cross-organization control passed both times.
+
+**Commit:** `00664a8` fix(09-F5): K148 staged uploads after an unknown commit outcome are queued, never unlinked
+
+### Codex 7 part 2: the boot lock bound is measured against a real lock and a real pool
+
+**Change (tests only).** New `tests/integration/tenant-seed-lock-bounds.test.ts`, with `DB_POOL_MAX=2` for this file. Both cases call `withTenantSeedLock` with 400 ms waits and a callback that writes nothing:
+- A separate pg session holds the tenant seed lock in an open transaction. The call must throw `TenantSeedLockTimeout` after at least 350 ms and less than 4.4 s, without running the callback.
+- Two open transactions exhaust the app pool. The call must reject (not with a lock timeout) inside the same window, without running the callback.
+
+The header of `tests/unit/boot-tenant-seed-lock.test.ts` points to the new file.
+
+**Runs:**
+- Green: exit 0, 2 passed (2).
+- Red, a mutation of `tenant-seed-lock.ts` that ignores both options (120 s and 30 s): exit 1, 2 failed (2), both `Test timed out in 20000ms`. Then the file was restored (`cmp` 0, no diff against `HEAD`).
+
+**Commit:** `c3230f6` fix(09-F5): Codex 7 the boot lock bound is measured against a real held lock and an exhausted pool
+
+### K150 (Codex 3): restore only into a truly empty target or one at exactly the set's migrations
+
+**Change.**
+- `scripts/backup/aida-restore-set.sh`:
+  - New required setting `RESTORE_RELEASE_MIGRATIONS`: the release's migration names, separated by spaces, each `[A-Za-z0-9_.-]+`. A missing or invalid value exits 2 before anything.
+  - Step 2a now has two halves, and any refusal exits 9 with nothing written:
+    - `check_release`: every migration of the dump must be in the release (`the set has N migration(s) that this release does not contain (a newer set)`). It then prints `set migrations: equal to this release` or `set migrations: older than this release; migrate deploy runs before app and worker start`.
+    - `check_target`: with no `_prisma_migrations` table, the database must have no relation in any non-system schema (`target database: empty`, else `the target database is not empty (N relation(s)) and has no migration history`). With the table, its names must equal the dump's exactly. The newer-schema refusal is unchanged, and there is a new `the target database lacks N migration(s) of the set (an older schema)`.
+  - The full restore runs both again before its first write, as `--check-schema` does.
+- `scripts/restore.sh`:
+  - reads the release list from its checkout's `prisma/migrations` (directory names; none or an odd name exits 1, nothing stopped);
+  - passes it to the check run and the set run;
+  - prints the check output and, on the "older" line, runs `docker compose run --rm --no-deps -T migrate` after the release and before `start`. A failure there starts nothing and exits 1 with a message.
+- The same commit adds the K149 `--validate-only` mode, because it lives in the same two scripts:
+  - the set script runs steps 1, 2, the release half of 2a and 2b, then exits 0 after `set validated` and `validate only: nothing was written ...`;
+  - the wrapper's `<setId> --validate-only` takes the lock and the lease, runs it, releases them, and stops, starts and confirms nothing.
+- `docs/OPERATIONS.md`, Restore: step 4, step 7, the four exit-9 refusal rows, and "Which database a set can be restored into". The last says the comparison is by name and does not prove identical schemas.
+
+**Tests.**
+- `tests/unit/restore-script.test.ts`, with the fake `docker` extended by `FAKE_CHECK_OUTPUT`, `FAKE_VALIDATE_EXIT` and an exact `compose run --rm --no-deps -T migrate` call with `FAKE_MIGRATE_EXIT`:
+  - the exact check and set calls now carry the release list;
+  - new cases: an equal set (no migrate); an older set (`check, stop, set, release, migrate, start, health`); a failed migrate (exit 1, no start); `--validate-only` (`lock, lease, validate, release`, nothing else); `--validate-only` exit 4 and 9.
+- `tests/integration/backup-restore-roundtrip.test.ts` (real set script in rule-J pgvector containers; `support/backup-runner.ts` passes the repo's list by default and an optional mode), ten new cases:
+  - a target lacking the set's last migration, full run and `--check-schema` (exit 9, snapshot unchanged, no `target-touched`, no staging);
+  - a target with relations and no `_prisma_migrations` (exit 9);
+  - a release without the set's last migration (exit 9);
+  - an empty and an invalid `RESTORE_RELEASE_MIGRATIONS` (exit 2);
+  - a truly empty target (public and pgboss schemas dropped) restores with exit 0, prints `target database: empty`, and with a later release migration prints the "older" line;
+  - an equal target prints `target migrations: equal to the set` and `set migrations: equal to this release`;
+  - `--validate-only` against a target at a newer schema: exit 0, `set validated`, snapshot unchanged, no staging;
+  - `--validate-only` with a set newer than the release: exit 9.
+
+**Runs:**
+- Unit green: exit 0, 30 passed (30). Unit red, old `restore.sh`: exit 1, 9 failed, 21 passed (30).
+- Roundtrip green: exit 0, 32 passed (32). Roundtrip red, old `aida-restore-set.sh`: exit 1, 10 failed, 22 passed (32). These are all ten new cases, and the 22 earlier cases pass on both versions.
+
+**Commit:** `47d5ad0` fix(09-F5): K150 restore only into a truly empty target or one at exactly the set's migrations
+
+### K149 (Codex 2): the rollback runbook stops the writers, checks the sets and keeps the old database
+
+**Change (docs only; the script mode is in the K150 commit).** `docs/OPERATIONS.md`:
+- Restore documents `--validate-only`.
+- Upgrading: the backup before an upgrade is checked with `--validate-only`.
+- The rollback is six steps:
+  1. `docker compose stop app worker backup`;
+  2. `./scripts/backup.sh`, then `--validate-only` on that set;
+  3. `git checkout <previous-tag>`, `docker compose build`, then `--validate-only` on the pre-upgrade set (stop here on a failure; nothing has changed);
+  4. `docker compose rm -s -f app worker backup`;
+  5. `ALTER DATABASE ... RENAME TO "<db>_before_rollback"` plus `createdb`, never `dropdb`;
+  6. the restore, then `docker compose up -d`.
+- The old sentence "everything in the database after the pre-upgrade set is then only in the set the first line made" is replaced. The new text says the writers stop before the backup, so the step 2 set and the renamed database both hold the state up to the stop.
+- A failed restore in step 6 is undone by renaming, with no drop.
+- Removing the renamed database later is left to the operator, with no command given.
+- The previous-tag note now also requires `--validate-only`.
+
+**Test.** None beyond the K150 `--validate-only` cases. The runbook itself is a stack procedure and was not run (no compose up, down or stop here).
+
+**Commit:** `930d8ee` fix(09-F5): K149 the rollback runbook stops the writers, checks the sets and keeps the old database
+
+### Codex 5: the new-server restore prepares `uploads_data`
+
+**Change.**
+- `docs/OPERATIONS.md`, Restore to a new server, step 4:
+  - after `up -d db backup-init`, run `docker compose build app` and `docker compose run --rm --no-deps -T --entrypoint true app`;
+  - this creates `uploads_data` from the image's `/data/uploads`, owned by `node` (1000:1000), which the restore's target check needs;
+  - the `true` container starts no server and runs no migration;
+  - without the step the wrapper stops with `Volume <name> does not exist` (exit 6).
+- Step 6 runs `--validate-only` first and says the restore runs `migrate deploy` for an older set.
+- `09-STACK-PROOFS.md` has a new named scenario, "SP-2 scenario 'new server'", with steps, assertions (volume absent before, exit 6 without the step, root `1000:1000` after it, restore exit 0, SP-2 assertions) and cleanup. Status: not run (waiting for the Phase 8.1 harness and the owner).
+
+**Test.** None run: the Compose behaviour is the open part of this item and belongs to SP-2. The docs-reading unit tests pass (see below).
+
+**Commit:** `426db16` fix(09-F5): Codex 5 the new-server restore prepares uploads_data with the app's ownership
+
+### Final checks
+
+| Command | Exit | Counts |
+|---|---|---|
+| `pnpm lint` | 0 | 680 files, 1 warning, pre-existing (`tests/unit/container-config.test.ts:160`) |
+| `pnpm typecheck` | 0 | 0 errors |
+| `pnpm test` | 0 | 98 files, 1693 tests passed |
+| `pnpm test:integration` (full, once) | 0 | 115 files, 1538 tests passed, 375.6 s |
+
+**Docker.** No container or volume was created by hand. All of them came from Testcontainers and the rule-J backup and restore runners, under the run id:
+- the integration global setup's Postgres;
+- the runner containers and named restore volumes of `backup-restore-roundtrip.test.ts`, in three runs: green, red and the full suite.
+
+Each was removed by the runners themselves. Afterwards `docker ps -a` and `docker volume ls` with `label=aida.test=1` listed nothing, and no container name held the run id. F5 ran no compose up, down, stop or build, built no image, ran no prune, and did not run `test:docker-cleanup`.
+
+### Not done, and limits
+
+- **The commit split is coarser than one item per commit in one place.** The K149 `--validate-only` mode is code in the same two scripts as K150, and so are its tests. It is in the K150 commit. The K149 commit holds only the runbook. The `docs/OPERATIONS.md` hunks were split between the K150, K149 and Codex 5 commits with `git apply --cached`.
+- **The lost-commit proxy is a test double of the network.** It loses the reply after the server reported the commit (ReadyForQuery idle). It does not cover a lost reply to a COMMIT the server never received. That case is still classified as unknown, and its files are queued too, which is safe.
+- **K148 window.** The sweep's reference check and a COMMIT still in flight could in theory interleave. The 15-minute delay makes that practically impossible, but it is not a lock.
+- **The empty-target rule counts relations in every non-system schema**, which is stricter than "the application schema". A database whose only content is a pgboss schema is not empty.
+- **The release list comes from the checkout.** If the images were built from another checkout, the list can differ from the running release. The docs say to run `restore.sh` from the checkout of the running release.
+- **Not run:** SP-1 to SP-3, including the new SP-2 "new server" scenario (waiting for the Phase 8.1 harness and the owner); the K149 runbook on a real stack; the E2E suite (next-o1 untouched, `.next` not moved).
+- **Human verification:** K148 (the commit-sent flags and the sweep's reference check), K150 (the empty and equal-history rules, migrate after an older set) and K151 are logic changes.
+- **`STATE.md`** was not touched, and no tool changed it. The untracked `.planning/state.json` was there before F5 and was left alone.
