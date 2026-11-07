@@ -77,6 +77,26 @@ Each is the real `docker-compose.yml` with the overlay and fresh run-scoped volu
 
 **Cleanup.** Remove stack B by label and prefix. Remove the run-scoped host directory with `rm -r --`.
 
+### SP-2 scenario "new server": the uploads volume is prepared before the restore
+
+Status: not run (waiting for the Phase 8.1 harness and the owner)
+
+Added after the Codex diff critique round 1, finding 5. It follows `docs/OPERATIONS.md`, "Restore to a new server", step by step, on a stack that has never run `app`, so the `uploads_data` volume does not exist before step 4 of that section.
+
+**Steps.**
+1. Stack A as in SP-2 steps 1 to 3: seed, back up, copy the set out, remove stack A.
+2. Stack B with fresh run-scoped volumes: only `up -d db backup-init`. Assert that B's `uploads_data` volume does not exist yet, and that `scripts/restore.sh <setId> --yes` now stops with exit code 6 (`Volume <name> does not exist`) and changes nothing.
+3. Stack B: `build app` (the run-tagged image) and `run --rm --no-deps -T --entrypoint true app`, as the docs say.
+4. Copy the set into B's backups volume, run `scripts/restore.sh <setId> --validate-only` (exit 0, nothing written), then `scripts/restore.sh <setId> --yes`.
+5. `up -d` the rest of stack B, then the SP-2 reads and hashes.
+
+**Assertions.**
+- After step 3, B's `uploads_data` exists, its root is owned `1000:1000`, it holds no file, and the `true` container left no other container behind and wrote nothing to the database (the table inventory is empty).
+- The restore exits 0; its target check (every entry in the uploads target owned by 1000:1000, the mount point included) passed, and every restored file is owned by UID 1000.
+- The SP-2 assertions on records, file hashes, downloads, a new upload, the logo route and health.
+
+**Cleanup.** As SP-2.
+
 ## SP-3: boot with a reserved-character database password
 
 Status: not run (waiting for the Phase 8.1 harness and the owner)

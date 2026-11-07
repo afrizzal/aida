@@ -240,15 +240,23 @@ Moving AIDA to new hardware (disk failure, migration, etc.):
 1. **Install Docker** (Docker Engine + the Docker Compose v2 plugin) on the new server.
 2. **Clone the repo**: `git clone <your-fork-or-origin> && cd aida`, at the release that made the set or a later one (never an earlier one: migrations only go forward).
 3. **Recreate `.env`.** Copy your old `.env` across, or recreate it from `.env.example`. **`BETTER_AUTH_SECRET` and `APP_ENCRYPTION_KEY` MUST be the exact same values as the old server.** If they differ, existing user sessions become invalid and — more importantly — every stored IMAP/SMTP/LLM credential becomes permanently undecryptable (they're encrypted with `APP_ENCRYPTION_KEY`; there is no recovery path for a lost key other than re-entering every credential from scratch).
-4. **Start only the database and the backups volume**: `docker compose up -d db backup-init`. This creates the volumes with the ownership the services need and prepares the backups volume (`backup-init`). It does not run `migrate`, so the database stays empty and the restore accepts it whatever release you cloned (see [Which database a set can be restored into](#which-database-a-set-can-be-restored-into)). The database **must** be the `pgvector/pgvector:pg16` image already pinned in `docker-compose.yml` — a stock `postgres:16` image cannot load a dump containing `CREATE EXTENSION vector`.
+4. **Start only the database and prepare the two volumes the restore needs**:
+
+   ```bash
+   docker compose up -d db backup-init
+   docker compose build app
+   docker compose run --rm --no-deps -T --entrypoint true app
+   ```
+
+   The first line starts the database and prepares the backups volume (`backup-init`). It does not run `migrate`, so the database stays empty and the restore accepts it whatever release you cloned (see [Which database a set can be restored into](#which-database-a-set-can-be-restored-into)). The last line creates the `uploads_data` volume: Docker fills a new named volume from the image directory it is mounted on, so the volume root gets the app image's `/data/uploads` ownership, `node` (1000:1000), which the restore requires (see [Ownership of the restored files](#ownership-of-the-restored-files)). The container runs `true` and exits; it starts no server, runs no migration and does not touch the database. Without this step the restore stops with `Volume <name> does not exist` (exit code 6) before it changes anything. The database **must** be the `pgvector/pgvector:pg16` image already pinned in `docker-compose.yml` — a stock `postgres:16` image cannot load a dump containing `CREATE EXTENSION vector`.
 5. **Copy the set into the backups volume**, from the tar stream made as in [Copying backups off the host](#copying-backups-off-the-host):
 
    ```bash
    docker compose run --rm --no-deps -T --entrypoint tar backup -C /backups -xf - < aida-backup-<setId>.tar
    ```
 
-6. **Run the restore**: `./scripts/restore.sh <setId> --yes`. It fills the empty database and the uploads volume from the set. `backup`, `app` and `worker` do not exist yet, so it says it could not start them; that is expected here.
-7. **Start the instance**: `docker compose up -d --build`. The one-shot `migrate` service runs this release's `prisma migrate deploy`, which applies every migration newer than the set (none when you cloned the set's own release), and then `app`, `worker` and `backup` start.
+6. **Run the restore**: `./scripts/restore.sh <setId> --validate-only`, then `./scripts/restore.sh <setId> --yes`. It fills the empty database and the uploads volume from the set, and runs this release's `migrate deploy` when the set is older. `backup`, `app` and `worker` do not exist yet, so it says it could not start them; that is expected here.
+7. **Start the instance**: `docker compose up -d --build`. The one-shot `migrate` service runs this release's `prisma migrate deploy` again (nothing is left to apply), and then `app`, `worker` and `backup` start.
 8. **Verify**: `curl http://localhost/api/health` should return `{"status":"ok",...}`.
 9. **Point DNS** at the new host and set `DOMAIN` in `.env` to your real domain, then `docker compose up -d caddy` — Caddy will automatically obtain a fresh Let's Encrypt certificate for the domain once ports 80/443 are reachable from the internet.
 
