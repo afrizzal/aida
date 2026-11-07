@@ -190,3 +190,15 @@ Question `run-loop/codex/fase09-diff-r2-tanya.md`, answer `fase09-diff-r2-jawab.
 - **Codex r2-6 (MEDIUM):** `docs/OPERATIONS.md` documents how an owner whose duplicate member rows deny them admin access repairs the rows safely.
 
 Fix batch F6, then Codex round 3 (the last).
+
+## Codex diff critique round 3 dispositions (2026-11-12, last round)
+
+Question `run-loop/codex/fase09-diff-r3-tanya.md`, answer `fase09-diff-r3-jawab.md` (log: `model: gpt-6.1-terra`, `reasoning effort: xhigh`; export paths replaced by repo-relative paths). 3 HIGH, 2 MEDIUM; Codex: "belum siap". This was the last Codex round for this topic. All accepted; on K155 the run takes the most conservative option (decision rule 4) instead of accepting the residual risk, and reports it to the owner.
+
+- **K156 (Codex r3-1, HIGH):** every rollback and recovery block in `docs/OPERATIONS.md` starts services only when the restore succeeded (`restore ... && docker compose up -d`, or an explicit exit-code check), and a docs test fails if any block can start services after a failed restore.
+- **K157 (Codex r3-2, HIGH):** during the K154 `migrate deploy`, the restore renews the lease and the lock heartbeat; losing either stops the migration and leaves services stopped. Test on the fake `docker` with a migrate that outlasts the lease TTL.
+- **K158 (Codex r3-3, HIGH; replaces the time bound of K155 as the safety rule):** a queued uncertain-commit key records the upload transaction's id (`pg_current_xact_id()`) in a new nullable column of `ProjectFileCleanup` (one non-destructive migration, created in a rule-J disposable dev database as in 08-02, never `db push`, never `aida-dev-db`). The sweep deletes such a key only when `pg_xact_status` of that id is `aborted`, or `committed` with no referencing row; `in progress` (or unknown) keeps the file. The 15-minute delay and the 30-second idle bound stay as defence in depth. Test with a transaction held open across a sweep: the file stays; after rollback it is deleted; after commit it stays.
+- **Codex r3-4 (MEDIUM):** the membership-repair and recovery commands in `docs/OPERATIONS.md` use correct quoting (no `\"` inside single-quoted `sh -c`, no escaped identifiers in the heredoc), checked by running them against a disposable rule-J database in a test.
+- **Codex r3-5 (MEDIUM):** the restore deletes the lease row only when its holder is the restore's own; an interleaving test covers a one-off backup that passed its lock check before the restore created the tables on an empty target.
+
+Fix batch F7. No further Codex round; then the gate is rerun (step 8) and the verifier runs (step 9).
