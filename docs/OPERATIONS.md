@@ -135,9 +135,12 @@ A backup that lives on the same disk as the instance it protects does not surviv
 ```bash
 docker compose run --rm --no-deps -T --entrypoint ls backup -1 /backups   # list the sets
 ./scripts/restore.sh <setId>
+./scripts/restore.sh <setId> --validate-only                               # check a set, write nothing
 ```
 
-Example: `./scripts/restore.sh 20261112T020001Z-a1b2c3`. The `db` service must be running.
+Example: `./scripts/restore.sh 20261112T020001Z-a1b2c3`. The `db` service must be running. Run the script from the checkout of the release that is running: it reads that release's migrations from `prisma/migrations` (see [Which database a set can be restored into](#which-database-a-set-can-be-restored-into)).
+
+**`--validate-only`** takes the restore lock and the backup lease, checks the whole set exactly as a restore would (the four files, the manifest, the sha256 and size of every part, the dump, every archive member, the extraction into a staging directory on the backups volume and every extracted checksum) and checks that every migration of the set is in this release. It does not compare the set with the current database, writes nothing to the database or the uploads volume, stops nothing, asks no confirmation, and removes its staging directory. Exit code 0 means the set can be restored by this release; 4 a failed validation; 9 a set newer than this release.
 
 **This is destructive.** It replaces the entire current database and the entire contents of the uploads volume with one set from the backups volume. There is no undo other than restoring a different set. Unless you pass `--yes`, the script asks you to type `restore` before it touches anything.
 
@@ -261,21 +264,47 @@ docker compose up -d
 
 The one-shot `migrate` service runs `prisma migrate deploy` automatically before `app`/`worker` start (it's gated on `db` being healthy, and `app`/`worker` are gated on `migrate` completing successfully) — **no manual migration step is needed**.
 
-**Take a backup first**: `./scripts/backup.sh` before every upgrade, and note the set id on its `backup succeeded` line. If something goes wrong, roll back to the previous git tag and restore the pre-upgrade set into an empty database. The upgrade has already migrated the database to the new release, so a restore into it is refused (exit code 9, see [Which database a set can be restored into](#which-database-a-set-can-be-restored-into)):
+**Take a backup first**: `./scripts/backup.sh` before every upgrade, and note the set id on its `backup succeeded` line. Check it with `./scripts/restore.sh <setId> --validate-only` (it writes nothing).
+
+**Rolling back.** If something goes wrong, go back to the previous git tag and restore the pre-upgrade set into an empty database. The upgrade has already migrated the database to the new release, so a restore into it is refused (exit code 9, see [Which database a set can be restored into](#which-database-a-set-can-be-restored-into)). Each step below changes nothing that a later step cannot still recover, and the database of the new release is kept, renamed, until the restore has succeeded:
 
 ```bash
-./scripts/backup.sh                                   # a set of the current state, in case you need it
+# 1. Stop every writer. Only db keeps running; nothing writes from here on.
+docker compose stop app worker backup
+
+# 2. A backup of the current state, now complete because nothing writes. Note its set id from
+#    the `backup succeeded` line, and check it (both commands write nothing to the database).
+./scripts/backup.sh
+./scripts/restore.sh <current-setId> --validate-only
+
+# 3. The previous release, and a check that it can restore the pre-upgrade set. Stop here if the
+#    check fails: nothing has been changed yet, and `docker compose up -d` on the new release
+#    brings the instance back as it was.
 git checkout <previous-tag>
 docker compose build
-docker compose rm -s -f app worker backup             # containers only; the volumes stay
-docker compose exec -T db sh -c 'dropdb -U "$POSTGRES_USER" --force "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
+./scripts/restore.sh <pre-upgrade-setId> --validate-only
+
+# 4. Remove the containers of the new release (containers only; every volume stays).
+docker compose rm -s -f app worker backup
+
+# 5. Keep the new release's database under another name and create an empty one in its place.
+#    ALTER DATABASE ... RENAME fails while any session is connected to it; then nothing changed.
+docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "ALTER DATABASE \"$POSTGRES_DB\" RENAME TO \"${POSTGRES_DB}_before_rollback\"" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
+
+# 6. Restore the pre-upgrade set into the empty database, then start the previous release.
 ./scripts/restore.sh <pre-upgrade-setId> --yes
 docker compose up -d
 ```
 
-The `dropdb` line empties the database of the new release. Run it only after the set ids are noted, because everything in the database after the pre-upgrade set is then only in the set the first line made. `restore.sh` says it could not start `backup`, `app` and `worker` (their containers were removed, so no new-release container runs on the old schema); `docker compose up -d` then creates them from the previous release and its `migrate` finds nothing to apply.
+Because the writers stop in step 1 before the backup in step 2, that set holds the whole state of the new release up to the stop, and the database renamed in step 5 holds the same state. Nothing written after the pre-upgrade set is lost while either of them is kept.
 
-This form needs a previous tag that already has set-based backups (this release or later). Releases before it took a database dump and an uploads tarball as two files, and their own `restore.sh` takes those two files.
+`restore.sh` says it could not start `backup`, `app` and `worker` (their containers were removed in step 4, so no new-release container runs on the old schema); `docker compose up -d` then creates them from the previous release and its `migrate` finds nothing to apply.
+
+**If the restore in step 6 fails**, the empty database may be partly restored and the renamed one is untouched. To go back to the new release: rename the partly restored database out of the way (`ALTER DATABASE "<db>" RENAME TO "<db>_failed_restore"`, as in step 5), rename `<db>_before_rollback` back to `<db>`, `git checkout` the new release, and run `docker compose up -d --build`. No step of this procedure drops a database.
+
+**Once the previous release runs correctly**, the renamed `<db>_before_rollback` database is no longer needed by AIDA. It still holds the new release's data and takes disk space; removing it is your decision, after you have kept the step 2 set wherever you keep backups.
+
+This form needs a previous tag that already has set-based backups and `restore.sh --validate-only` (this release or later). Releases before it took a database dump and an uploads tarball as two files, and their own `restore.sh` takes those two files.
 
 ### Upgrading an install whose containers ran as root
 
