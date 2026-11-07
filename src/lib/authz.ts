@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { isAdminRole } from "@/lib/membership";
+import { findConservativeMembership, isAdminRole } from "@/lib/membership";
 import { scopedDb } from "@/lib/scoped-db";
 import { requireSession } from "@/lib/session";
 
@@ -22,6 +22,11 @@ export type ActiveOrgAccess = {
  * organization/set-active commits between them, so the role could come from organization A while
  * the write goes to organization B.
  *
+ * The role is the conservative read (K151, Codex diff critique round 1, finding 4): the member table
+ * has no unique key on (organizationId, userId), so a user can hold an admin row and a plain member
+ * row in one organization. findConservativeMembership reads every row in id order and returns an
+ * admin role only when EVERY row is owner or admin; a single unordered row could be either.
+ *
  * Redirects to /login without a session (requireSession). Uses bare `prisma` (never scopedDb):
  * Better Auth's `member` model has no organizationId allowlist entry in scopedDb (see
  * src/lib/scoped-db.ts).
@@ -30,10 +35,7 @@ export async function getActiveOrgAccess(): Promise<ActiveOrgAccess> {
   const session = await requireSession();
   const orgId = session.session.activeOrganizationId ?? null;
   if (!orgId) return { session, orgId: null, role: null };
-  const member = await prisma.member.findFirst({
-    where: { userId: session.user.id, organizationId: orgId },
-    select: { role: true },
-  });
+  const member = await findConservativeMembership(prisma, session.user.id, orgId);
   return { session, orgId, role: member?.role ?? null };
 }
 

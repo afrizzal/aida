@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
   getSession: vi.fn(),
-  memberFindFirst: vi.fn(),
+  memberFindMany: vi.fn(),
   scopedDb: vi.fn(),
   tagDelete: vi.fn(),
 }));
@@ -21,7 +21,7 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ auth: { api: { getSession: h.getSession } } }));
-vi.mock("@/lib/db", () => ({ prisma: { member: { findFirst: h.memberFindFirst } } }));
+vi.mock("@/lib/db", () => ({ prisma: { member: { findMany: h.memberFindMany } } }));
 vi.mock("@/lib/scoped-db", () => ({ scopedDb: h.scopedDb }));
 vi.mock("@/lib/branding/logo-store", () => ({ replaceLogo: vi.fn(), removeLogo: vi.fn() }));
 vi.mock("@/lib/kb/create-article", () => ({
@@ -48,11 +48,12 @@ function activeOrgSwitches(first: string, then: string): void {
 }
 
 beforeEach(() => {
-  h.memberFindFirst.mockImplementation(
+  h.memberFindMany.mockImplementation(
     async (args: { where: { userId: string; organizationId: string } }) => {
-      if (args.where.organizationId === ORG_ADMIN) return { role: "admin" };
-      if (args.where.organizationId === ORG_MEMBER) return { role: "member" };
-      return null;
+      // getActiveOrgAccess reads every member row in id order (K151).
+      if (args.where.organizationId === ORG_ADMIN) return [{ id: "m-admin", role: "admin" }];
+      if (args.where.organizationId === ORG_MEMBER) return [{ id: "m-member", role: "member" }];
+      return [];
     },
   );
   h.scopedDb.mockImplementation((orgId: string) => ({
