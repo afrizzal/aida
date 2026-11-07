@@ -374,6 +374,24 @@ export interface RestoreRunOptions {
   uploadsDir?: string;
   pauseAt?: readonly RestorePausePoint[];
   env?: Record<string, string>;
+  /** The set script's mode flag (K142, K149); absent: a full restore. */
+  mode?: "--check-schema" | "--validate-only";
+}
+
+/**
+ * K150: the repository's prisma/migrations directory names, space separated, as
+ * scripts/restore.sh passes them in RESTORE_RELEASE_MIGRATIONS. A case may override it in `env`.
+ */
+export async function releaseMigrations(): Promise<string> {
+  const { readdir } = await import("node:fs/promises");
+  const entries = await readdir(path.resolve(__dirname, "../../../prisma/migrations"), {
+    withFileTypes: true,
+  });
+  return entries
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort()
+    .join(" ");
 }
 
 export interface RestoreRun {
@@ -523,15 +541,21 @@ export async function startRestoreRunner(opts: StartRestoreRunnerOptions): Promi
             await writeFile(path.join(hostPauseDir, `${point}.go`), "");
         }
       })();
-      const done = prepared.then(() =>
+      const done = prepared.then(async () =>
         execAs(
           "1000:1000",
-          ["sh", "/opt/aida-backup/aida-restore-set.sh", `/backups/${run.backups}/${run.setId}`],
+          [
+            "sh",
+            "/opt/aida-backup/aida-restore-set.sh",
+            ...(run.mode ? [run.mode] : []),
+            `/backups/${run.backups}/${run.setId}`,
+          ],
           {
             BACKUP_DIR: `/backups/${run.backups}`,
             RESTORE_HOLDER: run.holder,
             UPLOADS_DIR: run.uploadsDir ?? RESTORE_UPLOADS,
             BACKUP_TEST_PAUSE_DIR: `/pause/${pauseName}`,
+            RESTORE_RELEASE_MIGRATIONS: await releaseMigrations(),
             ...run.env,
           },
         ),

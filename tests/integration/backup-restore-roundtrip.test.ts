@@ -40,6 +40,7 @@ import {
   type RestoreRun,
   type RestoreRunner,
   type RunResult,
+  releaseMigrations,
   SET_ID_PATTERN,
   sha256Hex,
   startBackupRunner,
@@ -454,6 +455,7 @@ function runRestore(
     uploadsDir?: string;
     env?: Record<string, string>;
     pauseAt?: readonly "validating"[];
+    mode?: "--check-schema" | "--validate-only";
   } = {},
 ): RestoreRun {
   const run = runner.runRestore({ backups: c.backupsName, setId, holder, ...opts });
@@ -1055,6 +1057,218 @@ describe("a target at a newer schema is refused before any write (K142, d-CR-1, 
       expect(await targetTouched(runner, c)).toBeNull();
       expect(await stagingDirs(c)).toEqual([]);
       expect(await lockHolder(runner, c)).toBe(holder);
+      await releaseLock(runner, c, holder);
+    },
+    CASE_TIMEOUT,
+  );
+});
+
+describe("K150: only a truly empty target or one at exactly the set's migrations, and never a set newer than the release", () => {
+  /** Runs the set script on a copy of the base set into `target`; returns the result and the before/after state. */
+  async function refusedRun(
+    target: IsolatedDatabase,
+    opts: { env?: Record<string, string>; mode?: "--check-schema" | "--validate-only" } = {},
+  ) {
+    const runner = await newRestoreRunner(target);
+    const { c, setId } = await copyOfBase(runner);
+    const holder = newHolder();
+    await acquireLock(runner, c, holder);
+    const before = await snapshot(runner, target);
+    const result = await runRestore(runner, c, setId, holder, opts).done;
+    const after = await snapshot(runner, target);
+    const touched = await targetTouched(runner, c);
+    const staging = await stagingDirs(c);
+    expect(await lockHolder(runner, c)).toBe(holder);
+    await releaseLock(runner, c, holder);
+    return { result, before, after, touched, staging };
+  }
+
+  async function emptyDatabase(): Promise<IsolatedDatabase> {
+    const target = await newTargetDatabase();
+    await query(
+      target,
+      "DROP SCHEMA IF EXISTS pgboss CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public;",
+    );
+    return target;
+  }
+
+  for (const mode of [undefined, "--check-schema"] as const) {
+    it(
+      `a target lacking one of the set's migrations (an older schema) is refused, exit 9, nothing written${mode ? ` (${mode})` : ""}`,
+      async () => {
+        const target = await newTargetDatabase();
+        const [last] = await query<{ migration_name: string }>(
+          target,
+          'SELECT migration_name FROM "_prisma_migrations" ORDER BY migration_name DESC LIMIT 1',
+        );
+        await query(
+          target,
+          `DELETE FROM "_prisma_migrations" WHERE migration_name = '${last?.migration_name}'`,
+        );
+        const r = await refusedRun(target, { mode });
+        expect(r.result.exitCode, `${r.result.stdout}\n${r.result.stderr}`).toBe(9);
+        expectRestoreLog(r.result);
+        expect(r.result.stdout).toContain(
+          `[restore] refused: the target database lacks 1 migration(s) of the set (an older schema), first: ${last?.migration_name}`,
+        );
+        expect(r.after).toEqual(r.before);
+        expect(r.touched).toBeNull();
+        expect(r.staging).toEqual([]);
+      },
+      CASE_TIMEOUT,
+    );
+  }
+
+  it(
+    "a target with relations but no migration history is refused, exit 9, nothing written",
+    async () => {
+      const target = await newTargetDatabase();
+      await query(target, 'DROP TABLE "_prisma_migrations"');
+      const r = await refusedRun(target);
+      expect(r.result.exitCode, `${r.result.stdout}\n${r.result.stderr}`).toBe(9);
+      expect(r.result.stdout).toMatch(
+        /\[restore\] refused: the target database is not empty \(\d+ relation\(s\)\) and has no migration history/,
+      );
+      expect(r.after).toEqual(r.before);
+      expect(r.touched).toBeNull();
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "a set with a migration the release does not contain (a newer set) is refused, exit 9, nothing written",
+    async () => {
+      const release = (await releaseMigrations()).split(" ");
+      const dropped = release[release.length - 1] as string;
+      const r = await refusedRun(await newTargetDatabase(), {
+        env: { RESTORE_RELEASE_MIGRATIONS: release.slice(0, -1).join(" ") },
+      });
+      expect(r.result.exitCode, `${r.result.stdout}\n${r.result.stderr}`).toBe(9);
+      expect(r.result.stdout).toContain(
+        `[restore] refused: the set has 1 migration(s) that this release does not contain (a newer set), first: ${dropped}`,
+      );
+      expect(r.after).toEqual(r.before);
+      expect(r.touched).toBeNull();
+    },
+    CASE_TIMEOUT,
+  );
+
+  for (const [value, line] of [
+    ["", "invalid setting: RESTORE_RELEASE_MIGRATIONS is not set"],
+    ["20260629020504_init bad;name", "invalid setting: RESTORE_RELEASE_MIGRATIONS"],
+  ] as const) {
+    it(
+      `RESTORE_RELEASE_MIGRATIONS ${value === "" ? "empty" : "with an invalid name"}: exit 2 before anything`,
+      async () => {
+        const r = await refusedRun(await rejectionTarget(), {
+          env: { RESTORE_RELEASE_MIGRATIONS: value },
+        });
+        expect(r.result.exitCode, `${r.result.stdout}\n${r.result.stderr}`).toBe(2);
+        expect(r.result.stdout).toContain(`[restore] ${line}`);
+        expect(r.after).toEqual(r.before);
+        expect(r.touched).toBeNull();
+      },
+      CASE_TIMEOUT,
+    );
+  }
+
+  it(
+    "a truly empty target restores (exit 0), and a release with a later migration is reported as an older set",
+    async () => {
+      const target = await emptyDatabase();
+      const release = `${await releaseMigrations()} 29991231000000_k150_later`;
+      const runner = await newRestoreRunner(target);
+      const { c, setId } = await copyOfBase(runner);
+      const holder = newHolder();
+      await acquireLock(runner, c, holder);
+      const result = await runRestore(runner, c, setId, holder, {
+        env: { RESTORE_RELEASE_MIGRATIONS: release },
+      }).done;
+      expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expectRestoreLog(result);
+      expect(result.stdout).toContain("[restore] target database: empty");
+      expect(result.stdout).toContain(
+        "[restore] set migrations: older than this release; migrate deploy runs before app and worker start",
+      );
+      const restored = await query<{ n: string }>(
+        target,
+        'SELECT count(*) AS n FROM "_prisma_migrations"',
+      );
+      expect(Number(restored[0]?.n)).toBe((await releaseMigrations()).split(" ").length);
+      await releaseLock(runner, c, holder);
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "a target at exactly the set's migrations restores and says so; an equal release says equal",
+    async () => {
+      const target = await newTargetDatabase();
+      const runner = await newRestoreRunner(target);
+      const { c, setId } = await copyOfBase(runner);
+      const holder = newHolder();
+      await acquireLock(runner, c, holder);
+      const result = await runRestore(runner, c, setId, holder).done;
+      expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(result.stdout).toContain("[restore] target migrations: equal to the set");
+      expect(result.stdout).toContain("[restore] set migrations: equal to this release");
+      await releaseLock(runner, c, holder);
+    },
+    CASE_TIMEOUT,
+  );
+});
+
+describe("K149: --validate-only checks the whole set and writes nothing", () => {
+  it(
+    "a valid set: exit 0, 'set validated', no target write even into a target at a newer schema, staging removed",
+    async () => {
+      const target = await newTargetDatabase();
+      await query(
+        target,
+        `INSERT INTO "_prisma_migrations" ("id", "checksum", "migration_name", "started_at",
+           "finished_at", "applied_steps_count")
+           VALUES ('00000000-0000-4000-8000-000000000149', 'k149', '29991231000000_k149_newer',
+             now(), now(), 1);`,
+      );
+      const runner = await newRestoreRunner(target);
+      const { c, setId } = await copyOfBase(runner);
+      const holder = newHolder();
+      await acquireLock(runner, c, holder);
+      const before = await snapshot(runner, target);
+      const result = await runRestore(runner, c, setId, holder, { mode: "--validate-only" }).done;
+      expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expectRestoreLog(result);
+      expect(result.stdout).toContain("[restore] set validated");
+      expect(result.stdout).toContain(
+        "[restore] validate only: nothing was written to the target database or the uploads target",
+      );
+      expect(result.stdout).not.toContain("restoring the database");
+      expect(await snapshot(runner, target)).toEqual(before);
+      expect(await targetTouched(runner, c)).toBeNull();
+      expect(await stagingDirs(c)).toEqual([]);
+      await releaseLock(runner, c, holder);
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "a set newer than the release: exit 9 under --validate-only, nothing written",
+    async () => {
+      const release = (await releaseMigrations()).split(" ");
+      const target = await rejectionTarget();
+      const runner = await newRestoreRunner(target);
+      const { c, setId } = await copyOfBase(runner);
+      const holder = newHolder();
+      await acquireLock(runner, c, holder);
+      const before = await snapshot(runner, target);
+      const result = await runRestore(runner, c, setId, holder, {
+        mode: "--validate-only",
+        env: { RESTORE_RELEASE_MIGRATIONS: release.slice(0, -1).join(" ") },
+      }).done;
+      expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(9);
+      expect(result.stdout).not.toContain("set validated");
+      expect(await snapshot(runner, target)).toEqual(before);
+      expect(await targetTouched(runner, c)).toBeNull();
       await releaseLock(runner, c, holder);
     },
     CASE_TIMEOUT,

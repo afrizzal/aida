@@ -152,7 +152,7 @@ What it does, in order:
 1. Checks the set id and, without `--yes`, asks for the confirmation.
 2. Finds the real names of the `uploads_data` and `backups_data` volumes from `docker compose config --format json` (a project name or a `name:` changes them) and checks each with `docker volume inspect`. A missing volume stops it with exit code 6; nothing is stopped.
 3. Takes the **restore lock** in one-off containers of the `backup` service: a directory `.restore-lock` on the backups volume holding a new random holder (`restore-` and 32 hex characters) and a heartbeat. It lives on the backups volume, so it survives the database replacement. Then it takes the backup lease with the same holder, so a backup that is running makes the restore refuse before anything is stopped, and a backup that starts later sees the lock and skips (`backup skipped: restore in progress`).
-4. Checks the target database's migrations against the set, read only, in a one-off `backup` container (`aida-restore-set.sh --check-schema`): when the database holds a migration that the set's dump does not contain (a newer schema), it refuses with exit code 9 before anything is stopped. An empty database passes. See [Which database a set can be restored into](#which-database-a-set-can-be-restored-into).
+4. Checks the migrations, read only, in a one-off `backup` container (`aida-restore-set.sh --check-schema`): every migration of the set must be in this release, and the target database must be truly empty or hold exactly the set's migrations. Otherwise it refuses with exit code 9 before anything is stopped; the `[restore] refused:` line says which check failed. See [Which database a set can be restored into](#which-database-a-set-can-be-restored-into). The set script repeats these checks after the services have stopped, before its first write.
 5. Stops `backup`, `app` and `worker` (no writes, no job pickup, no backup while it runs).
 6. Runs `scripts/backup/aida-restore-set.sh` in a one-off `backup` container as user 1000:1000, with the uploads volume mounted read-write at `/restore/uploads`. It renews the lock's heartbeat every 60 seconds and stops when the lock names another holder.
    - **Validation, before anything is written** (the lines say `[restore] validation: <reason>`, then `set failed validation`, exit code 4): the set directory holds exactly the four files; the set id equals the directory name and the manifest's `setId`; the sha256 and size of `db.dump`, `uploads.tar.gz` and `uploads.sha256` equal the manifest's (`<file> checksum`); `pg_restore --list` reads the dump (`dump`); every archive member is a regular file named `<organizationId>/<storageKey>` (`member name`, `member type`: no absolute path, `..`, link, device, FIFO, odd name or volume marker); the archive is extracted into `.restore-staging-<holder>` on the backups volume, and the extracted files must equal the checksum list exactly with every checksum matching (`staged checksum`); the dump must hold the uploads volume identity (`volume identity missing from the dump`).
@@ -160,7 +160,7 @@ What it does, in order:
    - **Database step** (exit code 7 on failure): `pg_restore --clean --if-exists --no-owner --no-privileges` into the database, then the `backup:lease` row the dump carried in is removed.
    - **Uploads step** (exit code 8 on failure): removes the volume's current entries one by one (never the volume itself), copies the extracted files in (directories 0755, files 0644, owned by 1000:1000), checks every copied file against `uploads.sha256`, and writes the volume marker `.aida-uploads-volume` from the restored database's identity, so the next backup and the file cleanup recognise the volume. Then it checks that every entry is owned by 1000:1000 and that a probe file can be created, read and removed.
    - The staging directory is removed on every exit.
-7. On success: releases the lease and the lock, starts `backup`, `app` and `worker`, and polls the app's probe (`/api/health/probe`, inside the `app` container) for up to 60 seconds; a probe that does not answer is a warning only.
+7. On success: releases the lease and the lock. When the set is older than this release (step 4 printed `set migrations: older than this release`), it first runs this release's one-shot `migrate` service (`prisma migrate deploy`); if that fails it starts nothing and exits with code 1, and `docker compose up -d` (which runs `migrate` first) is the next step once the cause is fixed. Then it starts `backup`, `app` and `worker`, and polls the app's probe (`/api/health/probe`, inside the `app` container) for up to 60 seconds; a probe that does not answer is a warning only.
 
 **Refusals before anything is stopped** (the set and the instance are untouched, nothing to clean up):
 
@@ -170,16 +170,26 @@ What it does, in order:
 | `a backup is running; retry after it finishes.` | 3 | Wait for the backup run to end, then run the restore again. |
 | `Volume <name> does not exist.` | 6 | Run the script from the same checkout and project name as the running stack. |
 | `Set <setId> was not found in the backups volume.` | 4 | List the sets (above) and check the id. |
-| `Refused: the target database has migrations that set <setId> does not contain (a newer schema).` | 9 | The database belongs to a later release than the set. See [Which database a set can be restored into](#which-database-a-set-can-be-restored-into). |
+| `[restore] refused: the set has N migration(s) that this release does not contain (a newer set)` | 9 | The set was made by a later release. Restore it with that release or a later one. |
+| `[restore] refused: the target database has N applied migration(s) that the set does not contain (a newer schema)` | 9 | The database belongs to a later release than the set. Restore into an empty database (see below). |
+| `[restore] refused: the target database lacks N migration(s) of the set (an older schema)` | 9 | The database belongs to an earlier release than the set. Restore into an empty database (see below). |
+| `[restore] refused: the target database is not empty (N relation(s)) and has no migration history` | 9 | The database holds tables that are not an AIDA schema. Restore into an empty database (see below). |
 
 ### Which database a set can be restored into
 
-`pg_restore --clean` drops and recreates only the objects that are in the dump, and the restart after a restore does not run `migrate`. A database at a newer schema than the set would be left half dropped (a table the dump does not know still references one it drops) or end up older than the code that runs on it. So the restore refuses, before it stops anything or writes anything, when the target database has an applied migration (a row in `_prisma_migrations`) that the set's dump does not contain, unless the database is empty. Two paths are supported:
+`pg_restore --clean` drops and recreates only the objects that are in the dump. Any other object in the target database survives the restore next to the restored schema: a table of a newer schema that still references one the dump drops, a table of an older schema the set no longer has, or a table that is not AIDA's at all. So the restore proceeds only into one of two targets, and refuses (exit code 9) before it stops anything or writes anything otherwise:
+
+- **A truly empty database**: no table, view, sequence or other relation in any schema except the system ones. A database that has a schema but no `_prisma_migrations` table is not empty.
+- **A database whose migration history equals the set's exactly**: the names in its `_prisma_migrations` (any state, a failed one included) are exactly the names in the set's dump. This is a database of the release that made the set.
+
+The release that runs the restore must also know every migration of the set: a set whose migrations are not all in this checkout's `prisma/migrations` is refused, because migrations only go forward and this release's code would run on a schema it does not know. When the set is older than the release, the restore runs the release's `migrate deploy` before `app` and `worker` start (step 7).
+
+The comparison is by migration name. It does not prove that two schemas are identical: a migration that failed half way, one edited after it was applied, or a schema changed by hand can differ under the same names. Restore into an empty database when in doubt.
+
+Two paths are supported:
 
 - **Into a database of the release the set came from.** Run the release that made the set; its database has the same migrations as the dump, and the restore replaces it.
-- **Into an empty database, then the target release's `migrate deploy`.** Restore into a database that has no tables yet, then run `docker compose up -d --build` with the release you want: its one-shot `migrate` service runs `prisma migrate deploy`, which applies every migration newer than the set. [Restore to a new server](#restore-to-a-new-server) and the rollback under [Upgrading](#upgrading) show the commands.
-
-Migrations only go forward: a set made by a later release cannot be restored into an earlier release.
+- **Into an empty database.** Restore into a database that has no relation yet, with the release that made the set or a later one. The restore runs that release's `migrate deploy` afterwards when the set is older. [Restore to a new server](#restore-to-a-new-server) and the rollback under [Upgrading](#upgrading) show the commands.
 
 ### What a failure leaves behind
 

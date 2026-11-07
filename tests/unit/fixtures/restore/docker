@@ -9,6 +9,9 @@
 #   FAKE_LEASE_EXIT       exit code of the lease step (default 0)
 #   FAKE_TOUCHED          what the target-touched read prints (default: nothing)
 #   FAKE_CHECK_EXIT       exit code of the set script's --check-schema step (default 0)
+#   FAKE_CHECK_OUTPUT     its output (default nothing; K150: the `set migrations:` line)
+#   FAKE_VALIDATE_EXIT    exit code of the set script's --validate-only step (default 0, K149)
+#   FAKE_MIGRATE_EXIT     exit code of `compose run --rm --no-deps -T migrate` (default 0, K150)
 #   FAKE_SET_EXIT         exit code of the set script step (default 0)
 #   FAKE_SET_MODE         `hang`: the set script step waits until it is signalled
 #   FAKE_RELEASE_EXIT     exit code of the release step (default 0)
@@ -115,11 +118,20 @@ EOF
   *) unexpected "$@" ;;
 esac
 
+# K150: the release's one-shot migrate service, exactly this call.
+if [ "$*" = 'compose run --rm --no-deps -T migrate' ]; then
+  exit "${FAKE_MIGRATE_EXIT:-0}"
+fi
+
 # compose run: only one-off containers of the backup service, removed when they exit.
 has --rm && has --no-deps && has -T && has backup || unexpected "$@"
 
 if has /opt/aida-backup/aida-restore-set.sh && has --check-schema; then
+  if [ -n "${FAKE_CHECK_OUTPUT:-}" ]; then printf '%s\n' "$FAKE_CHECK_OUTPUT"; fi
   exit "${FAKE_CHECK_EXIT:-0}"
+fi
+if has /opt/aida-backup/aida-restore-set.sh && has --validate-only; then
+  exit "${FAKE_VALIDATE_EXIT:-0}"
 fi
 if has /opt/aida-backup/aida-restore-set.sh; then
   if [ "${FAKE_SET_MODE:-}" = hang ]; then

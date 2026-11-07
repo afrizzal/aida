@@ -8,6 +8,9 @@
 #
 # Usage:
 #   ./scripts/restore.sh <setId> [--yes]          restore the set BACKUP_DIR/<setId>
+#   ./scripts/restore.sh <setId> --validate-only  check the whole set and its migrations against
+#                                                 this release, write nothing and stop nothing
+#                                                 (K149)
 #   ./scripts/restore.sh --break-stale-lock <holder>
 #                                                 remove a restore lock left by a restore that is
 #                                                 no longer running (its heartbeat is older than
@@ -24,16 +27,26 @@
 #      (random holder restore-<32 hex> from lib.sh new_restore_holder; held: exit 3, with the
 #      holder and the heartbeat age) and then the backup lease with the same holder (a running
 #      backup: the lock is released, exit 3, nothing stopped);
-#   4. a one-off `backup` container runs `aida-restore-set.sh --check-schema` (read only, K142):
-#      the target database holds a migration the set does not contain (a newer schema): exit 9,
-#      nothing stopped or changed. An empty target database passes;
+#   4. a one-off `backup` container runs `aida-restore-set.sh --check-schema` (read only, K142,
+#      K150) with this checkout's prisma/migrations names in RESTORE_RELEASE_MIGRATIONS: a set
+#      with a migration this release lacks, a target database that is neither truly empty nor at
+#      exactly the set's migrations: exit 9, nothing stopped or changed;
 #   5. `docker compose stop backup app worker`;
 #   6. scripts/backup/aida-restore-set.sh runs in a one-off `backup` container as 1000:1000 with
 #      the uploads volume mounted read-write at /restore/uploads. It validates the whole set before
 #      it writes anything, and writes `.restore-lock/target-touched` (`database`, then `uploads`)
 #      immediately before its first write to each target;
-#   7. on success: the lease and the lock are released, backup, app and worker are started, and
-#      the app's probe is polled for up to 60 s (a warning only).
+#   7. on success: the lease and the lock are released; when the set is older than this release
+#      (step 4 said so), the release's one-shot `migrate` service runs `prisma migrate deploy`
+#      first (K150; on a failure nothing is started, exit 1); then backup, app and worker are
+#      started, and the app's probe is polled for up to 60 s (a warning only).
+#
+# With --validate-only (K149) it takes the lock and the lease, runs the set script with
+# --validate-only (the whole set and the release check, no write), releases them and exits with
+# the set script's code. Nothing is stopped or started, and no confirmation is asked.
+#
+# Run it from the checkout of the running release: the release's migrations are read from this
+# checkout's prisma/migrations, and compose builds app, worker and migrate from it.
 #
 # One trap on EXIT, INT, TERM and HUP decides every other outcome. Once the set script was
 # started, it first stops and removes its one-off container by its exact name (aida-<holder>) and
@@ -69,6 +82,7 @@ DOCS='docs/OPERATIONS.md, Restore'
 
 usage() {
   echo "Usage: ./scripts/restore.sh <setId> [--yes]"
+  echo "       ./scripts/restore.sh <setId> --validate-only"
   echo "       ./scripts/restore.sh --break-stale-lock <holder>"
   echo "List the sets with: docker compose run --rm --no-deps -T --entrypoint ls backup -1 /backups"
 }
@@ -128,6 +142,7 @@ MODE=restore
 SET_ID=''
 YES=0
 BREAK_HOLDER=''
+VALIDATE_ONLY=0
 case "${1:-}" in
   -h | --help)
     usage
@@ -147,6 +162,7 @@ case "${1:-}" in
     for arg in "$@"; do
       case $arg in
         --yes) YES=1 ;;
+        --validate-only) VALIDATE_ONLY=1 ;;
         *)
           usage >&2
           exit 2
@@ -190,7 +206,27 @@ if ! [[ $SET_ID =~ ^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}$ ]]; then
   exit 2
 fi
 
-if [ "$YES" != 1 ]; then
+# K150: the running release's migrations, from this checkout's prisma/migrations (directory
+# names only, each [A-Za-z0-9_.-]+). None or an odd name: nothing happens.
+REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+RELEASE_MIGRATIONS=''
+for dir in "$REPO_DIR"/prisma/migrations/*/; do
+  [ -d "$dir" ] || continue
+  name=${dir%/}
+  name=${name##*/}
+  if ! [[ $name =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    err "Unexpected migration directory name in prisma/migrations. Nothing was stopped."
+    exit 1
+  fi
+  RELEASE_MIGRATIONS="${RELEASE_MIGRATIONS:+$RELEASE_MIGRATIONS }$name"
+done
+if [ -z "$RELEASE_MIGRATIONS" ]; then
+  err "No migrations found in $REPO_DIR/prisma/migrations. Run this script from the checkout of the"
+  err "running release. Nothing was stopped."
+  exit 1
+fi
+
+if [ "$YES" != 1 ] && [ "$VALIDATE_ONLY" != 1 ]; then
   printf "Restore set %s? This REPLACES the current database and every stored file. Type 'restore' to continue: " "$SET_ID"
   ANSWER=''
   read -r ANSWER || ANSWER=''
@@ -401,20 +437,45 @@ case $rc in
     ;;
 esac
 
-# K142 (d-CR-1): refuse a target database that holds a migration the set does not contain (a
-# newer schema). Read only, in a one-off container, before anything is stopped.
-log "Checking the migrations of the target database against set $SET_ID..."
+# K149: --validate-only checks the whole set and its migrations against this release, writes
+# nothing, stops nothing, and releases the lock and the lease through the trap.
+if [ "$VALIDATE_ONLY" = 1 ]; then
+  log "Validating set $SET_ID (nothing is stopped or written)..."
+  set +e
+  $COMPOSE run --rm --no-deps -T --entrypoint sh -e "RESTORE_HOLDER=$HOLDER" \
+    -e "RESTORE_RELEASE_MIGRATIONS=$RELEASE_MIGRATIONS" \
+    backup /opt/aida-backup/aida-restore-set.sh --validate-only "/backups/$SET_ID" </dev/null
+  rc=$?
+  set -e
+  case $rc in
+    0) log "Set $SET_ID is valid and can be restored by this release. Nothing was stopped or changed." ;;
+    9) err "Refused: set $SET_ID has migrations that this release does not contain. Nothing was changed." ;;
+    *) err "Set $SET_ID failed validation (exit $rc). Nothing was stopped or changed. See $DOCS." ;;
+  esac
+  exit "$rc"
+fi
+
+# K142, K150: refuse a set newer than this release, and a target database that is neither truly
+# empty nor at exactly the set's migrations. Read only, in a one-off container, before anything
+# is stopped. Its `set migrations: older` line means migrate deploy runs after the restore.
+log "Checking the migrations of the set, this release and the target database for set $SET_ID..."
 set +e
-$COMPOSE run --rm --no-deps -T --entrypoint sh -e "RESTORE_HOLDER=$HOLDER" \
-  backup /opt/aida-backup/aida-restore-set.sh --check-schema "/backups/$SET_ID" </dev/null
+CHECK_OUT=$($COMPOSE run --rm --no-deps -T --entrypoint sh -e "RESTORE_HOLDER=$HOLDER" \
+  -e "RESTORE_RELEASE_MIGRATIONS=$RELEASE_MIGRATIONS" \
+  backup /opt/aida-backup/aida-restore-set.sh --check-schema "/backups/$SET_ID" </dev/null)
 rc=$?
 set -e
+[ -z "$CHECK_OUT" ] || printf '%s\n' "$CHECK_OUT"
+MIGRATE_AFTER=0
+case $'\n'"$CHECK_OUT" in
+  *$'\n[restore] set migrations: older than this release'*) MIGRATE_AFTER=1 ;;
+esac
 case $rc in
   0) ;;
   9)
-    err "Refused: the target database has migrations that set $SET_ID does not contain (a newer schema)."
-    err "Nothing was stopped or changed. Restore into a database of the release the set came from, or"
-    err "into an empty database and then run the target release's migrate deploy. See $DOCS."
+    err "Refused by the migration checks for set $SET_ID (the [restore] refused line above says which)."
+    err "Nothing was stopped or changed. Restore into a database at exactly the set's migrations, or"
+    err "into an empty database, with a release at or after the set's. See $DOCS."
     exit 9
     ;;
   *)
@@ -430,6 +491,7 @@ $COMPOSE stop backup app worker
 log "Restoring set $SET_ID..."
 SET_STARTED=1
 $COMPOSE run --rm --no-deps -T --name "$RESTORE_CONTAINER" --entrypoint sh -e "RESTORE_HOLDER=$HOLDER" \
+  -e "RESTORE_RELEASE_MIGRATIONS=$RELEASE_MIGRATIONS" \
   -e UPLOADS_DIR=/restore/uploads -v "$UPLOADS_VOLUME:/restore/uploads" \
   backup /opt/aida-backup/aida-restore-set.sh "/backups/$SET_ID" </dev/null &
 SET_PID=$!
@@ -445,6 +507,17 @@ fi
 # Success: release first, so the backup service never starts into a held restore lock.
 release || :
 DONE=1
+# K150: an older set leaves the database behind this release; its migrate deploy runs before
+# app and worker start (compose start does not run the one-shot migrate service).
+if [ "$MIGRATE_AFTER" = 1 ]; then
+  log "The set is older than this release: running this release's migrate deploy..."
+  if ! $COMPOSE run --rm --no-deps -T migrate </dev/null; then
+    err "migrate deploy failed after the restore of set $SET_ID. The database holds the set's data at"
+    err "the set's migrations; backup, app and worker were NOT started. Read the migrate output above,"
+    err "fix the cause, then run: docker compose up -d (it runs migrate first). See $DOCS."
+    exit 1
+  fi
+fi
 log "Starting backup, app and worker..."
 start_services || :
 log "Waiting for the app probe (up to 60 s)..."

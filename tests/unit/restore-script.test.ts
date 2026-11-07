@@ -9,7 +9,7 @@
 // every path that took the restore lock releases it and the lease; a held lock or a running
 // backup refuses before anything is stopped; a missing volume refuses before anything is stopped.
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -86,6 +86,8 @@ function steps(calls: string[]): string[] {
     if (call.startsWith("compose exec -T app wget")) return "health";
     if (call.startsWith("compose run ")) {
       if (call.includes("/opt/aida-backup/aida-restore-set.sh --check-schema")) return "check";
+      if (call.includes("/opt/aida-backup/aida-restore-set.sh --validate-only")) return "validate";
+      if (call === "compose run --rm --no-deps -T migrate") return "migrate";
       if (call.includes("/opt/aida-backup/aida-restore-set.sh")) return "set";
       for (const name of ["lock", "lease", "touched", "release", "break"]) {
         if (call.includes(` aida-restore-${name} `) || call.endsWith(` aida-restore-${name}`))
@@ -111,11 +113,24 @@ function expectNoDestructiveCall(run: Run): void {
   expect(run.stderr).not.toContain("fake docker: unexpected call");
 }
 
-/** The exact set-script call (D-05 key link: uploads volume read-write at /restore/uploads). */
-const SET_CALL = `compose run --rm --no-deps -T --name aida-${HOLDER} --entrypoint sh -e RESTORE_HOLDER=${HOLDER} -e UPLOADS_DIR=/restore/uploads -v aida_uploads_data:/restore/uploads backup /opt/aida-backup/aida-restore-set.sh /backups/${SET_ID}`;
+/** K150: the checkout's prisma/migrations directory names, as the wrapper passes them. */
+const RELEASE = readdirSync(path.join(ROOT, "prisma", "migrations"), { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => entry.name)
+  .sort()
+  .join(" ");
 
-/** The read-only migration check (K142), run before anything is stopped. */
-const CHECK_CALL = `compose run --rm --no-deps -T --entrypoint sh -e RESTORE_HOLDER=${HOLDER} backup /opt/aida-backup/aida-restore-set.sh --check-schema /backups/${SET_ID}`;
+/** The exact set-script call (D-05 key link: uploads volume read-write at /restore/uploads). */
+const SET_CALL = `compose run --rm --no-deps -T --name aida-${HOLDER} --entrypoint sh -e RESTORE_HOLDER=${HOLDER} -e RESTORE_RELEASE_MIGRATIONS=${RELEASE} -e UPLOADS_DIR=/restore/uploads -v aida_uploads_data:/restore/uploads backup /opt/aida-backup/aida-restore-set.sh /backups/${SET_ID}`;
+
+/** The read-only migration check (K142, K150), run before anything is stopped. */
+const CHECK_CALL = `compose run --rm --no-deps -T --entrypoint sh -e RESTORE_HOLDER=${HOLDER} -e RESTORE_RELEASE_MIGRATIONS=${RELEASE} backup /opt/aida-backup/aida-restore-set.sh --check-schema /backups/${SET_ID}`;
+
+/** The validate-only run (K149): the whole set, no target write, nothing stopped. */
+const VALIDATE_CALL = `compose run --rm --no-deps -T --entrypoint sh -e RESTORE_HOLDER=${HOLDER} -e RESTORE_RELEASE_MIGRATIONS=${RELEASE} backup /opt/aida-backup/aida-restore-set.sh --validate-only /backups/${SET_ID}`;
+
+const OLDER_LINE =
+  "[restore] set migrations: older than this release; migrate deploy runs before app and worker start";
 
 describe("scripts/restore.sh: outcome rules", () => {
   it("success: stop before the set script, start exactly once after it, lock and lease released, exit 0", () => {
@@ -367,7 +382,7 @@ describe("scripts/restore.sh: refusals before anything is stopped", () => {
   });
 
   for (const [code, says] of [
-    ["9", "Refused: the target database has migrations that set"],
+    ["9", "Refused by the migration checks for set"],
     ["6", "The migration check of set"],
   ] as const) {
     it(`migration check exit ${code} (K142): the lock and lease are released, exit ${code}, no stop, no set run and no start`, () => {
@@ -463,4 +478,78 @@ describe("the fake docker fixture", () => {
     expect(run.status).toBe(97);
     expect(readCalls(log)).toEqual(["compose down -v"]);
   });
+});
+
+describe("scripts/restore.sh: release migrations and validate-only (K149, K150)", () => {
+  it("the release list is this checkout's prisma/migrations and is passed to the check and the set script", () => {
+    expect(RELEASE.split(" ").length).toBeGreaterThan(0);
+    const run = restore([SET_ID, "--yes"]);
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.calls).toContain(CHECK_CALL);
+    expect(run.calls).toContain(SET_CALL);
+    // An equal set: no migrate run.
+    expect(count(steps(run.calls), "migrate")).toBe(0);
+    expectNoDestructiveCall(run);
+  });
+
+  it("an older set: migrate deploy runs after the set script and the release, before backup, app and worker start", () => {
+    const run = restore([SET_ID, "--yes"], { FAKE_CHECK_OUTPUT: OLDER_LINE });
+    expect(run.status, run.stderr).toBe(0);
+    expect(steps(run.calls).slice(5)).toEqual([
+      "check",
+      "stop",
+      "set",
+      "release",
+      "migrate",
+      "start",
+      "health",
+    ]);
+    expect(run.stdout).toContain(OLDER_LINE);
+    expectNoDestructiveCall(run);
+  });
+
+  it("an older set whose migrate deploy fails: exit 1, nothing started, the message says so", () => {
+    const run = restore([SET_ID, "--yes"], {
+      FAKE_CHECK_OUTPUT: OLDER_LINE,
+      FAKE_MIGRATE_EXIT: "1",
+    });
+    expect(run.status).toBe(1);
+    const s = steps(run.calls);
+    expect(s.slice(s.indexOf("set"))).toEqual(["set", "release", "migrate"]);
+    expect(count(s, "start")).toBe(0);
+    expect(run.stderr).toContain("migrate deploy failed after the restore");
+    expect(run.stderr).toContain("backup, app and worker were NOT started");
+    expectNoDestructiveCall(run);
+  });
+
+  it("--validate-only: lock, lease, the validate-only run and the release; nothing stopped, started or confirmed", () => {
+    const run = restore([SET_ID, "--validate-only"]);
+    expect(run.status, run.stderr).toBe(0);
+    expect(steps(run.calls)).toEqual([
+      "config",
+      "inspect aida_uploads_data",
+      "inspect aida_backups_data",
+      "lock",
+      "lease",
+      "validate",
+      "release",
+    ]);
+    expect(run.calls).toContain(VALIDATE_CALL);
+    expect(run.stdout).toContain("is valid and can be restored by this release");
+    expectNoDestructiveCall(run);
+  });
+
+  for (const [code, says] of [
+    ["4", "failed validation (exit 4)"],
+    ["9", "has migrations that this release does not contain"],
+  ] as const) {
+    it(`--validate-only exit ${code}: the same exit, the lock and lease released, nothing stopped`, () => {
+      const run = restore([SET_ID, "--validate-only"], { FAKE_VALIDATE_EXIT: code });
+      expect(run.status).toBe(Number(code));
+      const s = steps(run.calls);
+      expect(s.slice(3)).toEqual(["lock", "lease", "validate", "release"]);
+      expect(run.stderr).toContain(says);
+      expectNoDestructiveCall(run);
+    });
+  }
 });
