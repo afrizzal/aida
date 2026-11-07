@@ -4,6 +4,9 @@
 // The real src/instrumentation.ts, src/lib/bootstrap.ts, src/lib/demo/bootstrap-demo.ts and
 // src/lib/demo/tenant-guard.ts run. Only withTenantSeedLock is replaced (to inject a failure and
 // record the options it receives), plus the modules that would open a database or Better Auth.
+// This file checks the options passed; tests/integration/tenant-seed-lock-bounds.test.ts measures
+// that withTenantSeedLock really gives up after them, against a held lock and an exhausted pool
+// (Codex diff critique round 1, finding 7).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const lock = vi.hoisted(() => ({ withTenantSeedLock: vi.fn() }));
