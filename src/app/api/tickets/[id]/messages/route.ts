@@ -3,7 +3,10 @@ import { NextResponse } from "next/server";
 import { ALLOWED_MIME, MAX_BYTES } from "@/lib/attachments/constants";
 import { buildStorageKey, localFileStorage } from "@/lib/attachments/local-file-storage";
 import { saveStagedFiles } from "@/lib/attachments/staged-files";
-import { queueStagedFilesAfterUncertainCommit } from "@/lib/attachments/uncertain-commit";
+import {
+  boundUploadCommitInTx,
+  queueStagedFilesAfterUncertainCommit,
+} from "@/lib/attachments/uncertain-commit";
 import { recordAuditEvent } from "@/lib/audit/record-audit-event";
 import { getEmailSettings } from "@/lib/channels/email/settings";
 import { resolveActiveProvider } from "@/lib/llm/active-provider";
@@ -162,6 +165,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         });
       }
 
+      await boundUploadCommitInTx(tx);
       commitSent = true;
       return { ok: true as const, messageId: message.id };
     });

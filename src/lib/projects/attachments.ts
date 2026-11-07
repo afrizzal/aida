@@ -18,7 +18,10 @@
 import type { FileStorage } from "../attachments/file-storage";
 import { buildStorageKey, localFileStorage } from "../attachments/local-file-storage";
 import { saveStagedFiles } from "../attachments/staged-files";
-import { queueStagedFilesAfterUncertainCommit } from "../attachments/uncertain-commit";
+import {
+  boundUploadCommitInTx,
+  queueStagedFilesAfterUncertainCommit,
+} from "../attachments/uncertain-commit";
 import {
   type UploadCandidate,
   type ValidatedUpload,
@@ -293,6 +296,7 @@ export async function uploadTaskAttachments(
         });
         attachments.push(row);
       }
+      await boundUploadCommitInTx(tx);
       commitSent = true;
       return { attachments };
     });

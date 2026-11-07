@@ -286,6 +286,9 @@ async function sweepInsideFence(
       // K148: a queued key that a committed row still references is live (for example a staged
       // upload queued after a COMMIT whose reply was lost, although the COMMIT took effect). Its
       // queue row is removed and the file is never deleted; a later dereference queues it again.
+      // K155: such a key is due UNCERTAIN_COMMIT_CLEANUP_DELAY_MINUTES after it was queued, so
+      // this check runs UNCERTAIN_COMMIT_MARGIN_SECONDS after the server-side bound of its upload
+      // transaction (src/lib/attachments/uncertain-commit.ts, which states what it covers).
       if (await storageKeyReferenced(tx, row.organizationId, row.storageKey)) {
         await tx.$executeRaw`
           DELETE FROM "ProjectFileCleanup"

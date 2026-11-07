@@ -4,7 +4,10 @@ import {
   MAX_FILES_PER_REQUEST,
   MAX_REQUEST_BODY_BYTES,
 } from "@/lib/attachments/constants";
-import { queueStagedFilesAfterUncertainCommit } from "@/lib/attachments/uncertain-commit";
+import {
+  boundUploadCommitInTx,
+  queueStagedFilesAfterUncertainCommit,
+} from "@/lib/attachments/uncertain-commit";
 import {
   removeStoredUploads,
   storeValidatedUploads,
@@ -123,6 +126,7 @@ export async function POST(request: Request) {
               sizeBytes: s.sizeBytes,
             })),
           });
+          await boundUploadCommitInTx(tx);
           commitSent = true;
         });
       }

@@ -70,6 +70,12 @@ docker compose run --rm --no-deps --entrypoint ls backup -1 /backups
 
 The uploads volume carries an identity marker that the worker writes the first time its cleanup job runs on the mounted volume. A backup refuses to run (`uploads volume not verified`) when the marker is missing or does not match the database, for example when a different volume is mounted. A local `pnpm worker` outside a container deletes no stored files: its `UPLOADS_DIR` is not a mount point, so the cleanup job refuses to delete there.
 
+### Uploads whose save outcome is unknown
+
+An upload (the public form, a status-page follow-up, a ticket reply, a project task attachment) stores its files first and then saves the rows that reference them in one database transaction. When the connection fails after the app sent `COMMIT`, the app cannot tell whether the rows were saved. It then never deletes the files itself: it puts their keys on the file cleanup queue, due **15 minutes** later, and the cleanup job deletes a key only when no saved row references it (an attachment, a task attachment or the logo setting), inside the backup fence.
+
+The 15 minutes rest on a limit the database enforces. The last statement of each of those transactions sets `idle_in_transaction_session_timeout` to **30 seconds** for that transaction only: if the `COMMIT` has not reached the database 30 seconds after that statement, PostgreSQL ends the session and the transaction is rolled back, so a late `COMMIT` cannot save the rows. Everything the app does after an unknown outcome comes after that statement, so the cleanup job looks at the keys at least **870 seconds** (14.5 minutes) after that limit has passed. One case has no enforced limit: a `COMMIT` the database has already started. PostgreSQL 16 has no setting that interrupts it (`statement_timeout` stops before the commit work, and `transaction_timeout` only exists from PostgreSQL 17). AIDA's schema has no deferred constraint or trigger, so that commit work only writes the commit record; it takes longer only when the database server's disk stalls, and then every commit waits with it.
+
 ### Seeing the result
 
 - **Settings → Backups** (workspace owners and admins only) shows the most recent run: Succeeded or Failed, when it finished, the set id, and on failure one fixed sentence for its category. It shows nothing else and has no buttons: backups are configured here, on the server.
