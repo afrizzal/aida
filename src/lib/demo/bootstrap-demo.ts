@@ -11,6 +11,7 @@
 // and no write. Every outcome and every error ends in one log line and a normal return.
 // ---------------------------------------------------------------------------
 import { runGuardedDemoSeed } from "@/lib/demo/tenant-guard";
+import { describeErrorShape } from "@/lib/error-shape";
 import type { TenantSeedLockOptions } from "@/lib/tenant-seed-lock";
 
 /** register() passes the short boot waits (BOOT_TENANT_SEED_LOCK_OPTIONS, review a-WR-2). */
@@ -59,10 +60,10 @@ export async function bootstrapDemoMode(
         return;
     }
   } catch (error) {
-    // A failed demo seed must never prevent the app from starting.
+    // A failed demo seed must never prevent the app from starting. Only the class and the code
+    // are logged, never the message: it can quote a password or the database URL (Codex finding 6).
     console.error(
-      "[demo] Demo seeding failed:",
-      error instanceof Error ? error.message : String(error),
+      `[demo] Demo seeding failed (${describeErrorShape(error)}); nothing else is logged about it. The app starts without the demo.`,
     );
   }
 }

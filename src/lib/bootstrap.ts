@@ -1,5 +1,6 @@
 import { auth } from "./auth";
 import { prisma } from "./db";
+import { describeErrorShape } from "./error-shape";
 import {
   type TenantSeedLockOptions,
   TenantSeedLockTimeout,
@@ -110,15 +111,7 @@ export async function bootstrapFromEnv(lockOptions: TenantSeedLockOptions = {}):
       return;
     }
     console.error(
-      `[bootstrap] Skipped the headless admin bootstrap after an error (${describeError(err)}); the app starts without it.`,
+      `[bootstrap] Skipped the headless admin bootstrap after an error (${describeErrorShape(err)}); the app starts without it.`,
     );
   }
-}
-
-/** The error's class and, when it has the shape of one, its code; never the message. */
-function describeError(err: unknown): string {
-  const name =
-    err instanceof Error && /^[A-Za-z0-9_]{1,64}$/.test(err.name) ? err.name : "unknown error";
-  const code = (err as { code?: unknown } | null)?.code;
-  return typeof code === "string" && /^[A-Z0-9_]{1,16}$/.test(code) ? `${name}, ${code}` : name;
 }

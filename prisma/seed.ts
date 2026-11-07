@@ -17,6 +17,7 @@
 import "dotenv/config";
 import { prisma } from "@/lib/db";
 import { runGuardedDemoSeed } from "@/lib/demo/tenant-guard";
+import { describeErrorShape } from "@/lib/error-shape";
 
 async function main(): Promise<void> {
   let exitCode = 1;
@@ -60,7 +61,9 @@ async function main(): Promise<void> {
         break;
     }
   } catch (error) {
-    console.error("[seed] Failed:", error instanceof Error ? error.message : String(error));
+    // The class and the code only, never the message: it can quote a password or the database
+    // URL (Codex diff critique round 1, finding 6).
+    console.error(`[seed] Failed (${describeErrorShape(error)}); nothing else is logged about it.`);
     exitCode = 1;
   }
   // Required: createKbArticle() leaves a pg-boss connection pool open (kb-embed-article
