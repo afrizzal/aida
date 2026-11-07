@@ -120,7 +120,9 @@ docker compose run --rm --no-deps --entrypoint rm backup /backups/status-unrecor
 ./scripts/backup.sh
 ```
 
-This takes one backup now, outside the schedule, in a one-off container of the `backup` service (as 1000:1000, the same script and settings). It requires the `db` service to be running (`docker compose up -d db`), runs `backup-init` first (it exits at once on a prepared volume), and exits with the run's code: 0 succeeded, 2 failed, 3 skipped, 5 outcome not recorded; 1 means its own preflight failed. The new set lands in `backups_data` like a scheduled one and counts towards `BACKUP_RETENTION`. Releases before this one took an output directory argument; the script now refuses one, because sets live in the volume.
+This takes one backup now, outside the schedule, in a one-off container of the `backup` service (as 1000:1000, the same script and settings). It requires the `db` service to be running (`docker compose up -d db`), runs `backup-init` first (it exits at once on a prepared volume), and exits with the run's code: 0 succeeded, 2 failed, 3 skipped, 5 outcome not recorded; 1 means its own preflight failed. The new set lands in `backups_data` like a scheduled one and counts towards `BACKUP_RETENTION`.
+
+**What a backup writes.** In the database, a run writes only rows of `SystemSetting`: the lease `backup:lease` (inserted when the run starts, renewed while it lasts, deleted when it ends) and the outcome `backup:lastRun` (the record Settings → Backups shows). It changes no tenant row and no file in the uploads volume, which it only reads. In the backups volume it writes the new set (through a `.tmp-<setId>` directory renamed at the end), removes the oldest sets beyond `BACKUP_RETENTION` (7 by default) and any `.tmp-<setId>` left by an earlier run, and, when the outcome cannot be recorded in the database, writes `status-unrecorded-<setId>.json`. Releases before this one took an output directory argument; the script now refuses one, because sets live in the volume.
 
 `backup.sh` and `restore.sh` call `docker compose`, which needs Docker Compose v2: the legacy Compose v1 binary cannot read `docker-compose.yml` (it nests an interpolation in a default value) and has no `config --format json`, so it is not supported.
 
@@ -146,7 +148,7 @@ docker compose run --rm --no-deps -T --entrypoint ls backup -1 /backups   # list
 
 Example: `./scripts/restore.sh 20261112T020001Z-a1b2c3`. The `db` service must be running. Run the script from the checkout of the release that is running: it reads that release's migrations from `prisma/migrations` (see [Which database a set can be restored into](#which-database-a-set-can-be-restored-into)).
 
-**`--validate-only`** takes the restore lock only (no backup lease, so nothing is written to the database), checks the whole set exactly as a restore would (the four files, the manifest, the sha256 and size of every part, the dump, every archive member, the extraction into a staging directory on the backups volume and every extracted checksum) and checks that every migration of the set is in this release. It does not compare the set with the current database, writes nothing to the database or the uploads volume, stops nothing, asks no confirmation, and removes its staging directory. Exit code 0 means the set can be restored by this release; 4 a failed validation; 9 a set newer than this release.
+**`--validate-only`** writes nothing to the database and nothing to the uploads volume: it takes the restore lock only, and no backup lease. On the backups volume it writes the restore lock `.restore-lock` and the staging directory `.restore-staging-<holder>`, and removes both before it exits. It checks the whole set exactly as a restore would (the four files, the manifest, the sha256 and size of every part, the dump, every archive member, the extraction into a staging directory on the backups volume and every extracted checksum) and checks that every migration of the set is in this release. It does not compare the set with the current database, writes nothing to the database or the uploads volume, stops nothing, asks no confirmation, and removes its staging directory. Exit code 0 means the set can be restored by this release; 4 a failed validation; 9 a set newer than this release.
 
 **This is destructive.** It replaces the entire current database and the entire contents of the uploads volume with one set from the backups volume. There is no undo other than restoring a different set. Unless you pass `--yes`, the script asks you to type `restore` before it touches anything.
 
@@ -280,7 +282,7 @@ docker compose up -d
 
 The one-shot `migrate` service runs `prisma migrate deploy` automatically before `app`/`worker` start (it's gated on `db` being healthy, and `app`/`worker` are gated on `migrate` completing successfully) — **no manual migration step is needed**.
 
-**Take a backup first**: `./scripts/backup.sh` before every upgrade, and note the set id on its `backup succeeded` line. Check it with `./scripts/restore.sh <setId> --validate-only` (it writes nothing).
+**Take a backup first**: `./scripts/backup.sh` before every upgrade, and note the set id on its `backup succeeded` line. Check it with `./scripts/restore.sh <setId> --validate-only` (it writes nothing to the database or the uploads volume). Copy it off the host as well: later backups remove the oldest sets beyond `BACKUP_RETENTION`.
 
 **Rolling back.** If something goes wrong, go back to the previous git tag and restore the pre-upgrade set into an empty database. The upgrade has already migrated the database to the new release, so a restore into it is refused (exit code 9, see [Which database a set can be restored into](#which-database-a-set-can-be-restored-into)). Each step below changes nothing that a later step cannot still recover, and the database of the new release is kept, renamed, until the restore has succeeded:
 
@@ -289,7 +291,10 @@ The one-shot `migrate` service runs `prisma migrate deploy` automatically before
 docker compose stop app worker backup
 
 # 2. A backup of the current state, now complete because nothing writes. Note its set id from
-#    the `backup succeeded` line, and check it (both commands write nothing to the database).
+#    the `backup succeeded` line, and check it. The backup writes only its lease and its status
+#    in SystemSetting, a new set on the backups volume, and removes sets beyond BACKUP_RETENTION:
+#    keep the pre-upgrade set off the host or within that number. --validate-only writes nothing
+#    to the database (see "What a backup writes" and Restore above).
 ./scripts/backup.sh
 ./scripts/restore.sh <current-setId> --validate-only
 
