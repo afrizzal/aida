@@ -1,0 +1,110 @@
+#!/bin/bash
+# tests/integration/support/restore-bridge/docker: a `docker` for running the real
+# scripts/restore.sh in tests/integration/backup-restore-roundtrip.test.ts (run decisions K152 and
+# K154). It is first on the wrapper's PATH. There is no compose stack here: each one-off
+# `compose run ... backup <command>` the wrapper issues becomes `docker exec` into the rule-J
+# restore runner container this test created (BRIDGE_CONTAINER), as user 1000:1000, which is the
+# backup service's user. Everything else is answered here and never reaches the daemon:
+#
+#   compose config --format json   the two volume names (uploads: BRIDGE_UPLOADS_VOLUME)
+#   volume inspect <name>          found, for those two names only
+#   compose stop|start backup app worker, compose exec -T app wget ...   exit 0, nothing runs
+#   stop -t 30 / rm -f aida-restore-<hex>, ps -a --filter name=...       exit 0, nothing listed
+#                                  (the exec'd process ends with its client, so no container
+#                                  outlives it)
+#   compose run --rm --no-deps -T migrate
+#                                  records what holds while the release's migrate would run:
+#                                  `lock=present|absent` (the case's .restore-lock on the host)
+#                                  and `lease=<value or none>` (the target's backup:lease row,
+#                                  read in the runner), into BRIDGE_MIGRATE_RECORD; then sleeps
+#                                  1 s and exits BRIDGE_MIGRATE_EXIT (default 0)
+#
+# The runner mounts the backups root at /backups and each case uses a subdirectory, so the
+# bridge sets BACKUP_DIR=/backups/<BRIDGE_BACKUPS_SUBDIR> and maps the set script's argument
+# /backups/<setId> to /backups/<BRIDGE_BACKUPS_SUBDIR>/<setId>; production uses /backups itself.
+#
+# Every call is appended as one line to BRIDGE_LOG, and a migrate call also appends
+# `migrate-returned` when it returns. Any other call exits 97.
+set -u
+: "${BRIDGE_LOG:?}" "${BRIDGE_REAL_DOCKER:?}" "${BRIDGE_CONTAINER:?}" "${BRIDGE_BACKUPS_SUBDIR:?}"
+: "${BRIDGE_UPLOADS_VOLUME:?}" "${BRIDGE_BACKUPS_HOST:?}"
+BACKUPS_VOLUME=aida-test-bridge-backups
+
+printf '%s\n' "$(printf '%s' "$*" | tr '\n' ' ')" >>"$BRIDGE_LOG"
+
+unexpected() {
+  printf 'restore bridge: unexpected call: %s\n' "$*" >&2
+  exit 97
+}
+
+case "${1:-} ${2:-}" in
+  'compose config')
+    [ "$*" = 'compose config --format json' ] || unexpected "$@"
+    printf '{"name":"aida","volumes":{"uploads_data":{"name":"%s"},"backups_data":{"name":"%s"}}}\n' \
+      "$BRIDGE_UPLOADS_VOLUME" "$BACKUPS_VOLUME"
+    exit 0
+    ;;
+  'volume inspect')
+    [ "$#" -eq 3 ] || unexpected "$@"
+    [ "$3" = "$BRIDGE_UPLOADS_VOLUME" ] || [ "$3" = "$BACKUPS_VOLUME" ] || exit 1
+    exit 0
+    ;;
+  'compose stop' | 'compose start')
+    [ "$*" = "compose $2 backup app worker" ] || unexpected "$@"
+    exit 0
+    ;;
+  'compose exec')
+    [ "$*" = 'compose exec -T app wget -qO- http://127.0.0.1:3000/api/health/probe' ] ||
+      unexpected "$@"
+    exit 0
+    ;;
+  'stop -t' | 'rm -f')
+    case "$*" in
+      'stop -t 30 aida-restore-'* | 'rm -f aida-restore-'*) exit 0 ;;
+      *) unexpected "$@" ;;
+    esac
+    ;;
+  'ps -a')
+    case "${4:-}" in
+      'name=^/aida-restore-'*) exit 0 ;;
+      *) unexpected "$@" ;;
+    esac
+    ;;
+  'compose run') ;;
+  *) unexpected "$@" ;;
+esac
+
+if [ "$*" = 'compose run --rm --no-deps -T migrate' ]; then
+  if [ -d "$BRIDGE_BACKUPS_HOST/.restore-lock" ]; then lock=present; else lock=absent; fi
+  lease=$("$BRIDGE_REAL_DOCKER" exec -u 1000:1000 "$BRIDGE_CONTAINER" psql -X -q -t -A \
+    -c "SELECT COALESCE((SELECT value FROM \"SystemSetting\" WHERE key = 'backup:lease'), 'none')" \
+    2>/dev/null) || lease=unreadable
+  printf 'lock=%s\nlease=%s\n' "$lock" "$lease" >>"${BRIDGE_MIGRATE_RECORD:?}"
+  sleep 1
+  printf 'migrate-returned\n' >>"$BRIDGE_LOG"
+  exit "${BRIDGE_MIGRATE_EXIT:-0}"
+fi
+
+shift 2
+envs=()
+entry=''
+while [ "$#" -gt 0 ]; do
+  case $1 in
+    --rm | --no-deps | -T) shift ;;
+    --entrypoint) entry=$2; shift 2 ;;
+    -e) envs+=(-e "$2"); shift 2 ;;
+    --name | -v) shift 2 ;;
+    backup) shift; break ;;
+    *) unexpected "$@" ;;
+  esac
+done
+[ "$entry" = sh ] || unexpected "$@"
+args=()
+for arg in "$@"; do
+  if [[ $arg =~ ^/backups/([0-9]{8}T[0-9]{6}Z-[0-9a-f]{6})$ ]]; then
+    arg="/backups/$BRIDGE_BACKUPS_SUBDIR/${BASH_REMATCH[1]}"
+  fi
+  args+=("$arg")
+done
+exec "$BRIDGE_REAL_DOCKER" exec -u 1000:1000 -e "BACKUP_DIR=/backups/$BRIDGE_BACKUPS_SUBDIR" \
+  ${envs[@]+"${envs[@]}"} "$BRIDGE_CONTAINER" sh ${args[@]+"${args[@]}"}

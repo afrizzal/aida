@@ -141,8 +141,8 @@ describe("scripts/restore.sh: outcome rules", () => {
       "inspect aida_uploads_data",
       "inspect aida_backups_data",
       "lock",
-      "lease",
       "check",
+      "lease",
       "stop",
       "set",
       "release",
@@ -167,8 +167,8 @@ describe("scripts/restore.sh: outcome rules", () => {
       "inspect aida_uploads_data",
       "inspect aida_backups_data",
       "lock",
-      "lease",
       "check",
+      "lease",
       "stop",
       "set",
     ]);
@@ -374,7 +374,7 @@ describe("scripts/restore.sh: refusals before anything is stopped", () => {
     const run = restore([SET_ID, "--yes"], { FAKE_LEASE_EXIT: "3" });
     expect(run.status).toBe(3);
     const s = steps(run.calls);
-    expect(s.slice(3)).toEqual(["lock", "lease", "release"]);
+    expect(s.slice(3)).toEqual(["lock", "check", "lease", "release"]);
     expect(count(s, "stop")).toBe(0);
     expect(count(s, "start")).toBe(0);
     expect(run.stderr).toContain("a backup is running; retry after it finishes");
@@ -385,11 +385,12 @@ describe("scripts/restore.sh: refusals before anything is stopped", () => {
     ["9", "Refused by the migration checks for set"],
     ["6", "The migration check of set"],
   ] as const) {
-    it(`migration check exit ${code} (K142): the lock and lease are released, exit ${code}, no stop, no set run and no start`, () => {
+    it(`migration check exit ${code} (K142, K152): no lease was taken, the lock is released, exit ${code}, no stop, no set run and no start`, () => {
       const run = restore([SET_ID, "--yes"], { FAKE_CHECK_EXIT: code });
       expect(run.status).toBe(Number(code));
       const s = steps(run.calls);
-      expect(s.slice(3)).toEqual(["lock", "lease", "check", "release"]);
+      expect(s.slice(3)).toEqual(["lock", "check", "release"]);
+      expect(run.calls[s.indexOf("release")]).not.toContain("lease_release");
       expect(run.calls[s.indexOf("check")]).toBe(CHECK_CALL);
       expect(count(s, "stop")).toBe(0);
       expect(count(s, "set")).toBe(0);
@@ -496,7 +497,7 @@ describe("scripts/restore.sh: release migrations and validate-only (K149, K150)"
     const run = restore([SET_ID, "--yes"], { FAKE_CHECK_OUTPUT: OLDER_LINE });
     expect(run.status, run.stderr).toBe(0);
     expect(steps(run.calls).slice(5)).toEqual([
-      "check",
+      "lease",
       "stop",
       "set",
       "release",
@@ -522,7 +523,7 @@ describe("scripts/restore.sh: release migrations and validate-only (K149, K150)"
     expectNoDestructiveCall(run);
   });
 
-  it("--validate-only: lock, lease, the validate-only run and the release; nothing stopped, started or confirmed", () => {
+  it("--validate-only: lock, the validate-only run and the release; nothing stopped, started or confirmed", () => {
     const run = restore([SET_ID, "--validate-only"]);
     expect(run.status, run.stderr).toBe(0);
     expect(steps(run.calls)).toEqual([
@@ -530,11 +531,11 @@ describe("scripts/restore.sh: release migrations and validate-only (K149, K150)"
       "inspect aida_uploads_data",
       "inspect aida_backups_data",
       "lock",
-      "lease",
       "validate",
       "release",
     ]);
     expect(run.calls).toContain(VALIDATE_CALL);
+    expect(run.calls[steps(run.calls).indexOf("release")]).not.toContain("lease_release");
     expect(run.stdout).toContain("is valid and can be restored by this release");
     expectNoDestructiveCall(run);
   });
@@ -543,13 +544,69 @@ describe("scripts/restore.sh: release migrations and validate-only (K149, K150)"
     ["4", "failed validation (exit 4)"],
     ["9", "has migrations that this release does not contain"],
   ] as const) {
-    it(`--validate-only exit ${code}: the same exit, the lock and lease released, nothing stopped`, () => {
+    it(`--validate-only exit ${code}: the same exit, no lease taken, the lock released, nothing stopped`, () => {
       const run = restore([SET_ID, "--validate-only"], { FAKE_VALIDATE_EXIT: code });
       expect(run.status).toBe(Number(code));
       const s = steps(run.calls);
-      expect(s.slice(3)).toEqual(["lock", "lease", "validate", "release"]);
+      expect(s.slice(3)).toEqual(["lock", "validate", "release"]);
       expect(run.stderr).toContain(says);
       expectNoDestructiveCall(run);
     });
   }
+});
+
+/** K152: the check's line for a truly empty target (aida-restore-set.sh check_target). */
+const EMPTY_LINE = "[restore] target database: empty";
+
+describe("scripts/restore.sh: nothing is written to the target before the schema check (K152)", () => {
+  it("the read-only check runs before the lease, the first database write, and a refusal writes no lease", () => {
+    const ok = restore([SET_ID, "--yes"]);
+    expect(ok.status, ok.stderr).toBe(0);
+    const s = steps(ok.calls);
+    expect(s.indexOf("check")).toBeGreaterThan(s.indexOf("lock"));
+    expect(s.indexOf("lease")).toBeGreaterThan(s.indexOf("check"));
+    expect(ok.calls[s.indexOf("release")]).toContain("lease_release");
+
+    const refused = restore([SET_ID, "--yes"], { FAKE_CHECK_EXIT: "9" });
+    expect(refused.status).toBe(9);
+    expect(count(steps(refused.calls), "lease")).toBe(0);
+    expectNoDestructiveCall(refused);
+  });
+
+  it("a truly empty target: no lease is taken or released (it has no SystemSetting table), the restore runs under the restore lock alone and starts the services", () => {
+    const run = restore([SET_ID, "--yes"], {
+      FAKE_CHECK_OUTPUT: `${EMPTY_LINE}\n[restore] set migrations: equal to this release`,
+    });
+    expect(run.status, run.stderr).toBe(0);
+    const s = steps(run.calls);
+    expect(s.slice(3)).toEqual(["lock", "check", "stop", "set", "release", "start", "health"]);
+    expect(run.calls[s.indexOf("release")]).not.toContain("lease_release");
+    expect(run.calls[s.indexOf("release")]).toContain("restore_lock_release");
+    expect(run.stdout).toContain(
+      "the restore lock alone coordinates this restore (no lease is written)",
+    );
+    expect(run.calls).toContain(SET_CALL);
+    expectNoDestructiveCall(run);
+  });
+
+  it("a truly empty target whose set script fails validation: the lock alone is released and the services start again", () => {
+    const run = restore([SET_ID, "--yes"], { FAKE_CHECK_OUTPUT: EMPTY_LINE, FAKE_SET_EXIT: "4" });
+    expect(run.status).toBe(4);
+    const s = steps(run.calls);
+    expect(count(s, "lease")).toBe(0);
+    expect(run.calls[s.indexOf("release")]).not.toContain("lease_release");
+    expect(count(s, "start")).toBe(1);
+    expectNoDestructiveCall(run);
+  });
+
+  it("--validate-only takes no lease and runs no lease step: it writes nothing to the database", () => {
+    for (const extra of [{}, { FAKE_VALIDATE_EXIT: "4" }, { FAKE_VALIDATE_EXIT: "9" }]) {
+      const run = restore([SET_ID, "--validate-only"], extra);
+      const s = steps(run.calls);
+      expect(count(s, "lease"), JSON.stringify(extra)).toBe(0);
+      expect(run.calls[s.indexOf("release")]).not.toContain("lease_release");
+      expect(count(s, "stop") + count(s, "start") + count(s, "set") + count(s, "check")).toBe(0);
+      expectNoDestructiveCall(run);
+    }
+  });
 });

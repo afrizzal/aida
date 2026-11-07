@@ -23,27 +23,36 @@
 #   2. the real names of the uploads_data and backups_data volumes come from
 #      `docker compose config --format json` and each is checked with `docker volume inspect`
 #      (missing: exit 6, nothing stopped);
-#   3. one-off containers of the `backup` service take the restore lock on the backups volume
+#   3. a one-off container of the `backup` service takes the restore lock on the backups volume
 #      (random holder restore-<32 hex> from lib.sh new_restore_holder; held: exit 3, with the
-#      holder and the heartbeat age) and then the backup lease with the same holder (a running
-#      backup: the lock is released, exit 3, nothing stopped);
+#      holder and the heartbeat age). The lock is a directory on the backups volume, not a write
+#      to the database;
 #   4. a one-off `backup` container runs `aida-restore-set.sh --check-schema` (read only, K142,
-#      K150) with this checkout's prisma/migrations names in RESTORE_RELEASE_MIGRATIONS: a set
-#      with a migration this release lacks, a target database that is neither truly empty nor at
-#      exactly the set's migrations: exit 9, nothing stopped or changed;
-#   5. `docker compose stop backup app worker`;
-#   6. scripts/backup/aida-restore-set.sh runs in a one-off `backup` container as 1000:1000 with
+#      K150, K152) with this checkout's prisma/migrations names in RESTORE_RELEASE_MIGRATIONS: a
+#      set with a migration this release lacks, a target database that is neither truly empty nor
+#      at exactly the set's migrations: exit 9, nothing stopped or changed. Nothing has been
+#      written to the target database before this check;
+#   5. the backup lease with the same holder, only when the check found a target with a migration
+#      history (a running backup: the lock is released, exit 3, nothing stopped). A truly empty
+#      target has no SystemSetting table, so no backup can hold or take a lease on it, and the
+#      restore lock alone keeps every backup out (aida-backup.sh skips while the lock exists, and
+#      its fenced actions refuse under it); the restore writes nothing to it before step 7 (K152);
+#   6. `docker compose stop backup app worker`;
+#   7. scripts/backup/aida-restore-set.sh runs in a one-off `backup` container as 1000:1000 with
 #      the uploads volume mounted read-write at /restore/uploads. It validates the whole set before
 #      it writes anything, and writes `.restore-lock/target-touched` (`database`, then `uploads`)
 #      immediately before its first write to each target;
-#   7. on success: the lease and the lock are released; when the set is older than this release
-#      (step 4 said so), the release's one-shot `migrate` service runs `prisma migrate deploy`
-#      first (K150; on a failure nothing is started, exit 1); then backup, app and worker are
-#      started, and the app's probe is polled for up to 60 s (a warning only).
+#   8. on success: the lease (when held) and the lock are released; when the set is older than
+#      this release (step 4 said so), the release's one-shot `migrate` service runs `prisma
+#      migrate deploy` first (K150; on a failure nothing is started, exit 1); then backup, app and
+#      worker are started, and the app's probe is polled for up to 60 s (a warning only).
 #
-# With --validate-only (K149) it takes the lock and the lease, runs the set script with
-# --validate-only (the whole set and the release check, no write), releases them and exits with
-# the set script's code. Nothing is stopped or started, and no confirmation is asked.
+# With --validate-only (K149, K152) it takes the restore lock only, runs the set script with
+# --validate-only (the whole set and the release check), releases the lock and exits with the set
+# script's code. It writes nothing to the database (no lease: the restore lock alone keeps every
+# backup out, as in step 5) and nothing to the uploads volume; on the backups volume it writes only
+# the lock directory and the set script's staging directory, and removes both. Nothing is stopped
+# or started, and no confirmation is asked.
 #
 # Run it from the checkout of the running release: the release's migrations are read from this
 # checkout's prisma/migrations, and compose builds app, worker and migrate from it.
@@ -270,12 +279,16 @@ RESTORE_CONTAINER=''
 EXITING=0
 FINAL_RC=0
 
+# Releases this restore's own lease (only when it holds one: an empty target has no SystemSetting
+# table, K152) and its restore lock.
 release() {
   [ "$LOCK_HELD" = 1 ] && [ "$RELEASED" = 0 ] || return 0
   RELEASED=1
-  if ! backup_step aida-restore-release \
-    'r=0; lease_release "$1" || r=1; restore_lock_release "$1" || r=1; exit "$r"' \
-    "$HOLDER" >/dev/null; then
+  local script='r=0; restore_lock_release "$1" || r=1; exit "$r"'
+  if [ "$LEASE_HELD" = 1 ]; then
+    script='r=0; lease_release "$1" || r=1; restore_lock_release "$1" || r=1; exit "$r"'
+  fi
+  if ! backup_step aida-restore-release "$script" "$HOLDER" >/dev/null; then
     err "Could not release the restore lock or the lease of $HOLDER. Once nothing restores any more,"
     err "remove the lock with: ./scripts/restore.sh --break-stale-lock $HOLDER (after 900 s)."
     return 1
@@ -418,27 +431,11 @@ LOCK_HELD=1
 RESTORE_CONTAINER="aida-$HOLDER"
 log "Restore lock taken: $HOLDER"
 
-# The backup lease with the same holder: a running backup holds it.
-set +e
-backup_step aida-restore-lease \
-  "r=\$(lease_acquire \"\$1\" $LEASE_TTL_SECONDS) || exit 1; [ \"\$r\" = acquired ] || exit 3" \
-  "$HOLDER" >/dev/null
-rc=$?
-set -e
-case $rc in
-  0) LEASE_HELD=1 ;;
-  3)
-    err "a backup is running; retry after it finishes. Nothing was stopped."
-    exit 3
-    ;;
-  *)
-    err "Could not take the backup lease (exit $rc). Is the db service running? Nothing was stopped."
-    exit 1
-    ;;
-esac
-
-# K149: --validate-only checks the whole set and its migrations against this release, writes
-# nothing, stops nothing, and releases the lock and the lease through the trap.
+# K149, K152: --validate-only checks the whole set and its migrations against this release under
+# the restore lock alone. It takes no lease, so it writes nothing to the database: the restore
+# lock keeps every backup out (a backup skips while it exists, and its fenced actions refuse under
+# it), and nothing here writes anything a backup could race with. It stops nothing, and the trap
+# releases the lock.
 if [ "$VALIDATE_ONLY" = 1 ]; then
   log "Validating set $SET_ID (nothing is stopped or written)..."
   set +e
@@ -455,9 +452,11 @@ if [ "$VALIDATE_ONLY" = 1 ]; then
   exit "$rc"
 fi
 
-# K142, K150: refuse a set newer than this release, and a target database that is neither truly
-# empty nor at exactly the set's migrations. Read only, in a one-off container, before anything
-# is stopped. Its `set migrations: older` line means migrate deploy runs after the restore.
+# K142, K150, K152: refuse a set newer than this release, and a target database that is neither
+# truly empty nor at exactly the set's migrations. Read only, in a one-off container, before
+# anything is stopped and before anything is written to the target database (the lease below
+# comes after it). Its `set migrations: older` line means migrate deploy runs after the restore;
+# its `target database: empty` line means the target has no SystemSetting table for a lease.
 log "Checking the migrations of the set, this release and the target database for set $SET_ID..."
 set +e
 CHECK_OUT=$($COMPOSE run --rm --no-deps -T --entrypoint sh -e "RESTORE_HOLDER=$HOLDER" \
@@ -469,6 +468,10 @@ set -e
 MIGRATE_AFTER=0
 case $'\n'"$CHECK_OUT" in
   *$'\n[restore] set migrations: older than this release'*) MIGRATE_AFTER=1 ;;
+esac
+TARGET_EMPTY=0
+case $'\n'"$CHECK_OUT"$'\n' in
+  *$'\n[restore] target database: empty\n'*) TARGET_EMPTY=1 ;;
 esac
 case $rc in
   0) ;;
@@ -483,6 +486,33 @@ case $rc in
     exit "$rc"
     ;;
 esac
+
+# The backup lease with the same holder: a running backup holds it. K152: only on a target with a
+# migration history. A truly empty target has no SystemSetting table, so no backup can hold or
+# take a lease on it (a backup's first database step reads that table and fails); the restore
+# lock alone keeps every backup out, and the restore writes nothing to the target before the set
+# script's database step.
+if [ "$TARGET_EMPTY" = 1 ]; then
+  log "The target database is empty: no backup can run against it, so the restore lock alone coordinates this restore (no lease is written)."
+else
+  set +e
+  backup_step aida-restore-lease \
+    "r=\$(lease_acquire \"\$1\" $LEASE_TTL_SECONDS) || exit 1; [ \"\$r\" = acquired ] || exit 3" \
+    "$HOLDER" >/dev/null
+  rc=$?
+  set -e
+  case $rc in
+    0) LEASE_HELD=1 ;;
+    3)
+      err "a backup is running; retry after it finishes. Nothing was stopped."
+      exit 3
+      ;;
+    *)
+      err "Could not take the backup lease (exit $rc). Is the db service running? Nothing was stopped."
+      exit 1
+      ;;
+  esac
+fi
 
 log "Stopping backup, app and worker..."
 STOPPED=1

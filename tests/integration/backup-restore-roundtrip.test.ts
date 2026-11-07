@@ -23,8 +23,9 @@
 // wrapper owns its release, scripts/restore.sh), so each case releases its own lock.
 //
 // One test process at a time (vitest.integration.config.ts, fileParallelism: false).
+import { execFile, execFileSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { readdir, rm, writeFile } from "node:fs/promises";
+import { readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1270,6 +1271,166 @@ describe("K149: --validate-only checks the whole set and writes nothing", () => 
       expect(await snapshot(runner, target)).toEqual(before);
       expect(await targetTouched(runner, c)).toBeNull();
       await releaseLock(runner, c, holder);
+    },
+    CASE_TIMEOUT,
+  );
+});
+
+// ---------------------------------------------------------------------------------------------
+// K152, K154: the real scripts/restore.sh, with support/restore-bridge/docker first on its PATH.
+// The bridge runs each one-off `compose run ... backup` step of the wrapper as `docker exec` in
+// this case's rule-J restore runner and answers every compose call that would touch a stack
+// without running anything (see its header). One wrapper run per case.
+
+const BRIDGE_DIR = path.join(__dirname, "support", "restore-bridge");
+const WRAPPER = path.resolve(__dirname, "../../scripts/restore.sh");
+
+interface WrapperRun {
+  code: number;
+  stdout: string;
+  stderr: string;
+  /** Every docker call of the wrapper, in order. */
+  calls: string[];
+  /** The migrate step's records (`lock=...`, `lease=...`), when it ran. */
+  migrate: string[];
+}
+
+function realDocker(): string {
+  return execFileSync("sh", ["-c", "command -v docker"], { encoding: "utf8" }).trim();
+}
+
+/** Runs `bash <wrapper> <setId> <flag>` against `runner` and `c`; never throws on a non-zero exit. */
+async function runWrapper(
+  runner: RestoreRunner,
+  c: Case,
+  setId: string,
+  flag: "--yes" | "--validate-only",
+  opts: { wrapper?: string; migrateExit?: number } = {},
+): Promise<WrapperRun> {
+  const dir = await makeTestDir(testRoot, "bridge-");
+  const log = path.join(dir, "docker.log");
+  const record = path.join(dir, "migrate.log");
+  const env: NodeJS.ProcessEnv = {
+    PATH: `${BRIDGE_DIR}:/usr/bin:/bin`,
+    HOME: dir,
+    LC_ALL: "C",
+    DOCKER_HOST: process.env.DOCKER_HOST ?? "",
+    BRIDGE_LOG: log,
+    BRIDGE_REAL_DOCKER: realDocker(),
+    BRIDGE_CONTAINER: runner.id,
+    BRIDGE_BACKUPS_SUBDIR: c.backupsName,
+    BRIDGE_BACKUPS_HOST: c.backups,
+    BRIDGE_UPLOADS_VOLUME: runner.volume,
+    BRIDGE_MIGRATE_RECORD: record,
+    BRIDGE_MIGRATE_EXIT: String(opts.migrateExit ?? 0),
+  };
+  const result = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
+    execFile(
+      "/bin/bash",
+      [opts.wrapper ?? WRAPPER, setId, flag],
+      { env, encoding: "utf8", timeout: 240_000, maxBuffer: 16 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        const code = err ? (typeof err.code === "number" ? err.code : -1) : 0;
+        resolve({ code, stdout, stderr });
+      },
+    );
+  });
+  const lines = async (file: string) =>
+    (await readFile(file, "utf8").catch(() => "")).split("\n").filter((l) => l !== "");
+  return { ...result, calls: await lines(log), migrate: await lines(record) };
+}
+
+/** The wrapper's calls reduced to steps, as in tests/unit/restore-script.test.ts. */
+function wrapperSteps(calls: string[]): string[] {
+  return calls.map((call) => {
+    if (call === "migrate-returned") return "migrate-returned";
+    if (call === "compose run --rm --no-deps -T migrate") return "migrate";
+    if (call === "compose stop backup app worker") return "stop";
+    if (call === "compose start backup app worker") return "start";
+    if (call.includes("aida-restore-set.sh --check-schema")) return "check";
+    if (call.includes("aida-restore-set.sh --validate-only")) return "validate";
+    if (call.includes("aida-restore-set.sh")) return "set";
+    for (const name of ["lock", "lease", "touched", "release"]) {
+      if (call.includes(` aida-restore-${name} `)) return name;
+    }
+    return "other";
+  });
+}
+
+/** Every insert, update and delete the target's tables have counted (statistics views). */
+async function tupleWrites(db: IsolatedDatabase): Promise<number> {
+  const rows = await query<{ n: string }>(
+    db,
+    `SELECT COALESCE(sum(n_tup_ins + n_tup_upd + n_tup_del), 0)::text AS n FROM pg_stat_all_tables
+      WHERE schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')`,
+  );
+  return Number(rows[0]?.n);
+}
+
+async function emptyTarget(): Promise<IsolatedDatabase> {
+  const target = await newTargetDatabase();
+  await query(
+    target,
+    "DROP SCHEMA IF EXISTS pgboss CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public;",
+  );
+  return target;
+}
+
+describe("K152: through the real wrapper, nothing is written to the target before the schema check", () => {
+  it(
+    "a truly empty target restores through scripts/restore.sh (exit 0) under the restore lock alone",
+    async () => {
+      const target = await emptyTarget();
+      const runner = await newRestoreRunner(target);
+      const { c, setId } = await copyOfBase(runner);
+      const run = await runWrapper(runner, c, setId, "--yes");
+      expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
+      const s = wrapperSteps(run.calls);
+      expect(s.filter((x) => x !== "other")).toEqual([
+        "lock",
+        "check",
+        "stop",
+        "set",
+        "release",
+        "start",
+      ]);
+      expect(run.stdout).toContain("[restore] target database: empty");
+      expect(run.stdout).toContain("no lease is written");
+      expect(run.stdout).toContain(`Done: set ${setId} restored.`);
+      const restored = await query<{ n: string }>(
+        target,
+        'SELECT count(*) AS n FROM "_prisma_migrations"',
+      );
+      expect(Number(restored[0]?.n)).toBe((await releaseMigrations()).split(" ").length);
+      await expectRestoredVolume(runner, target);
+      expect(await lockHolder(runner, c)).toBeNull();
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "--validate-only through scripts/restore.sh writes nothing: the table list, the row counts and the write counters are unchanged",
+    async () => {
+      const target = await newTargetDatabase();
+      const runner = await newRestoreRunner(target);
+      const { c, setId } = await copyOfBase(runner);
+      const before = await snapshot(runner, target);
+      await new Promise((r) => setTimeout(r, 1500));
+      const writesBefore = await tupleWrites(target);
+      const run = await runWrapper(runner, c, setId, "--validate-only");
+      expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
+      expect(run.stdout).toContain("[restore] set validated");
+      // A backend counts its writes when its session ends; wait for the wrapper's to be counted.
+      await new Promise((r) => setTimeout(r, 1500));
+      expect(await tupleWrites(target)).toBe(writesBefore);
+      expect(await snapshot(runner, target)).toEqual(before);
+      expect(wrapperSteps(run.calls).filter((x) => x !== "other")).toEqual([
+        "lock",
+        "validate",
+        "release",
+      ]);
+      expect(await lockHolder(runner, c)).toBeNull();
+      expect(await stagingDirs(c)).toEqual([]);
     },
     CASE_TIMEOUT,
   );
