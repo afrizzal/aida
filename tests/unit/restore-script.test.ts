@@ -609,7 +609,12 @@ describe("scripts/restore.sh: nothing is written to the target before the schema
   });
 
   it("--validate-only takes no lease and runs no lease step: it writes nothing to the database", () => {
-    for (const extra of [{}, { FAKE_VALIDATE_EXIT: "4" }, { FAKE_VALIDATE_EXIT: "9" }]) {
+    const cases: Record<string, string>[] = [
+      {},
+      { FAKE_VALIDATE_EXIT: "4" },
+      { FAKE_VALIDATE_EXIT: "9" },
+    ];
+    for (const extra of cases) {
       const run = restore([SET_ID, "--validate-only"], extra);
       const s = steps(run.calls);
       expect(count(s, "lease"), JSON.stringify(extra)).toBe(0);

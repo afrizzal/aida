@@ -1311,6 +1311,7 @@ async function runWrapper(
   const log = path.join(dir, "docker.log");
   const record = path.join(dir, "migrate.log");
   const env: NodeJS.ProcessEnv = {
+    NODE_ENV: "test",
     PATH: `${BRIDGE_DIR}:/usr/bin:/bin`,
     HOME: dir,
     LC_ALL: "C",
