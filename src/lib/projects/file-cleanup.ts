@@ -42,6 +42,12 @@
 // its file kept. Staged uploads whose transaction outcome is unknown (an error after COMMIT was
 // sent) are queued here with a delay instead of being unlinked (src/lib/attachments/uncertain-commit.ts).
 //
+// K158 (Codex diff critique round 3, finding 3): such a key also carries its upload transaction's
+// id (uploadXactId). Before the reference check the sweep asks pg_xact_status about it: "in
+// progress" keeps the file and the row (due again later), unknown keeps the file and drops the
+// row, and only "committed" or "aborted" goes on to the reference check. Keys without an id (every
+// ordinary dereference, and rows queued before K158) are checked as before.
+//
 // Relative imports only: the worker bundles this module.
 import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "../../generated/prisma/client";
@@ -57,27 +63,72 @@ import {
 
 const MINUTE_MS = 60_000;
 
+/** An xid8 as decimal text (K158; the same pattern as UPLOAD_XACT_ID_PATTERN). */
+const XACT_ID_PATTERN = /^[0-9]{1,20}$/;
+
+/**
+ * K158: how long a key whose upload transaction is still in progress waits before the sweep asks
+ * again. The row keeps its attempts; only nextAttemptAt moves.
+ */
+export const UPLOAD_XACT_PENDING_RECHECK_MINUTES = 5;
+
+/** What pg_xact_status said about a queued key's upload transaction (null: unknown). */
+type UploadXactStatus = "committed" | "aborted" | "in progress" | null;
+
+/**
+ * K158: the server's view of the upload transaction. pg_xact_status is asked only for an id below
+ * the current snapshot's xmax (an id at or above it, for example one carried over from another
+ * cluster by a restore, would raise "transaction ID is in the future"); an id too old for the
+ * commit log comes back as NULL. Both are unknown.
+ *
+ * Order matters: pg_xact_status checks the running-transaction list before the commit log, and a
+ * committing transaction leaves that list only after its commit is recorded. So once this returns
+ * "committed", the next statement of this READ COMMITTED transaction (the reference check) takes a
+ * snapshot that sees the upload's rows.
+ */
+async function uploadXactStatus(
+  tx: Prisma.TransactionClient,
+  xactId: string,
+): Promise<UploadXactStatus> {
+  if (!XACT_ID_PATTERN.test(xactId)) return null;
+  const rows = await tx.$queryRaw<{ status: string | null }[]>`
+    SELECT CASE
+      WHEN x.id >= pg_snapshot_xmax(pg_current_snapshot()) THEN NULL
+      ELSE pg_xact_status(x.id)
+    END AS status
+    FROM (SELECT ${xactId}::xid8 AS id) AS x
+  `;
+  const status = rows[0]?.status;
+  return status === "committed" || status === "aborted" || status === "in progress" ? status : null;
+}
+
 /**
  * Inserts one ProjectFileCleanup row per storage key of the organization, inside the caller's
  * transaction. A key already queued for the organization is left as it is. Returns the number of
  * rows inserted. `delayMinutes` (K148) makes the rows due that many minutes after the database's
- * now instead of at once; without it the column default (now) applies.
+ * now instead of at once; without it the column default (now) applies. `uploadXactId` (K158) is
+ * stored on every inserted row: the upload transaction's id after an unknown commit outcome. A
+ * value that is not an xid8 in decimal text is stored as null.
  */
 export async function enqueueFileCleanupInTx(
   tx: Prisma.TransactionClient,
   orgId: string,
   storageKeys: readonly string[],
-  options: { delayMinutes?: number } = {},
+  options: { delayMinutes?: number; uploadXactId?: string | null } = {},
 ): Promise<number> {
   const keys = [...new Set(storageKeys)];
   if (keys.length === 0) return 0;
   const ids = keys.map(() => randomUUID());
   const delayMinutes = Math.max(0, Math.floor(options.delayMinutes ?? 0));
+  const xactId =
+    typeof options.uploadXactId === "string" && XACT_ID_PATTERN.test(options.uploadXactId)
+      ? options.uploadXactId
+      : null;
   const inserted =
-    delayMinutes > 0
+    delayMinutes > 0 || xactId !== null
       ? await tx.$queryRaw<{ id: string }[]>`
-    INSERT INTO "ProjectFileCleanup" (id, "organizationId", "storageKey", "nextAttemptAt")
-    SELECT k.id, ${orgId}, k.key, now() + make_interval(mins => ${delayMinutes}::int)
+    INSERT INTO "ProjectFileCleanup" (id, "organizationId", "storageKey", "nextAttemptAt", "uploadXactId")
+    SELECT k.id, ${orgId}, k.key, now() + make_interval(mins => ${delayMinutes}::int), ${xactId}::text
     FROM unnest(${ids}::text[], ${keys}::text[]) AS k(id, key)
     ON CONFLICT ("organizationId", "storageKey") DO NOTHING
     RETURNING id
@@ -128,9 +179,15 @@ export interface FileCleanupSweepResult {
   skipped?: FenceRefusalReason;
   /**
    * Rows removed WITHOUT deleting the file because a committed row still references the key
-   * (K148). Present only when at least one row was kept this way.
+   * (K148), or because the upload transaction's outcome is unknown to the server (K158). Present
+   * only when at least one row was kept this way.
    */
   kept?: number;
+  /**
+   * Rows left queued, file kept, because their upload transaction is still in progress (K158);
+   * due again UPLOAD_XACT_PENDING_RECHECK_MINUTES later. Present only when N > 0.
+   */
+  pending?: number;
 }
 
 export interface FileCleanupSweepOptions {
@@ -156,6 +213,7 @@ interface DueRow {
   organizationId: string;
   storageKey: string;
   attempts: number;
+  uploadXactId: string | null;
 }
 
 function errorCode(err: unknown): string {
@@ -176,6 +234,16 @@ function logKept(key: string): void {
     console.warn(`[project-file-cleanup] file kept, a row still references it: key=${key}`);
   } catch {
     // Logging never changes the sweep's outcome.
+  }
+}
+
+function logUploadXact(key: string, status: "in progress" | "unknown"): void {
+  try {
+    console.warn(
+      `[project-file-cleanup] file kept, its upload transaction is ${status}: key=${key}`,
+    );
+  } catch {
+    // Logging must never fail the sweep.
   }
 }
 
@@ -263,7 +331,7 @@ async function sweepInsideFence(
     // nextAttemptAt's default, so a worker clock behind the database's never skips a due row.
     const now = opts.now ?? (await databaseNow(tx));
     const due = await tx.$queryRaw<DueRow[]>`
-      SELECT id, "organizationId", "storageKey", attempts
+      SELECT id, "organizationId", "storageKey", attempts, "uploadXactId"
       FROM "ProjectFileCleanup"
       WHERE "nextAttemptAt" <= ${now} AND attempts < ${PROJECT_FILE_CLEANUP_MAX_ATTEMPTS}
       ORDER BY "createdAt" ASC, id ASC
@@ -289,6 +357,34 @@ async function sweepInsideFence(
       // K155: such a key is due UNCERTAIN_COMMIT_CLEANUP_DELAY_MINUTES after it was queued, so
       // this check runs UNCERTAIN_COMMIT_MARGIN_SECONDS after the server-side bound of its upload
       // transaction (src/lib/attachments/uncertain-commit.ts, which states what it covers).
+      // K158: a key queued after an unknown commit outcome waits for its upload transaction.
+      if (row.uploadXactId !== null) {
+        const status = await uploadXactStatus(tx, row.uploadXactId);
+        if (status === "in progress") {
+          const recheckAt = new Date(
+            now.getTime() + UPLOAD_XACT_PENDING_RECHECK_MINUTES * MINUTE_MS,
+          );
+          await tx.$executeRaw`
+            UPDATE "ProjectFileCleanup" SET "nextAttemptAt" = ${recheckAt}
+            WHERE id = ${row.id} AND "organizationId" = ${row.organizationId}
+          `;
+          result.pending = (result.pending ?? 0) + 1;
+          logUploadXact(row.storageKey, "in progress");
+          continue;
+        }
+        if (status === null) {
+          // Unknown can stay unknown for ever (an id older than the commit log), so the row goes
+          // and the file stays on disk as an orphan, never as a broken reference.
+          await tx.$executeRaw`
+            DELETE FROM "ProjectFileCleanup"
+            WHERE id = ${row.id} AND "organizationId" = ${row.organizationId}
+          `;
+          result.kept = (result.kept ?? 0) + 1;
+          logUploadXact(row.storageKey, "unknown");
+          continue;
+        }
+        // "committed" or "aborted": the reference check below decides, as for every other key.
+      }
       if (await storageKeyReferenced(tx, row.organizationId, row.storageKey)) {
         await tx.$executeRaw`
           DELETE FROM "ProjectFileCleanup"

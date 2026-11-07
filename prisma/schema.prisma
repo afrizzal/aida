@@ -1352,6 +1352,11 @@ model ProjectFileCleanup {
   lastErrorCode  String?
   nextAttemptAt  DateTime     @default(now())
   createdAt      DateTime     @default(now())
+  /// K158: pg_current_xact_id() of the upload transaction whose commit outcome was unknown, as
+  /// decimal text (xid8). Set only on keys queued by queueStagedFilesAfterUncertainCommit; the
+  /// sweep deletes such a key only when pg_xact_status of this id is committed or aborted and no
+  /// committed row references the key.
+  uploadXactId   String?
   organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, storageKey])

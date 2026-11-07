@@ -613,7 +613,7 @@ describe("K148: the sweep deletes a queued key only when no committed row refere
     await storage.save({ orgId: w.orgId, key, data: Buffer.from("staged") });
     const { queueStagedFilesAfterUncertainCommit, UNCERTAIN_COMMIT_CLEANUP_DELAY_MINUTES } =
       await import("@/lib/attachments/uncertain-commit");
-    await queueStagedFilesAfterUncertainCommit(w.orgId, [key]);
+    await queueStagedFilesAfterUncertainCommit(w.orgId, [key], null);
     const [row] = await prisma.$queryRaw<{ waitMs: number }[]>`
       SELECT (EXTRACT(EPOCH FROM ("nextAttemptAt" - now())) * 1000)::float8 AS "waitMs"
       FROM "ProjectFileCleanup" WHERE "organizationId" = ${w.orgId} AND "storageKey" = ${key}
@@ -626,5 +626,131 @@ describe("K148: the sweep deletes a queued key only when no committed row refere
       failed: 0,
     });
     expect(await fileExists(w.orgId, key)).toBe(true);
+  });
+});
+
+describe("K158: a key queued after an unknown commit outcome waits for its upload transaction", () => {
+  /** A connection of its own that holds the "upload" transaction open across sweeps. */
+  async function openUpload(orgId: string, referencedKey: string | null) {
+    const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    await client.connect();
+    await client.query("BEGIN");
+    // The upload's row: a setting that holds the key as a JSON string, as the logo setting does.
+    const value = JSON.stringify({ storageKey: referencedKey ?? "none", version: 1 });
+    await client.query(
+      `INSERT INTO "Setting" (id, "organizationId", key, value, "updatedAt") VALUES ($1, $2, $3, $4, now())`,
+      [`k158-${newKey()}`, orgId, `k158-${newKey()}`, value],
+    );
+    const { rows } = await client.query<{ id: string }>("SELECT pg_current_xact_id()::text AS id");
+    return { client, xactId: rows[0]?.id as string };
+  }
+
+  async function storedAndQueuedWith(orgId: string, uploadXactId: string): Promise<string> {
+    const key = newKey("png");
+    await storage.save({ orgId, key, data: Buffer.from(`bytes of ${key}`) });
+    await prisma.$transaction((tx) => enqueueFileCleanupInTx(tx, orgId, [key], { uploadXactId }));
+    const [row] = await prisma.$queryRaw<{ id: string | null }[]>`
+      SELECT "uploadXactId" AS id FROM "ProjectFileCleanup"
+      WHERE "organizationId" = ${orgId} AND "storageKey" = ${key}
+    `;
+    expect(row?.id).toBe(uploadXactId);
+    return key;
+  }
+
+  const LATER = new Date(T0.getTime() + 10 * MINUTE);
+
+  it("in progress keeps the file and the row across a sweep; after a rollback the next sweep deletes it", async () => {
+    const org = await seedOrgWithMembers(prisma, ["owner"]);
+    const key = newKey("png");
+    const upload = await openUpload(org.orgId, key);
+    try {
+      await storage.save({ orgId: org.orgId, key, data: Buffer.from("staged") });
+      await prisma.$transaction((tx) =>
+        enqueueFileCleanupInTx(tx, org.orgId, [key], { uploadXactId: upload.xactId }),
+      );
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      expect(await sweepProjectFileCleanup({ client: prisma, fence, storage, now: T0 })).toEqual({
+        deleted: 0,
+        missing: 0,
+        failed: 0,
+        pending: 1,
+      });
+      expect(warn).toHaveBeenCalledWith(
+        `[project-file-cleanup] file kept, its upload transaction is in progress: key=${key}`,
+      );
+      expect(await fileExists(org.orgId, key)).toBe(true);
+      const row = await cleanupRow(org.orgId, key);
+      expect(row?.attempts).toBe(0);
+      expect(row?.nextAttemptAt.getTime()).toBe(T0.getTime() + 5 * MINUTE);
+
+      await upload.client.query("ROLLBACK");
+      expect(await sweepProjectFileCleanup({ client: prisma, fence, storage, now: LATER })).toEqual(
+        { deleted: 1, missing: 0, failed: 0 },
+      );
+      expect(await fileExists(org.orgId, key)).toBe(false);
+      expect(await cleanupRow(org.orgId, key)).toBeNull();
+    } finally {
+      await upload.client.end();
+    }
+  });
+
+  it("in progress keeps the file; after the commit its committed reference keeps it for good", async () => {
+    const org = await seedOrgWithMembers(prisma, ["owner"]);
+    const key = newKey("png");
+    const upload = await openUpload(org.orgId, key);
+    try {
+      await storage.save({ orgId: org.orgId, key, data: Buffer.from("staged") });
+      await prisma.$transaction((tx) =>
+        enqueueFileCleanupInTx(tx, org.orgId, [key], { uploadXactId: upload.xactId }),
+      );
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      expect(await sweepProjectFileCleanup({ client: prisma, fence, storage, now: T0 })).toEqual({
+        deleted: 0,
+        missing: 0,
+        failed: 0,
+        pending: 1,
+      });
+      expect(await fileExists(org.orgId, key)).toBe(true);
+
+      await upload.client.query("COMMIT");
+      expect(await sweepProjectFileCleanup({ client: prisma, fence, storage, now: LATER })).toEqual(
+        { deleted: 0, missing: 0, failed: 0, kept: 1 },
+      );
+      expect(await fileExists(org.orgId, key)).toBe(true);
+      expect(await cleanupRow(org.orgId, key)).toBeNull();
+    } finally {
+      await upload.client.end();
+    }
+  });
+
+  it("committed with no referencing row: the file is deleted", async () => {
+    const org = await seedOrgWithMembers(prisma, ["owner"]);
+    const upload = await openUpload(org.orgId, null);
+    await upload.client.query("COMMIT");
+    await upload.client.end();
+    const key = await storedAndQueuedWith(org.orgId, upload.xactId);
+    expect(await sweepProjectFileCleanup({ client: prisma, fence, storage, now: T0 })).toEqual({
+      deleted: 1,
+      missing: 0,
+      failed: 0,
+    });
+    expect(await fileExists(org.orgId, key)).toBe(false);
+  });
+
+  it("an id the server cannot place (for example from another cluster) keeps the file and drops the row", async () => {
+    const org = await seedOrgWithMembers(prisma, ["owner"]);
+    const key = await storedAndQueuedWith(org.orgId, "999999999999");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await sweepProjectFileCleanup({ client: prisma, fence, storage, now: T0 })).toEqual({
+      deleted: 0,
+      missing: 0,
+      failed: 0,
+      kept: 1,
+    });
+    expect(warn).toHaveBeenCalledWith(
+      `[project-file-cleanup] file kept, its upload transaction is unknown: key=${key}`,
+    );
+    expect(await fileExists(org.orgId, key)).toBe(true);
+    expect(await cleanupRow(org.orgId, key)).toBeNull();
   });
 });

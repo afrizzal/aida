@@ -111,6 +111,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // K148: set when the callback has written every row and returns, so COMMIT is sent next. An
   // error after that point has an unknown outcome: the files are queued, never unlinked.
   let commitSent = false;
+  let uploadXactId: string | null = null;
   try {
     outcome = await db.$transaction(async (tx) => {
       const observer = getAgentMessageObserver();
@@ -165,12 +166,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         });
       }
 
-      await boundUploadCommitInTx(tx);
+      uploadXactId = await boundUploadCommitInTx(tx);
       commitSent = true;
       return { ok: true as const, messageId: message.id };
     });
   } catch (err) {
-    if (commitSent) await queueStagedFilesAfterUncertainCommit(orgId, staged.saved);
+    if (commitSent) await queueStagedFilesAfterUncertainCommit(orgId, staged.saved, uploadXactId);
     else await staged.discard();
     throw err;
   }

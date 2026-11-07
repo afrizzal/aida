@@ -98,6 +98,7 @@ export async function POST(request: Request) {
   // the reference-checked sweep, never unlinked. An error inside the callback (a failed insert)
   // leaves it false and keeps the immediate removal.
   let commitSent = false;
+  let uploadXactId: string | null = null;
   try {
     ticket = await createTicket(org.id, {
       subject,
@@ -126,14 +127,14 @@ export async function POST(request: Request) {
               sizeBytes: s.sizeBytes,
             })),
           });
-          await boundUploadCommitInTx(tx);
+          uploadXactId = await boundUploadCommitInTx(tx);
           commitSent = true;
         });
       }
     }
   } catch (err) {
     const keys = stored.map((s) => s.storageKey);
-    if (commitSent) await queueStagedFilesAfterUncertainCommit(org.id, keys);
+    if (commitSent) await queueStagedFilesAfterUncertainCommit(org.id, keys, uploadXactId);
     else await removeStoredUploads(org.id, keys);
     throw err;
   }

@@ -114,6 +114,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
   // K148: set when the callback has written every row and returns, so COMMIT is sent next. An
   // error after that point has an unknown outcome: the files are queued, never unlinked.
   let commitSent = false;
+  let uploadXactId: string | null = null;
   try {
     outcome = await prisma.$transaction(async (tx) => {
       const resolved = await resolveReplyTicket(tx, ticket.organizationId, ticket.id);
@@ -151,7 +152,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
           },
         });
       }
-      await boundUploadCommitInTx(tx);
+      uploadXactId = await boundUploadCommitInTx(tx);
       commitSent = true;
       return "ok";
     });
@@ -160,6 +161,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
       await queueStagedFilesAfterUncertainCommit(
         ticket.organizationId,
         stored.map((s) => s.storageKey),
+        uploadXactId,
       );
       throw err;
     }

@@ -55,20 +55,35 @@ export const UPLOAD_COMMIT_BOUND_SECONDS = UPLOAD_COMMIT_IDLE_TIMEOUT_SECONDS;
 export const UNCERTAIN_COMMIT_MARGIN_SECONDS =
   UNCERTAIN_COMMIT_CLEANUP_DELAY_MINUTES * 60 - UPLOAD_COMMIT_BOUND_SECONDS;
 
-/** The one statement boundUploadCommitInTx runs (the value is a constant, never input). */
-export const UPLOAD_COMMIT_BOUND_SQL = `SELECT set_config('idle_in_transaction_session_timeout', '${UPLOAD_COMMIT_IDLE_TIMEOUT_SECONDS}s', true)`;
+// K158 (Codex diff critique round 3, finding 3; replaces the time bound above as the safety
+// rule): the same last statement also returns the upload transaction's id,
+// pg_current_xact_id() (xid8, as decimal text; the transaction has written its rows, so it
+// already has one). After an unknown outcome the id is stored with every queued key
+// (ProjectFileCleanup.uploadXactId), and the sweep asks the server what became of that
+// transaction (pg_xact_status) before it looks for references: "in progress" or unknown keeps the
+// file, and only "committed" or "aborted" lets the reference check decide. The 15-minute delay
+// and the 30-second idle bound stay as defence in depth.
+
+/** The one statement boundUploadCommitInTx runs (the values are constants, never input). */
+export const UPLOAD_COMMIT_BOUND_SQL = `SELECT set_config('idle_in_transaction_session_timeout', '${UPLOAD_COMMIT_IDLE_TIMEOUT_SECONDS}s', true) AS bound, pg_current_xact_id()::text AS xact_id`;
+
+/** An xid8 as decimal text (what pg_current_xact_id()::text returns). */
+export const UPLOAD_XACT_ID_PATTERN = /^[0-9]{1,20}$/;
 
 /** The transaction client part boundUploadCommitInTx needs (any Prisma transaction client). */
 export interface RawExecutor {
-  $executeRawUnsafe(query: string, ...values: unknown[]): PromiseLike<number>;
+  $queryRawUnsafe<T = unknown>(query: string, ...values: unknown[]): PromiseLike<T>;
 }
 
 /**
- * K155: the last statement of an upload transaction that can reach the uncertain-commit path.
- * Sets the server-side idle limit above for the rest of the transaction (see the comment above).
+ * K155 and K158: the last statement of an upload transaction that can reach the uncertain-commit
+ * path. Sets the server-side idle limit above for the rest of the transaction, and returns the
+ * transaction's id for queueStagedFilesAfterUncertainCommit (null if the server returned none).
  */
-export async function boundUploadCommitInTx(tx: RawExecutor): Promise<void> {
-  await tx.$executeRawUnsafe(UPLOAD_COMMIT_BOUND_SQL);
+export async function boundUploadCommitInTx(tx: RawExecutor): Promise<string | null> {
+  const rows = await tx.$queryRawUnsafe<{ xact_id?: unknown }[]>(UPLOAD_COMMIT_BOUND_SQL);
+  const id = Array.isArray(rows) ? rows[0]?.xact_id : undefined;
+  return typeof id === "string" && UPLOAD_XACT_ID_PATTERN.test(id) ? id : null;
 }
 
 function errorCode(err: unknown): string {
@@ -76,16 +91,21 @@ function errorCode(err: unknown): string {
   return typeof code === "string" && /^[A-Za-z0-9_]{1,32}$/.test(code) ? code : "UNKNOWN";
 }
 
-/** Queues the keys for the fenced, reference-checked sweep. Never throws and never unlinks. */
+/**
+ * Queues the keys for the fenced, reference-checked sweep. Never throws and never unlinks.
+ * `uploadXactId` is what boundUploadCommitInTx returned in the upload transaction (K158).
+ */
 export async function queueStagedFilesAfterUncertainCommit(
   orgId: string,
   storageKeys: readonly string[],
+  uploadXactId: string | null,
 ): Promise<void> {
   if (storageKeys.length === 0) return;
   try {
     await prisma.$transaction((tx) =>
       enqueueFileCleanupInTx(tx, orgId, storageKeys, {
         delayMinutes: UNCERTAIN_COMMIT_CLEANUP_DELAY_MINUTES,
+        uploadXactId,
       }),
     );
   } catch (err) {

@@ -43,6 +43,7 @@ const UPGRADE_MIGRATIONS = [
   "20261111100000_kb_proposals",
   "20261112100000_kb_proposal_final_fence",
   "20261113100000_projects_foundation",
+  "20261114100000_project_file_cleanup_upload_xact_id",
 ] as const;
 
 let db: IsolatedDatabase | null = null;

@@ -37,16 +37,25 @@ describe("K155: the upload transactions end with the server-side bound", () => {
         let j = i - 1;
         while (j >= 0 && (lines[j] as string).trim() === "") j -= 1;
         expect((lines[j] as string).trim(), `${file}:${i + 1}`).toBe(
-          "await boundUploadCommitInTx(tx);",
+          "uploadXactId = await boundUploadCommitInTx(tx);",
         );
       }
       expect(lines.join("\n")).toContain("queueStagedFilesAfterUncertainCommit");
+    });
+
+    it(`${file}: every queue call after an unknown outcome passes the upload transaction id (K158)`, () => {
+      const text = readFileSync(path.join(ROOT, file), "utf8");
+      const calls = [...text.matchAll(/queueStagedFilesAfterUncertainCommit\(([^;]*?)\);/g)];
+      expect(calls.length).toBeGreaterThan(0);
+      for (const call of calls) {
+        expect((call[1] as string).trim().replace(/,$/, "")).toMatch(/,\s*uploadXactId$/);
+      }
     });
   }
 
   it("the statement sets the idle limit for the transaction only, from the constant", () => {
     expect(UPLOAD_COMMIT_BOUND_SQL).toBe(
-      "SELECT set_config('idle_in_transaction_session_timeout', '30s', true)",
+      "SELECT set_config('idle_in_transaction_session_timeout', '30s', true) AS bound, pg_current_xact_id()::text AS xact_id",
     );
   });
 
@@ -57,10 +66,19 @@ describe("K155: the upload transactions end with the server-side bound", () => {
     expect(UNCERTAIN_COMMIT_MARGIN_SECONDS).toBeGreaterThan(UPLOAD_COMMIT_BOUND_SECONDS);
   });
 
-  it("boundUploadCommitInTx runs exactly that one statement on the transaction client", async () => {
-    const $executeRawUnsafe = vi.fn(async () => 1);
-    await boundUploadCommitInTx({ $executeRawUnsafe });
-    expect($executeRawUnsafe).toHaveBeenCalledTimes(1);
-    expect($executeRawUnsafe).toHaveBeenCalledWith(UPLOAD_COMMIT_BOUND_SQL);
+  it("boundUploadCommitInTx runs exactly that one statement and returns the transaction id (K158)", async () => {
+    const $queryRawUnsafe = vi.fn(async () => [{ bound: "30s", xact_id: "7451" }]);
+    const client = { $queryRawUnsafe } as unknown as Parameters<typeof boundUploadCommitInTx>[0];
+    expect(await boundUploadCommitInTx(client)).toBe("7451");
+    expect($queryRawUnsafe).toHaveBeenCalledTimes(1);
+    expect($queryRawUnsafe).toHaveBeenCalledWith(UPLOAD_COMMIT_BOUND_SQL);
+  });
+
+  it("boundUploadCommitInTx returns null for anything that is not an xid8 in decimal text", async () => {
+    for (const xact_id of [undefined, null, "", "12a", "-1", "1".repeat(21)]) {
+      const $queryRawUnsafe = vi.fn(async () => [{ xact_id }]);
+      const client = { $queryRawUnsafe } as unknown as Parameters<typeof boundUploadCommitInTx>[0];
+      expect(await boundUploadCommitInTx(client)).toBeNull();
+    }
   });
 });

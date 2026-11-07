@@ -255,6 +255,7 @@ export async function uploadTaskAttachments(
   // queued for the reference-checked sweep, never unlinked. A refusal raised inside the callback
   // leaves it false and keeps the immediate discard.
   let commitSent = false;
+  let uploadXactId: string | null = null;
   try {
     result = await runProjectTransaction(actor, "uploadTaskAttachments", async (tx) => {
       const access = await requireTask(tx, actor, taskId, {
@@ -296,17 +297,19 @@ export async function uploadTaskAttachments(
         });
         attachments.push(row);
       }
-      await boundUploadCommitInTx(tx);
+      uploadXactId = await boundUploadCommitInTx(tx);
       commitSent = true;
       return { attachments };
     });
   } catch (err) {
-    if (commitSent) await queueStagedFilesAfterUncertainCommit(actor.orgId, staged.saved);
+    if (commitSent)
+      await queueStagedFilesAfterUncertainCommit(actor.orgId, staged.saved, uploadXactId);
     else await staged.discard();
     throw err;
   }
   if (!result.ok) {
-    if (commitSent) await queueStagedFilesAfterUncertainCommit(actor.orgId, staged.saved);
+    if (commitSent)
+      await queueStagedFilesAfterUncertainCommit(actor.orgId, staged.saved, uploadXactId);
     else await staged.discard();
   }
   return result;
