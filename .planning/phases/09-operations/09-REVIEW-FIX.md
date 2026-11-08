@@ -909,3 +909,157 @@ The bridge only runs `docker exec` into those runner containers, and the wrapper
 - **Not run:** SP-1 to SP-3; the K153 runbook and the r2-6 repair on a real stack; the E2E suite (next-o1 untouched, `.next` not moved).
 - **Human verification:** K152, K154 and K155 are logic changes.
 - **State files.** `STATE.md` was not touched, and no tool changed it. The untracked `.planning/state.json` was left alone. The orchestrator commit `ca7ba45` (re-dispatch note) landed on the branch during F6; it is not part of F6.
+
+## F7
+
+**Date:** 2026-11-12. **Scope:** the Codex diff critique round 3, the last (`run-loop/codex/fase09-diff-r3-jawab.md`), as its dispositions in `09-REVIEW.md` state them: K156, K157, K158 and the two MEDIUM items (Codex r3-4 and r3-5). **Where it ran:** the main checkout on `v2/run-loop`, no worktree, as the dispatch asked. Runs used `AIDA_TEST_RUN_ID=mwdqdznk-d8fdfc6488cc29d9` and the Colima `DOCKER_HOST` (`colima status` exit 0 and `docker info` exit 0 before the first Docker step and again before the full suite). One test process ran at a time, logs went to one `mktemp -d` directory (removed at the end with `rm -r --`, exit 0), and exit codes were read without a pipe. For each red run the file at `HEAD` (`git show HEAD:<file>`) or a mutation was swapped in, and the new file was then restored with `cp` and checked with `cmp` (exit 0 every time). No code path deletes demo or tenant data: the sweep change only keeps more files, the restore change only keeps more lease rows, and the runbook renames databases and never drops one. **Result:** 5 of 5 items fixed in 6 commits; one is a follow-up formatting commit. K157, K158 and r3-5 are logic changes and **require human verification**.
+
+### K158 (Codex r3-3): the sweep keeps an uncertain-commit file until the server says its upload transaction ended
+
+**Change.**
+- **Schema and migration.** `ProjectFileCleanup.uploadXactId String?` (new nullable column, no default). Migration `prisma/migrations/20261114100000_project_file_cleanup_upload_xact_id/migration.sql`: one `ALTER TABLE "ProjectFileCleanup" ADD COLUMN "uploadXactId" TEXT;`.
+  - Made with `prisma migrate dev --create-only` in a rule-J disposable dev database (see "Dev database" below), never `db push`, never `aida-dev-db`; `.env` unchanged and unread, `DATABASE_URL` given in the command environment.
+  - Prisma named the folder `20261112160055_...`, which sorts before the latest `20261113100000_projects_foundation`; it was renamed to `20261114100000_...` before anything applied it.
+  - **The generated SQL was destructive and was cut by hand:** besides the new column, Prisma proposed dropping the `searchVector` generated columns and their indexes on `Message` and `Ticket` (they are managed in raw SQL, as in the earlier migrations). Those statements were removed; the file says so. On a fresh database in the same dev container, `migrate deploy` of all 15 migrations exited 0, both `searchVector` columns were still there with the new `uploadXactId text`, and `migrate status` reported "Database schema is up to date!" (exit 0).
+- **`src/lib/attachments/uncertain-commit.ts`.** The K155 bound statement now also returns the transaction id: `SELECT set_config('idle_in_transaction_session_timeout', '30s', true) AS bound, pg_current_xact_id()::text AS xact_id`. `boundUploadCommitInTx(tx)` returns that id, or null for anything that is not an xid8 in decimal text. `queueStagedFilesAfterUncertainCommit(orgId, keys, uploadXactId)` stores it on every queued key.
+- **The four upload paths** (public intake, follow-up, ticket messages, project attachments): `uploadXactId = await boundUploadCommitInTx(tx);` stays the last statement before `commitSent = true;`, and every queue call passes `uploadXactId`.
+- **`src/lib/projects/file-cleanup.ts`.** `enqueueFileCleanupInTx` takes an `uploadXactId` option. Before the reference check, the sweep asks the server about a row that has an id:
+  - `in progress`: the file and the row stay, with `nextAttemptAt` moved 5 minutes on (`UPLOAD_XACT_PENDING_RECHECK_MINUTES`) and attempts unchanged; the result gets `pending: N`.
+  - unknown (`pg_xact_status` NULL for an id too old, or an id at or above the snapshot's xmax, for example one from another cluster after a restore, which would otherwise raise "transaction ID is in the future"): the file stays, the row goes, counted in `kept`.
+  - `committed` or `aborted`: the existing reference check decides. An aborted upload has no committed row, so its file is deleted; a committed one with a referencing row is kept.
+  - Ordering: `pg_xact_status` reads the running-transaction list before the commit log, so once it says committed, the next READ COMMITTED statement (the reference check) sees the upload's rows. This is written at the function.
+  - Rows without an id (every ordinary dereference, and rows queued before this migration) behave as before. The 15-minute delay and the 30-second idle bound stay as defence in depth.
+- **`docs/OPERATIONS.md`**, "Uploads whose save outcome is unknown": the transaction-status rule is now the safety rule; the earlier "no enforced limit" case is covered by it.
+- `tests/integration/auth-upgrade.test.ts` lists the new migration in its upgrade list (it asserts the exact list; it failed with "expected 7, got 8" before that line).
+
+**Tests.**
+- `tests/integration/project-file-cleanup.test.ts`, new describe "K158", 4 cases. A pg client of its own holds the "upload" transaction open (it inserts a setting that references the key, as the logo does):
+  - in progress across a sweep: `{ deleted: 0, missing: 0, failed: 0, pending: 1 }`, the file stays, the row stays with attempts 0 and `nextAttemptAt` = T0 + 5 min; after `ROLLBACK` the next sweep deletes the file (`deleted: 1`);
+  - in progress, then `COMMIT`: the next sweep keeps the file by its committed reference (`kept: 1`);
+  - committed with no referencing row: deleted;
+  - an id the server cannot place (`999999999999`): `kept: 1`, file stays, row gone, the warn line named.
+- `tests/unit/upload-commit-bound.test.ts`: the statement before every `commitSent = true;` is `uploadXactId = await boundUploadCommitInTx(tx);`; a new case per file that every queue call passes `uploadXactId`; the exact SQL; the helper returns the id, and null for 6 malformed values.
+
+**Runs:**
+- Unit green: exit 0, 18 passed (2 files, with `file-delete-callers.test.ts`). Unit red, `uncertain-commit.ts` and the four call sites at `HEAD`: exit 1, 11 failed, 1 passed (12).
+- Integration green (`project-file-cleanup`, `upload-commit-bound`, `file-delete-inventory`): exit 0, 41 passed (3 files).
+- Integration red, `file-cleanup.ts` at `HEAD` (`-t K158`): exit 1, 4 failed (14 skipped). The two in-progress cases failed with `expected { deleted: 1, ... } to deeply equal { deleted: 0, ..., pending: 1 }`: the old sweep deleted a file whose upload was still open. The other two failed because the old enqueue drops the id (`expected null to be '1170'`); the "committed, no reference" case has no behaviour difference by itself.
+- `auth-upgrade.test.ts`: exit 1 (1 failed, 6 passed) before the list update, exit 0 (7 passed) after.
+
+**Dev database (rule J).** Name `aida-test-devdb-mwdqdznk-d8fdfc6488cc29d9-b53a5a` from `testResourceName("devdb", runId)`, `planned` and `created` ledger lines through `recordResource`. Image `pgvector/pgvector:pg16` present (checked with `docker image inspect`), `docker run -d --pull never`, labels `aida.test=1` and `aida.test.run=mwdqdznk-d8fdfc6488cc29d9`, `--tmpfs /var/lib/postgresql/data:rw`, `-p 127.0.0.1:55433:5432` (55433 checked free; never 55432), `POSTGRES_PASSWORD=<redacted>` (a random value kept only in a mode-600 file in the scratch directory). Labels, image, tmpfs and port binding were checked with `docker inspect`; ready on the first `pg_isready`. Databases: `aida` (the create-only run) and `aida_verify` (the fresh deploy). Removed by exact name through `planExact` and `applyCleanup` of `scripts/test-docker-cleanup.ts` for this run id only: `plan=<that name> notOurs=0`, `removed=1 gone=0 skipped=0 failed=0`, exit 0; afterwards `docker ps -a --filter label=aida.test.run=<runId>` listed nothing. `pnpm test:docker-cleanup --apply` was not run.
+
+**Commit:** `ef878a2` fix(09-F7): K158 the sweep keeps an uncertain-commit file until the server says its upload transaction ended
+
+### Codex r3-5: the restore removes only its own lease row, and a backup re-checks the restore lock after its lease
+
+**Change.**
+- `scripts/backup/aida-restore-set.sh`: after `pg_restore`, the `backup:lease` row is deleted only when its holder is the set's id (the row the dump carried) or this restore's holder. A row of any other holder stays. Through psql variables (`:'setid'`, `:'holder'`) in a heredoc.
+- `scripts/backup/aida-backup.sh`: right after the lease is taken (and before its renewal loop starts) the run checks the restore lock again; under a lock it stops with `backup skipped: restore in progress` (exit 3), and the exit path releases only its own lease row. So a one-off backup that passed its first check before a restore took the lock, and took its lease once `pg_restore` had created the table on an empty target, stops there.
+- Two test pause points: `after-lock-check` (backup) and `restored-database` (restore, after `pg_restore`, before the lease delete). Both return at once without `BACKUP_TEST_PAUSE_DIR`.
+- Wording in `scripts/restore.sh` and `docs/OPERATIONS.md` (Restore step 8, "What a backup writes").
+
+**Tests.** `tests/integration/backup-restore-roundtrip.test.ts`, new describe "Codex r3-5", 2 cases with the real scripts in rule-J runners:
+- an empty target (no `SystemSetting` before): the restore waits at `restored-database`; the dump-carried row's holder is the set id; the row is then taken over by another holder (`20261112T020001Z-ffffff`, unexpired, as `lease_acquire` would write it); after the restore (exit 0) that row is still there;
+- a backup waits at `after-lock-check`, a restore takes its lock, the backup goes on: it ends with exit 3 and `backup skipped: restore in progress`, never reaches `after-fence`, and leaves no lease row.
+
+**Runs:**
+- Green (`-t "Codex r3-5|empty round trip|round trip: ticket"`): exit 0, 4 passed. The first green run failed (exit 1, 1 failed, 3 passed) because the case used a migrated target; it now uses `emptyTarget()`.
+- Red, both scripts at `HEAD` plus only the two `pause_point` lines: exit 1, 2 failed. `expected [] to deeply equal [ Array(1) ]` (the old delete removed the other holder's row) and `expected { reachedAfterFence: true } to have property "done"` (the old backup ran on under the restore lock).
+
+**Commit:** `b56642f` fix(09-F7): Codex r3-5 the restore removes only its own lease row, and a backup re-checks the restore lock after its lease
+
+### K157 (Codex r3-2): the restore renews the lease and the lock heartbeat while migrate deploy runs
+
+**Change.** `scripts/restore.sh`, for an older set:
+- `migrate` runs in the background as `compose run --rm --no-deps -T --name aida-<holder>-migrate migrate`, and the script waits for it.
+- A renewal loop runs beside it. Every `RESTORE_RENEW_SECONDS` (default 60, 1 to 300) one backup step runs `restore_lock_heartbeat` and `lease_renew` for this restore's holder (TTL `RESTORE_LEASE_TTL_SECONDS`, default 900, 3 to 3600, more than twice the interval; otherwise exit 2 before anything else).
+- Exit 4 (lock lost) or 3 (lease lost or expired) stops the migrate container at once (`docker stop -t 30 <name>`, or TERM to the client if that fails). Any other failure is retried until the last success is so old that the lease could expire before the next try; then the same stop.
+- After migrate returns: the loop is ended between two steps (a started step always finishes). If it lost ownership the script exits 1 with "migrate deploy was stopped ... lost its restore lock or its backup lease", starts nothing, and the trap releases only its own lease and lock.
+- A signal during migrate: the trap waits for the migrate call (renewal continues), ends the loop, then releases (K154 order kept).
+- `scripts/backup/lib.sh`: `lease_renew` accepts a restore holder (`valid_lease_holder` instead of `valid_set_id`).
+- Two fixes during green, both in the new code: the loop is a background subshell that inherited the main EXIT trap, so its traps are reset first; and `wait` in `stop_renewal` tripped `set -e`.
+- `docs/OPERATIONS.md`, Restore step 8.
+
+**Tests.**
+- The fake `docker` keeps a lease expiry (now plus the TTL in the step's script) set by the lease and renewal steps, records `valid` or `expired` when migrate returns, answers `aida-restore-renew` (`FAKE_RENEW_EXIT`, else exit 3 once expired), and lets `stop -t 30 aida-restore-<hex>-migrate` end a running migrate (exit 137).
+- `tests/unit/restore-script.test.ts`, new describe "K157", 5 cases with TTL 3 s and interval 1 s:
+  - a 5 s migrate (longer than the TTL): at least 3 renew steps between migrate and its return, each with `restore_lock_heartbeat "$1" || exit 4`, `lease_renew "$1" 3` and the holder; the lease is valid at the return; release and start after it; no renew after it;
+  - renew exit 3, 4 and 1 with a 20 s migrate: done in under 12 s, the migrate container stopped after the first renew and before the return, then only `release`; exit 1, no start, the matching message;
+  - a TTL not more than twice the interval: exit 2, no call.
+- `tests/integration/backup-restore-roundtrip.test.ts`, "K157", 1 case on a real database: `lease_renew` extends a restore holder's lease (left above 500 s after a 600 s renew of a 3 s lease), returns 0 for another holder, and the release leaves no row.
+- The bridge and the round-trip step list accept the named migrate call.
+
+**Runs:**
+- Unit green: exit 0, 44 passed (44). The first three green attempts failed on the two bugs above and on a 5 s test timeout (now 20 s).
+- Unit red, `restore.sh` and `lib.sh` at `HEAD` (`-t K157`): exit 1, 5 failed. For example `expected 0 to be greater than or equal to 3` (no renewal), and the failure cases ran the full 20 s migrate and exited 0.
+- Round trip green, `-t "K152|K154"` with the new wrapper: exit 0, 4 passed. `-t K157` green: exit 0, 1 passed; red with `lib.sh` at `HEAD`: exit 1, 1 failed (`expected 1 to be +0`, the old `lease_renew` refused the restore holder).
+
+**Commit:** `11c63d9` fix(09-F7): K157 the restore renews the lease and the lock heartbeat while migrate deploy runs
+
+### K156 (Codex r3-1): the runbook starts services only after a restore that succeeded
+
+**Change (docs).** `docs/OPERATIONS.md`:
+- rollback step 6: `./scripts/restore.sh <pre-upgrade-setId> --yes && docker compose up -d`;
+- recovery step c: `./scripts/restore.sh <current-setId> --yes && docker compose up -d`;
+- new-server step 7 starts the instance only after step 6's `--yes` run ended with `Done: ...` and exit code 0, and otherwise points to "What a failure leaves behind".
+
+**Test.** New `tests/unit/operations-restore-blocks.test.ts`. Every bash block that runs `restore.sh <...>` is pasted into `sh -c` (no errexit, as in an interactive shell), with `<...>` placeholders replaced, in a scratch directory whose `scripts/restore.sh` stub fails every non-`--validate-only` call and whose PATH holds a recording fake `docker` and `git`. Three cases:
+- at least two such blocks with `--yes` and `docker compose up`;
+- after a failed restore no `docker compose up` or `start` follows in any block;
+- control: with a successful restore those blocks do start the instance.
+
+**Runs:**
+- Green: exit 0, 10 passed, together with `operations-rollback-docs.test.ts` (the K153 order check still passes).
+- Red, the docs at `HEAD`: exit 1, 2 failed, 2 passed (4; with the r3-4 static case below). The failure printed the rollback block and its call log, where `docker compose up -d` followed the failed restore.
+
+**Commit:** `cc27af6` fix(09-F7): K156 the runbook starts services only after a restore that succeeded
+
+### Codex r3-4: the runbook's psql commands use psql variables and a quoted heredoc, run against a real database
+
+**Change (docs).**
+- Rollback step 5 and recovery step a: one psql with `-v db="$POSTGRES_DB" -v kept="${POSTGRES_DB}_before_rollback"` (or `_failed_restore`) and `ON_ERROR_STOP`, fed `ALTER DATABASE :"db" RENAME TO :"kept"; CREATE DATABASE :"db";` through `<<'SQL'`. A refused rename stops psql before `CREATE DATABASE`.
+- The duplicate-member query: the same heredoc form.
+- The role repair was already a quoted heredoc with no escapes, and is unchanged.
+
+**Tests.**
+- Static, in `operations-restore-blocks.test.ts`: no bash block contains `\"`.
+- New `tests/integration/operations-runbook-sql.test.ts`, 5 cases. Each command is taken from the checked-in text and run with `docker compose exec -T db` replaced by `docker exec -i -e POSTGRES_DB=<scratch> <container>`. The container is this run's rule-J integration database (`integrationDatabaseContainerId`), and the cases use only scratch databases `ops_r34_<hex>` that they create and drop:
+  - both renames keep the rows under the new name and leave an empty database;
+  - a rename while a session is connected exits non-zero with "is being accessed by other users" and changes nothing;
+  - the duplicate query lists only the user with two rows;
+  - the repair with the three placeholders set gives both rows of that user in that workspace the one role, commits, leaves the other workspace's row alone, and removes no row.
+
+**Runs:**
+- Integration green: exit 0, 5 passed. The first run had 1 failure (exit 1): the test's holding session had not connected yet. It now waits for it in `pg_stat_activity`.
+- Unit green: exit 0, 11 passed.
+- Red, the docs at `HEAD`: the static case failed (exit 1, with the K156 red above: 3 offending lines). **The integration test passed against the `HEAD` docs (exit 0, 5 passed).** The old commands ran correctly on PostgreSQL 16: inside the inner shell's double quotes, `\"` is a valid escape that becomes `"`, and the old heredoc held no escaped identifiers. So Codex's claim that the old commands sent literal quotes did not hold when executed. The rewrite removes the construct the disposition names, and the new test now runs the commands for real.
+
+**Commits:**
+- `68f3394` fix(09-F7): Codex r3-4 the runbook's psql commands use psql variables and a quoted heredoc, run against a real database
+- `8559317` fix(09-F7): Codex r3-4 the runbook SQL test passes the formatter (biome, after `pnpm lint` found it; no behaviour change)
+
+### Final checks
+
+| Command | Exit | Counts |
+|---|---|---|
+| `pnpm lint` | 0 | 685 files, 1 warning, pre-existing (`tests/unit/container-config.test.ts:160`); the first run exited 1 on the formatting of the new integration test, fixed in `8559317` |
+| `pnpm typecheck` | 0 | 0 errors |
+| `pnpm test` | 0 | 101 files, 1730 tests passed |
+| `pnpm test:integration` (full, once) | 0 | 117 files, 1559 tests passed, 430.5 s |
+
+**Docker.**
+- Created by hand: only the dev database container above, removed by exact name through the cleanup library.
+- Everything else came from Testcontainers and the rule-J backup and restore runners, under the run id: the integration global setup's Postgres, and the runner containers and named restore volumes. Each runner removed its own.
+- The r3-4 test only ran `docker exec` into the integration database container and created and dropped its own scratch databases there.
+- Afterwards `docker ps -a` and `docker volume ls` with `label=aida.test=1` and `label=aida.test.run=mwdqdznk-d8fdfc6488cc29d9` listed nothing, and no container name held the run id.
+- F7 ran no compose up, down, stop or build, built no image, ran no prune, and did not run `test:docker-cleanup`. `scripts/restore.sh` never ran against a compose project or a real volume: only on the fake `docker` and the existing `restore-bridge`.
+
+### Not done, and limits
+
+- **Human verification:** K157, K158 and r3-5 are logic changes.
+- **K158 old rows.** Keys queued before this migration have no transaction id and keep the K155 time rule. A key whose transaction is "unknown" leaves an orphan file on disk, by design.
+- **K157 stop of a migration.** Stopping `prisma migrate deploy` part way can leave a migration recorded as failed. The restore then exits 1 with services stopped, and the message says the database may be part-migrated. Not tried on a real Compose stack (SP-2). The renewal interval and TTL variables are new operator knobs with checked ranges.
+- **r3-5.** A foreign lease row left by the restore makes the K154 re-lease for migrate fail (exit 1, nothing started) until that backup has released or its lease has expired. The interleaving is proven with the real scripts in runners, but not on Compose.
+- **r3-4.** See the red run: the old commands were not broken when executed.
+- **Not run:** SP-1 to SP-3; the runbooks on a real stack; the E2E suite (next-o1 untouched, `.next` not moved).
+- **State files.** `STATE.md`, `ROADMAP.md`, `REQUIREMENTS.md` and `.planning/run-loop/` were not touched, and no tool changed them. The untracked `.planning/state.json` was left alone.
