@@ -4,12 +4,12 @@ milestone: v2.0
 milestone_name: Helpdesk & Projects
 current_phase: 9
 current_phase_name: operations
-status: Phase 8 Part A verified human_needed (16 of 17, no code gap); Part B (Docker test tooling, Phase 8.1) waits for the owner; Phase 9 executed (13 of 13 plans; gate recorded in 09-GATE.md), code review next; Phases 10 and 15 unparked; Phases 11, 12, 12.1, 12.2 and 14 verified human_needed
-stopped_at: Phase 9 step 7, review fix batches F1 to F3 done (K141 to K144, K147); next F4, then the Codex diff critique
-last_updated: "2026-11-12T13:58:00.000Z"
+status: Phase 8 Part A verified human_needed; Phase 8.1 waits for the owner; Phase 9 executed and reviewed (13 plans, review fixes F1 to F7, three Codex diff rounds K141 to K158), gate rerun at 38ef41a, verifier at step 9; Phases 10 and 15 unparked; Phases 11, 12, 12.1, 12.2 and 14 verified human_needed
+stopped_at: Phase 9 step 9 (verification); gate rerun at 38ef41a green except audit 10 high and test:egress blocked by VM space; stack proofs SP-1 to SP-3 not run
+last_updated: "2026-11-12T17:20:00.000Z"
 last_activity: 2026-11-12
-last_activity_desc: "Phase 9 executed, 13 plans. Gate on 2c75680 (lint, typecheck, unit 1646, integration 1500, build, full E2E 260 exit 0; audit --prod exit 1 with 10 high; test:egress blocked by VM space 13.2 GiB; stack proofs SP-1 to SP-3 not run until the Phase 8.1 harness). AIDA-37, 38, 39 closable; AIDA-33, 34, 35, 36, 40, 41 open with named reasons. Next code review"
-state_head: ea50f35
+last_activity_desc: Phase 9 reviewed and fixed. Code review in four parts (2 critical, 15 warning), fix batches F1 to F7, three Codex diff rounds (K141 to K158, including one non-destructive migration adding ProjectFileCleanup.uploadXactId). Gate rerun at 38ef41a (lint, typecheck, unit 1730, integration 1559, build, full E2E 261 exit 0; audit --prod exit 1 with 10 high; test:egress blocked by VM space 13.2 GiB; SP-1 to SP-3 not run). AIDA-37, 38, 39 closable
+state_head: 0af2bf8
 progress:
   total_phases: 13
   completed_phases: 0
@@ -30,10 +30,10 @@ See: .planning/PROJECT.md (updated 2026-11-07, v2.0 opened)
 
 ## Current Position
 
-Phase: 9 (Operations), step 6 done: all 13 plans executed under `run-loop/PIAGAM.md`; the gate is in `09-GATE.md` and the stack-proof specification in `09-STACK-PROOFS.md`. Next: step 7, code review of Phase 9, fixes, then the Codex diff critique.
-Plan: 13 of 13 complete (replanned 2026-11-12, CONTEXT "Update 2026-11-12" U-01 to U-18). Gate on `2c75680`: lint, typecheck, unit 1646, integration 1500, build, full E2E 260 exit 0; audit exit 1 (10 high, same as Phase 8); `test:egress` blocked (space); SP-1 to SP-3 not run.
-Status: Phase 8 Part A verified `human_needed` (`08-VERIFICATION.md`); Phase 8.1 waits for the owner. Phases 11, 12, 12.1, 12.2 and 14 are verified `human_needed`. Phases 10 and 15 are unparked and not yet executed; 13, 16 and 17 are not planned. No phase is parked.
-Last activity: 2026-11-12 — Phase 9 executed (09-01 to 09-13). v1.0.0 stays complete and archived (`milestones/v1.0.0-*`); the v1.0.0 safe-point candidate is `fc8078f` (owner decides).
+Phase: 9 (Operations), step 9 (verification): 13 plans executed, code review in four parts and fix batches F1 to F7, three Codex diff rounds (run decisions K141 to K158). Gate rerun recorded in `09-GATE.md` ("Gate rerun after review fixes").
+Plan: 13 of 13 complete. Gate rerun at `38ef41a`: lint, typecheck, unit 1730, integration 1559, build, full E2E 261 exit 0; audit exit 1 (10 high, same as Phase 8); `test:egress` blocked (space); SP-1 to SP-3 not run (Phase 8.1 harness and owner).
+Status: Phase 8 Part A verified `human_needed`; Phase 8.1 waits for the owner. Phases 11, 12, 12.1, 12.2 and 14 are verified `human_needed`. Phases 10 and 15 are unparked and not yet executed; 13, 16 and 17 are not planned. No phase is parked.
+Last activity: 2026-11-12 — Phase 9 review fixes and gate rerun. v1.0.0 stays complete and archived (`milestones/v1.0.0-*`); the v1.0.0 safe-point candidate is `fc8078f` (owner decides).
 
 ## Accumulated Context
 
@@ -125,11 +125,11 @@ Owner items, in the order of `run-loop/LAPORAN.md` section 3:
 
 ## Session Continuity
 
-**Last session:** 2026-11-12T13:58:00.000Z
-**Stopped at:** Phase 9 step 7, fix batches F1 to F3 done, next F4 (2026-11-12)
+**Last session:** 2026-11-12T17:20:00.000Z
+**Stopped at:** Phase 9 step 9, verification after the gate rerun at 38ef41a (2026-11-12)
 **Resume file:** .planning/run-loop/ANTREAN.md
 
-**Last action (2026-11-12):** plan 09-11 executed (stack-proof specification, Phase 9 gate, requirement matrix, section 9 checklist, STATE re-check). No tag, nothing pushed.
+**Last action (2026-11-12):** Phase 9 review fixes F1 to F7 and the gate rerun at `38ef41a`. No tag, nothing pushed.
 
 **Next action:** follow `run-loop/PIAGAM.md`; the first open row of `run-loop/ANTREAN.md` decides the next step.
 
