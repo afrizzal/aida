@@ -11,6 +11,10 @@ const PUBLIC_PREFIXES = [
   "/request",
   "/status",
   "/api/public",
+  // Plan 10-15 (V-04): the invitation page and its accept route. No branch of its own: it is
+  // forwarded through forwardWithSecurityHeaders like every public path, and csp.ts gives it
+  // Referrer-Policy no-referrer because the token is in the path.
+  "/invite",
 ];
 
 // FIX 1 (07-09, GAP 1): Better Auth's emailAndPassword provider has no sign-up gate

@@ -21,8 +21,11 @@
 
 export const CSP_NONCE_HEADER = "x-nonce";
 
-/** Paths whose URL carries a status token, so the token must never leak through `Referer` (D-14). */
-export const NO_REFERRER_PATH_PREFIXES = ["/status", "/api/public/status"] as const;
+/**
+ * Paths whose URL carries a token (a status token, D-14; an invitation token, plan 10-15 V-04),
+ * so the token must never leak through `Referer`.
+ */
+export const NO_REFERRER_PATH_PREFIXES = ["/status", "/api/public/status", "/invite"] as const;
 
 /**
  * sonner 2.0.7 injects one static <style> at module load (`__insertCSS` in dist/index.mjs) and
