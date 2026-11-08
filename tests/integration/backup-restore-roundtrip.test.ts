@@ -1345,7 +1345,11 @@ async function runWrapper(
 function wrapperSteps(calls: string[]): string[] {
   return calls.map((call) => {
     if (call === "migrate-returned") return "migrate-returned";
-    if (call === "compose run --rm --no-deps -T migrate") return "migrate";
+    if (
+      call === "compose run --rm --no-deps -T migrate" ||
+      /^compose run --rm --no-deps -T --name aida-restore-[0-9a-f]{32}-migrate migrate$/.test(call)
+    )
+      return "migrate";
     if (call === "compose stop backup app worker") return "stop";
     if (call === "compose start backup app worker") return "start";
     if (call.includes("aida-restore-set.sh --check-schema")) return "check";
@@ -1728,6 +1732,34 @@ describe("Codex r3-5: a backup that passed its lock check before a restore took 
       expect(`${result.stdout}${result.stderr}`).toContain("backup skipped: restore in progress");
       expect(await prisma.systemSetting.count({ where: { key: "backup:lease" } })).toBe(0);
       await releaseLock(runner, c, holder);
+    },
+    CASE_TIMEOUT,
+  );
+});
+
+describe("K157: lib.sh renews a restore holder's lease on a real database", () => {
+  it(
+    "lease_renew extends the lease of a restore holder, and only of that holder",
+    async () => {
+      const target = await newTargetDatabase();
+      const runner = await newRestoreRunner(target);
+      const c = await newCase();
+      const holder = newHolder();
+      const acquired = await lib(runner, c, 'lease_acquire "$1" 3', holder);
+      expect(acquired.stdout.trim(), acquired.stderr).toBe("acquired");
+      const renewed = await lib(runner, c, 'lease_renew "$1" 600', holder);
+      expect(renewed.exitCode, renewed.stderr).toBe(0);
+      expect(renewed.stdout.trim()).toBe("1");
+      const left = await query<{ s: string }>(
+        target,
+        `SELECT ((value::jsonb ->> 'expiresAt')::timestamptz - now() > interval '500 seconds')::text AS s FROM "SystemSetting" WHERE key = 'backup:lease'`,
+      );
+      expect(left).toEqual([{ s: "true" }]);
+      const other = await lib(runner, c, 'lease_renew "$1" 600', newHolder());
+      expect(other.stdout.trim()).toBe("0");
+      const released = await lib(runner, c, 'lease_release "$1"', holder);
+      expect(released.exitCode, released.stderr).toBe(0);
+      expect(await leaseRows(target)).toBe(0);
     },
     CASE_TIMEOUT,
   );

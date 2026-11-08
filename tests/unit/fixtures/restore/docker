@@ -16,7 +16,15 @@
 #                         line `migrate-returned` to the log (K154)
 #   FAKE_LEASE_AGAIN_EXIT exit code of the second lease step, after the set script (default 0,
 #                         K154)
+#   FAKE_RENEW_EXIT       exit code of every renewal step during migrate (K157); unset: the step
+#                         succeeds while the fake lease is unexpired, else exits 3
 #   FAKE_SET_EXIT         exit code of the set script step (default 0)
+#
+# K157: the fake keeps a lease expiry (epoch seconds) in $FAKE_DOCKER_LOG.lease-expiry. A lease
+# step that succeeds sets it to now + the TTL in its script; a renewal that succeeds does the
+# same. When the migrate call returns it writes `valid` or `expired` to
+# $FAKE_DOCKER_LOG.lease-at-migrate-return. `stop -t 30 aida-restore-<hex>-migrate` makes a
+# running migrate call return at once with exit 137.
 #   FAKE_SET_MODE         `hang`: the set script step waits until it is signalled
 #   FAKE_RELEASE_EXIT     exit code of the release step (default 0)
 #   FAKE_CONTAINER_LISTED how many `ps -a` calls still list the restore container (default 0),
@@ -99,6 +107,9 @@ EOF
       *) unexpected "$@" ;;
     esac
     [ "$#" -eq "$([ "$1" = stop ] && echo 4 || echo 3)" ] || unexpected "$@"
+    case "$*" in
+      'stop -t 30 aida-restore-'*'-migrate') : >"$FAKE_DOCKER_LOG.migrate-stopped" ;;
+    esac
     exit 0
     ;;
   'ps -a')
@@ -122,12 +133,37 @@ EOF
   *) unexpected "$@" ;;
 esac
 
-# K150: the release's one-shot migrate service, exactly this call.
-if [ "$*" = 'compose run --rm --no-deps -T migrate' ]; then
-  sleep "${FAKE_MIGRATE_SLEEP:-0.3}"
-  printf 'migrate-returned\n' >>"$FAKE_DOCKER_LOG"
-  exit "${FAKE_MIGRATE_EXIT:-0}"
-fi
+ttl_of() {
+  printf '%s\n' "$ARGS" | sed -n 's/.*lease_[a-z]* "$1" \([0-9][0-9]*\).*/\1/p'
+}
+set_expiry() {
+  _ttl=$(ttl_of)
+  [ -n "$_ttl" ] || _ttl=900
+  printf '%s\n' "$(($(date +%s) + _ttl))" >"$FAKE_DOCKER_LOG.lease-expiry"
+}
+
+# K150: the release's one-shot migrate service: exactly this call, or (K157) with the name of its
+# container.
+case "$*" in
+  'compose run --rm --no-deps -T migrate' | \
+    'compose run --rm --no-deps -T --name aida-restore-'*'-migrate migrate')
+    _ticks=$(awk "BEGIN { print int(${FAKE_MIGRATE_SLEEP:-0.3} * 10) }")
+    _rc=${FAKE_MIGRATE_EXIT:-0}
+    while [ "$_ticks" -gt 0 ]; do
+      if [ -e "$FAKE_DOCKER_LOG.migrate-stopped" ]; then
+        _rc=137
+        break
+      fi
+      sleep 0.1
+      _ticks=$((_ticks - 1))
+    done
+    _exp=$(cat "$FAKE_DOCKER_LOG.lease-expiry" 2>/dev/null || echo 0)
+    if [ "$(date +%s)" -le "$_exp" ]; then _at=valid; else _at=expired; fi
+    printf '%s\n' "$_at" >"$FAKE_DOCKER_LOG.lease-at-migrate-return"
+    printf 'migrate-returned\n' >>"$FAKE_DOCKER_LOG"
+    exit "$_rc"
+    ;;
+esac
 
 # compose run: only one-off containers of the backup service, removed when they exit.
 has --rm && has --no-deps && has -T && has backup || unexpected "$@"
@@ -157,8 +193,16 @@ if has aida-restore-lease; then
   _lease_file="$FAKE_DOCKER_LOG.lease-count"
   _ln=$(($(cat "$_lease_file" 2>/dev/null || echo 0) + 1))
   printf '%s\n' "$_ln" >"$_lease_file"
-  if [ "$_ln" -ge 2 ]; then exit "${FAKE_LEASE_AGAIN_EXIT:-0}"; fi
-  exit "${FAKE_LEASE_EXIT:-0}"
+  if [ "$_ln" -ge 2 ]; then _lrc=${FAKE_LEASE_AGAIN_EXIT:-0}; else _lrc=${FAKE_LEASE_EXIT:-0}; fi
+  if [ "$_lrc" = 0 ]; then set_expiry; fi
+  exit "$_lrc"
+fi
+if has aida-restore-renew; then
+  if [ -n "${FAKE_RENEW_EXIT:-}" ]; then exit "$FAKE_RENEW_EXIT"; fi
+  _exp=$(cat "$FAKE_DOCKER_LOG.lease-expiry" 2>/dev/null || echo 0)
+  [ "$(date +%s)" -le "$_exp" ] || exit 3
+  set_expiry
+  exit 0
 fi
 if has aida-restore-touched; then
   if [ -n "${FAKE_TOUCHED:-}" ]; then printf '%s\n' "$FAKE_TOUCHED"; fi

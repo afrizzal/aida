@@ -12,7 +12,7 @@
 #   stop -t 30 / rm -f aida-restore-<hex>, ps -a --filter name=...       exit 0, nothing listed
 #                                  (the exec'd process ends with its client, so no container
 #                                  outlives it)
-#   compose run --rm --no-deps -T migrate
+#   compose run --rm --no-deps -T [--name aida-restore-<hex>-migrate] migrate
 #                                  records what holds while the release's migrate would run:
 #                                  `lock=present|absent` (the case's .restore-lock on the host)
 #                                  and `lease=<value or none>` (the target's backup:lease row,
@@ -74,7 +74,9 @@ case "${1:-} ${2:-}" in
   *) unexpected "$@" ;;
 esac
 
-if [ "$*" = 'compose run --rm --no-deps -T migrate' ]; then
+# K157: the wrapper names the migrate container (aida-restore-<hex>-migrate) so that it can stop it.
+if [ "$*" = 'compose run --rm --no-deps -T migrate' ] ||
+  [[ "$*" =~ ^compose\ run\ --rm\ --no-deps\ -T\ --name\ aida-restore-[0-9a-f]{32}-migrate\ migrate$ ]]; then
   if [ -d "$BRIDGE_BACKUPS_HOST/.restore-lock" ]; then lock=present; else lock=absent; fi
   lease=$("$BRIDGE_REAL_DOCKER" exec -u 1000:1000 "$BRIDGE_CONTAINER" psql -X -q -t -A \
     -c "SELECT COALESCE((SELECT value FROM \"SystemSetting\" WHERE key = 'backup:lease'), 'none')" \

@@ -83,8 +83,20 @@
 set -euo pipefail
 
 COMPOSE="docker compose"
-LEASE_TTL_SECONDS=900
+LEASE_TTL_SECONDS="${RESTORE_LEASE_TTL_SECONDS:-900}"
 STALE_LOCK_SECONDS=900
+# K157: while migrate deploy runs, the lease and the lock heartbeat are renewed every
+# RENEW_SECONDS (1 to 300 s; the lease lasts LEASE_TTL_SECONDS, 3 to 3600 s, more than twice that).
+RENEW_SECONDS="${RESTORE_RENEW_SECONDS:-60}"
+if ! [[ $LEASE_TTL_SECONDS =~ ^[0-9]{1,4}$ ]] || ! [[ $RENEW_SECONDS =~ ^[0-9]{1,3}$ ]] ||
+  [ "$LEASE_TTL_SECONDS" -lt 3 ] || [ "$LEASE_TTL_SECONDS" -gt 3600 ] ||
+  [ "$RENEW_SECONDS" -lt 1 ] || [ "$RENEW_SECONDS" -gt 300 ] ||
+  [ $((RENEW_SECONDS * 2)) -ge "$LEASE_TTL_SECONDS" ]; then
+  printf '[restore] RESTORE_LEASE_TTL_SECONDS (3 to 3600) must be more than twice RESTORE_RENEW_SECONDS (1 to 300).\n' >&2
+  exit 2
+fi
+# The renewal loop's exit code when it lost the lease or the lock (it stopped migrate).
+RENEW_LOST=75
 # d-WR-1: how long the trap waits for the restore container to be gone (1 to 600 s).
 CONTAINER_WAIT_SECONDS="${RESTORE_CONTAINER_WAIT_SECONDS:-60}"
 if ! [[ $CONTAINER_WAIT_SECONDS =~ ^[0-9]{1,3}$ ]] || [ "$CONTAINER_WAIT_SECONDS" -lt 1 ] ||
@@ -284,6 +296,11 @@ SET_STARTED=0
 # lease again, migrate deploy), and the trap releases the lease and the lock but starts nothing.
 SET_OK=0
 RESTORE_CONTAINER=''
+# K157: the migrate client, its container name and the renewal loop, while migrate runs.
+MIGRATE_PID=''
+MIGRATE_CONTAINER=''
+RENEW_PID=''
+RENEW_RC=0
 EXITING=0
 FINAL_RC=0
 
@@ -301,6 +318,57 @@ release() {
     err "remove the lock with: ./scripts/restore.sh --break-stale-lock $HOLDER (after 900 s)."
     return 1
   fi
+}
+
+# K157: runs in the background while migrate deploy runs. Every RENEW_SECONDS it renews the lock
+# heartbeat and the lease in one step (both only for this restore's holder). A lost lock (exit 4)
+# or a lost or expired lease (exit 3) stops the migrate container at once; another failure (the
+# database did not answer) is retried until the last renewal is so old that the lease could expire
+# before the next try. Then it stops migrate too and exits RENEW_LOST. TERM ends it between two
+# steps (exit 0): a step that has started always finishes first.
+renew_during_migrate() {
+  local stop=0 last_ok now rc sleeper=''
+  # This runs in a background subshell: the main script's traps (on_exit) must not run here.
+  trap - EXIT
+  trap '' INT HUP
+  trap 'stop=1; [ -z "$sleeper" ] || kill "$sleeper" 2>/dev/null' TERM
+  last_ok=$(date +%s)
+  while [ "$stop" = 0 ]; do
+    sleep "$RENEW_SECONDS" </dev/null >/dev/null 2>&1 &
+    sleeper=$!
+    wait "$sleeper" 2>/dev/null || :
+    sleeper=''
+    [ "$stop" = 0 ] || break
+    rc=0
+    backup_step aida-restore-renew \
+      "restore_lock_heartbeat \"\$1\" || exit 4; n=\$(lease_renew \"\$1\" $LEASE_TTL_SECONDS) || exit 1; [ \"\$n\" = 1 ] || exit 3" \
+      "$HOLDER" >/dev/null 2>&1 || rc=$?
+    now=$(date +%s)
+    if [ "$rc" = 0 ]; then
+      last_ok=$now
+      continue
+    fi
+    if [ "$rc" = 3 ] || [ "$rc" = 4 ] ||
+      [ $((now - last_ok + RENEW_SECONDS * 2)) -ge "$LEASE_TTL_SECONDS" ]; then
+      case $rc in
+        4) err "Lost the restore lock while migrate deploy ran: stopping migrate deploy." ;;
+        3) err "Lost the backup lease while migrate deploy ran: stopping migrate deploy." ;;
+        *) err "Could not renew the restore lock and the backup lease while migrate deploy ran (exit $rc): stopping migrate deploy." ;;
+      esac
+      docker stop -t 30 "$MIGRATE_CONTAINER" >/dev/null 2>&1 || kill -TERM "$MIGRATE_PID" 2>/dev/null || :
+      exit "$RENEW_LOST"
+    fi
+  done
+  exit 0
+}
+
+# K157: ends the renewal loop (it finishes a step it has started) and sets RENEW_RC.
+stop_renewal() {
+  RENEW_RC=0
+  [ -n "$RENEW_PID" ] || return 0
+  kill -TERM "$RENEW_PID" 2>/dev/null || :
+  wait "$RENEW_PID" 2>/dev/null || RENEW_RC=$?
+  RENEW_PID=''
 }
 
 start_services() {
@@ -355,6 +423,13 @@ on_exit() {
     wait "$SET_PID" 2>/dev/null
     SET_PID=''
   fi
+  # K154, K157: a signal while migrate deploy runs: the migrate call is waited for (the lease and
+  # the lock stay renewed meanwhile), then the renewal ends, and only then the release below.
+  if [ -n "$MIGRATE_PID" ]; then
+    wait "$MIGRATE_PID" 2>/dev/null
+    MIGRATE_PID=''
+  fi
+  stop_renewal
   if [ "$DONE" = 1 ]; then
     : # the success path released the locks and started the services
   elif [ "$SET_OK" = 1 ]; then
@@ -556,7 +631,10 @@ SET_OK=1
 # the restore lock and the lease are held, so no other restore and no backup can start before
 # the migration has finished. pg_restore replaced SystemSetting, and the set script removed the
 # lease row the dump carried in, so this restore's lease is taken again on the restored database.
-# migrate runs in the foreground: a signal is handled by the trap once it has returned.
+# K157: migrate runs in the background, and this script waits for it while a renewal loop keeps
+# the lease and the lock heartbeat fresh, however long the migration takes; losing either stops
+# the migrate container, and nothing is started. A signal is handled by the trap, which waits for
+# the migrate call to return before it releases anything.
 if [ "$MIGRATE_AFTER" = 1 ]; then
   set +e
   backup_step aida-restore-lease \
@@ -572,7 +650,25 @@ if [ "$MIGRATE_AFTER" = 1 ]; then
   fi
   LEASE_HELD=1
   log "The set is older than this release: running this release's migrate deploy..."
-  if ! $COMPOSE run --rm --no-deps -T migrate </dev/null; then
+  MIGRATE_CONTAINER="aida-$HOLDER-migrate"
+  $COMPOSE run --rm --no-deps -T --name "$MIGRATE_CONTAINER" migrate </dev/null &
+  MIGRATE_PID=$!
+  renew_during_migrate </dev/null &
+  RENEW_PID=$!
+  set +e
+  wait "$MIGRATE_PID"
+  migrate_rc=$?
+  set -e
+  MIGRATE_PID=''
+  stop_renewal
+  if [ "$RENEW_RC" = "$RENEW_LOST" ]; then
+    err "migrate deploy was stopped after the restore of set $SET_ID because this restore lost its"
+    err "restore lock or its backup lease. The database holds the set's data, possibly part-migrated;"
+    err "backup, app and worker were NOT started. Find out what took the lock or the lease, then run:"
+    err "docker compose up -d (it runs migrate first). See $DOCS."
+    exit 1
+  fi
+  if [ "$migrate_rc" -ne 0 ]; then
     err "migrate deploy failed after the restore of set $SET_ID. The database holds the set's data at"
     err "the set's migrations; backup, app and worker were NOT started. Read the migrate output above,"
     err "fix the cause, then run: docker compose up -d (it runs migrate first). See $DOCS."

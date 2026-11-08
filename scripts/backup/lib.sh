@@ -165,9 +165,10 @@ SQL
 }
 
 # lease_renew <holder> <ttl>: extends the lease only while the holder matches and the lease is
-# unexpired. Prints the number of rows changed (1 or 0).
+# unexpired. Prints the number of rows changed (1 or 0). The holder is a backup run's set id or,
+# during the migrate deploy after a restore (K157), a restore holder.
 lease_renew() {
-  valid_set_id "$1" || return 1
+  valid_lease_holder "$1" || return 1
   is_uint "$2" || return 1
   psql_q -v holder="$1" -v ttl="$2" <<SQL
 WITH renewed AS (

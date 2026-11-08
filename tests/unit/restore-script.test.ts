@@ -88,9 +88,15 @@ function steps(calls: string[]): string[] {
     if (call.startsWith("compose run ")) {
       if (call.includes("/opt/aida-backup/aida-restore-set.sh --check-schema")) return "check";
       if (call.includes("/opt/aida-backup/aida-restore-set.sh --validate-only")) return "validate";
-      if (call === "compose run --rm --no-deps -T migrate") return "migrate";
+      if (
+        call === "compose run --rm --no-deps -T migrate" ||
+        /^compose run --rm --no-deps -T --name aida-restore-[0-9a-f]{32}-migrate migrate$/.test(
+          call,
+        )
+      )
+        return "migrate";
       if (call.includes("/opt/aida-backup/aida-restore-set.sh")) return "set";
-      for (const name of ["lock", "lease", "touched", "release", "break"]) {
+      for (const name of ["lock", "lease", "touched", "release", "break", "renew"]) {
         if (call.includes(` aida-restore-${name} `) || call.endsWith(` aida-restore-${name}`))
           return name;
       }
@@ -727,4 +733,80 @@ describe("scripts/restore.sh: the lock and the lease are held until migrate depl
     expect(stderr).toContain("left stopped");
     expectNoDestructiveCall({ status: code, stdout: "", stderr, calls });
   }, 30_000);
+});
+
+describe("scripts/restore.sh: the lease and the lock heartbeat are renewed while migrate deploy runs (K157)", () => {
+  const FAST = { RESTORE_LEASE_TTL_SECONDS: "3", RESTORE_RENEW_SECONDS: "1" };
+
+  function between(s: string[], from: string, to: string, item: string): number {
+    return count(s.slice(s.indexOf(from), s.indexOf(to)), item);
+  }
+
+  function leaseAtMigrateReturn(): string {
+    return readFileSync(`${lastLog}.lease-at-migrate-return`, "utf8").trim();
+  }
+
+  let lastLog = "";
+  function restoreLogged(extra: Record<string, string>): Run {
+    const log = logFile();
+    lastLog = log;
+    const started = Date.now();
+    const run = spawnSync("/bin/bash", [SCRIPT, SET_ID, "--yes"], {
+      cwd: ROOT,
+      env: env(log, { FAKE_CHECK_OUTPUT: OLDER_LINE, ...FAST, ...extra }),
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    elapsedMs = Date.now() - started;
+    return { status: run.status, stdout: run.stdout, stderr: run.stderr, calls: readCalls(log) };
+  }
+  let elapsedMs = 0;
+
+  it("a migrate that outlasts the lease TTL: the heartbeat and the lease are renewed in one step while it runs, the lease is still valid when it returns, then release and start", () => {
+    const run = restoreLogged({ FAKE_MIGRATE_SLEEP: "5" });
+    expect(run.status, run.stderr).toBe(0);
+    const s = steps(run.calls);
+    expect(between(s, "migrate", "migrate-returned", "renew")).toBeGreaterThanOrEqual(3);
+    for (const call of run.calls.filter((_, i) => s[i] === "renew")) {
+      expect(call).toContain('restore_lock_heartbeat "$1" || exit 4');
+      expect(call).toContain('lease_renew "$1" 3');
+      expect(call.endsWith(` ${HOLDER}`)).toBe(true);
+    }
+    expect(leaseAtMigrateReturn()).toBe("valid");
+    expect(s.indexOf("release")).toBeGreaterThan(s.indexOf("migrate-returned"));
+    expect(s.indexOf("start")).toBeGreaterThan(s.indexOf("release"));
+    expect(s.slice(s.indexOf("migrate-returned"))).not.toContain("renew");
+    expectNoDestructiveCall(run);
+  }, 20_000);
+
+  for (const [code, message] of [
+    ["3", "Lost the backup lease while migrate deploy ran"],
+    ["4", "Lost the restore lock while migrate deploy ran"],
+    ["1", "Could not renew the restore lock and the backup lease while migrate deploy ran"],
+  ] as const) {
+    it(`a renewal that fails with exit ${code}: migrate is stopped at once, exit 1, nothing started, released only after the migrate call returned`, () => {
+      const run = restoreLogged({ FAKE_MIGRATE_SLEEP: "20", FAKE_RENEW_EXIT: code });
+      expect(run.status, run.stderr).toBe(1);
+      expect(elapsedMs).toBeLessThan(12_000);
+      const s = steps(run.calls);
+      const stopAt = run.calls.findIndex((c) =>
+        /^stop -t 30 aida-restore-[0-9a-f]{32}-migrate$/.test(c),
+      );
+      expect(stopAt).toBeGreaterThan(s.indexOf("renew"));
+      expect(stopAt).toBeLessThan(s.indexOf("migrate-returned"));
+      expect(s.slice(s.indexOf("migrate-returned"))).toEqual(["migrate-returned", "release"]);
+      expect(count(s, "start")).toBe(0);
+      expect(run.stderr).toContain(message);
+      expect(run.stderr).toContain("backup, app and worker were NOT started");
+      expect(run.calls[s.indexOf("release")]).toContain("lease_release");
+      expectNoDestructiveCall(run);
+    }, 20_000);
+  }
+
+  it("refuses a lease TTL that is not more than twice the renewal interval, before anything else", () => {
+    const run = restoreLogged({ RESTORE_LEASE_TTL_SECONDS: "4", RESTORE_RENEW_SECONDS: "2" });
+    expect(run.status).toBe(2);
+    expect(run.calls).toEqual([]);
+    expect(run.stderr).toContain("must be more than twice RESTORE_RENEW_SECONDS");
+  });
 });
