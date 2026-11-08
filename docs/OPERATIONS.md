@@ -311,8 +311,12 @@ docker compose build
 docker compose rm -s -f app worker backup
 
 # 5. Keep the new release's database under another name and create an empty one in its place.
-#    ALTER DATABASE ... RENAME fails while any session is connected to it; then nothing changed.
-docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "ALTER DATABASE \"$POSTGRES_DB\" RENAME TO \"${POSTGRES_DB}_before_rollback\"" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
+#    ALTER DATABASE ... RENAME fails while any session is connected to it; psql then stops
+#    (ON_ERROR_STOP) before CREATE DATABASE, and nothing changed.
+docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -v db="$POSTGRES_DB" -v kept="${POSTGRES_DB}_before_rollback"' <<'SQL'
+ALTER DATABASE :"db" RENAME TO :"kept";
+CREATE DATABASE :"db";
+SQL
 
 # 6. Restore the pre-upgrade set into the empty database; only when that succeeded, start the
 #    previous release (`&&`: a failed restore starts nothing).
@@ -327,7 +331,10 @@ Because the writers stop in step 1 before the backup in step 2, that set holds t
 
 ```bash
 # a. Move the partly restored database out of the way and create an empty one (no drop).
-docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "ALTER DATABASE \"$POSTGRES_DB\" RENAME TO \"${POSTGRES_DB}_failed_restore\"" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
+docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -v db="$POSTGRES_DB" -v kept="${POSTGRES_DB}_failed_restore"' <<'SQL'
+ALTER DATABASE :"db" RENAME TO :"kept";
+CREATE DATABASE :"db";
+SQL
 
 # b. The new release, and a check that it can restore the step 2 set (nothing is changed yet).
 git checkout <new-tag>
@@ -639,7 +646,10 @@ The `member` table has no unique key on the workspace and the user yet, so one u
 1. Find the duplicates (read only):
 
    ```bash
-   docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT \"organizationId\", \"userId\", array_agg(role ORDER BY id) AS roles FROM member GROUP BY 1, 2 HAVING count(*) > 1"'
+   docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1' <<'SQL'
+   SELECT "organizationId", "userId", array_agg(role ORDER BY id) AS roles
+   FROM member GROUP BY 1, 2 HAVING count(*) > 1;
+   SQL
    ```
 
 2. Decide the intended role for each user listed with another owner or admin of that workspace, never from the rows alone.

@@ -4,7 +4,10 @@
 // no errexit: every line runs even after a failure), in a scratch directory whose
 // scripts/restore.sh and scripts/backup.sh are stubs and whose PATH holds a fake `docker` and a
 // fake `git` that only record their calls. Nothing here reaches Docker, git or a database.
-
+//
+// Codex r3-4 (static half): no bash block puts `\"` inside a command (the runbook's SQL goes
+// through psql variables and a quoted heredoc instead). The commands themselves are run against a
+// real database in tests/integration/operations-runbook-sql.test.ts.
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -127,5 +130,14 @@ describe("K156: no runbook block starts services after a failed restore", () => 
         calls.join("\n"),
       ).toBe(true);
     }
+  });
+});
+
+describe("Codex r3-4: no runbook command escapes a double quote", () => {
+  it('no bash block contains \\"', () => {
+    const offending = bashBlocks(DOC)
+      .flatMap((block) => block.split("\n"))
+      .filter((line) => line.includes('\\"'));
+    expect(offending).toEqual([]);
   });
 });
