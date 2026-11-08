@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { readFreshSession } from "@/lib/fresh-session";
 import { searchTicketsForPicker } from "@/lib/tickets/ticket-picker";
 
 // GET /api/tickets/picker?q=&ticketId=&purpose=link|merge — the ticket search behind the link and
@@ -16,7 +16,7 @@ import { searchTicketsForPicker } from "@/lib/tickets/ticket-picker";
 const NO_STORE = { "Cache-Control": "no-store" } as const;
 
 export async function GET(request: Request) {
-  const session = await auth.api.getSession({ headers: request.headers });
+  const session = await readFreshSession(request.headers);
   if (!session) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401, headers: NO_STORE });
   }

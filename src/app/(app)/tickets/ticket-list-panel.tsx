@@ -5,7 +5,8 @@ import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { prisma } from "@/lib/db";
 import { findConservativeMembership, isAdminRole } from "@/lib/membership";
-import { getScopedDb } from "@/lib/session";
+import { scopedDb } from "@/lib/scoped-db";
+import { getSessionActor } from "@/lib/session";
 import { e2eFault } from "@/lib/testing/e2e-fault";
 import {
   legacyRedirectSearch,
@@ -39,10 +40,14 @@ export async function TicketListPanel({
   basePath = "/tickets",
 }: TicketListPanelProps) {
   await e2eFault("tickets-list-delay"); // inert outside the E2E server (src/lib/testing/e2e-fault.ts)
-  const { db, orgId, session } = await getScopedDb();
-  // The actor's membership is checked before any panel data is read (D-01, Codex diff critique
-  // D1): a removed member with a still-valid session gets no roster, no tickets and no tags,
-  // only the "membership ended" line below.
+  // getSessionActor, not getScopedDb (Phase 10, D-08): getScopedDb now throws for a removed member,
+  // and this panel answers that case itself. The actor's membership is checked by
+  // loadTicketListPanelData before any panel data is read (D-01, Codex diff critique D1): a removed
+  // member with a still-valid session gets no roster, no tickets and no tags, only the "membership
+  // ended" line below. Plan 10-17 puts requirePageAccess in front of every page.
+  const actor = await getSessionActor();
+  const { orgId } = actor;
+  const db = scopedDb(orgId);
   const {
     membershipActive,
     tickets,
@@ -54,7 +59,7 @@ export async function TicketListPanel({
     legacyStateIds,
     stateOptions,
     defaultStateId,
-  } = await loadTicketListPanelData(prisma, { userId: session.user.id, orgId }, searchParams);
+  } = await loadTicketListPanelData(prisma, actor, searchParams);
 
   // D-09: an old bookmark with status=<ENUM,...> is answered with the canonical state= URL of the
   // active organization (replace, so the old URL leaves no history entry). The target is this
@@ -71,7 +76,7 @@ export async function TicketListPanel({
   // only for an active member. The bar only hides or explains the entry; requestProposalAction
   // decides again on the server.
   const membership = membershipActive
-    ? await findConservativeMembership(prisma, session.user.id, orgId)
+    ? await findConservativeMembership(prisma, actor.userId, orgId)
     : null;
   const isAdmin = isAdminRole(membership?.role);
   const aiSetting = isAdmin

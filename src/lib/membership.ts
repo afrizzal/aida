@@ -148,3 +148,19 @@ export function isAdminRole(role: string | null | undefined): boolean {
   if (!role) return false;
   return ADMIN_ROLES.has(role);
 }
+
+/**
+ * Thrown by getScopedDb (src/lib/session.ts) when the session has no active organization or the
+ * user holds no member row in it (Phase 10, D-08, AIDA-43). Server actions and API routes answer
+ * 403 from `status`; /api/attachments/[id] answers its missing-attachment 404 instead, so it is no
+ * existence oracle; pages redirect to /no-access through requirePageAccess (src/lib/page-access.ts)
+ * before they could throw this.
+ */
+export class AccessDeniedError extends Error {
+  readonly status = 403;
+
+  constructor(message = "Access denied: no membership in the active organization") {
+    super(message);
+    this.name = "AccessDeniedError";
+  }
+}

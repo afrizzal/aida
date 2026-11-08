@@ -1,0 +1,330 @@
+// Phase 10, plan 10-02 (AIDA-43, D-08, V-23, V-05, V-27): the one membership gate, on a real
+// Postgres through Testcontainers with no mock of the database or of Better Auth.
+//
+// A user is created and signed in through in-process auth.api.signUpEmail and signInEmail with
+// returnHeaders, and the request headers are built from the returned Set-Cookie values: the
+// session token cookie and the cookie cache's session data cookie, exactly what a browser sends.
+// Only the Next request scope is replaced: `next/headers` returns those headers and
+// `next/navigation`'s redirect throws a recognisable error that carries its target.
+//
+// Proves: readFreshSession never trusts the cookie cache (a deleted session row is gone, a changed
+// activeOrganizationId is seen), getScopedDb re-reads membership on every call, and the attachment
+// route answers a removed member exactly like a missing attachment.
+import { randomUUID } from "node:crypto";
+import { rm } from "node:fs/promises";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+const env = await vi.hoisted(async () => {
+  const { mkdtemp } = await import("node:fs/promises");
+  const os = await import("node:os");
+  const nodePath = await import("node:path");
+  const uploadsDir = await mkdtemp(nodePath.join(os.tmpdir(), "aida-membership-gate-"));
+  const previous = {
+    UPLOADS_DIR: process.env.UPLOADS_DIR,
+    BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET,
+  };
+  // Read once when src/lib/attachments/local-file-storage.ts and src/lib/auth.ts load.
+  process.env.UPLOADS_DIR = uploadsDir;
+  process.env.BETTER_AUTH_SECRET = `${crypto.randomUUID()}${crypto.randomUUID()}`;
+  return { uploadsDir, previous, requestHeaders: new Headers() };
+});
+
+/** The error the mocked redirect throws; `target` is the path redirect() was called with. */
+class RedirectSignal extends Error {
+  constructor(readonly target: string) {
+    super(`NEXT_REDIRECT ${target}`);
+  }
+}
+
+vi.mock("next/headers", () => ({ headers: async () => env.requestHeaders }));
+vi.mock("next/navigation", () => ({
+  redirect: (target: string) => {
+    throw new RedirectSignal(target);
+  },
+}));
+
+import { GET as attachmentGet } from "@/app/api/attachments/[id]/route";
+import { localFileStorage } from "@/lib/attachments/local-file-storage";
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/db";
+import { readFreshSession } from "@/lib/fresh-session";
+import { AccessDeniedError } from "@/lib/membership";
+import { getScopedDb } from "@/lib/session";
+import { seedTicket } from "../support/inbox-fixtures";
+
+afterAll(async () => {
+  await rm(env.uploadsDir, { recursive: true, force: true });
+  for (const [key, value] of Object.entries(env.previous)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+});
+
+beforeEach(() => {
+  env.requestHeaders = new Headers();
+});
+
+type Role = "owner" | "admin" | "member";
+
+async function createOrg(): Promise<string> {
+  const orgId = randomUUID();
+  await prisma.organization.create({
+    data: { id: orgId, name: "Gate Org", slug: `gate-${orgId}`, createdAt: new Date() },
+  });
+  return orgId;
+}
+
+async function addMember(orgId: string, userId: string, role: Role, id: string = randomUUID()) {
+  await prisma.member.create({
+    data: { id, organizationId: orgId, userId, role, createdAt: new Date() },
+  });
+}
+
+interface SignedIn {
+  orgId: string;
+  userId: string;
+  /** The Cookie header a browser would send after this sign-in. */
+  cookie: string;
+  /** The session token, the session row's key. */
+  token: string;
+}
+
+/**
+ * An organization, a user who is a member with `role`, and a real sign-in. The member row exists
+ * before the sign-in, so Better Auth's session hook (src/lib/auth.ts) sets the active organization.
+ */
+async function signedInMember(role: Role = "member"): Promise<SignedIn> {
+  const orgId = await createOrg();
+  const email = `gate-${randomUUID()}@example.test`;
+  const password = `pw-${randomUUID()}`;
+  const signUp = await auth.api.signUpEmail({ body: { name: "Gate Agent", email, password } });
+  const userId = signUp.user.id;
+  await addMember(orgId, userId, role);
+  const { headers, response } = await auth.api.signInEmail({
+    body: { email, password },
+    returnHeaders: true,
+  });
+  const cookie = headers
+    .getSetCookie()
+    .map((c) => c.split(";")[0])
+    .join("; ");
+  expect(cookie).toContain("session_token=");
+  // The cookie cache is on (src/lib/auth.ts), so the sign-in also hands out the cached copy.
+  expect(cookie).toContain("session_data=");
+  return { orgId, userId, cookie, token: response.token };
+}
+
+function headersFor(cookie: string): Headers {
+  return new Headers({ cookie });
+}
+
+/** The cookie-cache read, for comparison only: what a read WITHOUT disableCookieCache returns. */
+function cachedRead(cookie: string) {
+  return auth.api.getSession({ headers: headersFor(cookie) });
+}
+
+describe("readFreshSession (V-23): the cookie cache is never the source of truth", () => {
+  it("returns the signed-in session with its active organization", async () => {
+    const s = await signedInMember();
+    const session = await readFreshSession(headersFor(s.cookie));
+    expect(session?.user.id).toBe(s.userId);
+    expect(session?.session.activeOrganizationId).toBe(s.orgId);
+  });
+
+  it("sees a session row deleted after sign-in as gone, with the same cookies", async () => {
+    const s = await signedInMember();
+    // Presence first, through both reads, so a null below cannot come from a bad cookie.
+    expect((await readFreshSession(headersFor(s.cookie)))?.user.id).toBe(s.userId);
+    expect((await cachedRead(s.cookie))?.user.id).toBe(s.userId);
+
+    await prisma.session.delete({ where: { token: s.token } });
+
+    expect(await readFreshSession(headersFor(s.cookie))).toBeNull();
+    // Recorded for the SUMMARY: the cached read still answers from the session data cookie,
+    // which is why no AIDA path may use it.
+    const cached = await cachedRead(s.cookie);
+    expect(cached?.user.id).toBe(s.userId);
+    expect(cached?.session.activeOrganizationId).toBe(s.orgId);
+  });
+
+  it("on a deleted row the fresh read expires the session token and the cached data cookies", async () => {
+    const s = await signedInMember();
+    expect((await readFreshSession(headersFor(s.cookie)))?.user.id).toBe(s.userId);
+    await prisma.session.delete({ where: { token: s.token } });
+
+    const { headers, response } = await auth.api.getSession({
+      headers: headersFor(s.cookie),
+      query: { disableCookieCache: true },
+      returnHeaders: true,
+    });
+    expect(response).toBeNull();
+    const expired = headers
+      .getSetCookie()
+      .filter((c) => /max-age=0/i.test(c))
+      .map((c) => c.split("=")[0]);
+    expect(expired.some((name) => name.endsWith("session_token"))).toBe(true);
+    expect(expired.some((name) => name.endsWith("session_data"))).toBe(true);
+  });
+
+  it("sees a database update of session.activeOrganizationId on the next read", async () => {
+    const s = await signedInMember();
+    const otherOrg = await createOrg();
+    await addMember(otherOrg, s.userId, "member");
+    expect((await readFreshSession(headersFor(s.cookie)))?.session.activeOrganizationId).toBe(
+      s.orgId,
+    );
+    expect((await cachedRead(s.cookie))?.session.activeOrganizationId).toBe(s.orgId);
+
+    await prisma.session.update({
+      where: { token: s.token },
+      data: { activeOrganizationId: otherOrg },
+    });
+
+    expect((await readFreshSession(headersFor(s.cookie)))?.session.activeOrganizationId).toBe(
+      otherOrg,
+    );
+    // Recorded for the SUMMARY: the cached copy still names the old organization.
+    expect((await cachedRead(s.cookie))?.session.activeOrganizationId).toBe(s.orgId);
+  });
+
+  it("returns null without a session cookie", async () => {
+    expect(await readFreshSession(new Headers())).toBeNull();
+  });
+});
+
+describe("getScopedDb (D-08): membership re-read on every call", () => {
+  it("returns the organization, a scoped client and the role for a member", async () => {
+    const s = await signedInMember("admin");
+    env.requestHeaders = headersFor(s.cookie);
+    const scoped = await getScopedDb();
+    expect(scoped.orgId).toBe(s.orgId);
+    expect(scoped.role).toBe("admin");
+    expect(scoped.session.user.id).toBe(s.userId);
+    expect(typeof scoped.db.ticket.findFirst).toBe("function");
+  });
+
+  it("throws AccessDeniedError (403) once the member row is deleted, with the same cookies", async () => {
+    const s = await signedInMember();
+    env.requestHeaders = headersFor(s.cookie);
+    expect((await getScopedDb()).role).toBe("member");
+
+    await prisma.member.deleteMany({ where: { organizationId: s.orgId, userId: s.userId } });
+
+    const err = await getScopedDb().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AccessDeniedError);
+    expect((err as AccessDeniedError).status).toBe(403);
+  });
+
+  it("throws AccessDeniedError when the session has no active organization", async () => {
+    const s = await signedInMember();
+    env.requestHeaders = headersFor(s.cookie);
+    expect((await getScopedDb()).orgId).toBe(s.orgId);
+
+    await prisma.session.update({
+      where: { token: s.token },
+      data: { activeOrganizationId: null },
+    });
+
+    await expect(getScopedDb()).rejects.toBeInstanceOf(AccessDeniedError);
+  });
+
+  it("throws AccessDeniedError when the session names an organization the user is not in", async () => {
+    const s = await signedInMember();
+    const foreignOrg = await createOrg();
+    env.requestHeaders = headersFor(s.cookie);
+    expect((await getScopedDb()).orgId).toBe(s.orgId);
+
+    await prisma.session.update({
+      where: { token: s.token },
+      data: { activeOrganizationId: foreignOrg },
+    });
+
+    await expect(getScopedDb()).rejects.toBeInstanceOf(AccessDeniedError);
+  });
+
+  it("returns role member for mixed duplicate rows (owner and member), in both id orders", async () => {
+    for (const extraId of ["0-gate-extra", "z-gate-extra"]) {
+      const s = await signedInMember("owner");
+      await addMember(s.orgId, s.userId, "member", `${extraId}-${randomUUID()}`);
+      env.requestHeaders = headersFor(s.cookie);
+      expect((await getScopedDb()).role).toBe("member");
+    }
+  });
+
+  it("redirects to /login without a session", async () => {
+    env.requestHeaders = new Headers();
+    const err = await getScopedDb().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RedirectSignal);
+    expect((err as RedirectSignal).target).toBe("/login");
+  });
+});
+
+describe("/api/attachments/[id] (D-08): a removed member gets the missing-attachment answer", () => {
+  async function seedAttachment(orgId: string) {
+    const ticket = await seedTicket(orgId);
+    const message = await prisma.message.create({
+      data: {
+        organizationId: orgId,
+        ticketId: ticket.id,
+        direction: "INBOUND",
+        bodyMarkdown: "with file",
+        bodyHtml: "<p>with file</p>",
+      },
+    });
+    const key = `${randomUUID().replace(/-/g, "")}.txt`;
+    await localFileStorage.save({ orgId, key, data: Buffer.from("gate file body") });
+    return prisma.attachment.create({
+      data: {
+        organizationId: orgId,
+        messageId: message.id,
+        storageKey: key,
+        originalFilename: "gate.txt",
+        mimeType: "text/plain",
+        sizeBytes: 14,
+      },
+    });
+  }
+
+  function get(id: string) {
+    return attachmentGet(new Request(`http://localhost/api/attachments/${id}`), {
+      params: Promise.resolve({ id }),
+    });
+  }
+
+  it("serves the file to a member and answers 404 not_found for a missing id", async () => {
+    const s = await signedInMember();
+    const attachment = await seedAttachment(s.orgId);
+    env.requestHeaders = headersFor(s.cookie);
+
+    const ok = await get(attachment.id);
+    expect(ok.status).toBe(200);
+    expect(await ok.text()).toBe("gate file body");
+
+    const missing = await get(`missing-${randomUUID()}`);
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: "not_found" });
+  });
+
+  it("answers a removed member exactly as for a missing attachment", async () => {
+    const s = await signedInMember();
+    const attachment = await seedAttachment(s.orgId);
+    env.requestHeaders = headersFor(s.cookie);
+    expect((await get(attachment.id)).status).toBe(200);
+
+    await prisma.member.deleteMany({ where: { organizationId: s.orgId, userId: s.userId } });
+
+    const missing = await get(`missing-${randomUUID()}`);
+    const existing = await get(attachment.id);
+    expect(existing.status).toBe(404);
+    expect(missing.status).toBe(404);
+    expect(await existing.json()).toEqual({ error: "not_found" });
+    expect(await missing.json()).toEqual({ error: "not_found" });
+  });
+
+  it("still answers 401 without a session", async () => {
+    env.requestHeaders = new Headers();
+    const res = await get(`any-${randomUUID()}`);
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+});

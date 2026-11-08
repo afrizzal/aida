@@ -1,16 +1,20 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/db";
+import { readFreshSession } from "@/lib/fresh-session";
+import { AccessDeniedError, findConservativeMembership } from "@/lib/membership";
 import { scopedDb } from "@/lib/scoped-db";
 
 /**
  * Retrieves the current Better Auth session from request headers.
  * Returns null when the request is unauthenticated.
  *
- * Use in Server Components and Server Actions.
+ * Every read is fresh (Phase 10, V-23): it goes through readFreshSession (src/lib/fresh-session.ts),
+ * so the five-minute cookie cache is never the source of truth for the session or its active
+ * organization. Use in Server Components and Server Actions.
  */
 export async function getCurrentSession() {
-  return auth.api.getSession({ headers: await headers() });
+  return readFreshSession(await headers());
 }
 
 /**
@@ -24,31 +28,43 @@ export async function requireSession() {
 }
 
 /**
- * Bridges the authenticated session to a tenant-scoped Prisma client.
+ * Bridges the authenticated session to a tenant-scoped Prisma client, behind the membership gate
+ * (Phase 10, D-08, AIDA-43).
  *
- * Reads `session.activeOrganizationId` and returns a `scopedDb` bound to that org.
- * Throws if no active organization is set (use authClient.organization.setActive first).
+ * Reads the session once (K141; redirects to /login without one), then re-reads the user's member
+ * rows in the session's active organization from the database on every call with the conservative
+ * read (findConservativeMembership: every row in id order, admin only when every row is owner or
+ * admin). Throws AccessDeniedError (status 403) when no organization is active or the user holds no
+ * member row in it, so a removed member never gets a tenant client, whatever the cookie holds.
  *
- * Returns: `{ db, session, orgId }` — `db` is the org-scoped client ready for domain queries.
+ * Returns: `{ db, session, orgId, role }`. `db` is the org-scoped client ready for domain queries
+ * and `role` is the conservative role in exactly `orgId`.
  *
- * Usage in a Server Component or Server Action:
+ * Usage in a Server Action or route handler:
  *   const { db, orgId } = await getScopedDb();
  *   const settings = await db.setting.findMany();
+ * A page calls requirePageAccess (src/lib/page-access.ts) instead, which redirects to /no-access.
  */
 export async function getScopedDb() {
   const session = await requireSession();
   const orgId = session.session.activeOrganizationId;
-  if (!orgId) throw new Error("No active organization on session — cannot scope queries");
-  return { db: scopedDb(orgId), session, orgId };
+  if (!orgId) throw new AccessDeniedError("No active organization on session");
+  // Better Auth's member model is outside DOMAIN_MODELS: bare prisma, explicit organization term.
+  const member = await findConservativeMembership(prisma, session.user.id, orgId);
+  if (!member) throw new AccessDeniedError();
+  return { db: scopedDb(orgId), session, orgId, role: member.role };
 }
 
 /**
  * The acting user and organization for a Phase 11 server action or route (D-01).
  *
- * Reads the session and its `activeOrganizationId` exactly like getScopedDb (same redirect when
- * unauthenticated, same error when no organization is active) and returns `{ userId, orgId }`.
- * It does NOT check membership: every caller passes the actor to a core function that checks
- * the member row through findActiveMembership (src/lib/membership.ts) itself.
+ * Reads the session once (fresh, like getCurrentSession; same redirect when unauthenticated) and
+ * its `activeOrganizationId` (an Error when no organization is active), and returns
+ * `{ userId, orgId }`. It does NOT check membership, by contract: every caller passes the actor to
+ * a service that checks the member row itself inside its own read or transaction (for example
+ * runTicketMutation through findActiveMembership, src/lib/membership.ts). The membership
+ * inventory (tests/unit/membership-inventory.test.ts, Rule A) accepts it as a gate only when the
+ * entry also calls such a service.
  */
 export async function getSessionActor(): Promise<{ userId: string; orgId: string }> {
   const session = await requireSession();
