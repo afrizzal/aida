@@ -29,7 +29,39 @@ const PUBLIC_PREFIXES = [
 // while leaving every legitimate bootstrap path intact. This check MUST run before the
 // PUBLIC_PREFIXES allow-list below, because "/api/auth" is itself a public prefix and would
 // otherwise short-circuit past it.
-const BLOCKED_PUBLIC_ROUTES = ["/api/auth/sign-up"];
+//
+// Organization and admin plugins (plan 10-15, D-02, V-03, AIDA-43): both route groups are closed
+// over HTTP by prefix, so no Better Auth endpoint can create, accept or cancel an invitation,
+// change a member or a role, leave or delete an organization, switch organizations, or remove a
+// user. AIDA's own services (src/lib/workspace-members/) are the only membership writers. The
+// route list was read from better-auth 1.7.20 as installed: 36 paths under /organization/ (the 9
+// team and 5 dynamic-role routes included, although src/lib/auth.ts registers neither group) and
+// 15 under /admin/. In-process `auth.api.*` calls never traverse this proxy and are unaffected.
+// A Better Auth upgrade must re-run the route listing: tests/unit/better-auth-routes.test.ts
+// pins the version and the route set, and fails until both are re-read. `/organization/delete`
+// is owner item 09-o3, closed by default (O-5).
+const TEAM_CHANGES_ERROR = "Team changes are made in AIDA under Settings → Team.";
+const BLOCKED_PUBLIC_ROUTES: ReadonlyArray<{ prefix: string; error: string }> = [
+  {
+    prefix: "/api/auth/sign-up",
+    error:
+      "Public self-registration is disabled. Ask an administrator to invite you, or complete /setup if this is a fresh install.",
+  },
+  { prefix: "/api/auth/organization/", error: TEAM_CHANGES_ERROR },
+  { prefix: "/api/auth/admin/", error: TEAM_CHANGES_ERROR },
+];
+
+// The blocked prefixes are matched against a canonical form of the path (decoded, lower case,
+// repeated slashes collapsed), so a spelling such as `/api/auth/Organization/leave` or
+// `/api/auth/organization%2Fleave` cannot slip past the list. Better Auth's router already
+// answers 404 to those spellings; this keeps the block independent of that detail. Routing
+// itself keeps using the raw pathname. Runs after the malformed-path guard, so decoding succeeds.
+function blockedRouteFor(pathname: string) {
+  const canonical = decodeURIComponent(pathname)
+    .toLowerCase()
+    .replace(/\/{2,}/g, "/");
+  return BLOCKED_PUBLIC_ROUTES.find((route) => canonical.startsWith(route.prefix));
+}
 
 // CSP (D-11, D-12, AIDA-28, F-15): every request that passes through gets a fresh nonce and the
 // nonce policy from src/lib/security/csp.ts. Next.js reads the nonce from the *request*
@@ -107,15 +139,10 @@ export function proxy(request: NextRequest) {
 
   if (hasMalformedPathEncoding(pathname)) return malformedPathResponse(pathname);
 
-  if (BLOCKED_PUBLIC_ROUTES.some((p) => pathname.startsWith(p))) {
+  const blocked = blockedRouteFor(pathname);
+  if (blocked) {
     return withSecurityHeaders(
-      NextResponse.json(
-        {
-          error:
-            "Public self-registration is disabled. Ask an administrator to invite you, or complete /setup if this is a fresh install.",
-        },
-        { status: 403 },
-      ),
+      NextResponse.json({ error: blocked.error }, { status: 403 }),
       pathname,
     );
   }
