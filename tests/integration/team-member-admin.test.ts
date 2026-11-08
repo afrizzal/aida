@@ -5,7 +5,8 @@
 // the lock-wait helpers (each run's backend PID recorded through the service's own hook, then
 // waitForBlockedBy on exactly that PID), never with sleeps.
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { MemberAdminError } from "@/lib/workspace-members/errors";
 import {
@@ -23,6 +24,8 @@ import {
   seedTicket,
   stateIdFor,
 } from "../support/inbox-fixtures";
+import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
+import { assertNoDeadlock, createObserverClient, settleAll } from "../support/project-race";
 
 /** Adds one more member row for userId (explicit id and createdAt, as member-rights.test.ts does). */
 async function addRow(orgId: string, userId: string, role: string): Promise<string> {
@@ -752,5 +755,288 @@ describe("reassignOpenTickets and countOpenAssignedTickets (V-25, D-07)", () => 
     expect(new Set(audit.map((a) => a.ticketId)).size).toBe(150);
     expect(new Set(audit.map((a) => a.batchId)).size).toBe(2);
     expect(audit.every((a) => a.action === "ASSIGNEE_CHANGED")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Task 3: forced-order races (C3, R2-4, R3-3, V-16, V-26). The holder records its backend PID from
+// inside its own transaction in a service hook and parks there on a deferred; the waiter records
+// its PID in beforeLock; waitForBlockedBy proves that exact PID is blocked by the holder's PID
+// before the holder is released. Every race asserts the error code its check order produces and
+// the final database state, and ends with assertNoDeadlock. None expects LAST_OWNER: the loser
+// fails at the actor re-read (NOT_ALLOWED) or the target read (NOT_A_MEMBER), D-09 amended.
+// ---------------------------------------------------------------------------------------------
+
+const observer = createObserverClient();
+afterAll(async () => {
+  await observer.close();
+});
+
+type Tx = Prisma.TransactionClient;
+
+/** A hook that records the PID of its transaction and parks until release(). */
+function holdPoint() {
+  const pid = deferred<number>();
+  const gate = deferred<void>();
+  return {
+    pid: pid.promise,
+    release: () => gate.resolve(),
+    hook: async (tx: Tx) => {
+      pid.resolve(await backendPid(tx));
+      await gate.promise;
+    },
+  };
+}
+
+/** A hook that records the PID of its transaction and continues. */
+function pidPoint() {
+  const pid = deferred<number>();
+  return {
+    pid: pid.promise,
+    hook: async (tx: Tx) => {
+      pid.resolve(await backendPid(tx));
+    },
+  };
+}
+
+/**
+ * Starts the holder (parked in its hook), then the waiter, runs `proveBlocked` with both recorded
+ * PIDs (each race passes waitForBlockedBy: the waiter's PID blocked by the holder's PID), always
+ * releases the holder, and returns both settled results after assertNoDeadlock.
+ */
+async function forcedOrder<H, W>(
+  startHolder: (hook: (tx: Tx) => Promise<void>) => Promise<H>,
+  startWaiter: (hook: (tx: Tx) => Promise<void>) => Promise<W>,
+  proveBlocked: (holderPid: number, waiterPid: number) => Promise<void>,
+): Promise<[PromiseSettledResult<H>, PromiseSettledResult<W>]> {
+  const hold = holdPoint();
+  const wait = pidPoint();
+  const holder = startHolder(hold.hook);
+  holder.catch(() => {});
+  let waiter: Promise<W> | undefined;
+  try {
+    const holderPid = await hold.pid;
+    waiter = startWaiter(wait.hook);
+    waiter.catch(() => {});
+    const waiterPid = await wait.pid;
+    await proveBlocked(holderPid, waiterPid);
+  } finally {
+    hold.release();
+  }
+  const results = (await settleAll<unknown>([holder, waiter ?? Promise.resolve()])) as [
+    PromiseSettledResult<H>,
+    PromiseSettledResult<W>,
+  ];
+  assertNoDeadlock(results);
+  return results;
+}
+
+function settledValue<T>(r: PromiseSettledResult<T>): T {
+  if (r.status !== "fulfilled") throw r.reason;
+  return r.value;
+}
+
+describe("races between the last two owners (D-09 amended, R2-4)", () => {
+  it("owners A and B deactivate each other: A succeeds, B is NOT_ALLOWED, one owner remains", async () => {
+    const { orgId, ids } = await seed(["owner", "owner"]);
+    const [a, b] = ids;
+    const [first, second] = await forcedOrder(
+      (hook) => deactivateMember({ orgId, actorUserId: a, targetUserId: b }, { afterLock: hook }),
+      (hook) => deactivateMember({ orgId, actorUserId: b, targetUserId: a }, { beforeLock: hook }),
+      (holderPid, waiterPid) => waitForBlockedBy(observer.client, holderPid, [waiterPid]),
+    );
+    expect(settledValue(first)).toMatchObject({ ok: true, owners: 1, admins: 0 });
+    expect(settledValue(second)).toEqual({ ok: false, error: "NOT_ALLOWED" });
+
+    expect((await rowsOf(orgId, a)).map((r) => r.role)).toEqual(["owner"]);
+    expect(await rowsOf(orgId, b)).toEqual([]);
+    expect(await countOwners(prisma, orgId)).toBe(1);
+    const audit = await memberAudit(orgId);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({
+      action: "MEMBER_DEACTIVATED",
+      actorUserId: a,
+      targetUserId: b,
+    });
+  });
+
+  it("owners A and B demote each other to admin: A succeeds, B is NOT_ALLOWED, A owner and B admin", async () => {
+    const { orgId, ids } = await seed(["owner", "owner"]);
+    const [a, b] = ids;
+    const [first, second] = await forcedOrder(
+      (hook) =>
+        changeMemberRole(
+          { orgId, actorUserId: a, targetUserId: b, newRole: "admin" },
+          { afterLock: hook },
+        ),
+      (hook) =>
+        changeMemberRole(
+          { orgId, actorUserId: b, targetUserId: a, newRole: "admin" },
+          { beforeLock: hook },
+        ),
+      (holderPid, waiterPid) => waitForBlockedBy(observer.client, holderPid, [waiterPid]),
+    );
+    expect(settledValue(first)).toEqual({ ok: true, owners: 1, admins: 1 });
+    expect(settledValue(second)).toEqual({ ok: false, error: "NOT_ALLOWED" });
+
+    expect((await rowsOf(orgId, a)).map((r) => r.role)).toEqual(["owner"]);
+    expect((await rowsOf(orgId, b)).map((r) => r.role)).toEqual(["admin"]);
+    expect(await countOwners(prisma, orgId)).toBe(1);
+    const audit = await memberAudit(orgId);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({
+      action: "ROLE_CHANGED",
+      actorUserId: a,
+      targetUserId: b,
+      oldRole: "owner",
+      newRole: "admin",
+    });
+  });
+});
+
+describe("an actor removed or demoted mid-race (R2-4)", () => {
+  it("owner O deactivates admin X while X deactivates member M: X is NOT_ALLOWED, M stays", async () => {
+    const { orgId, ids } = await seed(["owner", "admin", "member"]);
+    const [o, x, m] = ids;
+    const [first, second] = await forcedOrder(
+      (hook) => deactivateMember({ orgId, actorUserId: o, targetUserId: x }, { afterLock: hook }),
+      (hook) => deactivateMember({ orgId, actorUserId: x, targetUserId: m }, { beforeLock: hook }),
+      (holderPid, waiterPid) => waitForBlockedBy(observer.client, holderPid, [waiterPid]),
+    );
+    expect(settledValue(first)).toMatchObject({ ok: true, owners: 1, admins: 0 });
+    expect(settledValue(second)).toEqual({ ok: false, error: "NOT_ALLOWED" });
+
+    expect(await rowsOf(orgId, x)).toEqual([]);
+    expect((await rowsOf(orgId, m)).map((r) => r.role)).toEqual(["member"]);
+    const audit = await memberAudit(orgId);
+    expect(audit.map((a) => [a.action, a.targetUserId])).toEqual([["MEMBER_DEACTIVATED", x]]);
+  });
+
+  it("owner O demotes admin X to member while X deactivates member M: X is NOT_ALLOWED, M stays", async () => {
+    const { orgId, ids } = await seed(["owner", "admin", "member"]);
+    const [o, x, m] = ids;
+    const [first, second] = await forcedOrder(
+      (hook) =>
+        changeMemberRole(
+          { orgId, actorUserId: o, targetUserId: x, newRole: "member" },
+          { afterLock: hook },
+        ),
+      (hook) => deactivateMember({ orgId, actorUserId: x, targetUserId: m }, { beforeLock: hook }),
+      (holderPid, waiterPid) => waitForBlockedBy(observer.client, holderPid, [waiterPid]),
+    );
+    expect(settledValue(first)).toEqual({ ok: true, owners: 1, admins: 0 });
+    expect(settledValue(second)).toEqual({ ok: false, error: "NOT_ALLOWED" });
+
+    expect((await rowsOf(orgId, x)).map((r) => r.role)).toEqual(["member"]);
+    expect((await rowsOf(orgId, m)).map((r) => r.role)).toEqual(["member"]);
+    const audit = await memberAudit(orgId);
+    expect(audit.map((a) => [a.action, a.targetUserId, a.newRole])).toEqual([
+      ["ROLE_CHANGED", x, "member"],
+    ]);
+  });
+});
+
+describe("serialised deactivations that both may succeed, and one target twice", () => {
+  it("owner O deactivates admins X and Y under a forced order: both succeed and the owner count stays 1", async () => {
+    const { orgId, ids } = await seed(["owner", "admin", "admin"]);
+    const [o, x, y] = ids;
+    const [first, second] = await forcedOrder(
+      (hook) => deactivateMember({ orgId, actorUserId: o, targetUserId: x }, { afterLock: hook }),
+      (hook) => deactivateMember({ orgId, actorUserId: o, targetUserId: y }, { beforeLock: hook }),
+      (holderPid, waiterPid) => waitForBlockedBy(observer.client, holderPid, [waiterPid]),
+    );
+    expect(settledValue(first)).toMatchObject({ ok: true, owners: 1, admins: 1 });
+    expect(settledValue(second)).toMatchObject({ ok: true, owners: 1, admins: 0 });
+
+    expect(await rowsOf(orgId, x)).toEqual([]);
+    expect(await rowsOf(orgId, y)).toEqual([]);
+    expect(await countOwners(prisma, orgId)).toBe(1);
+    const audit = await memberAudit(orgId);
+    expect(audit.map((a) => a.targetUserId)).toEqual([x, y]);
+  });
+
+  it("two admins deactivate the same member: one success, one NOT_A_MEMBER, one audit row", async () => {
+    const { orgId, ids } = await seed(["owner", "admin", "admin", "member"]);
+    const [, x1, x2, m] = ids;
+    await addRow(orgId, m, "member");
+    const [first, second] = await forcedOrder(
+      (hook) => deactivateMember({ orgId, actorUserId: x1, targetUserId: m }, { afterLock: hook }),
+      (hook) => deactivateMember({ orgId, actorUserId: x2, targetUserId: m }, { beforeLock: hook }),
+      (holderPid, waiterPid) => waitForBlockedBy(observer.client, holderPid, [waiterPid]),
+    );
+    expect(settledValue(first)).toMatchObject({ ok: true });
+    expect(settledValue(second)).toEqual({ ok: false, error: "NOT_A_MEMBER" });
+
+    expect(await rowsOf(orgId, m)).toEqual([]);
+    const audit = await memberAudit(orgId);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({
+      action: "MEMBER_DEACTIVATED",
+      actorUserId: x1,
+      targetUserId: m,
+    });
+  });
+});
+
+describe("duplicate rows under the lock (V-26 (2), O-4)", () => {
+  it("an owner with an extra admin row and no other owner cannot grant owner, behind a held change", async () => {
+    const { orgId, ids } = await seed(["owner", "admin", "member"]);
+    const [d, admin, m] = ids;
+    await addRow(orgId, d, "admin");
+    expect(await countOwners(prisma, orgId)).toBe(0);
+
+    const [first, second] = await forcedOrder(
+      (hook) =>
+        changeMemberRole(
+          { orgId, actorUserId: d, targetUserId: admin, newRole: "member" },
+          { afterLock: hook },
+        ),
+      (hook) =>
+        changeMemberRole(
+          { orgId, actorUserId: d, targetUserId: m, newRole: "owner" },
+          { beforeLock: hook },
+        ),
+      (holderPid, waiterPid) => waitForBlockedBy(observer.client, holderPid, [waiterPid]),
+    );
+    expect(settledValue(first)).toEqual({ ok: true, owners: 0, admins: 1 });
+    expect(settledValue(second)).toEqual({ ok: false, error: "NOT_ALLOWED" });
+
+    expect(await countOwners(prisma, orgId)).toBe(0);
+    expect((await rowsOf(orgId, m)).map((r) => r.role)).toEqual(["member"]);
+    expect((await rowsOf(orgId, d)).map((r) => r.role).sort()).toEqual(["admin", "owner"]);
+  });
+
+  it("a real owner's change to owner makes every row owner; the mixed user's grant queued behind it then succeeds", async () => {
+    const { orgId, ids } = await seed(["owner", "owner", "member"]);
+    const [r, d, m] = ids;
+    await addRow(orgId, d, "admin");
+    expect(await countOwners(prisma, orgId)).toBe(1);
+
+    const [first, second] = await forcedOrder(
+      (hook) =>
+        changeMemberRole(
+          { orgId, actorUserId: r, targetUserId: d, newRole: "owner" },
+          { afterLock: hook },
+        ),
+      (hook) =>
+        changeMemberRole(
+          { orgId, actorUserId: d, targetUserId: m, newRole: "owner" },
+          { beforeLock: hook },
+        ),
+      (holderPid, waiterPid) => waitForBlockedBy(observer.client, holderPid, [waiterPid]),
+    );
+    expect(settledValue(first)).toEqual({ ok: true, owners: 2, admins: 0 });
+    // The waiter re-read d's rights under the lock, after the holder committed.
+    expect(settledValue(second)).toEqual({ ok: true, owners: 3, admins: 0 });
+
+    const dRows = await rowsOf(orgId, d);
+    expect(dRows).toHaveLength(2);
+    expect(dRows.map((row) => row.role)).toEqual(["owner", "owner"]);
+    expect((await rowsOf(orgId, m)).map((row) => row.role)).toEqual(["owner"]);
+    const audit = await memberAudit(orgId);
+    expect(audit.map((a) => [a.actorUserId, a.targetUserId, a.oldRole, a.newRole])).toEqual([
+      [r, d, "admin", "owner"],
+      [d, m, "member", "owner"],
+    ]);
   });
 });
