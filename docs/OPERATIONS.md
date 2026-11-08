@@ -268,7 +268,7 @@ Moving AIDA to new hardware (disk failure, migration, etc.):
    ```
 
 6. **Run the restore**: `./scripts/restore.sh <setId> --validate-only`, then `./scripts/restore.sh <setId> --yes`. It fills the empty database and the uploads volume from the set, and runs this release's `migrate deploy` when the set is older. `backup`, `app` and `worker` do not exist yet, so it says it could not start them; that is expected here.
-7. **Start the instance**: `docker compose up -d --build`. The one-shot `migrate` service runs this release's `prisma migrate deploy` again (nothing is left to apply), and then `app`, `worker` and `backup` start.
+7. **Start the instance**, only when step 6's `--yes` run ended with `[restore] Done: set <setId> restored.` and exit code 0 (after a failure, follow [What a failure leaves behind](#what-a-failure-leaves-behind) instead and start nothing): `docker compose up -d --build`. The one-shot `migrate` service runs this release's `prisma migrate deploy` again (nothing is left to apply), and then `app`, `worker` and `backup` start.
 8. **Verify**: `curl http://localhost/api/health` should return `{"status":"ok",...}`.
 9. **Point DNS** at the new host and set `DOMAIN` in `.env` to your real domain, then `docker compose up -d caddy` — Caddy will automatically obtain a fresh Let's Encrypt certificate for the domain once ports 80/443 are reachable from the internet.
 
@@ -314,9 +314,9 @@ docker compose rm -s -f app worker backup
 #    ALTER DATABASE ... RENAME fails while any session is connected to it; then nothing changed.
 docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "ALTER DATABASE \"$POSTGRES_DB\" RENAME TO \"${POSTGRES_DB}_before_rollback\"" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
 
-# 6. Restore the pre-upgrade set into the empty database, then start the previous release.
-./scripts/restore.sh <pre-upgrade-setId> --yes
-docker compose up -d
+# 6. Restore the pre-upgrade set into the empty database; only when that succeeded, start the
+#    previous release (`&&`: a failed restore starts nothing).
+./scripts/restore.sh <pre-upgrade-setId> --yes && docker compose up -d
 ```
 
 Because the writers stop in step 1 before the backup in step 2, that set holds the whole state of the new release up to the stop, database and uploads together. The database renamed in step 5 holds the same database state, but not the uploads: the restore in step 6 replaces the uploads volume. So the step 2 set is what brings the new release back, and the renamed database is a second copy of its database only. Nothing written after the pre-upgrade set is lost while the step 2 set is kept.
@@ -334,9 +334,9 @@ git checkout <new-tag>
 docker compose build
 ./scripts/restore.sh <current-setId> --validate-only
 
-# c. Restore the database and the uploads of the step 2 set together, then start the new release.
-./scripts/restore.sh <current-setId> --yes
-docker compose up -d
+# c. Restore the database and the uploads of the step 2 set together; only when that succeeded,
+#    start the new release.
+./scripts/restore.sh <current-setId> --yes && docker compose up -d
 ```
 
 The same applies when the restore in step 6 stopped before it changed anything (exit code 4 or 6): the steps above bring the new release back from its own set. If step c fails as well, nothing is started: read its message, fix the cause and run step c again, as in [What a failure leaves behind](#what-a-failure-leaves-behind). No step of this procedure drops a database; `<db>_before_rollback` and `<db>_failed_restore` stay until you remove them.
