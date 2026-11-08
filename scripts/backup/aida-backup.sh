@@ -363,6 +363,7 @@ trap on_lease_lost USR1
 if restore_lock_present; then
   restore_skip
 fi
+pause_point after-lock-check || fail unknown
 
 # The set id comes first: the unrecorded-status file of any later failure is named by it.
 SET_ID=$(new_set_id) || SET_ID=''
@@ -433,6 +434,13 @@ if [ "$_lease" != acquired ]; then
   exit 3
 fi
 LEASE_HELD=1
+# Codex r3-5: a restore may have taken its lock after the check above (a one-off backup can wait
+# there for a long time); on an empty target its pg_restore then created the table this lease is
+# in. Check again now that the lease is held: under a restore lock the run stops here, and the
+# exit path releases this run's own lease row only.
+if restore_lock_present; then
+  restore_skip
+fi
 
 # The renewal's log lines (fixed text) reach the run's output; its errors go nowhere.
 renew_loop 2>/dev/null 7>&- &

@@ -43,7 +43,8 @@
 #      it writes anything, and writes `.restore-lock/target-touched` (`database`, then `uploads`)
 #      immediately before its first write to each target;
 #   8. on success, when the set is older than this release (step 4 said so): the database
-#      replacement removed every lease row, so the lease is taken again with the same holder on
+#      replacement removed the lease row the dump carried (only that row, or this restore's own:
+#      Codex r3-5), so the lease is taken again with the same holder on
 #      the restored database, and the release's one-shot `migrate` service runs `prisma migrate
 #      deploy` while the restore lock and the lease are held (K150, K154). On a failure (or a
 #      signal, which bash handles once the foreground migrate call has returned) nothing is

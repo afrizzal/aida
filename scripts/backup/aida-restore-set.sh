@@ -560,7 +560,21 @@ if [ "$_prc" -ne 0 ]; then
   fi
   rlog 'pg_restore: only the known benign pg-boss partition message; continuing'
 fi
-psql_q -c "DELETE FROM \"SystemSetting\" WHERE key = '${BACKUP_LEASE_KEY}'" >/dev/null ||
+pause_point restored-database || fail_database 'pause'
+# Codex r3-5: the dump carries the lease row of the backup that made this set (its holder is the
+# set id). Only that row, or one of this restore's own holder, is removed. A row of any other
+# holder belongs to a backup that passed its restore-lock check before this restore took the lock
+# and took its lease once pg_restore had created the table on an empty target; it is never
+# removed here. That backup checks the restore lock again right after its lease and stops
+# (aida-backup.sh), releasing its own row; and restore.sh cannot take the lease again for migrate
+# while it is held, so nothing is started on its account.
+psql_q -v setid="$SET_ID" -v holder="$RESTORE_HOLDER" >/dev/null <<SQL ||
+DELETE FROM "SystemSetting"
+WHERE key = '${BACKUP_LEASE_KEY}'
+  AND CASE WHEN value IS JSON OBJECT
+        THEN COALESCE((value::jsonb ->> 'holder') IN (:'setid', :'holder'), false)
+        ELSE false END;
+SQL
   fail_database 'could not remove the backup lease'
 _db_id=$(psql_q -c "SELECT value FROM \"SystemSetting\" WHERE key = '${UPLOADS_VOLUME_ID_KEY}'") ||
   fail_database 'could not read the restored volume identity'

@@ -50,7 +50,13 @@ export const TEST_TMP_ROOT = path.join(PROJECT_ROOT, ".test-tmp");
 const SCRIPT_DIR = path.join(PROJECT_ROOT, "scripts", "backup");
 const PACKAGE_JSON = path.join(PROJECT_ROOT, "package.json");
 
-export const PAUSE_POINTS = ["after-fence", "after-dump", "after-list", "after-archive"] as const;
+export const PAUSE_POINTS = [
+  "after-lock-check",
+  "after-fence",
+  "after-dump",
+  "after-list",
+  "after-archive",
+] as const;
 export type PausePoint = (typeof PAUSE_POINTS)[number];
 
 export const SET_ID_PATTERN = /^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}$/;
@@ -359,7 +365,7 @@ export async function startBackupRunner(opts: StartBackupRunnerOptions): Promise
 // ownership from the app image's /data/uploads, Dockerfile:93; a fresh volume in this image is
 // root-owned), and execAsRoot lets a case plant an entry not owned by 1000 (the U-16 refusal).
 
-export const RESTORE_PAUSE_POINTS = ["validating"] as const;
+export const RESTORE_PAUSE_POINTS = ["validating", "restored-database"] as const;
 export type RestorePausePoint = (typeof RESTORE_PAUSE_POINTS)[number];
 
 /** The restore target inside the restore runner. */

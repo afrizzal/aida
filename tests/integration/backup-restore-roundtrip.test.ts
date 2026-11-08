@@ -455,7 +455,7 @@ function runRestore(
   opts: {
     uploadsDir?: string;
     env?: Record<string, string>;
-    pauseAt?: readonly "validating"[];
+    pauseAt?: readonly ("validating" | "restored-database")[];
     mode?: "--check-schema" | "--validate-only";
   } = {},
 ): RestoreRun {
@@ -1662,6 +1662,72 @@ describe("restore lock and holder (Q3)", () => {
       if (i >= 0) heldLocks.splice(i, 1);
       // Nothing to break any more.
       expect((await breakStale(holder)).exitCode).toBe(1);
+    },
+    CASE_TIMEOUT,
+  );
+});
+
+describe("Codex r3-5: a backup that passed its lock check before a restore took the lock", () => {
+  const LEASE_HOLDER_SQL = `SELECT value::jsonb ->> 'holder' AS holder FROM "SystemSetting" WHERE key = 'backup:lease'`;
+
+  it(
+    "an empty target: a lease row another holder took once pg_restore created the table is left in place, and the set's own carried row is the only one removed",
+    async () => {
+      const c = await newCase();
+      const setId = await backupSucceeded(c, runBackup(c));
+      const target = await emptyTarget();
+      expect(
+        await query(target, `SELECT to_regclass('public."SystemSetting"')::text AS t`),
+      ).toEqual([{ t: null }]);
+      const runner = await newRestoreRunner(target);
+      const holder = newHolder();
+      await acquireLock(runner, c, holder);
+      const run = runRestore(runner, c, setId, holder, { pauseAt: ["restored-database"] });
+      await run.waitReached("restored-database");
+      // pg_restore created the table on the empty target, with the lease row the dump carried.
+      expect(await query(target, LEASE_HOLDER_SQL)).toEqual([{ holder: setId }]);
+      // That row has expired for a one-off backup that passed its lock check before this restore
+      // took the lock: the backup's lease_acquire takes the row over now (the same write).
+      const other = "20261112T020001Z-ffffff";
+      await query(
+        target,
+        `UPDATE "SystemSetting" SET value = json_build_object('holder', '${other}', 'expiresAt', to_char((now() + interval '900 seconds') AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))::text WHERE key = 'backup:lease'`,
+      );
+      await run.go("restored-database");
+      const result = await run.done;
+      expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(await query(target, LEASE_HOLDER_SQL)).toEqual([{ holder: other }]);
+      await releaseLock(runner, c, holder);
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "the backup checks the restore lock again right after its lease: it stops there (exit 3) and leaves no lease row",
+    async () => {
+      const c = await newCase();
+      const run = runBackup(c, ["after-lock-check", "after-fence"]);
+      await run.waitReached("after-lock-check");
+      // A restore takes its lock while the backup waits after its lock check.
+      const target = await newTargetDatabase();
+      const runner = await newRestoreRunner(target);
+      const holder = newHolder();
+      await acquireLock(runner, c, holder);
+      await run.go("after-lock-check");
+      const outcome = await Promise.race([
+        run.done.then((done) => ({ done })),
+        run.waitReached("after-fence", 60_000).then(
+          () => ({ reachedAfterFence: true }),
+          () => ({ reachedAfterFence: false }),
+        ),
+      ]);
+      if (!("done" in outcome)) await run.releaseAll();
+      const result = await run.done;
+      expect(outcome).toHaveProperty("done");
+      expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(3);
+      expect(`${result.stdout}${result.stderr}`).toContain("backup skipped: restore in progress");
+      expect(await prisma.systemSetting.count({ where: { key: "backup:lease" } })).toBe(0);
+      await releaseLock(runner, c, holder);
     },
     CASE_TIMEOUT,
   );
