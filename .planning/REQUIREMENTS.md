@@ -24,11 +24,11 @@ IDs continue at AIDA-25. AIDA-18 keeps its v1 ID.
 - [ ] **AIDA-34** `v2` — An admin can upload a workspace logo shown in the sidebar and on public pages, with the name-only fallback intact. [Charter] Accept: bytes are sniffed, SVG is rejected, the public serving route is listed in `src/proxy.ts` and throttled, and an E2E test covers upload, replace and fallback.
 - [ ] **AIDA-35** `v2` — A `POSTGRES_PASSWORD` containing URL-reserved characters works. [Charter] Accept: with a synthetic test password containing `/ @ : # ?`, a test checks the `DATABASE_URL` that `docker compose config` resolves for every service that uses one, programmatically and without printing it, and a stack booted with the same password connects from `migrate`, `app` and `worker`; no log or recorded evidence contains the password.
 - [ ] **AIDA-36** `v2` — Every app page has exactly one `<h1>`. [Charter] Accept: an E2E test asserts the count on every app route.
-- [ ] **AIDA-37** `v2` — Neither `pnpm db:seed` nor the `DEMO_MODE` boot can plant demo data or demo accounts in a database that holds anything else, and neither prints a password. [Charter, F-09, F-10] Accept: infrastructure data never counts: `_prisma_migrations`, the `pgboss` schema, `SystemSetting` (which the worker heartbeat writes every minute) and `RateLimitHit`. Tenant data is any `organization` or `user` row; every org-scoped row hangs off an organization, so this covers all of it. Before any write, `pnpm db:seed` refuses when tenant data exists. The `DEMO_MODE` boot seeds when no tenant data exists, skips when the only organization is the demo one and every user is a demo identity, and refuses otherwise (today `src/lib/demo/bootstrap-demo.ts` checks only the ticket count). Tests cover a fresh and a repeated demo boot after the heartbeat has run, and refusal by both paths on a database holding a non-demo organization or user with zero tickets, comparing the row count of every table before and after; `prisma/seed.ts` and `scripts/capture-demo-assets.ts` no longer print the password.
-- [ ] **AIDA-38** `v2` — Demo-boot idempotency, the seed guard and the backup/restore round trip are permanent regression tests. [Charter] Accept: they run from the repository test suites, not from one-off evidence in `07-VERIFICATION.md`.
-- [ ] **AIDA-39** `v2` — Phase 1 has a `01-VERIFICATION.md` built from evidence. [Charter] Accept: the file sits in `milestones/v1.0.0-phases/01-foundation/`, cites commands run at a named commit, and leaves human-only checks open rather than marking them passed.
+- [x] **AIDA-37** `v2` — Neither `pnpm db:seed` nor the `DEMO_MODE` boot can plant demo data or demo accounts in a database that holds anything else, and neither prints a password. [Charter, F-09, F-10] Accept: infrastructure data never counts: `_prisma_migrations`, the `pgboss` schema, `SystemSetting` (which the worker heartbeat writes every minute) and `RateLimitHit`. Tenant data is any `organization` or `user` row; every org-scoped row hangs off an organization, so this covers all of it. Before any write, `pnpm db:seed` refuses when tenant data exists. The `DEMO_MODE` boot seeds when no tenant data exists, skips when the only organization is the demo one and every user is a demo identity, and refuses otherwise (today `src/lib/demo/bootstrap-demo.ts` checks only the ticket count). Tests cover a fresh and a repeated demo boot after the heartbeat has run, and refusal by both paths on a database holding a non-demo organization or user with zero tickets, comparing the row count of every table before and after; `prisma/seed.ts` and `scripts/capture-demo-assets.ts` no longer print the password.
+- [x] **AIDA-38** `v2` — Demo-boot idempotency, the seed guard and the backup/restore round trip are permanent regression tests. [Charter] Accept: they run from the repository test suites, not from one-off evidence in `07-VERIFICATION.md`.
+- [x] **AIDA-39** `v2` — Phase 1 has a `01-VERIFICATION.md` built from evidence. [Charter] Accept: the file sits in `milestones/v1.0.0-phases/01-foundation/`, cites commands run at a named commit, and leaves human-only checks open rather than marking them passed.
 - [ ] **AIDA-40** `v2` — The repo-health items of SEED-010 ship. [Charter, SEED-010] Accept: `scripts/install.sh` is tested against a local stand-in for a release and makes no call beyond the documented download; `check-version` workflow, `AGENTS.md`, `CODEOWNERS` and README widgets exist, except any item that needs an owner account, which is recorded as a manual item.
-- [ ] **AIDA-41** `v2` — `STATE.md` contains no stale statement. [Charter] Accept: every open todo and caveat is re-checked against the repository and either corrected or removed.
+- [x] **AIDA-41** `v2` — `STATE.md` contains no stale statement. [Charter] Accept: every open todo and caveat is re-checked against the repository and either corrected or removed.
 
 ## Team and collaboration
 
@@ -152,15 +152,15 @@ Clean-room rule for this and every later section: `PIAGAM.md` → Clean-room. So
 | AIDA-30 | Phase 8, 8.1 | Split (throttles, follow-up size cap and limit-before-lookup verified in Part A; container healthcheck, Caddy pass-through and upstream probe refusal in Phase 8.1) |
 | AIDA-31 | Phase 8 | Complete (acceptance verified, `08-VERIFICATION.md`: all four call sites return a fixed category through `classifyConnectionError`; CR-01 closed by K127 and K131) |
 | AIDA-32 | Phase 8, 8.1 | Split (telemetry off in build and CI, no `next/font`, `addTag` gate and `sla-flag` comment verified in Part A; image runtime telemetry and `docs/SECURITY.md` reconciliation in Phase 8.1) |
-| AIDA-33 | Phase 9 | Pending |
-| AIDA-34 | Phase 9 | Pending |
-| AIDA-35 | Phase 9 | Pending |
-| AIDA-36 | Phase 9 | Pending |
-| AIDA-37 | Phase 9 | Pending |
-| AIDA-38 | Phase 9 | Pending |
-| AIDA-39 | Phase 9 | Pending |
-| AIDA-40 | Phase 9 | Pending |
-| AIDA-41 | Phase 9 | Pending |
+| AIDA-33 | Phase 9 | Open (host clauses verified, `09-VERIFICATION.md` human_needed 6/6; stack proofs SP-1 and SP-2 not run until the Phase 8.1 harness and the owner) |
+| AIDA-34 | Phase 9 | Open (code verified, `09-VERIFICATION.md` human_needed 6/6; the logo look in light and dark waits for a human) |
+| AIDA-35 | Phase 9 | Open (compose URL guard verified, `09-VERIFICATION.md` human_needed 6/6; stack proof SP-3 not run) |
+| AIDA-36 | Phase 9 | Open (one h1 per rendered route state verified by E2E, `09-VERIFICATION.md` human_needed 6/6; unrendered route states and the screen-reader check remain) |
+| AIDA-37 | Phase 9 | Complete (acceptance verified, `09-VERIFICATION.md` human_needed 6/6; refusal without deletion, owner item 3) |
+| AIDA-38 | Phase 9 | Complete (acceptance verified, `09-VERIFICATION.md` human_needed 6/6; demo-boot, seed-guard and backup round trip in the default integration suite) |
+| AIDA-39 | Phase 9 | Complete (acceptance verified, `09-VERIFICATION.md` human_needed 6/6; `01-VERIFICATION.md` built from evidence, human checks left open) |
+| AIDA-40 | Phase 9 | Open (installer, check-version, version 1.0.0, CODEOWNERS, AGENTS.md verified, `09-VERIFICATION.md` human_needed 6/6; README widgets not added by owner decision; the clean-VM installer run waits for a human) |
+| AIDA-41 | Phase 9 | Complete (acceptance verified, `09-VERIFICATION.md` human_needed 6/6, after the STATE update `be5b26f`) |
 | AIDA-42 | Phase 10 | Pending |
 | AIDA-43 | Phase 10 | Pending |
 | AIDA-44 | Phase 10 | Pending |

@@ -1,8 +1,8 @@
 ---
 phase: 09-operations
-verified: 2026-11-12T17:01:15Z
-status: gaps_found
-score: 5/6 success criteria verified at host level (SC5 failed on STATE.md; stack clauses of SC1 and SC3 not proven, U-15)
+verified: 2026-11-12T17:03:15Z
+status: human_needed
+score: 6/6 success criteria verified at host level (stack clauses of SC1 and SC3 not proven, U-15)
 covered_files:
   - ".planning/REQUIREMENTS.md"
   - ".planning/STATE.md"
@@ -52,26 +52,18 @@ covered_files:
   - "src/lib/projects/file-cleanup.ts"
   - "src/lib/storage/file-fence.ts"
   - "src/lib/tenant-seed-lock.ts"
-covered_digest: "v1:sha256:82c44268f061a999477691d95456666ae9b2a494c6ab14c1985942f85d68a475"
+covered_digest: "v1:sha256:b66e925b8ae200c485f7db3d56b3830133ceaa21373573f34501e485aa9f0548"
 behavior_unverified: 0
 overrides_applied: 0
-gaps:
-  - truth: "SC5 (AIDA-41): STATE.md has no stale statement"
-    status: failed
-    reason: "The orchestrator-owned sections of STATE.md describe the run as it stood after fix batch F3 and before the gate rerun. HEAD has F4 to F7 and the gate rerun at 38ef41a. The gate itself records this row as open (orchestrator)."
-    artifacts:
-      - path: ".planning/STATE.md"
-        issue: "line 8 stopped_at: 'F1 to F3 done ... next F4'; F7 and the gate rerun are done"
-      - path: ".planning/STATE.md"
-        issue: "line 9 last_updated 2026-11-12T13:58Z and line 12 state_head ea50f35; 45 commits have landed since ea50f35"
-      - path: ".planning/STATE.md"
-        issue: "line 33 Current Position: 'step 6 done ... Next: step 7'; step 8 (gate rerun) is done"
-      - path: ".planning/STATE.md"
-        issue: "line 34 and front matter last_activity_desc: cite only the first gate at 2c75680 (unit 1646, integration 1500, E2E 260), not the rerun at 38ef41a (unit 1730, integration 1559, E2E 261)"
-      - path: ".planning/STATE.md"
-        issue: "line 129 Session Continuity: 'Stopped at: ... F1 to F3 done, next F4'"
-    missing:
-      - "The orchestrator updates the front matter, Current Position and Session Continuity of STATE.md to the post-rerun state. This is a records change, not a code change."
+re_verification:
+  previous_status: gaps_found
+  previous_score: 5/6
+  scope: "SC5 / AIDA-41 only, against STATE.md at be5b26f"
+  gaps_closed:
+    - "SC5 (AIDA-41): STATE.md has no stale statement. Commit be5b26f brought the front matter (status, stopped_at, last_updated, last_activity_desc, state_head 0af2bf8), Current Position (lines 33-36) and Session Continuity (lines 127-134) up to step 9 after the gate rerun at 38ef41a"
+  gaps_remaining: []
+  regressions: []
+gaps: []
 deferred: []
 human_verification:
   - test: "Logo look in the sidebar, the Branding preview, /request and /status/[token], light and dark (D-11)"
@@ -101,8 +93,8 @@ human_verification:
 
 **Phase goal:** A self-hoster can run AIDA unattended: backups happen on their own, the known boot and seed traps are fixed and pinned by tests, and the planning records tell the truth.
 **Verified:** 2026-11-12T17:01:15Z, at HEAD `0af2bf8`. `git diff 38ef41a HEAD -- . ':!.planning'` is empty (checked again here), so the code is the code the gate rerun tested.
-**Status:** gaps_found. The one gap is in the records (STATE.md), not in code.
-**Re-verification:** No. This is the first verification.
+**Status:** human_needed. Every must-have is met in the code and records; only human and not-run items remain.
+**Re-verification:** Yes, for SC5 / AIDA-41 only, after the orchestrator updated STATE.md in `be5b26f` (previous status gaps_found, 5/6).
 
 ## Goal Achievement
 
@@ -114,10 +106,10 @@ human_verification:
 | 2 | A logo uploads, shows in the sidebar and on public pages, and falls back to the name | VERIFIED (look open for a human) | Bytes are sniffed with `fileTypeFromBuffer` and SVG is refused (`logo-validate.ts:23,53-59`). The public route throttles before any parameter work, serves only the current version, and sends nosniff and immutable cache headers (`api/public/logo/[orgId]/[version]/route.ts:27-50`). The `(app)/layout.tsx:44-58` passes `logoUrl` to `Sidebar` and then `BrandMark`. `request/page.tsx:15` and `status/[token]/page.tsx:58` use `loadPublicBrand`; an invalid token gets `brand={null}` (`:37`). Replace and remove take the per-org advisory lock and enqueue the old key (`logo-store.ts:68,113,137`). `tests/e2e/logo.spec.ts` passed in E2E run 2 (261). |
 | 3 | A password containing `/ @ : # ?` connects from every service, and every app page has exactly one `<h1>` | VERIFIED (host); stack clause not proven | `docker-compose.yml:42-45,65-68,123-126` give the same `AIDA_DATABASE_URL` fallback plus `AIDA_EXPECT_DB_*` to migrate, app and worker. The guard runs in `src/instrumentation.ts:6-8`, `src/lib/worker/index.ts:26`, and the migrate command (`docker-compose.yml:29`). `compose-database-url.test.ts` passed (integration). The top-bar title is a `<p>` (`top-bar.tsx:44`). `single-h1.spec.ts` passed in E2E run 2, and `single-h1-route-list.test.ts` pins the route list (unit run here). The booted stack (SP-3) is not proven. Some route states are not rendered by any test (AIDA-36 open part). |
 | 4 | Neither `pnpm db:seed` nor the `DEMO_MODE` boot writes into a database with non-demo tenant data; a repeated demo boot works after the heartbeat; no password printed; the tests live in the repository suites | VERIFIED | `classifyTenantData` (`tenant-guard.ts`) reads only organization, user and the marker Setting, and returns empty, demo-complete, demo-partial or foreign. `runGuardedDemoSeed` seeds only when the database is empty, under `withTenantSeedLock`, and writes the marker last. `bootstrap-demo.ts` and `prisma/seed.ts:25` both call it. `bootstrap.ts:96` and `setup/actions.ts:49` take the same lock. There is no `delete`/`deleteMany` in `src/lib/demo/` or `prisma/seed.ts` (grep exit 1), which keeps the owner rule "refuses, never deletes". Output names only the environment variable, not the password (`seed.ts:32`, `bootstrap-demo.ts:33`); errors log only the error shape. `capture-demo-assets.ts:811` redacts. `demo-boot.test.ts` and `seed-guard.test.ts` have no `.skip`, `.only` or `skipIf`, and they sit in `vitest.integration.config.ts` (include `tests/integration/**`; only `egress-isolation` is excluded). |
-| 5 | `01-VERIFICATION.md` exists and is backed by evidence, and `STATE.md` has no stale statement | FAILED | The first half holds: `.planning/milestones/v1.0.0-phases/01-foundation/01-VERIFICATION.md` exists, cites the 40-character commits it ran at, records criterion 1 as open-human and criterion 2 as failed, and marks no human check passed. The second half does not: STATE.md lines 8, 9, 12, 33, 34 and 129 describe the run before F4 (see Gaps). |
+| 5 | `01-VERIFICATION.md` exists and is backed by evidence, and `STATE.md` has no stale statement | VERIFIED (re-checked at `be5b26f`) | The first half holds: `.planning/milestones/v1.0.0-phases/01-foundation/01-VERIFICATION.md` exists, cites the 40-character commits it ran at, records criterion 1 as open-human and criterion 2 as failed, and marks no human check passed. The second half now holds too: at `be5b26f` STATE.md line 8 says step 9 (verification) after the gate rerun at 38ef41a, line 12 `state_head: 0af2bf8`, lines 33-34 cite the rerun (unit 1730, integration 1559, E2E 261), and line 129 says step 9. A grep for the stale phrases (next F4, step 6, step 7, 1646, 1500, E2E 260, ea50f35, next 09-11) finds nothing. Line 84 cites the first gate's build at `2c75680` as history; it is still accurate, because the rerun printed the same 5 warnings. |
 | 6 | `scripts/install.sh`, `check-version`, `AGENTS.md`, `CODEOWNERS` and the README widgets exist, or an owner-account item is recorded as manual | VERIFIED | `install.sh:157` is the only `curl` or `wget` call (https only). `check-version.yml` uses `ubuntu-latest`, runs on push, pull_request and workflow_dispatch, has no `schedule:`, and sets `permissions`. `package.json` has `"version": "1.0.0"`. `.github/CODEOWNERS` is `* @afrizzal`, the owner's handle from item 13. `AGENTS.md` has no handle and no home path (grep exit 1). No README widget was added: the three badges at `README.md:11-13` date from `b96120b` (2026-08-03), before this phase. `LAUNCH.md:57,62` records the bump policy as an open owner item and the "widgets not added" owner decision. The clean-VM installer run is left for a human. |
 
-**Score:** 5/6 truths verified at host level, 0 present-but-behavior-unverified. SC5 failed. The stack clauses of SC1 and SC3 are not proven (U-15) and count as not-run items, not as gaps.
+**Score:** 6/6 truths verified at host level, 0 present-but-behavior-unverified. The stack clauses of SC1 and SC3 are not proven (U-15) and count as not-run items, not as gaps.
 
 ### Required Artifacts
 
@@ -166,7 +158,7 @@ There is no `scripts/*/tests/probe-*.sh` in this phase. The stack proofs SP-1 to
 | AIDA-38 | closable | The demo-boot, seed-guard and round-trip tests are in the default integration suite, with no skips. |
 | AIDA-39 | closable | `01-VERIFICATION.md` is evidence-backed and leaves human checks open. |
 | AIDA-40 | open | The artifacts are verified and the widgets were not added by owner decision. The clean-VM installer run waits for a human. |
-| AIDA-41 | open (gap) | STATE.md orchestrator-owned sections are stale (see Gaps). |
+| AIDA-41 | closable | Executor-owned sections were re-checked in 09-03 and 09-11. The orchestrator-owned sections are current at `be5b26f` (re-checked here). |
 
 No orphaned requirements: all nine IDs are claimed by plans.
 
@@ -180,9 +172,9 @@ These items are listed in the `human_verification` front matter: the logo look, 
 
 ### Gaps Summary
 
-There is one gap, and it is in the records. The phase code achieves the host-side goal: backups, the fence, retention, restore, the seed and demo guards that refuse without deleting, the password URL guard, the logo, the h1 work and the repo-health files. All of it is present, wired and covered by suites that passed on this exact code. STATE.md, though, still describes the run after fix batch F3 (lines 8, 9, 12, 33, 34, 129). So SC5's "STATE.md has no stale statement" is false at HEAD. The orchestrator can close it with a STATE.md update; no code change is needed. Once that is done, the remaining items are all human or not-run items, and the status would become `human_needed`.
+None remain. The one gap of the first pass (stale orchestrator-owned STATE.md sections) was closed by `be5b26f` and re-checked here. The phase code achieves the host-side goal. What is left is human or not-run work: the stack proofs SP-1 to SP-3 (U-15), the visual, dark-mode and screen-reader checks, the clean-VM installer run, the AIDA-36 route states no test renders, and the owner items.
 
 ---
 
-_Verified: 2026-11-12T17:01:15Z_
+_Verified: 2026-11-12T17:01:15Z; SC5 re-checked 2026-11-12T17:03:15Z at be5b26f_
 _Verifier: Claude (gsd-verifier)_

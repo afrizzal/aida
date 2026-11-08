@@ -31,7 +31,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 - [ ] **Phase 8: Security Hardening** — Dependency audit to zero critical and high, non-root containers, CSP, trusted client IP, public-route abuse controls
 - [ ] **Phase 8.1: Docker test tooling and runtime proofs** — Split from Phase 8 after plan review cycle 4 (owner decision 2026-11-11): container harness, runtime proofs, full gate, CI egress job; waits for owner (`08-SPLIT.md`)
-- [ ] **Phase 9: Operations** — Backup schedule, logo upload, password encoding, single `<h1>`, seed guard, permanent regression tests, repo health
+- [ ] **Phase 9: Operations** (executed, verified human_needed 2026-11-12) — Backup schedule, logo upload, password encoding, single `<h1>`, seed guard, permanent regression tests, repo health
 - [ ] **Phase 10: Team** — Invitations and roles, notifications and mentions
 - [ ] **Phase 11: Inbox** — Saved views, bulk actions, command palette, keyboard inbox, auto-close
 - [ ] **Phase 12: Ticket Lifecycle** — Relations, merge, snooze and the activity feed (split K32)
