@@ -32,7 +32,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 - [ ] **Phase 8: Security Hardening** — Dependency audit to zero critical and high, non-root containers, CSP, trusted client IP, public-route abuse controls
 - [ ] **Phase 8.1: Docker test tooling and runtime proofs** — Split from Phase 8 after plan review cycle 4 (owner decision 2026-11-11): container harness, runtime proofs, full gate, CI egress job; waits for owner (`08-SPLIT.md`)
 - [ ] **Phase 9: Operations** (executed, verified human_needed 2026-11-12) — Backup schedule, logo upload, password encoding, single `<h1>`, seed guard, permanent regression tests, repo health
-- [ ] **Phase 10: Team** — Invitations and roles, notifications and mentions
+- [ ] **Phase 10: Team** (replanned 2026-11-13, 17 plans, plan checker passed; execution next) — Invitations and roles, notifications and mentions
 - [ ] **Phase 11: Inbox** — Saved views, bulk actions, command palette, keyboard inbox, auto-close
 - [ ] **Phase 12: Ticket Lifecycle** — Relations, merge, snooze and the activity feed (split K32)
 - [ ] **Phase 12.1: Ticket Lifecycle** — Custom states with SLA pause
@@ -193,40 +193,44 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 5. Preferences apply, and the digest sends one batched email through a fake SMTP with no PII in the subject.
 
 **Stays open for a human:** a test with real email.
-**Plans:** 0/16 plans complete
+**Plans:** 0/17 plans complete (replanned 2026-11-13 after the owner unparked the phase: 16 plans rewritten in place, 10-17 new; plan checker passed with info notes only, plus a second pass tracing drift items D1 to D43 and the cycle 3 findings; no further Codex plan review per owner item 2)
 **Wave 1**
 
-- [ ] 10-01-PLAN.md — Lay the whole Phase 10 data foundation in one migration so later waves never edit the schema in parallel (Wave 1)
-- [ ] 10-02-PLAN.md — Build the one membership-checking helper every data path uses (D-08) and close the Better Auth bypasses (D-02) (Wave 1)
-- [ ] 10-15-PLAN.md — Close the Better Auth organization and admin plugin endpoints over HTTP (D-02) and open /invite with no referrer (D-04, D-05) (Wave 1)
+- [ ] 10-01-PLAN.md — Lay the whole Phase 10 data foundation in one migration (`20261115100000_team_foundation`) and the shared workspace-member modules (Wave 1)
+- [ ] 10-02-PLAN.md — Build the server half of the one membership gate (D-08, V-23): uncached session read, membership re-read, page helper and `/no-access` (V-27) (Wave 1)
+- [ ] 10-15-PLAN.md — Close the Better Auth organization and admin plugin endpoints over HTTP (D-02, V-03) and open `/invite` with no referrer through the CSP path (Wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 10-03-PLAN.md — Implement the server-side team administration service (AIDA-43): list members, change roles, deactivate (Wave 2)
-- [ ] 10-04-PLAN.md — Build the entity-generic notification core (AIDA-44) with per-type preferences and explicit defaults (D-22) (Wave 2)
-- [ ] 10-05-PLAN.md — Implement the invitation service (AIDA-42): role ceilings, hashed token, 7-day expiry, revoke, safe accept (Wave 2)
-- [ ] 10-16-PLAN.md — Give the public status-token path one named lookup helper and make the inventory's public-token rule a real check (D-08) (Wave 2)
+- [ ] 10-03-PLAN.md — Implement the team administration service (AIDA-43): list members, change roles, deactivate, owner floor under the organization lock (D-09) (Wave 2)
+- [ ] 10-04-PLAN.md — Build the entity-generic notification core (AIDA-44): idempotent writes in the caller's transaction, scoped reads, the unassigned fallback marker (V-28) (Wave 2)
+- [ ] 10-16-PLAN.md — Give the two status-token POST routes one named lookup (V-11) and make the inventory's public-token rule a real check (Wave 2)
+- [ ] 10-17-PLAN.md — Wire the page helper of 10-02 into every protected render entry so a removed member lands on `/no-access` (V-27) (Wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 10-06-PLAN.md — Wire the notification producers (AIDA-44): assignment, every customer-reply path and SLA transitions (Wave 3)
-- [ ] 10-07-PLAN.md — Implement mentions on the server (AIDA-45): member-validated ids, sanitized rendering, internal notes only (Wave 3)
-- [ ] 10-08-PLAN.md — Build the invitation landing page and its join flows (AIDA-42, D-05) (Wave 3)
-- [ ] 10-09-PLAN.md — Deliver the batched email digest (AIDA-46): leased scheduled job, one PII-free email per recipient (Wave 3)
-- [ ] 10-10-PLAN.md — Build Settings → Team (AIDA-43, AIDA-42 UI): members, invite dialog, pending invitations, per UI-SPEC (Wave 3)
+- [ ] 10-05-PLAN.md — Implement the invitation service (AIDA-42): role ceilings, hashed token, 7-day expiry, revoke, one locked accept transaction (Wave 3)
+- [ ] 10-06-PLAN.md — Wire the notification producers (AIDA-44): assignment in the ticket mutation service (V-08), customer replies with the unassigned fallback, SLA transitions (Wave 3)
+- [ ] 10-07-PLAN.md — Implement mentions on the server (AIDA-45): member-validated ids in the message transaction, sanitized rendering, internal notes only (Wave 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 10-11-PLAN.md — Ship the in-app surfaces for AIDA-44 and AIDA-46: the top-bar bell and Settings → Notifications (Wave 4)
+- [ ] 10-08-PLAN.md — Build the invitation landing page and its join flows (AIDA-42, D-05) through one Origin-checked POST route (V-24) (Wave 4)
+- [ ] 10-09-PLAN.md — Deliver the batched email digest (AIDA-46): leased scheduled job, one PII-free email per recipient, sender deadline (V-29) (Wave 4)
+- [ ] 10-10-PLAN.md — Build Settings → Team (AIDA-43, AIDA-42 UI): members, invite dialog, pending invitations, per UI-SPEC (Wave 4)
 - [ ] 10-12-PLAN.md — Add the member autocomplete to the internal-note composer (AIDA-45, UI-SPEC Surface 4) (Wave 4)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 10-13-PLAN.md — Prove the phase's acceptance criteria in the real UI (AIDA-42 to AIDA-46) (Wave 5)
+- [ ] 10-11-PLAN.md — Ship the in-app surfaces of AIDA-44 and AIDA-46: the top-bar bell and Settings → Notifications (Wave 5)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 10-14-PLAN.md — Run the phase gate and the §9 design checklist, record evidence per requirement, list what stays open (Wave 6)
+- [ ] 10-13-PLAN.md — Prove the phase's acceptance criteria in the real UI (AIDA-42 to AIDA-46) (Wave 6)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 10-14-PLAN.md — Run the phase gate and the §9 design checklist, record evidence per requirement, list what stays open (Wave 7)
 
 ### Phase 11: Inbox
 
@@ -554,15 +558,15 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |---|---|---|---|---|
-| 8. Security Hardening | v2.0 | 0/23 | Parked (Codex plan review cycle 3 left HIGH findings; owner decision) | - |
-| 9. Operations | v2.0 | 0/11 | Parked (Codex plan review cycle 3 left a HIGH finding; owner decision) | - |
-| 10. Team | v2.0 | 0/16 | Parked (Codex plan review cycle 3 left HIGH findings; owner decision) | - |
+| 8. Security Hardening | v2.0 | 18/18 (Part A) | Part A verified: human_needed (2026-11-12); Part B moved to Phase 8.1, waits for owner | - |
+| 9. Operations | v2.0 | 13/13 | Verified: human_needed (stack proofs SP-1 to SP-3 and human checks open) | - |
+| 10. Team | v2.0 | 0/17 | Planned (replanned 2026-11-13; plan checker passed); execution next | - |
 | 11. Inbox | v2.0 | 9/9 | Verified: human_needed (visual, dark mode, 360px and screen-reader checks open) | - |
 | 12. Ticket Lifecycle (relations, merge, snooze, activity) | v2.0 | 10/10 | Verified: human_needed (visual, dark mode, layout widths and screen-reader checks open; AIDA-53 closed by owner decision 12-o1 on 2026-11-11) | - |
 | 12.1. Ticket Lifecycle (custom states, SLA pause) | v2.0 | 17/17 | Verified: human_needed (visual, dark mode, contrast by eye, screen reader and UAT open; K47 deferred) | - |
 | 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 12/12 | Verified: human_needed (visual, dark mode, screen reader, UI-SPEC amendments A1 to A8 and UAT open; owner items 12.2-o1 to 12.2-o4) | - |
-| 13. Integrations | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
+| 13. Integrations | v2.0 | 0/0 | Not started (runs after Phase 10) | - |
 | 14. Projects Foundation | v2.0 | 13/13 | Verified: human_needed (owner items 14-o1, 14-o2, 14-o3; O-1 suites blocked) | - |
 | 15. Work Views | v2.0 | 0/0 | Not started | - |
-| 16. Workspace | v2.0 | 0/0 | Parked (depends on parked Phase 10) | - |
-| 17. Unification | v2.0 | 0/0 | Parked (depends on parked Phases 10, 13 and 16) | - |
+| 16. Workspace | v2.0 | 0/0 | Not started (needs Phases 10, 14 and 15) | - |
+| 17. Unification | v2.0 | 0/0 | Not started (needs Phases 13 to 16) | - |
