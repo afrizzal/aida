@@ -27,6 +27,9 @@ export type ActiveOrgAccess = {
  * row in one organization. findConservativeMembership reads every row in id order and returns an
  * admin role only when EVERY row is owner or admin; a single unordered row could be either.
  *
+ * The session read is fresh (Phase 10, V-23): requireSession reads through getCurrentSession and
+ * readFreshSession, so the active organization never comes from the cookie cache.
+ *
  * Redirects to /login without a session (requireSession). Uses bare `prisma` (never scopedDb):
  * Better Auth's `member` model has no organizationId allowlist entry in scopedDb (see
  * src/lib/scoped-db.ts).

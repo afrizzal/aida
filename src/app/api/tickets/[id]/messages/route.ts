@@ -11,7 +11,7 @@ import { recordAuditEvent } from "@/lib/audit/record-audit-event";
 import { getEmailSettings } from "@/lib/channels/email/settings";
 import { resolveActiveProvider } from "@/lib/llm/active-provider";
 import { renderMarkdown } from "@/lib/markdown/render";
-import { findActiveMembership } from "@/lib/membership";
+import { AccessDeniedError, findActiveMembership } from "@/lib/membership";
 import { getBoss } from "@/lib/queue/boss-client";
 import { getScopedDb } from "@/lib/session";
 import { getAgentMessageObserver, lockTicketForAgentWrite } from "@/lib/tickets/merge";
@@ -23,20 +23,25 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // getScopedDb() redirects (next/navigation redirect()) when unauthenticated — that
   // throw is caught here and converted into a clean 401 for this fetch-based endpoint,
   // rather than letting a raw redirect response reach the composer's fetch() call.
+  // Phase 10 (D-08, AIDA-43): getScopedDb throws AccessDeniedError when the session has no active
+  // organization or the user holds no member row in it; that is a 403, never a 401.
   let scoped: Awaited<ReturnType<typeof getScopedDb>>;
   try {
     scoped = await getScopedDb();
-  } catch {
+  } catch (err) {
+    if (err instanceof AccessDeniedError) {
+      return NextResponse.json({ error: "membership_ended" }, { status: err.status });
+    }
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { db, orgId, session } = scoped;
 
-  // D-01 (Codex diff round 1, D2): getScopedDb does not check the member row, so a user removed
-  // from the organization whose session still names it is refused here, first, before the
-  // ticket, the body, the email settings or any file is read or staged. A removed member gets
-  // the same 403 for an existing id, a missing id and an invalid body, so this route is no
-  // oracle for the former organization's ticket ids. The check inside the transaction below
-  // stays: it covers a removal that commits after this read.
+  // D-01 (Codex diff round 1, D2): a user removed from the organization whose session still names
+  // it is refused before the ticket, the body, the email settings or any file is read or staged:
+  // getScopedDb above already re-reads the member rows (Phase 10), and this check stays as the
+  // pre-transaction guard. A removed member gets the same 403 for an existing id, a missing id
+  // and an invalid body, so this route is no oracle for the former organization's ticket ids. The
+  // check inside the transaction below stays: it covers a removal that commits after this read.
   if (!(await findActiveMembership(db, session.user.id, orgId))) {
     return NextResponse.json({ error: "MEMBERSHIP_ENDED" }, { status: 403 });
   }
