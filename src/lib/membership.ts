@@ -115,8 +115,10 @@ export interface MembershipLockClient {
  * and a demotion or a delete of any of those rows waits for the publish. null when there is no
  * row.
  *
- * Only publishProposal (src/lib/kb/proposal-review.ts) uses it, as its transaction's first
- * statement. findActiveMembership above is unchanged and stays the plain read of the paths of earlier
+ * publishProposal (src/lib/kb/proposal-review.ts) uses it as its transaction's first statement,
+ * and runTicketMutation (src/lib/tickets/mutations.ts, Phase 10, V-25) reads the assignee with it
+ * before the ticket lock, so a deactivation's delete of those rows waits for the assignment.
+ * findActiveMembership above is unchanged and stays the plain read of the paths of earlier
  * phases; the other new 12.2 paths use findConservativeMembership (run decision K59).
  */
 export async function shareLockActiveMembership(

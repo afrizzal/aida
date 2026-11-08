@@ -6,10 +6,13 @@
 // Order inside the transaction, always:
 //   1. hooks.onTransactionStart (test seam only)
 //   2. the actor's member row (findActiveMembership), refused with MEMBERSHIP_ENDED (D-01)
-//   3. the operation's references (assignee membership, tag in the organization; for a state
-//      change the target state read FOR SHARE with shareLockActiveState, refused with
-//      STATE_NOT_FOUND when it is missing, soft-deleted or another organization's: D-15 amended,
-//      the state lock always precedes the ticket lock)
+//   3. the operation's references (tag in the organization; for an assignment every member row
+//      of the assignee read FOR SHARE in id order with shareLockActiveMembership, refused with
+//      MEMBER_NOT_ACTIVE when there is none (Phase 10, V-25: a concurrent deactivation's delete of
+//      those rows waits for this transaction, and an assignment that waited behind a committed
+//      deactivation sees no row); for a state change the target state read FOR SHARE with
+//      shareLockActiveState, refused with STATE_NOT_FOUND when it is missing, soft-deleted or
+//      another organization's: D-15 amended; both share locks always precede the ticket lock)
 //   4. one SELECT … FROM "Ticket" WHERE "organizationId" = actor org ORDER BY id FOR UPDATE over
 //      every ticket: one statement on the ticket table alone (no join, so no state row is
 //      locked), locking in ascending id and waiting for rows held by others. The sla-flag worker
@@ -19,9 +22,15 @@
 //      also needs priority, assigneeId, createdAt and the SLA columns.
 //   5. a state change refuses the whole payload with MERGED_SOURCE when any locked ticket is a
 //      merged source (Phase 12, D-07, D-08; Codex diff critique round 1, D1)
-//   6. the current groups of the locked tickets (readStateGroups), then `now`, read after the
-//      lock (hooks.clock in tests, D-16, D-17)
-//   7. per locked ticket, in id order: apply, audit, hooks.afterItem (test seam only)
+//   6. the current groups of the locked tickets (readStateGroups; for a state change, and for a
+//      conditional assignment), then `now`, read after the lock (hooks.clock in tests, D-16, D-17)
+//   7. per locked ticket, in id order: apply, audit, hooks.afterItem (test seam only). A
+//      conditional assignment (assign op with `onlyIfAssignedTo`, Phase 10, V-25: set only by
+//      reassignOpenTickets in workspace-members/member-admin.ts) skips a ticket whose locked row is
+//      no longer assigned to that user or whose current group is RESOLVED or CLOSED: no update, no
+//      audit row, no afterItem; the ok result then carries `skipped` (the count of such tickets,
+//      0 included) and `count` is the number of tickets changed. Without `onlyIfAssignedTo` the
+//      result has no `skipped` key and behaves exactly as before.
 //
 // A state change goes through applyStateTransition (state-transition.ts): lifecycle effects
 // (resolvedAt, flags, SLA pause) fire only when the group changes (D-11, D-16). Its audit row is
@@ -31,10 +40,14 @@
 // RETURNED as { ok: false, error: code }. Any other error (database, or one thrown by a test
 // hook) rolls the transaction back and is RETHROWN unchanged.
 //
-// Membership guarantee (Codex review C7): the member row is a plain read before any reference
-// check, lock or write. A removal committed before that read refuses the mutation. A removal
-// committed after it neither blocks nor undoes the mutation, which completes as the last act of
-// a member who was active when it was authorized. Nothing stronger is claimed.
+// Membership guarantee (Codex review C7): the ACTOR's member row is a plain read before any
+// reference check, lock or write. A removal committed before that read refuses the mutation. A
+// removal committed after it neither blocks nor undoes the mutation, which completes as the last
+// act of a member who was active when it was authorized. Nothing stronger is claimed for the
+// actor. The ASSIGNEE's rows are share-locked in step 3 (V-25), so an assignment and a
+// deactivation of its assignee serialise: assignment first, the deactivation waits and then
+// removes the member (the ticket keeps the former member as assignee, D-07); deactivation first,
+// the assignment is refused with MEMBER_NOT_ACTIVE.
 //
 // Privacy (AIDA-48): audit before/after carry ids, enum values and booleans only.
 //
@@ -43,7 +56,7 @@
 import { randomUUID } from "node:crypto";
 import type { Prisma, TicketPriority } from "../../generated/prisma/client";
 import { prisma } from "../db";
-import { findActiveMembership } from "../membership";
+import { findActiveMembership, shareLockActiveMembership } from "../membership";
 import { DEFAULT_SLA_TARGETS, type SlaTargets } from "./sla";
 import { applyStateTransition, pausedDueTimestamps } from "./state-transition";
 import type { TicketAuditSnapshot } from "./ticket-audit";
@@ -58,6 +71,13 @@ import {
 /** The most unique ticket ids one call may change (D-08). */
 export const MAX_BULK_TICKETS = 100;
 
+/**
+ * The state groups of a ticket that is no longer open (Phase 10, D-07 as defined 2026-11-08): a
+ * ticket is open when its current state's group is neither of these. A conditional assignment
+ * skips such a ticket, and workspace-members/member-admin.ts counts and lists open tickets with it.
+ */
+export const FINISHED_STATE_GROUPS: readonly StateGroup[] = ["RESOLVED", "CLOSED"];
+
 const TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: 30_000 } as const;
 
 const TICKET_PRIORITIES = [
@@ -70,7 +90,16 @@ const TICKET_PRIORITIES = [
 const MAX_STATE_ID_LENGTH = 128;
 
 export type TicketOp =
-  | { kind: "assign"; assigneeId: string | null }
+  | {
+      kind: "assign";
+      assigneeId: string | null;
+      /**
+       * Phase 10, V-25: change a ticket only when its locked row is still assigned to this user
+       * and still open; skip it otherwise. Set only by reassignOpenTickets; the inbox bulk action
+       * and the ticket page never pass it.
+       */
+      onlyIfAssignedTo?: string;
+    }
   | { kind: "state"; stateId: string }
   | { kind: "priority"; priority: TicketPriority }
   | { kind: "addTag"; tagId: string }
@@ -105,7 +134,8 @@ export class TicketMutationError extends Error {
 }
 
 export type TicketMutationResult =
-  | { ok: true; count: number; batchId: string | null }
+  /** `skipped` is present only for a conditional assignment (`onlyIfAssignedTo`). */
+  | { ok: true; count: number; batchId: string | null; skipped?: number }
   | { ok: false; error: TicketMutationErrorCode };
 
 export interface TicketMutationInput {
@@ -153,7 +183,9 @@ function validateInput(ticketIds: readonly string[], op: TicketOp): string[] {
   let valid: boolean;
   switch (op?.kind) {
     case "assign":
-      valid = op.assigneeId === null || isNonEmptyString(op.assigneeId);
+      valid =
+        (op.assigneeId === null || isNonEmptyString(op.assigneeId)) &&
+        (op.onlyIfAssignedTo === undefined || isNonEmptyString(op.onlyIfAssignedTo));
       break;
     case "state":
       valid = isNonEmptyString(op.stateId) && op.stateId.length <= MAX_STATE_ID_LENGTH;
@@ -177,7 +209,7 @@ function validateInput(ticketIds: readonly string[], op: TicketOp): string[] {
 
 /** The operation with its references resolved once for the whole payload. */
 type ResolvedOp =
-  | { kind: "assign"; assigneeId: string | null }
+  | { kind: "assign"; assigneeId: string | null; onlyIfAssignedTo: string | null }
   | { kind: "state"; stateId: string; group: StateGroup }
   | { kind: "priority"; priority: TicketPriority; targets: SlaTargets }
   | { kind: "addTag"; tagId: string }
@@ -196,10 +228,15 @@ async function resolveOp(
   switch (op.kind) {
     case "assign": {
       if (op.assigneeId !== null) {
-        const assignee = await findActiveMembership(tx, op.assigneeId, orgId);
+        // V-25: every member row of the assignee FOR SHARE, before the ticket lock (header step 3).
+        const assignee = await shareLockActiveMembership(tx, op.assigneeId, orgId);
         if (!assignee) throw new TicketMutationError("MEMBER_NOT_ACTIVE");
       }
-      return { kind: "assign", assigneeId: op.assigneeId };
+      return {
+        kind: "assign",
+        assigneeId: op.assigneeId,
+        onlyIfAssignedTo: op.onlyIfAssignedTo ?? null,
+      };
     }
     case "state": {
       // D-15 amended: the target state is share-locked before any ticket lock, so a concurrent
@@ -306,8 +343,9 @@ export async function runTicketMutation(
 
       // The current group of every locked ticket's state, read after the lock (the stateId
       // cannot change under it). The composite foreign key guarantees each id is present.
+      const conditional = resolved.kind === "assign" && resolved.onlyIfAssignedTo !== null;
       const groups =
-        resolved.kind === "state"
+        resolved.kind === "state" || conditional
           ? await readStateGroups(
               tx,
               orgId,
@@ -319,7 +357,12 @@ export async function runTicketMutation(
       // Read after the ticket lock (D-16): a transition that waited measures from when it runs.
       const now = hooks.clock ? hooks.clock() : new Date();
 
+      let skipped = 0;
       for (const [index, ticket] of locked.entries()) {
+        if (resolved.kind === "assign" && skipsConditionalAssign(ticket, resolved, groups)) {
+          skipped += 1;
+          continue;
+        }
         const change = await applyOp(
           tx,
           orgId,
@@ -341,12 +384,32 @@ export async function runTicketMutation(
         if (hooks.afterItem) await hooks.afterItem(tx, ticket.id, index);
       }
 
+      if (conditional) {
+        return { ok: true as const, count: locked.length - skipped, batchId, skipped };
+      }
       return { ok: true as const, count: locked.length, batchId };
     }, TRANSACTION_OPTIONS);
   } catch (err) {
     if (err instanceof TicketMutationError) return { ok: false, error: err.code };
     throw err;
   }
+}
+
+/**
+ * A conditional assignment (`onlyIfAssignedTo`, V-25) skips a locked ticket that is no longer
+ * assigned to that user or is no longer open (FINISHED_STATE_GROUPS), so a reassignment never
+ * overwrites an assignment or a resolution made after its list was read. An unconditional
+ * assignment never skips.
+ */
+function skipsConditionalAssign(
+  ticket: LockedTicket,
+  op: Extract<ResolvedOp, { kind: "assign" }>,
+  groups: ReadonlyMap<string, StateGroup>,
+): boolean {
+  if (op.onlyIfAssignedTo === null) return false;
+  if (ticket.assigneeId !== op.onlyIfAssignedTo) return true;
+  const group = groups.get(ticket.stateId);
+  return group === undefined || FINISHED_STATE_GROUPS.includes(group);
 }
 
 interface AppliedChange {
