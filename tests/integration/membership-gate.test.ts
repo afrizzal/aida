@@ -44,11 +44,14 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { GET as attachmentGet } from "@/app/api/attachments/[id]/route";
+import { POST as messagesPost } from "@/app/api/tickets/[id]/messages/route";
 import { localFileStorage } from "@/lib/attachments/local-file-storage";
 import { auth } from "@/lib/auth";
+import { getActiveOrgAccess, requireOrgAdminScope } from "@/lib/authz";
 import { prisma } from "@/lib/db";
 import { readFreshSession } from "@/lib/fresh-session";
 import { AccessDeniedError } from "@/lib/membership";
+import { requirePageAccess } from "@/lib/page-access";
 import { getScopedDb } from "@/lib/session";
 import { seedTicket } from "../support/inbox-fixtures";
 
@@ -326,5 +329,172 @@ describe("/api/attachments/[id] (D-08): a removed member gets the missing-attach
     const res = await get(`any-${randomUUID()}`);
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+});
+
+describe("requirePageAccess (V-27): the one page helper", () => {
+  /** The redirect target requirePageAccess threw, or null when it returned. */
+  async function redirectTarget(): Promise<string | null> {
+    try {
+      await requirePageAccess();
+      return null;
+    } catch (err) {
+      // The redirect must reach the caller as thrown by redirect(), never wrapped or swallowed.
+      expect(err).toBeInstanceOf(RedirectSignal);
+      return (err as RedirectSignal).target;
+    }
+  }
+
+  it("returns the session, organization, role and a scoped client for a member", async () => {
+    const s = await signedInMember("owner");
+    env.requestHeaders = headersFor(s.cookie);
+    const access = await requirePageAccess();
+    expect(access.orgId).toBe(s.orgId);
+    expect(access.role).toBe("owner");
+    expect(access.session.user.id).toBe(s.userId);
+    expect(typeof access.db.ticket.findMany).toBe("function");
+  });
+
+  it("redirects to /no-access once the member row is deleted", async () => {
+    const s = await signedInMember();
+    env.requestHeaders = headersFor(s.cookie);
+    expect(await redirectTarget()).toBeNull();
+
+    await prisma.member.deleteMany({ where: { organizationId: s.orgId, userId: s.userId } });
+
+    expect(await redirectTarget()).toBe("/no-access");
+  });
+
+  it("redirects to /no-access when the session has no active organization", async () => {
+    const s = await signedInMember();
+    env.requestHeaders = headersFor(s.cookie);
+    expect(await redirectTarget()).toBeNull();
+
+    await prisma.session.update({
+      where: { token: s.token },
+      data: { activeOrganizationId: null },
+    });
+
+    expect(await redirectTarget()).toBe("/no-access");
+  });
+
+  it("redirects to /login without a session, and after the session row is deleted", async () => {
+    env.requestHeaders = new Headers();
+    expect(await redirectTarget()).toBe("/login");
+
+    const s = await signedInMember();
+    env.requestHeaders = headersFor(s.cookie);
+    expect(await redirectTarget()).toBeNull();
+    await prisma.session.delete({ where: { token: s.token } });
+    expect(await redirectTarget()).toBe("/login");
+  });
+
+  it("returns role member for mixed duplicate rows (admin and member)", async () => {
+    const s = await signedInMember("admin");
+    await addMember(s.orgId, s.userId, "member", `z-page-${randomUUID()}`);
+    env.requestHeaders = headersFor(s.cookie);
+    expect((await requirePageAccess()).role).toBe("member");
+  });
+});
+
+describe("/api/tickets/[id]/messages (D-08): 403 for a removed member", () => {
+  function post(ticketId: string) {
+    const form = new FormData();
+    form.set("mode", "internal");
+    form.set("body", "Internal note from the gate suite");
+    return messagesPost(
+      new Request(`http://localhost/api/tickets/${ticketId}/messages`, {
+        method: "POST",
+        body: form,
+      }),
+      { params: Promise.resolve({ id: ticketId }) },
+    );
+  }
+
+  function messageCount(ticketId: string) {
+    return prisma.message.count({ where: { ticketId } });
+  }
+
+  it("writes an internal note for a member", async () => {
+    const s = await signedInMember();
+    const ticket = await seedTicket(s.orgId);
+    env.requestHeaders = headersFor(s.cookie);
+    const before = await messageCount(ticket.id);
+
+    const res = await post(ticket.id);
+
+    expect(res.status).toBe(200);
+    expect(await messageCount(ticket.id)).toBe(before + 1);
+  });
+
+  it("answers 403 membership_ended for a removed member and writes no message", async () => {
+    const s = await signedInMember();
+    const ticket = await seedTicket(s.orgId);
+    env.requestHeaders = headersFor(s.cookie);
+    await prisma.member.deleteMany({ where: { organizationId: s.orgId, userId: s.userId } });
+    const before = await messageCount(ticket.id);
+
+    const res = await post(ticket.id);
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "membership_ended" });
+    expect(await messageCount(ticket.id)).toBe(before);
+  });
+
+  it("answers 403 for a session with no active organization", async () => {
+    const s = await signedInMember();
+    const ticket = await seedTicket(s.orgId);
+    env.requestHeaders = headersFor(s.cookie);
+    await prisma.session.update({
+      where: { token: s.token },
+      data: { activeOrganizationId: null },
+    });
+
+    const res = await post(ticket.id);
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "membership_ended" });
+  });
+
+  it("still answers 401 without a session", async () => {
+    env.requestHeaders = new Headers();
+    const res = await post(`any-${randomUUID()}`);
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+});
+
+describe("authz gates keep their results through the fresh session read", () => {
+  it("getActiveOrgAccess gives the role for a member and an admin, and null for a non-member", async () => {
+    const member = await signedInMember("member");
+    env.requestHeaders = headersFor(member.cookie);
+    expect(await getActiveOrgAccess()).toMatchObject({ orgId: member.orgId, role: "member" });
+
+    const admin = await signedInMember("admin");
+    env.requestHeaders = headersFor(admin.cookie);
+    expect(await getActiveOrgAccess()).toMatchObject({ orgId: admin.orgId, role: "admin" });
+
+    await prisma.member.deleteMany({
+      where: { organizationId: admin.orgId, userId: admin.userId },
+    });
+    expect(await getActiveOrgAccess()).toMatchObject({ orgId: admin.orgId, role: null });
+  });
+
+  it("requireOrgAdminScope admits an admin and refuses a member and a non-member", async () => {
+    const admin = await signedInMember("admin");
+    env.requestHeaders = headersFor(admin.cookie);
+    const scope = await requireOrgAdminScope();
+    expect(scope.orgId).toBe(admin.orgId);
+    expect(scope.role).toBe("admin");
+
+    const member = await signedInMember("member");
+    env.requestHeaders = headersFor(member.cookie);
+    await expect(requireOrgAdminScope()).rejects.toThrow(/Forbidden/);
+
+    env.requestHeaders = headersFor(admin.cookie);
+    await prisma.member.deleteMany({
+      where: { organizationId: admin.orgId, userId: admin.userId },
+    });
+    await expect(requireOrgAdminScope()).rejects.toThrow(/Forbidden/);
   });
 });
