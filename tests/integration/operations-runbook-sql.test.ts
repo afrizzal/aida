@@ -147,7 +147,9 @@ describe("Codex r3-4: the runbook's psql commands run as written", () => {
       `docker exec -i ${container} sh -c 'psql -U "$POSTGRES_USER" -d ${db} -X -q -c "SELECT pg_sleep(8)"'`,
     );
     const until = Date.now() + 10_000;
-    while ((await admin(`SELECT count(*) FROM pg_stat_activity WHERE datname = '${db}';`)) === "0") {
+    while (
+      (await admin(`SELECT count(*) FROM pg_stat_activity WHERE datname = '${db}';`)) === "0"
+    ) {
       if (Date.now() > until) throw new Error("the holding session never connected");
       await new Promise((r) => setTimeout(r, 100));
     }
