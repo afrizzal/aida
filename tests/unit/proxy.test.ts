@@ -314,6 +314,7 @@ describe("proxy — d-WR-d3 emitted CSP equals buildCsp()", () => {
   const forwarded = [
     { label: "public prefix /login", request: () => new NextRequest("http://localhost/login") },
     { label: "status page", request: () => new NextRequest("http://localhost/status/abc") },
+    { label: "invite page", request: () => new NextRequest("http://localhost/invite/abc") },
     {
       label: "authenticated /tickets",
       request: () =>
@@ -359,5 +360,155 @@ describe("proxy — d-WR-d3 emitted CSP equals buildCsp()", () => {
         }
       }
     }
+  });
+});
+
+// Plan 10-15 (D-02, V-03, O-5, AIDA-43): the organization and admin plugin routes are closed over
+// HTTP by prefix, with and without a session cookie. tests/unit/better-auth-routes.test.ts covers
+// every installed route; these cases name the ones that change membership or switch organizations.
+describe("proxy — 10-15 Better Auth organization and admin plugin block", () => {
+  const TEAM_CHANGES_ERROR = "Team changes are made in AIDA under Settings → Team.";
+  const closed = [
+    "/api/auth/organization/accept-invitation",
+    "/api/auth/organization/set-active",
+    "/api/auth/organization/update-member-role",
+    "/api/auth/organization/remove-member",
+    "/api/auth/organization/leave",
+    "/api/auth/organization/delete", // owner item 09-o3, closed by default (O-5)
+    "/api/auth/admin/remove-user",
+  ];
+
+  it("Z1: membership, role, switch and delete routes return 403 JSON without and with a session", async () => {
+    for (const path of closed) {
+      for (const headers of [{}, { cookie: "better-auth.session_token=abc" }] as Record<
+        string,
+        string
+      >[]) {
+        const label = `${path} ${headers.cookie ? "with" : "without"} cookie`;
+        const response = proxy(
+          new NextRequest(`http://localhost${path}`, { method: "POST", headers }),
+        );
+        expect(response.status, label).toBe(403);
+        expect(response.headers.get("content-type"), label).toContain("application/json");
+        expect(response.headers.get("x-middleware-next"), label).toBeNull();
+        expect(response.headers.get("x-content-type-options"), label).toBe("nosniff");
+        expect(response.headers.get("x-frame-options"), label).toBe("DENY");
+        const body = (await response.json()) as { error: string };
+        expect(body.error, label).toBe(TEAM_CHANGES_ERROR);
+      }
+    }
+  });
+
+  it("Z2: other spellings of a blocked path are refused too (case, encoded slash, repeated slash)", () => {
+    for (const path of [
+      "/api/auth/Organization/leave",
+      "/api/auth/ORGANIZATION/set-active",
+      "/api/auth/organization%2Fremove-member",
+      "/api/auth/%6Frganization/delete",
+      "/api/auth//organization/accept-invitation",
+      "/api/auth/Admin/remove-user",
+      "/api/auth/admin%2Fset-role",
+      "/api/auth/Sign-Up/email",
+    ]) {
+      const response = proxy(new NextRequest(`http://localhost${path}`, { method: "POST" }));
+      expect(response.status, path).toBe(403);
+      expect(response.headers.get("x-middleware-next"), path).toBeNull();
+    }
+  });
+
+  it("Z3 (D-05): sign-up stays blocked with its own message; sign-in and get-session pass through", async () => {
+    const signUp = proxy(
+      new NextRequest("http://localhost/api/auth/sign-up/email", { method: "POST" }),
+    );
+    expect(signUp.status).toBe(403);
+    expect(((await signUp.json()) as { error: string }).error).toMatch(
+      /self-registration is disabled/i,
+    );
+    for (const [path, method] of [
+      ["/api/auth/sign-in/email", "POST"],
+      ["/api/auth/get-session", "GET"],
+    ]) {
+      const response = proxy(new NextRequest(`http://localhost${path}`, { method }));
+      expect(response.status, path).toBe(200);
+      expect(response.headers.get("x-middleware-next"), path).toBe("1");
+    }
+  });
+
+  it("Z4: a path that only resembles a plugin prefix is not blocked", () => {
+    for (const path of ["/api/auth/organizations", "/api/auth/administrator"]) {
+      const response = proxy(new NextRequest(`http://localhost${path}`));
+      expect(response.status, path).toBe(200);
+      expect(response.headers.get("x-middleware-next"), path).toBe("1");
+    }
+  });
+});
+
+// Plan 10-15 (V-04, D-04, T-10-09, T-10-53): /invite is public and goes through the same
+// forwarding helper as every public path (nonce CSP, proxy-written client identity), with
+// Referrer-Policy no-referrer because the invitation token is in the URL path.
+describe("proxy — 10-15 /invite entry point", () => {
+  it("Z5: GET /invite/abc without a cookie passes through with no-referrer, the nonce CSP and the client identity", () => {
+    const response = proxy(
+      new NextRequest("http://localhost/invite/abc", {
+        headers: { "x-aida-client-ip": "9.9.9.9", "x-forwarded-for": "203.0.113.5" },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    const csp = response.headers.get("content-security-policy") ?? "";
+    const nonce = response.headers.get("x-middleware-request-x-nonce") ?? "";
+    expect(nonce.length).toBeGreaterThanOrEqual(22);
+    expect(csp).toBe(buildCsp(nonce, { isDev: false }));
+    expect(response.headers.get("x-middleware-request-content-security-policy")).toBe(csp);
+    expect(response.headers.get("x-middleware-request-x-aida-client-ip")).toBe("203.0.113.5");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("x-frame-options")).toBe("DENY");
+  });
+
+  it("Z6: POST /invite/abc/accept passes through with no-referrer and the nonce CSP, with and without a cookie", () => {
+    for (const headers of [{}, { cookie: "better-auth.session_token=abc" }] as Record<
+      string,
+      string
+    >[]) {
+      const response = proxy(
+        new NextRequest("http://localhost/invite/abc/accept", { method: "POST", headers }),
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get("location")).toBeNull();
+      expect(response.headers.get("x-middleware-next")).toBe("1");
+      expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+      const csp = response.headers.get("content-security-policy") ?? "";
+      expect(cspNonce(csp)).toBe(response.headers.get("x-middleware-request-x-nonce"));
+      expect(response.headers.get("x-middleware-request-x-aida-client-ip")).toBe(
+        "shared:no-client-ip",
+      );
+    }
+  });
+
+  it("Z7: a malformed /invite path gets the existing plain-text 400", async () => {
+    await expectMalformedPathRejection(proxy(new NextRequest("http://localhost/invite/%E0%A4%A")));
+    await expectMalformedPathRejection(
+      proxy(new NextRequest("http://localhost/invite/%FF/accept", { method: "POST" })),
+    );
+  });
+});
+
+// Plan 10-15 (V-27): /no-access is not public. It needs a session cookie, so the page itself
+// never renders for an anonymous visitor; it carries no membership requirement, so it cannot loop.
+describe("proxy — 10-15 /no-access needs a session", () => {
+  it("Z8: GET /no-access without a cookie redirects to /login; with one it passes", () => {
+    const anonymous = proxy(new NextRequest("http://localhost/no-access"));
+    expect(anonymous.status).toBe(307);
+    expect((anonymous.headers.get("location") ?? "").endsWith("/login")).toBe(true);
+    const signedIn = proxy(
+      new NextRequest("http://localhost/no-access", {
+        headers: { cookie: "better-auth.session_token=abc" },
+      }),
+    );
+    expect(signedIn.status).toBe(200);
+    expect(signedIn.headers.get("x-middleware-next")).toBe("1");
+    expect(signedIn.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
   });
 });
