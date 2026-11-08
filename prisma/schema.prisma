@@ -46,6 +46,10 @@ model user {
   taskAttachments    TaskAttachment[]
   projectFavorites   ProjectFavorite[]
   taskFavorites      TaskFavorite[]
+
+  // Phase 10 team (only the recipient and the mentioned user carry a user relation)
+  notifications   Notification[]
+  messageMentions MessageMention[]
 }
 
 model session {
@@ -155,6 +159,14 @@ model organization {
   taskKeys            TaskKey[]
   projectActivities   ProjectActivity[]
   projectFileCleanups ProjectFileCleanup[]
+
+  // Phase 10 team
+  memberAuditEvents       MemberAuditEvent[]
+  notifications           Notification[]
+  notificationPreferences NotificationPreference[]
+  notificationSettings    NotificationSetting[]
+  notificationDigests     NotificationDigest[]
+  messageMentions         MessageMention[]
 }
 
 model member {
@@ -179,6 +191,9 @@ model invitation {
   expiresAt      DateTime
   createdAt      DateTime
   inviterId      String
+  /// Phase 10 (D-04): hex SHA-256 of AIDA's own 256-bit link token. The plugin id is visible to
+  /// the plugin's list endpoints, so it is never the link token. Null for rows made before.
+  tokenHash      String?      @unique
   organization   organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   user           user         @relation(fields: [inviterId], references: [id], onDelete: Cascade)
 
@@ -385,6 +400,7 @@ model Message {
   authorUser    user?        @relation("MessageAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
   authorContact Contact?     @relation(fields: [authorContactId], references: [id], onDelete: SetNull)
   attachments   Attachment[]
+  mentions      MessageMention[]
 
   @@index([ticketId])
   @@index([organizationId])
@@ -1361,4 +1377,133 @@ model ProjectFileCleanup {
 
   @@unique([organizationId, storageKey])
   @@index([nextAttemptAt, createdAt])
+}
+
+
+// ---------------------------------------------------------------------------
+// Domain models (Phase 10 — Team: member audit, notifications, mentions)
+// ---------------------------------------------------------------------------
+
+enum MemberAuditAction {
+  INVITATION_CREATED
+  INVITATION_REVOKED
+  INVITATION_ACCEPTED
+  ROLE_CHANGED
+  MEMBER_DEACTIVATED
+}
+
+// D-12, V-14: append-only at the database level (trigger aida_member_audit_event_immutable).
+// actorUserId and targetUserId carry no user relation on purpose (the TicketAuditEvent shape), so
+// removing a user never touches an audit row. Ids, an action, roles and a timestamp only: no
+// email, no token, no free text.
+model MemberAuditEvent {
+  id             String            @id @default(cuid())
+  organizationId String
+  actorUserId    String
+  targetUserId   String?
+  invitationId   String?
+  action         MemberAuditAction
+  oldRole        String?
+  newRole        String?
+  createdAt      DateTime          @default(now())
+  organization   organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+}
+
+enum NotificationType {
+  ASSIGNED
+  CUSTOMER_REPLY
+  MENTION
+  SLA_AT_RISK
+  SLA_BREACHED
+}
+
+// D-14: entity-generic (ticket now, task in AIDA-83). The unique key includes the recipient, so a
+// retry never duplicates and one event key serves every recipient (V-28). unassignedFallback marks
+// rows created by the unassigned-ticket fallback of owner item 11 (V-28). Every read also filters
+// recipientUserId (D-15).
+model Notification {
+  id                 String           @id @default(cuid())
+  organizationId     String
+  recipientUserId    String
+  actorUserId        String?
+  type               NotificationType
+  eventKey           String
+  entityType         String
+  entityId           String
+  unassignedFallback Boolean          @default(false)
+  readAt             DateTime?
+  archivedAt         DateTime?
+  digestedAt         DateTime?
+  createdAt          DateTime         @default(now())
+  organization       organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  recipient          user             @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, recipientUserId, type, eventKey])
+  @@index([organizationId, recipientUserId, archivedAt, readAt])
+}
+
+// D-22: one row per (organization, member, type); a missing row means the defaults.
+model NotificationPreference {
+  id             String           @id @default(cuid())
+  organizationId String
+  userId         String
+  type           NotificationType
+  inApp          Boolean          @default(true)
+  digest         Boolean          @default(true)
+  updatedAt      DateTime         @updatedAt
+  organization   organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId, type])
+}
+
+// V-28: the per-person opt-out of the unassigned-ticket fallback; a missing row means on.
+model NotificationSetting {
+  id                String       @id @default(cuid())
+  organizationId    String
+  userId            String
+  unassignedTickets Boolean      @default(true)
+  updatedAt         DateTime     @updatedAt
+  organization      organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+}
+
+enum NotificationDigestStatus {
+  CLAIMED
+  SENT
+  RELEASED
+  CANCELED
+}
+
+// D-23: one claimed batch per recipient with frozen notification ids and a lease.
+model NotificationDigest {
+  id              String                   @id @default(cuid())
+  organizationId  String
+  recipientUserId String
+  notificationIds String[]
+  status          NotificationDigestStatus @default(CLAIMED)
+  leaseExpiresAt  DateTime
+  sentAt          DateTime?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  organization    organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, recipientUserId, status])
+}
+
+// D-20: one row per mentioned member of an internal note.
+model MessageMention {
+  id              String       @id @default(cuid())
+  organizationId  String
+  messageId       String
+  mentionedUserId String
+  createdAt       DateTime     @default(now())
+  organization    organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  message         Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  mentionedUser   user         @relation(fields: [mentionedUserId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, mentionedUserId])
+  @@index([organizationId])
 }

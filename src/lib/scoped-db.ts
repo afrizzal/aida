@@ -55,6 +55,14 @@ export const DOMAIN_MODELS = [
   "TaskKey",
   "ProjectActivity",
   "ProjectFileCleanup",
+  // Phase 10 team: notifications, mentions, member audit
+  // (D-15: every Notification read must also filter recipientUserId; scopedDb adds only the org.)
+  "MemberAuditEvent",
+  "Notification",
+  "NotificationPreference",
+  "NotificationSetting",
+  "NotificationDigest",
+  "MessageMention",
 ] as const;
 
 const isDomain = (model?: string): boolean =>
