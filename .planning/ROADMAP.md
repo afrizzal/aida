@@ -193,12 +193,12 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 5. Preferences apply, and the digest sends one batched email through a fake SMTP with no PII in the subject.
 
 **Stays open for a human:** a test with real email.
-**Plans:** 2/17 plans complete (replanned 2026-11-13 after the owner unparked the phase: 16 plans rewritten in place, 10-17 new; plan checker passed with info notes only, plus a second pass tracing drift items D1 to D43 and the cycle 3 findings; no further Codex plan review per owner item 2)
+**Plans:** 3/17 plans complete (replanned 2026-11-13 after the owner unparked the phase: 16 plans rewritten in place, 10-17 new; plan checker passed with info notes only, plus a second pass tracing drift items D1 to D43 and the cycle 3 findings; no further Codex plan review per owner item 2)
 **Wave 1**
 
 - [x] 10-01-PLAN.md — Lay the whole Phase 10 data foundation in one migration (`20261115100000_team_foundation`) and the shared workspace-member modules (Wave 1)
 - [x] 10-02-PLAN.md — Build the server half of the one membership gate (D-08, V-23): uncached session read, membership re-read, page helper and `/no-access` (V-27) (Wave 1)
-- [ ] 10-15-PLAN.md — Close the Better Auth organization and admin plugin endpoints over HTTP (D-02, V-03) and open `/invite` with no referrer through the CSP path (Wave 1)
+- [x] 10-15-PLAN.md — Close the Better Auth organization and admin plugin endpoints over HTTP (D-02, V-03) and open `/invite` with no referrer through the CSP path (Wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -560,7 +560,7 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 |---|---|---|---|---|
 | 8. Security Hardening | v2.0 | 18/18 (Part A) | Part A verified: human_needed (2026-11-12); Part B moved to Phase 8.1, waits for owner | - |
 | 9. Operations | v2.0 | 13/13 | Verified: human_needed (stack proofs SP-1 to SP-3 and human checks open) | - |
-| 10. Team | v2.0 | 2/17 | Executing (replanned 2026-11-13; plan checker passed) | - |
+| 10. Team | v2.0 | 3/17 | Executing (replanned 2026-11-13; plan checker passed) | - |
 | 11. Inbox | v2.0 | 9/9 | Verified: human_needed (visual, dark mode, 360px and screen-reader checks open) | - |
 | 12. Ticket Lifecycle (relations, merge, snooze, activity) | v2.0 | 10/10 | Verified: human_needed (visual, dark mode, layout widths and screen-reader checks open; AIDA-53 closed by owner decision 12-o1 on 2026-11-11) | - |
 | 12.1. Ticket Lifecycle (custom states, SLA pause) | v2.0 | 17/17 | Verified: human_needed (visual, dark mode, contrast by eye, screen reader and UAT open; K47 deferred) | - |
