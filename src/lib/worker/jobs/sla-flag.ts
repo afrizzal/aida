@@ -20,8 +20,21 @@
 //
 // Boundary: breach when a live deadline is strictly before now; at-risk when it is strictly
 // after now and within 20 percent of its target; a deadline equal to now gets neither.
+//
+// Notifications (Phase 10, AIDA-44, D-18, V-09, V-30): each UPDATE hands back the rows it flipped
+// (id, organizationId, assigneeId), and the pass notifies for exactly those rows inside its own
+// transaction, after the update and before afterPassUpdate: SLA_BREACHED for the breach pass,
+// SLA_AT_RISK for the at-risk pass, to the assignee or, for an unassigned ticket, to every current
+// owner and admin who has not opted out (emitForTicket, V-28). A direct breach sets both flags in
+// the breach pass, so the at-risk pass skips it and it gets one breach notification only. Event
+// keys are sla-breached:{ticketId}:{now ISO} and sla-at-risk:{ticketId}:{now ISO}, with `now` read
+// once per run and shared by both passes. The flag is the transition's identity: a pass that
+// rolls back leaves neither flag nor notification, a re-run after commit finds nothing to flip,
+// and a reset followed by a new flip is a new transition with a new now. The emitter's reads are
+// plain reads after the ticket locks and take no lock of their own (V-25, V-28).
 import type { Prisma } from "../../../generated/prisma/client";
 import { prisma } from "../../db";
+import { emitForTicket } from "../../notifications/emit";
 
 export type SlaFlagPass = "breach" | "atRisk";
 
@@ -37,7 +50,10 @@ export interface SlaFlagOptions {
     pass: SlaFlagPass,
     lockedIds: string[],
   ): Promise<void> | void;
-  /** Awaited after the pass's UPDATE, before its commit (not called when nothing was locked). */
+  /**
+   * Awaited after the pass's UPDATE and its notifications, before its commit (not called when
+   * nothing was locked).
+   */
   afterPassUpdate?(tx: Prisma.TransactionClient, pass: SlaFlagPass): Promise<void> | void;
 }
 
@@ -48,14 +64,23 @@ interface LockedRow {
   organizationId: string;
 }
 
+/** A row an UPDATE flipped: the only data the passes hand back, used only to notify. */
+interface FlippedRow {
+  id: string;
+  organizationId: string;
+  assigneeId: string | null;
+}
+
 // Why the four raw statements below (two lock SELECTs, two UPDATEs) have no tenant filter
 // (D-28, F-13). This is a system cron job over all organizations by design: no request, no
 // session and no tenant input reaches it, and every bound value is the job's own clock or the ids
 // it just locked. Every predicate uses only the row's own columns (status through its own state,
 // isBreached, isAtRisk, slaPausedAt, the due and responded timestamps, the target minutes); the
 // state join and the UPDATEs pair each ticket with its own "organizationId". The lock SELECTs
-// return only id and "organizationId" to this function, the UPDATEs return a row count, and the
-// handler returns nothing, so no tenant can read another tenant's data through this job.
+// return only id and "organizationId" to this function, the UPDATEs hand back only the flipped
+// rows' id, "organizationId" and "assigneeId", which go nowhere but emitForTicket under that row's
+// own organization (Phase 10, V-09), and the handler returns nothing, so no tenant can read
+// another tenant's data through this job.
 // scopedDb does NOT intercept $queryRaw or $executeRaw: any copy of this pattern that returns
 // data to a caller or takes tenant input must add an explicit "organizationId" filter
 // (src/lib/rag/retrieve.ts and src/lib/tickets/search.ts show that discipline).
@@ -82,7 +107,7 @@ function lockBreachCandidates(tx: Prisma.TransactionClient, now: Date) {
 
 /** Breach (implies at-risk): only the locked rows, eligibility re-checked on the written row. */
 function updateBreach(tx: Prisma.TransactionClient, now: Date, ids: string[], orgIds: string[]) {
-  return tx.$executeRaw`
+  return tx.$queryRaw<FlippedRow[]>`
     UPDATE "Ticket"
     SET "isBreached" = true, "isAtRisk" = true
     FROM unnest(${ids}::text[], ${orgIds}::text[]) AS l(id, "organizationId")
@@ -99,6 +124,7 @@ function updateBreach(tx: Prisma.TransactionClient, now: Date, ids: string[], or
         ("Ticket"."firstRespondedAt" IS NULL AND "Ticket"."firstResponseDueAt" < ${now})
         OR ("Ticket"."resolvedAt" IS NULL AND "Ticket"."resolutionDueAt" < ${now})
       )
+    RETURNING "Ticket".id, "Ticket"."organizationId", "Ticket"."assigneeId"
   `;
 }
 
@@ -126,7 +152,7 @@ function lockAtRiskCandidates(tx: Prisma.TransactionClient, now: Date) {
 
 /** At-risk: only the locked rows, eligibility re-checked on the written row. */
 function updateAtRisk(tx: Prisma.TransactionClient, now: Date, ids: string[], orgIds: string[]) {
-  return tx.$executeRaw`
+  return tx.$queryRaw<FlippedRow[]>`
     UPDATE "Ticket"
     SET "isAtRisk" = true
     FROM unnest(${ids}::text[], ${orgIds}::text[]) AS l(id, "organizationId")
@@ -147,6 +173,7 @@ function updateAtRisk(tx: Prisma.TransactionClient, now: Date, ids: string[], or
           AND "Ticket"."resolutionDueAt" - ${now}
             <= ("Ticket"."resolutionTargetMinutes" * 0.2) * interval '1 minute')
       )
+    RETURNING "Ticket".id, "Ticket"."organizationId", "Ticket"."assigneeId"
   `;
 }
 
@@ -159,13 +186,29 @@ async function runPass(pass: SlaFlagPass, now: Date, opts: SlaFlagOptions): Prom
     if (opts.afterPassLock) await opts.afterPassLock(tx, pass, ids);
     if (locked.length === 0) return;
     const orgIds = locked.map((row) => row.organizationId);
-    if (pass === "breach") await updateBreach(tx, now, ids, orgIds);
-    else await updateAtRisk(tx, now, ids, orgIds);
+    const flipped =
+      pass === "breach"
+        ? await updateBreach(tx, now, ids, orgIds)
+        : await updateAtRisk(tx, now, ids, orgIds);
+    // Exactly the flipped rows, in id order, each under its own organization (V-09, V-30).
+    const type = pass === "breach" ? "SLA_BREACHED" : "SLA_AT_RISK";
+    const keyPrefix = pass === "breach" ? "sla-breached" : "sla-at-risk";
+    for (const row of [...flipped].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
+      await emitForTicket(tx, row.organizationId, {
+        assigneeId: row.assigneeId,
+        type,
+        eventKey: `${keyPrefix}:${row.id}:${now.toISOString()}`,
+        entityId: row.id,
+      });
+    }
     if (opts.afterPassUpdate) await opts.afterPassUpdate(tx, pass);
   }, TRANSACTION_OPTIONS);
 }
 
-/** The scheduled job. Pass 1 breach (implies at-risk), pass 2 at-risk; each in its own transaction. */
+/**
+ * The scheduled job. Pass 1 breach (implies at-risk), pass 2 at-risk; each in its own transaction.
+ * `now` is read once here and shared by both passes and their event keys (V-30).
+ */
 export async function slaFlagHandler(_data?: unknown, opts: SlaFlagOptions = {}): Promise<void> {
   const now = opts.now ?? new Date();
   await runPass("breach", now, opts);

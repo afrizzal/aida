@@ -288,14 +288,14 @@ const ALLOWLIST: AllowEntry[] = [
     file: "src/lib/worker/jobs/sla-flag.ts",
     function: "updateBreach",
     reason:
-      "raw UPDATE of the locked ticket ids, each paired with its own organizationId through unnest; returns a count only",
+      "raw UPDATE of the locked ticket ids, each paired with its own organizationId through unnest; hands back only the flipped rows' id, organizationId and assigneeId, used only to emit SLA notifications under that row's organization in the pass transaction (V-09)",
   },
   {
     rule: "D",
     file: "src/lib/worker/jobs/sla-flag.ts",
     function: "updateAtRisk",
     reason:
-      "raw UPDATE of the locked ticket ids, each paired with its own organizationId through unnest; returns a count only",
+      "raw UPDATE of the locked ticket ids, each paired with its own organizationId through unnest; hands back only the flipped rows' id, organizationId and assigneeId, used only to emit SLA notifications under that row's organization in the pass transaction (V-09)",
   },
   {
     rule: "D",
