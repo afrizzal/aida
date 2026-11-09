@@ -52,3 +52,33 @@ export async function unassignedFallbackRecipients(
   }
   return [...qualifies].filter(([, ok]) => ok).map(([userId]) => userId);
 }
+
+/** The transaction client ticketAssigneeId needs, typed structurally like RecipientsTx. */
+export interface TicketAssigneeTx {
+  ticket: {
+    findFirst(args: {
+      where: { id: string; organizationId: string };
+      select: { assigneeId: true };
+    }): PromiseLike<{ assigneeId: string | null } | null>;
+  };
+}
+
+/**
+ * The current assignee of a ticket of orgId, or null when it has none or is not in orgId. A plain
+ * read with an explicit organization term and no lock of its own: the reply writers call it inside
+ * their transaction after resolveReplyTicket locked the effective ticket (V-28), so the value
+ * cannot change before commit. An assignee who is no longer a member is still returned, and
+ * emitForTicket then skips them (O-7 (b) default: such a ticket is not unassigned).
+ */
+export async function ticketAssigneeId(
+  tx: TicketAssigneeTx,
+  orgId: string,
+  ticketId: string,
+): Promise<string | null> {
+  if (!orgId) throw new Error("ticketAssigneeId requires a non-empty organizationId");
+  const row = await tx.ticket.findFirst({
+    where: { id: ticketId, organizationId: orgId },
+    select: { assigneeId: true },
+  });
+  return row?.assigneeId ?? null;
+}

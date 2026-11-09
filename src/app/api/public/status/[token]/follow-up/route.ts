@@ -16,6 +16,8 @@ import {
 import { prisma } from "@/lib/db";
 import { readBoundedFormData } from "@/lib/http/read-bounded-form-data";
 import { renderMarkdown } from "@/lib/markdown/render";
+import { emitForTicket } from "@/lib/notifications/emit";
+import { ticketAssigneeId } from "@/lib/notifications/recipients";
 import { followUpSchema } from "@/lib/public-forms/limits";
 import { consumeRateLimit } from "@/lib/rate-limit/check-rate-limit";
 import { getRateLimitIdentity } from "@/lib/rate-limit/client-ip";
@@ -137,6 +139,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
           bodyHtml: renderMarkdown(message),
           triggeredReopen: reopened,
         },
+      });
+
+      // V-10, V-28, D-16: the customer reply notifies the effective (merge target) ticket's
+      // assignee, or every current owner and admin who has not opted out when it is unassigned,
+      // in this transaction, bound to the token's organization (Rule E). Plain reads after the
+      // ticket lock taken by resolveReplyTicket; ids only, never the customer's text (T-10-25).
+      await emitForTicket(tx, ticket.organizationId, {
+        assigneeId: await ticketAssigneeId(tx, ticket.organizationId, effectiveTicketId),
+        type: "CUSTOMER_REPLY",
+        eventKey: `message:${created.id}`,
+        entityId: effectiveTicketId,
       });
 
       for (const entry of stored) {
