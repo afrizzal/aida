@@ -24,7 +24,9 @@
 //      merged source (Phase 12, D-07, D-08; Codex diff critique round 1, D1)
 //   6. the current groups of the locked tickets (readStateGroups; for a state change, and for a
 //      conditional assignment), then `now`, read after the lock (hooks.clock in tests, D-16, D-17)
-//   7. per locked ticket, in id order: apply, audit, hooks.afterItem (test seam only). A
+//   7. per locked ticket, in id order: apply, audit, hooks.afterItem (test seam only). An
+//      assignment that changes the assignee to a user other than the actor emits one ASSIGNED
+//      notification for that user inside apply (Phase 10, V-08, D-16; no new lock). A
 //      conditional assignment (assign op with `onlyIfAssignedTo`, Phase 10, V-25: set only by
 //      reassignOpenTickets in workspace-members/member-admin.ts) skips a ticket whose locked row is
 //      no longer assigned to that user or whose current group is RESOLVED or CLOSED: no update, no
@@ -57,6 +59,7 @@ import { randomUUID } from "node:crypto";
 import type { Prisma, TicketPriority } from "../../generated/prisma/client";
 import { prisma } from "../db";
 import { findActiveMembership, shareLockActiveMembership } from "../membership";
+import { emitNotifications } from "../notifications/emit";
 import { DEFAULT_SLA_TARGETS, type SlaTargets } from "./sla";
 import { applyStateTransition, pausedDueTimestamps } from "./state-transition";
 import type { TicketAuditSnapshot } from "./ticket-audit";
@@ -366,6 +369,7 @@ export async function runTicketMutation(
         const change = await applyOp(
           tx,
           orgId,
+          userId,
           ticket,
           resolved,
           linked.has(ticket.id),
@@ -425,6 +429,7 @@ interface AppliedChange {
 async function applyOp(
   tx: Prisma.TransactionClient,
   orgId: string,
+  actorUserId: string,
   ticket: LockedTicket,
   op: ResolvedOp,
   tagLinked: boolean,
@@ -435,6 +440,23 @@ async function applyOp(
     case "assign": {
       if (ticket.assigneeId !== op.assigneeId) {
         await updateTicket(tx, orgId, ticket.id, { assigneeId: op.assigneeId });
+        // V-08, D-16: the new assignee hears about it in this transaction, unless the ticket was
+        // unassigned or they assigned themselves. `now` was read once after the ticket lock, so
+        // every ticket of a bulk assignment has its own key and a retry of the same commit
+        // cannot add a second row. emitNotifications skips a recipient with no member row and
+        // one who turned ASSIGNED off in-app; it reads with no lock of its own.
+        if (op.assigneeId !== null && op.assigneeId !== actorUserId) {
+          await emitNotifications(tx, orgId, [
+            {
+              recipientUserId: op.assigneeId,
+              actorUserId,
+              type: "ASSIGNED",
+              eventKey: `assigned:${ticket.id}:${now.toISOString()}`,
+              entityType: "ticket",
+              entityId: ticket.id,
+            },
+          ]);
+        }
       }
       return {
         action: "ASSIGNEE_CHANGED",
