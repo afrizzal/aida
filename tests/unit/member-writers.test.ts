@@ -124,6 +124,10 @@ const ALLOWLIST: WriterAllowEntry[] = [
     reason:
       "role change (updateMany of every row of the target) and deactivation (deleteMany of every row of the target), both under the organization lock (D-09, V-26 (5))",
   },
+  {
+    file: "src/lib/workspace-members/invitations.ts",
+    reason: "accept inserts one member row under the organization lock",
+  },
 ];
 
 const run = (sources: Record<string, string>, allowlist: WriterAllowEntry[] = ALLOWLIST) =>
@@ -163,6 +167,13 @@ describe("member-table writers in the real tree (V-26 (6))", () => {
     );
     expect(own.map((f) => f.text).sort()).toEqual(expect.arrayContaining(["tx.member.updateMany"]));
     for (const f of own) expect(["tx.member.updateMany", "tx.member.deleteMany"]).toContain(f.text);
+  });
+
+  it("invitations.ts writes only one tx.member.create (the accept, plan 10-05)", () => {
+    const own = result.findings.filter(
+      (f) => f.file === "src/lib/workspace-members/invitations.ts",
+    );
+    expect(own.map((f) => f.text)).toEqual(["tx.member.create"]);
   });
 });
 
