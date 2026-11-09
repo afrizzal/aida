@@ -433,6 +433,20 @@ describe("Rule B on the real tree", () => {
     );
   });
 
+  it("flags a real page put back in its pre-10-17 shape (getScopedDb, e2eFault first)", () => {
+    const file = "src/app/(app)/contacts/page.tsx";
+    const text = REAL.get(file) ?? "";
+    expect(text).toContain("await requirePageAccess()");
+    const reverted = text
+      .replace(
+        'import { requirePageAccess } from "@/lib/page-access";',
+        'import { getScopedDb } from "@/lib/session";',
+      )
+      .replace("const { db } = await requirePageAccess();", "const { db } = await getScopedDb();");
+    const mutated = findPageAccessViolations(RULES, new Map([...REAL, [file, reverted]]));
+    expect(labels(mutated.violations)).toEqual([`${file}#ContactsPage`, `${file}#ContactsPage`]);
+  });
+
   it("skips the nested layouts that reach no tenant data", () => {
     const checked = result.checked.map((c) => c.file);
     expect(checked).not.toContain("src/app/(app)/settings/layout.tsx");

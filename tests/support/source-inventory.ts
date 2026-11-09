@@ -1363,9 +1363,180 @@ export interface PageAccessResult {
   pagesChecked: string[];
 }
 
+/** The block body of a function node, or undefined (an expression-bodied arrow, a call value). */
+function blockBodyOf(node: ts.Node): ts.Block | undefined {
+  if (
+    (ts.isFunctionDeclaration(node) || ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
+    node.body &&
+    ts.isBlock(node.body)
+  ) {
+    return node.body;
+  }
+  return undefined;
+}
+
+/** Whether `node` sits inside a try statement (its try block, catch or finally) below `stop`. */
+function insideTry(node: ts.Node, stop: ts.Node): boolean {
+  for (let cur = node.parent; cur && cur !== stop; cur = cur.parent) {
+    if (ts.isTryStatement(cur)) return true;
+  }
+  return false;
+}
+
+/**
+ * Rule B on one render entry: the first statement of its body awaits the helper, no helper call
+ * sits inside a try, and the module neither imports nor calls a forbidden gate.
+ */
+function pageAccessFindings(project: Project, ref: FnRef, rules: PageAccessRules): string[] {
+  const out: string[] = [];
+  const helper = rules.helper;
+  const isHelper = (call: ts.CallExpression) => isCallOf(project, ref, siteOfCall(call), helper);
+  const body = blockBodyOf(ref.fn.node);
+  const first = body?.statements[0];
+  let expr: ts.Expression | undefined;
+  if (first && ts.isVariableStatement(first)) {
+    const decls = first.declarationList.declarations;
+    if (decls.length === 1) expr = decls[0].initializer;
+  } else if (first && ts.isExpressionStatement(first)) expr = first.expression;
+  while (expr && ts.isParenthesizedExpression(expr)) expr = expr.expression;
+  const ok =
+    !!expr &&
+    ts.isAwaitExpression(expr) &&
+    ts.isCallExpression(expr.expression) &&
+    isHelper(expr.expression);
+  if (!ok) {
+    const shown = first
+      ? first.getText().split("\n")[0].slice(0, 80)
+      : body
+        ? "(empty body)"
+        : "(no block body)";
+    out.push(
+      `first statement is not \`await ${helper.name}()\` outside any try (${helper.home}): ${shown}`,
+    );
+  }
+  for (const site of callsIn(ref.fn.node)) {
+    if (
+      ts.isCallExpression(site.node) &&
+      isHelper(site.node) &&
+      insideTry(site.node, ref.fn.node)
+    ) {
+      out.push(`calls ${helper.name} inside a try, where a catch can swallow its redirect`);
+    }
+  }
+  for (const f of rules.forbidden) {
+    // One finding per forbidden gate: an import of it from its home (under any local name), or a
+    // call by its own name anywhere in the module.
+    const aliases = [...ref.mod.imports.values()]
+      .filter((b) => !b.typeOnly && b.resolved === f.home && b.imported === f.name)
+      .map((b) => b.local);
+    const called = callsIn(ref.mod.sf).some((site) => site.name === f.name);
+    if (aliases.length > 0 || called) {
+      const via = aliases.length > 0 ? ` (imported as ${aliases.join(", ")})` : "";
+      out.push(`imports or calls ${f.name}${via}; a render entry uses ${helper.name}`);
+    }
+  }
+  return out;
+}
+
+/**
+ * Tenant reach of one function of an (app) module: it, or a function of its own module it calls,
+ * references a binding of a src/lib module that reaches the shared prisma client, calls scopedDb(
+ * or uses raw SQL (Project.libReaches). Children rendered as JSX are judged on their own.
+ */
+function functionReaches(project: Project, start: FnRef): boolean {
+  const seen = new Set<string>();
+  const visit = (ref: FnRef): boolean => {
+    if (seen.has(ref.fn.name)) return false;
+    seen.add(ref.fn.name);
+    for (const site of callsIn(ref.fn.node)) {
+      if (site.chain.length === 1 && site.name === "scopedDb") return true;
+      if (RAW_NAMES.has(site.name)) return true;
+    }
+    for (const local of valueRefsIn(ref.fn.node)) {
+      const b = project.bindingOf(ref, local);
+      if (b && !b.typeOnly && b.resolved?.startsWith("src/lib/") && project.libReaches(b.resolved))
+        return true;
+    }
+    for (const site of callsIn(ref.fn.node)) {
+      const next = project.resolveCall(ref, site, () => false);
+      if (next && visit(next)) return true;
+    }
+    return false;
+  };
+  return visit(start);
+}
+
 export function findPageAccessViolations(
-  _rules: PageAccessRules,
-  _sources: Sources,
+  rules: PageAccessRules,
+  sources: Sources,
 ): PageAccessResult {
-  return { violations: [], checked: [], pagesFound: [], pagesChecked: [] };
+  const project = new Project(sources);
+  const violations: PageAccessViolation[] = [];
+  const checked: PageAccessEntry[] = [];
+  const pagesFound: string[] = [];
+  const pagesChecked: string[] = [];
+  const judge = (ref: FnRef, kind: PageAccessEntry["kind"]) => {
+    checked.push({ file: ref.mod.file, function: ref.fn.name, kind });
+    for (const detail of pageAccessFindings(project, ref, rules)) {
+      violations.push({ file: ref.mod.file, function: ref.fn.name, detail });
+    }
+  };
+
+  const files = [...project.modules.keys()].filter((f) => f.startsWith(rules.appPrefix)).sort();
+  for (const file of files) {
+    const mod = project.modules.get(file);
+    if (!mod) continue;
+    const base = path.posix.basename(file);
+    if (base === "page.tsx") {
+      pagesFound.push(file);
+      const def = project.exported(file, "default");
+      if (def) {
+        pagesChecked.push(file);
+        judge(def, "page");
+      } else {
+        violations.push({
+          file,
+          function: "<default>",
+          detail: "page has no default-exported function the rule can read",
+        });
+      }
+    } else if (base === "layout.tsx") {
+      const def = project.exported(file, "default");
+      if (file === rules.rootLayout) {
+        if (def) judge(def, "layout");
+        else {
+          violations.push({
+            file,
+            function: "<default>",
+            detail: "the root layout has no default-exported function the rule can read",
+          });
+        }
+      } else if (def && functionReaches(project, def)) judge(def, "layout");
+    } else if (file.endsWith(".tsx") && !mod.useClient && !mod.useServer) {
+      // A server component module: every exported function that reaches tenant data itself.
+      for (const fn of mod.functions.values()) {
+        if (!fn.exported) continue;
+        const ref = { mod, fn };
+        if (functionReaches(project, ref)) judge(ref, "component");
+      }
+    }
+  }
+  if (!project.modules.has(rules.rootLayout)) {
+    violations.push({
+      file: rules.rootLayout,
+      function: "<module>",
+      detail: "the root layout is missing from the tree",
+    });
+  }
+  if (pagesFound.length !== pagesChecked.length) {
+    violations.push({
+      file: rules.appPrefix,
+      function: "<pages>",
+      detail: `${pagesFound.length} page(s) found, ${pagesChecked.length} checked`,
+    });
+  }
+  checked.sort((a, b) =>
+    a.file === b.file ? a.function.localeCompare(b.function) : a.file.localeCompare(b.file),
+  );
+  return { violations, checked, pagesFound, pagesChecked };
 }
