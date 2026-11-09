@@ -7,9 +7,11 @@
 // Built on better-auth 1.7.20 (D-01 as updated by V-01): a later Better Auth upgrade reruns this
 // suite.
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { simpleParser } from "mailparser";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Prisma } from "@/generated/prisma/client";
 import { saveBrandingSettings } from "@/lib/branding/settings";
+import { saveEmailSettings } from "@/lib/channels/email/settings";
 import { prisma } from "@/lib/db";
 import { scopedDb } from "@/lib/scoped-db";
 import { INVALID_INVITATION_MESSAGE, InvitationError } from "@/lib/workspace-members/errors";
@@ -24,8 +26,13 @@ import {
   revokeInvitation,
   type SessionRef,
 } from "@/lib/workspace-members/invitations";
+import {
+  INVITATION_EMAIL_SUBJECT,
+  invitationEmailBody,
+} from "@/lib/workspace-members/invite-email";
 import { createInviteToken, hashInviteToken } from "@/lib/workspace-members/invite-token";
 import { changeMemberRole, deactivateMember } from "@/lib/workspace-members/member-admin";
+import { type FakeSmtpMode, type FakeSmtpServer, startFakeSmtp } from "../support/fake-smtp";
 import { type MemberRole, seedOrgWithMembers } from "../support/inbox-fixtures";
 import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
 import { assertNoDeadlock, createObserverClient, settleAll } from "../support/project-race";
@@ -95,6 +102,12 @@ function created(result: Awaited<ReturnType<typeof createInvitation>>): CreateIn
   return result;
 }
 
+/** The copyable link of a result that was not emailed (smtp_off or send_failed, D-06). */
+function linkOf(result: CreateInvitationSuccess): string {
+  if (result.delivery === "sent") throw new Error("the invitation was emailed; no link returned");
+  return result.link;
+}
+
 /** The token at the end of an invitation link. */
 function tokenFromLink(link: string): string {
   const match = /\/invite\/([A-Za-z0-9_-]+)$/.exec(link);
@@ -138,8 +151,13 @@ describe("tracer: create an invitation and accept it into one membership and an 
       }),
     );
     expect(invite.email).toBe(invitee.email);
-    expect(invite.link).toBe(`${BASE_URL}/invite/${invite.token}`);
-    expect(invite.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    // No email settings: the copyable link comes back to the inviter (D-06).
+    expect(invite.delivery).toBe("smtp_off");
+    const link = linkOf(invite);
+    expect(link).toMatch(
+      new RegExp(`^${BASE_URL.replace(/[.]/g, "\\.")}/invite/[A-Za-z0-9_-]{43}$`),
+    );
+    const token = tokenFromLink(link);
 
     // Only the hash is stored; the row carries the D-04 shape.
     const row = await prisma.invitation.findUniqueOrThrow({ where: { id: invite.invitationId } });
@@ -149,13 +167,14 @@ describe("tracer: create an invitation and accept it into one membership and an 
       role: "admin",
       status: "pending",
       inviterId: owner,
-      tokenHash: hashInviteToken(invite.token),
+      tokenHash: hashInviteToken(token),
     });
-    expect(row.tokenHash).not.toContain(invite.token);
+    expect(row.tokenHash).not.toContain(token);
+    expect(JSON.stringify(row)).not.toContain(token);
     expect(row.expiresAt.getTime() - row.createdAt.getTime()).toBe(7 * 86_400_000);
 
     const accepted = await acceptInvitation({
-      token: tokenFromLink(invite.link),
+      token,
       userId: invitee.id,
       userEmail: invitee.email,
       session: { id: session.id },
@@ -200,9 +219,10 @@ async function invite(
   email: string,
   role: string,
   now?: Date,
-): Promise<CreateInvitationSuccess & { linkToken: string }> {
+): Promise<CreateInvitationSuccess & { link: string; linkToken: string }> {
   const result = created(await createInvitation({ orgId, actorUserId, email, role }, now));
-  return { ...result, linkToken: tokenFromLink(result.link) };
+  const link = linkOf(result);
+  return { ...result, link, linkToken: tokenFromLink(link) };
 }
 
 /** Runs acceptInvitation and also returns the internal refusal reason (tests only). */
@@ -1087,5 +1107,188 @@ describe("reads: getInvitationView and listPendingInvitations", () => {
     expect(list.find((p) => p.invitationId === p1.invitationId)?.invitedBy).toBe(
       FORMER_MEMBER_LABEL,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Task 3: the invitation email through the fake SMTP and the copy-link fallback (V-15, D-06,
+// R2-5). The organization's email settings point at a loopback server on a plain TCP socket;
+// nothing leaves the machine.
+// ---------------------------------------------------------------------------------------------
+
+describe("the invitation email through the fake SMTP (V-15, D-06, R2-5)", () => {
+  let smtp: FakeSmtpServer;
+
+  beforeAll(async () => {
+    smtp = await startFakeSmtp();
+  });
+
+  afterAll(async () => {
+    await smtp.stop();
+  });
+
+  beforeEach(() => {
+    smtp.reset();
+  });
+
+  async function orgWithSmtp({ enabled = true }: { enabled?: boolean } = {}) {
+    const { orgId, ids } = await seed(["owner"]);
+    await prisma.user.update({ where: { id: ids[0] }, data: { name: "Olive Owner" } });
+    await saveEmailSettings(scopedDb(orgId), orgId, {
+      enabled,
+      fromAddress: "support@example.test",
+      smtpHost: "127.0.0.1",
+      smtpPort: smtp.port,
+      smtpSecure: false,
+      smtpUser: "fake-user",
+      smtpPassword: "fake-password",
+    });
+    await saveBrandingSettings(scopedDb(orgId), orgId, { workspaceName: "Acme Help" });
+    return { orgId, owner: ids[0] };
+  }
+
+  /** The decoded subject and text of a captured message. */
+  async function parse(raw: string) {
+    const mail = await simpleParser(raw);
+    return { subject: mail.subject ?? "", text: mail.text ?? "" };
+  }
+
+  it("sends one message to the invited address with the UI-SPEC subject and body; its link is valid and accepts; no link is returned", async () => {
+    const { orgId, owner } = await orgWithSmtp();
+    const user = await addUser();
+    const result = created(
+      await createInvitation({ orgId, actorUserId: owner, email: user.email, role: "admin" }),
+    );
+    expect(result.delivery).toBe("sent");
+    expect(result).not.toHaveProperty("link");
+    expect(result).not.toHaveProperty("token");
+
+    expect(smtp.messages).toHaveLength(1);
+    const [message] = smtp.messages;
+    expect(message?.recipients).toEqual([user.email]);
+    expect(message?.from).toBe("support@example.test");
+
+    const { subject, text } = await parse(message?.raw ?? "");
+    expect(subject).toBe(INVITATION_EMAIL_SUBJECT);
+    expect(subject).toBe("You've been invited to an AIDA workspace");
+    const match = new RegExp(`${BASE_URL.replace(/[.]/g, "\\.")}/invite/([A-Za-z0-9_-]{43})`).exec(
+      text,
+    );
+    expect(match?.[1]).toBeDefined();
+    const token = match?.[1] ?? "";
+    expect(text.trim()).toBe(
+      invitationEmailBody({
+        inviterName: "Olive Owner",
+        workspaceName: "Acme Help",
+        role: "admin",
+        link: `${BASE_URL}/invite/${token}`,
+        expiresAt: result.expiresAt,
+      }),
+    );
+    expect(text).toContain("Olive Owner invited you to join Acme Help on AIDA as admin.");
+    expect(text).toContain("If you did not expect this, ignore this email.");
+
+    expect(await getInvitationView(token)).toMatchObject({ state: "valid", role: "admin" });
+    const session = await addSession(user.id);
+    expect((await acceptWithReason(token, user, session)).result).toEqual({
+      ok: true,
+      orgId,
+      role: "admin",
+      retried: false,
+    });
+    expect(await sessionOrg(session.id)).toBe(orgId);
+  });
+
+  it("email disabled or not configured: nothing is sent and the link is returned (smtp_off)", async () => {
+    const { orgId, owner } = await orgWithSmtp({ enabled: false });
+    const result = created(
+      await createInvitation({
+        orgId,
+        actorUserId: owner,
+        email: `off-${randomUUID()}@example.test`,
+        role: "member",
+      }),
+    );
+    expect(result.delivery).toBe("smtp_off");
+    expect(linkOf(result)).toMatch(/\/invite\/[A-Za-z0-9_-]{43}$/);
+
+    const bare = await seed(["owner"]);
+    const bareResult = created(
+      await createInvitation({
+        orgId: bare.orgId,
+        actorUserId: bare.ids[0],
+        email: `bare-${randomUUID()}@example.test`,
+        role: "member",
+      }),
+    );
+    expect(bareResult.delivery).toBe("smtp_off");
+    expect(smtp.received).toEqual([]);
+  });
+
+  for (const mode of ["reject-data", "reject-data-command", "reject-rcpt"] as FakeSmtpMode[]) {
+    it(`${mode}: send_failed with the link; the invitation stays pending and acceptable`, async () => {
+      const { orgId, owner } = await orgWithSmtp();
+      smtp.setMode(mode);
+      const user = await addUser();
+      const result = created(
+        await createInvitation({ orgId, actorUserId: owner, email: user.email, role: "member" }),
+      );
+      expect(result.delivery).toBe("send_failed");
+      expect(smtp.messages).toEqual([]);
+      // Only reject-data reads the whole message before refusing it.
+      expect(smtp.received).toHaveLength(mode === "reject-data" ? 1 : 0);
+      const token = tokenFromLink(linkOf(result));
+      expect(await invitationStatus(result.invitationId)).toBe("pending");
+      expect(await getInvitationView(token)).toMatchObject({ state: "valid" });
+      const session = await addSession(user.id);
+      expect((await acceptWithReason(token, user, session)).result).toMatchObject({ ok: true });
+    });
+  }
+
+  it("drop-on-data: send_failed within the transport timeout, the link returned", async () => {
+    const { orgId, owner } = await orgWithSmtp();
+    smtp.setMode("drop-on-data");
+    const started = Date.now();
+    const result = created(
+      await createInvitation({
+        orgId,
+        actorUserId: owner,
+        email: `drop-${randomUUID()}@example.test`,
+        role: "member",
+      }),
+    );
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(result.delivery).toBe("send_failed");
+    expect(linkOf(result)).toMatch(/\/invite\/[A-Za-z0-9_-]{43}$/);
+    expect(smtp.received).toEqual([]);
+  });
+
+  it("drop-after-data-end: the server read the whole message but never answered; send_failed with the link", async () => {
+    const { orgId, owner } = await orgWithSmtp();
+    smtp.setMode("drop-after-data-end");
+    const email = `ambiguous-${randomUUID()}@example.test`;
+    const result = created(
+      await createInvitation({ orgId, actorUserId: owner, email, role: "member" }),
+    );
+    expect(result.delivery).toBe("send_failed");
+    expect(smtp.received).toHaveLength(1);
+    expect(smtp.received[0]).toMatchObject({ recipients: [email], accepted: false });
+    expect(smtp.messages).toEqual([]);
+    expect(linkOf(result)).toMatch(/\/invite\/[A-Za-z0-9_-]{43}$/);
+  });
+
+  it("delay-ms: a slow but answering server still delivers (sent)", async () => {
+    const { orgId, owner } = await orgWithSmtp();
+    smtp.setMode("delay-ms", { delayMs: 30 });
+    const result = created(
+      await createInvitation({
+        orgId,
+        actorUserId: owner,
+        email: `slow-${randomUUID()}@example.test`,
+        role: "member",
+      }),
+    );
+    expect(result.delivery).toBe("sent");
+    expect(smtp.messages).toHaveLength(1);
   });
 });

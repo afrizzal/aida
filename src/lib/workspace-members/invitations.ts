@@ -49,6 +49,7 @@ import {
   MemberAdminError,
   type MemberAdminErrorCode,
 } from "./errors";
+import { type InvitationEmailStatus, sendInvitationEmail } from "./invite-email";
 import { createInviteToken, hashInviteToken, isInviteTokenShape } from "./invite-token";
 import { recordMemberAudit } from "./member-audit";
 import {
@@ -111,18 +112,23 @@ export type CreateInvitationErrorCode = MemberAdminErrorCode | "INVALID_EMAIL";
 
 export type CreateInvitationFailure = { ok: false; error: CreateInvitationErrorCode };
 
-export interface CreateInvitationSuccess {
+interface CreatedInvitation {
   ok: true;
   invitationId: string;
   /** The normalised invited address. */
   email: string;
   role: MemberRole;
   expiresAt: Date;
-  /** The raw link token, given to the caller only; never stored. */
-  token: string;
-  /** BETTER_AUTH_URL base plus `/invite/` plus the token. */
-  link: string;
 }
+
+/**
+ * D-06: the link (BETTER_AUTH_URL base plus `/invite/` plus the raw token) is returned to the
+ * inviting owner or admin only when the email was not delivered (smtp_off or send_failed); in no
+ * other case. The raw token is never stored and never returned on its own.
+ */
+export type CreateInvitationSuccess =
+  | (CreatedInvitation & { delivery: "sent" })
+  | (CreatedInvitation & { delivery: "smtp_off" | "send_failed"; link: string });
 
 /** Test seams of createInvitation (the 10-01 lock seam). Production callers pass none. */
 export type CreateInvitationHooks = OrgLockHooks<Tx>;
@@ -134,7 +140,9 @@ export type CreateInvitationHooks = OrgLockHooks<Tx>;
  * only an owner may invite an owner (ROLE_ABOVE_OWN); a user with that email who holds any member
  * row here → ALREADY_MEMBER; an unexpired pending invitation for that email here →
  * PENDING_EXISTS; the row is inserted with only the token's hash, expiring 7 days after `now`, and
- * INVITATION_CREATED is written.
+ * INVITATION_CREATED is written. After the commit the invitation email is sent through the
+ * organization's SMTP settings (invite-email.ts); the link comes back only when it was not
+ * delivered (D-06).
  */
 export async function createInvitation(
   input: CreateInvitationInput,
@@ -161,11 +169,19 @@ export async function createInvitation(
   const expiresAt = new Date(now.getTime() + INVITATION_TTL_MS);
 
   try {
-    const invitationId = await prisma.$transaction(async (tx) => {
+    const { invitationId, inviterName, orgName } = await prisma.$transaction(async (tx) => {
       if (!(await lockOrganization(tx, orgId, hooks))) throw new MemberAdminError("NOT_ALLOWED");
       const actor = await readMemberRights(tx, orgId, actorUserId);
       if (!actor.isAdmin) throw new MemberAdminError("NOT_ALLOWED");
       if (role === "owner" && !actor.isOwner) throw new MemberAdminError("ROLE_ABOVE_OWN");
+      const inviter = await tx.user.findUnique({
+        where: { id: actorUserId },
+        select: { name: true },
+      });
+      const organization = await tx.organization.findUnique({
+        where: { id: orgId },
+        select: { name: true },
+      });
 
       const users = await tx.user.findMany({
         where: { email: { contains: email, mode: "insensitive" } },
@@ -213,21 +229,58 @@ export async function createInvitation(
         invitationId: id,
         newRole: role,
       });
-      return id;
+      return {
+        invitationId: id,
+        inviterName: inviter?.name.trim() ?? "",
+        orgName: organization?.name ?? "",
+      };
     }, TRANSACTION_OPTIONS);
 
-    return {
-      ok: true,
-      invitationId,
-      email,
+    const link = `${baseUrl}/invite/${token}`;
+    const delivery = await deliverInvitation(orgId, {
+      to: email,
+      inviterName,
+      orgName,
       role,
+      link,
       expiresAt,
-      token,
-      link: `${baseUrl}/invite/${token}`,
-    };
+    });
+    const base: CreatedInvitation = { ok: true, invitationId, email, role, expiresAt };
+    return delivery === "sent" ? { ...base, delivery } : { ...base, delivery, link };
   } catch (err) {
     if (err instanceof MemberAdminError) return { ok: false, error: err.code };
     throw err;
+  }
+}
+
+/**
+ * Sends the committed invitation's email. Never throws: the invitation already exists, so any
+ * failure here (the branding read included) is send_failed and the caller returns the link.
+ */
+async function deliverInvitation(
+  orgId: string,
+  input: {
+    to: string;
+    inviterName: string;
+    orgName: string;
+    role: MemberRole;
+    link: string;
+    expiresAt: Date;
+  },
+): Promise<InvitationEmailStatus> {
+  try {
+    const db = scopedDb(orgId);
+    const branding = await getBrandingSettings(db, input.orgName);
+    return await sendInvitationEmail(db, {
+      to: input.to,
+      inviterName: input.inviterName || "A workspace admin",
+      workspaceName: branding.workspaceName,
+      role: input.role,
+      link: input.link,
+      expiresAt: input.expiresAt,
+    });
+  } catch {
+    return "send_failed";
   }
 }
 
