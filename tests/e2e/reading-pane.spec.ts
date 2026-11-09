@@ -48,7 +48,7 @@ test("posts an internal note with distinct amber styling, separate from public r
 test.describe("A member whose row was deleted (Codex diff critique round 2, E1)", () => {
   test.use({ storageState: path.resolve(__dirname, ".auth/member.json") });
 
-  test("cannot read a known ticket: the page shows the access-ended state, no ticket data and no filter row", async ({
+  test("cannot read a known ticket: the page redirects to /no-access with no ticket data", async ({
     page,
   }) => {
     const member = await prisma.member.findFirstOrThrow({
@@ -66,25 +66,38 @@ test.describe("A member whose row was deleted (Codex diff critique round 2, E1)"
     // The member is removed; the session cookie (with its active organization) stays valid.
     await prisma.member.delete({ where: { id: member.id } });
     try {
-      const response = await page.goto(`/tickets/${ticketId}`);
-      expect(response?.status()).toBe(200);
-      // The whole streamed response, RSC payload included: no subject, no message text and no
-      // roster name reaches the browser.
+      // Phase 10, V-27: requirePageAccess runs first in the layout and the page, so the request is
+      // redirected to /no-access before any ticket, message or roster read.
+      // Polls past a first-hit 404 while next dev compiles /no-access; the product is unchanged.
+      const last: { response: Awaited<ReturnType<typeof page.goto>> } = { response: null };
+      await expect
+        .poll(async () => {
+          last.response = await page.goto(`/tickets/${ticketId}`);
+          return last.response?.status() ?? 0;
+        })
+        .toBe(200);
+      const response = last.response;
+      await expect(page).toHaveURL(/\/no-access$/);
+      // The redirect hop answered with a redirect status, never a rendered ticket page.
+      const hop = response?.request().redirectedFrom();
+      if (hop) {
+        const hopResponse = await hop.response();
+        expect(hopResponse?.status()).toBeGreaterThanOrEqual(300);
+        expect(hopResponse?.status()).toBeLessThan(400);
+      }
+      // The whole response the browser ends on: no subject, no message text and no roster name.
       const html = (await response?.text()) ?? "";
       expect(html).not.toContain(SUBJECT);
       expect(html).not.toContain("Initial inbound message");
       expect(html).not.toContain(owner.name);
 
-      const main = page.getByRole("main");
       await expect(
-        main.getByRole("heading", { name: "Your access to this workspace has ended." }),
+        page.getByRole("heading", { level: 1, name: "You don't have access to this workspace" }),
       ).toBeVisible();
-      await expect(main.getByText("Sign out, then sign in again.").first()).toBeVisible();
-      // Not the error boundary.
+      await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+      // Not the error boundary, and none of the inbox controls.
       await expect(page.getByText("Couldn't load tickets.")).toHaveCount(0);
-      // The membership-ended panel has no filter row and no create-ticket control.
       await expect(page.getByRole("button", { name: "New Ticket" })).toHaveCount(0);
-      await expect(page.getByRole("button", { name: "Unassigned", exact: true })).toHaveCount(0);
       await expect(page.getByPlaceholder("Search tickets…")).toHaveCount(0);
     } finally {
       await prisma.member.create({

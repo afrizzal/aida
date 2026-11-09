@@ -11,6 +11,10 @@
  * one draft proposal are seeded and every route is rendered again. The shared E2E organization is
  * only read (the first case), so later files see it unchanged.
  *
+ * A member whose row was deleted and a user with no membership at all are redirected to /no-access
+ * from every route they open (Phase 10, V-27: requirePageAccess runs first in the (app) layout and
+ * in every page); that page is under (auth), has no <main>, and owns the document's one <h1>.
+ *
  * Error and loading states are rendered through the E2E fault hook (src/lib/testing/e2e-fault.ts),
  * which acts only on the E2E dev server (global-setup.ts sets its flag) and only for a request that
  * carries the `aida-e2e-fault` cookie naming a fault point: a page point makes the page throw, so
@@ -46,7 +50,8 @@ const NO_WORKSPACE_STORAGE = path.join(AUTH_DIR, "single-h1-no-workspace.json");
 const OWN_PASSWORD = "E2E-single-h1-password-1!";
 /** The fault hook's cookie (E2E_FAULT_COOKIE); a literal here so this file never loads next/headers. */
 const FAULT_COOKIE = "aida-e2e-fault";
-const ACCESS_ENDED_HEADING = "Your access to this workspace has ended.";
+/** The one h1 of /no-access (src/app/(auth)/no-access/page.tsx, UI-SPEC Surface 6). */
+const NO_ACCESS_HEADING = "You don't have access to this workspace";
 
 /** The page routes of src/app/(app); every one must be rendered by at least one case below. */
 const APP_PAGE_ROUTES = [
@@ -127,6 +132,37 @@ async function expectRouteSingleH1(page: Page, url: string, text?: string | RegE
   await expectSingleH1(page, text);
 }
 
+/**
+ * Opens `url` and asserts the redirect to /no-access (V-27): the final URL is /no-access, the
+ * document has exactly one h1, it is the no-access title, and it is the first heading in DOM order.
+ * /no-access is an (auth) page, so there is no <main> to look inside.
+ */
+async function expectNoAccess(page: Page, url: string): Promise<void> {
+  await gotoWarm(page, url);
+  await expect(page).toHaveURL(/\/no-access$/);
+  await expect(page.locator("h1")).toHaveCount(1);
+  await expect(page.locator("h1")).toHaveText(NO_ACCESS_HEADING);
+  const firstHeadingTag = await page
+    .locator("h1, h2, h3, h4, h5, h6")
+    .first()
+    .evaluate((element) => element.tagName);
+  expect(firstHeadingTag).toBe("H1");
+}
+
+/** Opens each route in turn, expects /no-access, and records it against its route pattern. */
+async function expectNoAccessRows(
+  page: Page,
+  state: string,
+  rows: readonly { route: AppPageRoute; url: string }[],
+): Promise<void> {
+  for (const row of rows) {
+    await test.step(`${state}: ${row.url} -> /no-access`, async () => {
+      await expectNoAccess(page, row.url);
+    });
+    rendered.set(row.route, [...(rendered.get(row.route) ?? []), state]);
+  }
+}
+
 /** Renders each row in turn and records it against its route pattern. */
 async function expectRows(page: Page, rows: readonly Row[]): Promise<void> {
   for (const row of rows) {
@@ -153,8 +189,16 @@ async function setPassword(userId: string): Promise<void> {
   });
 }
 
-/** Signs a user in through the real login page and saves the session to storagePath. */
-async function signIn(browser: Browser, userId: string, storagePath: string): Promise<void> {
+/**
+ * Signs a user in through the real login page and saves the session to storagePath. The login form
+ * sends the user to /tickets; a user with no membership lands on /no-access instead (V-27).
+ */
+async function signIn(
+  browser: Browser,
+  userId: string,
+  storagePath: string,
+  landing: RegExp = /\/tickets/,
+): Promise<void> {
   const { email } = await prisma.user.findUniqueOrThrow({
     where: { id: userId },
     select: { email: true },
@@ -166,7 +210,7 @@ async function signIn(browser: Browser, userId: string, storagePath: string): Pr
   await page.getByLabel("Email address").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(OWN_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForURL(/\/tickets/, { timeout: 60_000 });
+  await page.waitForURL(landing, { timeout: 60_000 });
   await context.storageState({ path: storagePath });
   await context.close();
 }
@@ -218,7 +262,7 @@ test.describe
       await signIn(browser, ownerId, OWNER_STORAGE);
       await signIn(browser, memberId, MEMBER_STORAGE);
       await signIn(browser, endedUserId, ENDED_STORAGE);
-      await signIn(browser, noWorkspaceUserId, NO_WORKSPACE_STORAGE);
+      await signIn(browser, noWorkspaceUserId, NO_WORKSPACE_STORAGE, /\/no-access$/);
 
       // The ended member's row goes after sign-in, so its session keeps the active organization.
       endedMemberRow = await prisma.member.findFirstOrThrow({
@@ -519,58 +563,55 @@ test.describe
       await context.close();
     });
 
-    test("a member whose row was deleted: the access-ended states", async ({ browser }) => {
-      test.setTimeout(180_000);
+    test("a member whose row was deleted: every route redirects to /no-access", async ({
+      browser,
+    }) => {
+      test.setTimeout(300_000);
+      // The session still names the organization; the member row is gone (beforeAll).
+      await expect(
+        prisma.member.count({ where: { organizationId: orgId, userId: endedUserId } }),
+      ).resolves.toBe(0);
       const context = await browser.newContext({ storageState: ENDED_STORAGE });
       const page = await context.newPage();
-      await expectRows(page, [
-        { route: "/tickets", state: "access ended", url: "/tickets", h1: "Tickets" },
-        {
-          route: "/tickets/[id]",
-          state: "access ended",
-          url: `/tickets/${ticket.id}`,
-          h1: ACCESS_ENDED_HEADING,
-        },
-        {
-          route: "/contacts/[id]",
-          state: "access ended",
-          url: `/contacts/${ticket.contactId}`,
-          h1: ACCESS_ENDED_HEADING,
-        },
-        {
-          route: "/kb/proposals",
-          state: "access ended",
-          url: "/kb/proposals",
-          h1: ACCESS_ENDED_HEADING,
-        },
-        {
-          route: "/kb/proposals/[id]",
-          state: "access ended",
-          url: `/kb/proposals/${proposalId}`,
-          h1: ACCESS_ENDED_HEADING,
-        },
-        {
-          route: "/settings/statuses",
-          state: "access ended",
-          url: "/settings/statuses",
-          h1: STATUS_PAGE_TITLE,
-        },
+      await expectNoAccessRows(page, "no access (row deleted)", [
+        { route: "/tickets", url: "/tickets" },
+        { route: "/tickets/[id]", url: `/tickets/${ticket.id}` },
+        { route: "/contacts", url: "/contacts" },
+        { route: "/contacts/[id]", url: `/contacts/${ticket.contactId}` },
+        { route: "/kb", url: "/kb" },
+        { route: "/kb/new", url: "/kb/new" },
+        { route: "/kb/[id]", url: `/kb/${articleId}` },
+        { route: "/kb/proposals", url: "/kb/proposals" },
+        { route: "/kb/proposals/[id]", url: `/kb/proposals/${proposalId}` },
+        { route: "/insights", url: "/insights" },
+        { route: "/settings", url: "/settings" },
+        { route: "/settings/backups", url: "/settings/backups" },
+        { route: "/settings/branding", url: "/settings/branding" },
+        { route: "/settings/custom-fields", url: "/settings/custom-fields" },
+        { route: "/settings/email", url: "/settings/email" },
+        { route: "/settings/sla", url: "/settings/sla" },
+        { route: "/settings/statuses", url: "/settings/statuses" },
+        { route: "/settings/tags", url: "/settings/tags" },
       ]);
       await context.close();
     });
 
-    test("the app-shell fallback: a signed-in user with no workspace", async ({ browser }) => {
-      test.setTimeout(120_000);
+    test("a signed-in user with no workspace: redirected to /no-access", async ({ browser }) => {
+      test.setTimeout(180_000);
       // The database holds no member row for this user.
       await expect(prisma.member.count({ where: { userId: noWorkspaceUserId } })).resolves.toBe(0);
       const context = await browser.newContext({ storageState: NO_WORKSPACE_STORAGE });
       const page = await context.newPage();
-      await gotoWarm(page, "/tickets");
-      await expect(
-        page.getByText("No workspace found. Please sign out and sign in again."),
-      ).toBeVisible();
-      await expectSingleH1(page, "Workspace not found");
-      await expect(page.locator("main h1")).toHaveClass(/\bsr-only\b/);
+      await expectNoAccessRows(page, "no access (no workspace)", [
+        { route: "/tickets", url: "/tickets" },
+        { route: "/tickets/[id]", url: `/tickets/${ticket.id}` },
+        { route: "/contacts", url: "/contacts" },
+        { route: "/kb/new", url: "/kb/new" },
+        { route: "/settings", url: "/settings" },
+        { route: "/settings/backups", url: "/settings/backups" },
+      ]);
+      // The old app-shell fallback is gone.
+      await expect(page.getByText("No workspace found.")).toHaveCount(0);
       await context.close();
     });
 
