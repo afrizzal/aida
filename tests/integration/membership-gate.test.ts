@@ -52,7 +52,7 @@ import { prisma } from "@/lib/db";
 import { readFreshSession } from "@/lib/fresh-session";
 import { AccessDeniedError } from "@/lib/membership";
 import { requirePageAccess } from "@/lib/page-access";
-import { getScopedDb } from "@/lib/session";
+import { getScopedDb, getSessionActor } from "@/lib/session";
 import { seedTicket } from "../support/inbox-fixtures";
 
 afterAll(async () => {
@@ -192,6 +192,59 @@ describe("readFreshSession (V-23): the cookie cache is never the source of truth
 
   it("returns null without a session cookie", async () => {
     expect(await readFreshSession(new Headers())).toBeNull();
+  });
+});
+
+/**
+ * The Set-Cookie values of every auth.api.getSession call made while `run` executes, one array per
+ * call. The spy re-issues the caller's own arguments with returnHeaders and hands the caller only
+ * the session, so readFreshSession runs unchanged and its real call is the one observed.
+ */
+async function setCookiesOfSessionReads(run: () => Promise<unknown>): Promise<string[][]> {
+  const original = auth.api.getSession;
+  const seen: string[][] = [];
+  const spy = vi.spyOn(auth.api, "getSession").mockImplementation((async (context: {
+    headers: Headers;
+    query?: { disableCookieCache?: boolean; disableRefresh?: boolean };
+  }) => {
+    const { headers, response } = await original({ ...context, returnHeaders: true });
+    seen.push(headers.getSetCookie());
+    return response;
+  }) as unknown as typeof original);
+  try {
+    await run();
+  } finally {
+    spy.mockRestore();
+  }
+  return seen;
+}
+
+describe("R10-1: a session read sets no cookie for a valid session", () => {
+  // Better Auth's nextCookies plugin (src/lib/auth.ts) turns every Set-Cookie of an auth.api call
+  // into cookies().set(), and Next.js re-renders the route of any server action that sets a cookie
+  // (x-action-revalidated). A refused action must leave the page as it is (its alert, the selection,
+  // focus), so the reads a server action makes may not set a cookie while the session is valid.
+  it("readFreshSession, getSessionActor and getScopedDb each read once and set no cookie", async () => {
+    const s = await signedInMember();
+    // What a browser sends with a server action: its cookies and Next.js's action header.
+    const actionHeaders = () => new Headers({ cookie: s.cookie, "next-action": "r10-1" });
+
+    const fresh = await setCookiesOfSessionReads(async () => {
+      expect((await readFreshSession(actionHeaders()))?.user.id).toBe(s.userId);
+    });
+    expect(fresh).toEqual([[]]);
+
+    env.requestHeaders = actionHeaders();
+    const actor = await setCookiesOfSessionReads(async () => {
+      expect(await getSessionActor()).toEqual({ userId: s.userId, orgId: s.orgId });
+    });
+    expect(actor).toEqual([[]]);
+
+    env.requestHeaders = actionHeaders();
+    const scoped = await setCookiesOfSessionReads(async () => {
+      expect((await getScopedDb()).orgId).toBe(s.orgId);
+    });
+    expect(scoped).toEqual([[]]);
   });
 });
 
