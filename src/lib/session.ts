@@ -10,8 +10,8 @@ import { scopedDb } from "@/lib/scoped-db";
  * Returns null when the request is unauthenticated.
  *
  * Every read is fresh (Phase 10, V-23): it goes through readFreshSession (src/lib/fresh-session.ts),
- * so the five-minute cookie cache is never the source of truth for the session or its active
- * organization. Use in Server Components and Server Actions.
+ * so a cookie cache is never the source of truth for the session or its active organization (the
+ * cache is off, src/lib/auth.ts, R10-1). Use in Server Components and Server Actions.
  */
 export async function getCurrentSession() {
   return readFreshSession(await headers());

@@ -8,7 +8,13 @@ import { CLIENT_IP_HEADER } from "./rate-limit/client-ip";
 export const auth = betterAuth({
   database: prismaAdapter(prisma, { provider: "postgresql" }),
   emailAndPassword: { enabled: true },
-  session: { strategy: "database", cookieCache: { enabled: true, maxAge: 5 * 60 } },
+  // No cookie cache (R10-1, V-23). AIDA never trusts a cached copy of the session: every read goes
+  // to the session row (src/lib/fresh-session.ts). With the cache on, each of those reads rewrote
+  // the session_data cookie, and Next.js re-renders the route of any server action that sets a
+  // cookie, so a refused action lost its alert, selection and focus. Off, a valid read sets no
+  // cookie (only a refresh after updateAge, or a gone session, does), and Better Auth's own
+  // endpoints read the session row as well.
+  session: { strategy: "database", cookieCache: { enabled: false } },
   advanced: { ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] } }, // D-18: only the proxy-written identity, never raw X-Forwarded-For
   databaseHooks: {
     session: {

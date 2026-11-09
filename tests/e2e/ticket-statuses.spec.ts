@@ -117,17 +117,17 @@ async function gotoReady(page: Page, url: string) {
 }
 
 /**
- * Renews the session cookie cache (better-auth cookieCache, maxAge 5 minutes). Each test starts
- * from the storage state written at the global-setup sign-in. Once that cookie is older than
- * 5 minutes, the first server action sets a new one, and Next.js then re-renders the page in
- * the action's response: a refused action shows the server's current list, so a state deleted
- * behind the page disappears with its Options button. `disableCookieCache` makes the server
- * read the session row and set a fresh cookie even when the old one has not yet expired.
+ * The refusal tests below need the page NOT to re-render after a refused action, and Next.js
+ * re-renders the page in the response of any server action that sets a cookie: a state deleted
+ * behind the page would then disappear with its Options button. The session cookie cache is off
+ * (src/lib/auth.ts, R10-1), so a fresh session read of the signed-in agent sets no cookie at all.
+ * This checks that precondition through the same fresh read the server actions make.
  */
-async function renewSessionCookieCache(page: Page) {
+async function expectSessionReadSetsNoCookie(page: Page) {
   const res = await page.request.get("/api/auth/get-session?disableCookieCache=true");
   expect(res.status()).toBe(200);
-  expect(res.headers()["set-cookie"] ?? "").toContain("better-auth.session_data=");
+  expect((await res.json())?.session?.id).toBeTruthy();
+  expect(res.headers()["set-cookie"]).toBeUndefined();
 }
 
 /** The ordered list of a group card on /settings/statuses. */
@@ -144,7 +144,7 @@ async function chooseTopBarState(page: Page, name: string) {
 test.describe
   .serial("Ticket statuses", () => {
     test.beforeEach(async ({ page }) => {
-      await renewSessionCookieCache(page);
+      await expectSessionReadSetsNoCookie(page);
     });
 
     test.afterAll(async () => {

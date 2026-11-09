@@ -2,16 +2,20 @@
 // Postgres through Testcontainers with no mock of the database or of Better Auth.
 //
 // A user is created and signed in through in-process auth.api.signUpEmail and signInEmail with
-// returnHeaders, and the request headers are built from the returned Set-Cookie values: the
-// session token cookie and the cookie cache's session data cookie, exactly what a browser sends.
+// returnHeaders, and the request headers are built from the returned Set-Cookie values (the
+// session token cookie; the cookie cache is off, R10-1), exactly what a browser sends. Where a
+// test needs a cached copy of the session in the cookies, as a browser may still hold one from a
+// deployment with the cache on, a Better Auth instance with the cache on mints it (cachingAuth).
 // Only the Next request scope is replaced: `next/headers` returns those headers and
 // `next/navigation`'s redirect throws a recognisable error that carries its target.
 //
 // Proves: readFreshSession never trusts the cookie cache (a deleted session row is gone, a changed
-// activeOrganizationId is seen), getScopedDb re-reads membership on every call, and the attachment
-// route answers a removed member exactly like a missing attachment.
+// activeOrganizationId is seen), a valid session read sets no cookie (R10-1), getScopedDb re-reads
+// membership on every call, and the attachment route answers a removed member exactly like a
+// missing attachment.
 import { randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
+import { betterAuth } from "better-auth";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const env = await vi.hoisted(async () => {
@@ -112,8 +116,8 @@ async function signedInMember(role: Role = "member"): Promise<SignedIn> {
     .map((c) => c.split(";")[0])
     .join("; ");
   expect(cookie).toContain("session_token=");
-  // The cookie cache is on (src/lib/auth.ts), so the sign-in also hands out the cached copy.
-  expect(cookie).toContain("session_data=");
+  // The cookie cache is off (src/lib/auth.ts, R10-1), so the sign-in hands out no cached copy.
+  expect(cookie).not.toContain("session_data=");
   return { orgId, userId, cookie, token: response.token };
 }
 
@@ -121,8 +125,37 @@ function headersFor(cookie: string): Headers {
   return new Headers({ cookie });
 }
 
-/** The cookie-cache read, for comparison only: what a read WITHOUT disableCookieCache returns. */
-function cachedRead(cookie: string) {
+/**
+ * AIDA's Better Auth options with the five-minute cookie cache on, as configured before R10-1.
+ * It shares the database and the secret, so the session_data cookie it hands out is a valid cached
+ * copy of the same session row: the cookie a browser may still hold from such a deployment.
+ */
+const cachingAuth = betterAuth({
+  ...auth.options,
+  session: { ...auth.options.session, cookieCache: { enabled: true, maxAge: 5 * 60 } },
+});
+
+/** The Cookie header of `s` plus a cached copy of its session, minted by cachingAuth now. */
+async function withCachedCopy(s: SignedIn): Promise<string> {
+  const { headers } = await cachingAuth.api.getSession({
+    headers: headersFor(s.cookie),
+    returnHeaders: true,
+  });
+  const data = headers
+    .getSetCookie()
+    .map((c) => c.split(";")[0])
+    .filter((c) => c.includes("session_data="));
+  expect(data).toHaveLength(1);
+  return `${s.cookie}; ${data[0]}`;
+}
+
+/** A read that trusts the cookie cache, for comparison only: no AIDA path reads this way. */
+function cacheTrustingRead(cookie: string) {
+  return cachingAuth.api.getSession({ headers: headersFor(cookie) });
+}
+
+/** Better Auth's default read (no disableCookieCache), as its own HTTP endpoints read. */
+function defaultRead(cookie: string) {
   return auth.api.getSession({ headers: headersFor(cookie) });
 }
 
@@ -134,29 +167,34 @@ describe("readFreshSession (V-23): the cookie cache is never the source of truth
     expect(session?.session.activeOrganizationId).toBe(s.orgId);
   });
 
-  it("sees a session row deleted after sign-in as gone, with the same cookies", async () => {
+  it("sees a session row deleted after sign-in as gone, with the same cookies and a cached copy", async () => {
     const s = await signedInMember();
-    // Presence first, through both reads, so a null below cannot come from a bad cookie.
-    expect((await readFreshSession(headersFor(s.cookie)))?.user.id).toBe(s.userId);
-    expect((await cachedRead(s.cookie))?.user.id).toBe(s.userId);
+    const cookie = await withCachedCopy(s);
+    // Presence first, through every read, so a null below cannot come from a bad cookie.
+    expect((await readFreshSession(headersFor(cookie)))?.user.id).toBe(s.userId);
+    expect((await defaultRead(cookie))?.user.id).toBe(s.userId);
+    expect((await cacheTrustingRead(cookie))?.user.id).toBe(s.userId);
 
     await prisma.session.delete({ where: { token: s.token } });
 
-    expect(await readFreshSession(headersFor(s.cookie))).toBeNull();
-    // Recorded for the SUMMARY: the cached read still answers from the session data cookie,
-    // which is why no AIDA path may use it.
-    const cached = await cachedRead(s.cookie);
+    expect(await readFreshSession(headersFor(cookie))).toBeNull();
+    // With the cache off, Better Auth's default read (its own endpoints) sees the row gone too.
+    expect(await defaultRead(cookie)).toBeNull();
+    // Recorded for the SUMMARY: a cache-trusting read still answers from the session data cookie,
+    // which is why the cache is off and no AIDA path may read that way.
+    const cached = await cacheTrustingRead(cookie);
     expect(cached?.user.id).toBe(s.userId);
     expect(cached?.session.activeOrganizationId).toBe(s.orgId);
   });
 
   it("on a deleted row the fresh read expires the session token and the cached data cookies", async () => {
     const s = await signedInMember();
-    expect((await readFreshSession(headersFor(s.cookie)))?.user.id).toBe(s.userId);
+    const cookie = await withCachedCopy(s);
+    expect((await readFreshSession(headersFor(cookie)))?.user.id).toBe(s.userId);
     await prisma.session.delete({ where: { token: s.token } });
 
     const { headers, response } = await auth.api.getSession({
-      headers: headersFor(s.cookie),
+      headers: headersFor(cookie),
       query: { disableCookieCache: true },
       returnHeaders: true,
     });
@@ -171,23 +209,25 @@ describe("readFreshSession (V-23): the cookie cache is never the source of truth
 
   it("sees a database update of session.activeOrganizationId on the next read", async () => {
     const s = await signedInMember();
+    const cookie = await withCachedCopy(s);
     const otherOrg = await createOrg();
     await addMember(otherOrg, s.userId, "member");
-    expect((await readFreshSession(headersFor(s.cookie)))?.session.activeOrganizationId).toBe(
+    expect((await readFreshSession(headersFor(cookie)))?.session.activeOrganizationId).toBe(
       s.orgId,
     );
-    expect((await cachedRead(s.cookie))?.session.activeOrganizationId).toBe(s.orgId);
+    expect((await cacheTrustingRead(cookie))?.session.activeOrganizationId).toBe(s.orgId);
 
     await prisma.session.update({
       where: { token: s.token },
       data: { activeOrganizationId: otherOrg },
     });
 
-    expect((await readFreshSession(headersFor(s.cookie)))?.session.activeOrganizationId).toBe(
+    expect((await readFreshSession(headersFor(cookie)))?.session.activeOrganizationId).toBe(
       otherOrg,
     );
+    expect((await defaultRead(cookie))?.session.activeOrganizationId).toBe(otherOrg);
     // Recorded for the SUMMARY: the cached copy still names the old organization.
-    expect((await cachedRead(s.cookie))?.session.activeOrganizationId).toBe(s.orgId);
+    expect((await cacheTrustingRead(cookie))?.session.activeOrganizationId).toBe(s.orgId);
   });
 
   it("returns null without a session cookie", async () => {
@@ -245,6 +285,20 @@ describe("R10-1: a session read sets no cookie for a valid session", () => {
       expect((await getScopedDb()).orgId).toBe(s.orgId);
     });
     expect(scoped).toEqual([[]]);
+  });
+
+  it("expires a cached copy left from a deployment with the cache on, once, and reads the row", async () => {
+    const s = await signedInMember();
+    const cookie = await withCachedCopy(s);
+    const seen = await setCookiesOfSessionReads(async () => {
+      expect((await readFreshSession(headersFor(cookie)))?.user.id).toBe(s.userId);
+    });
+    // The only cookie this read sets is the expiry of the stale copy; the browser then drops it,
+    // and every read after that sets none (the case above).
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toHaveLength(1);
+    expect(seen[0][0]).toMatch(/^better-auth\.session_data=;/);
+    expect(seen[0][0]).toMatch(/max-age=0/i);
   });
 });
 
