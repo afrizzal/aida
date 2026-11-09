@@ -8,14 +8,27 @@
 // suite.
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { Prisma } from "@/generated/prisma/client";
+import { saveBrandingSettings } from "@/lib/branding/settings";
 import { prisma } from "@/lib/db";
+import { scopedDb } from "@/lib/scoped-db";
+import { INVALID_INVITATION_MESSAGE, InvitationError } from "@/lib/workspace-members/errors";
 import {
+  type AcceptInvitationHooks,
   acceptInvitation,
   type CreateInvitationSuccess,
   createInvitation,
+  FORMER_MEMBER_LABEL,
+  getInvitationView,
+  listPendingInvitations,
+  revokeInvitation,
+  type SessionRef,
 } from "@/lib/workspace-members/invitations";
-import { hashInviteToken } from "@/lib/workspace-members/invite-token";
+import { createInviteToken, hashInviteToken } from "@/lib/workspace-members/invite-token";
+import { changeMemberRole, deactivateMember } from "@/lib/workspace-members/member-admin";
 import { type MemberRole, seedOrgWithMembers } from "../support/inbox-fixtures";
+import { backendPid, deferred, waitForBlockedBy } from "../support/lock-wait";
+import { assertNoDeadlock, createObserverClient, settleAll } from "../support/project-race";
 
 const BASE_URL = "http://invite.example.test:3100";
 let savedAuthUrl: string | undefined;
@@ -168,5 +181,911 @@ describe("tracer: create an invitation and accept it into one membership and an 
       invitationId: invite.invitationId,
       newRole: "admin",
     });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Task 2: every rejection rule, the expiry boundary, session gone, the retry path and the
+// forced-order races (C2, R2-2, R2-4, V-16, V-23, V-26).
+// ---------------------------------------------------------------------------------------------
+
+const DAY_MS = 86_400_000;
+const INVALID = { ok: false, error: "INVALID_INVITATION" } as const;
+const SESSION_GONE = { ok: false, error: "SESSION_GONE" } as const;
+
+/** Creates an invitation (refusal throws) and returns it with the token from its link. */
+async function invite(
+  orgId: string,
+  actorUserId: string,
+  email: string,
+  role: string,
+  now?: Date,
+): Promise<CreateInvitationSuccess & { linkToken: string }> {
+  const result = created(await createInvitation({ orgId, actorUserId, email, role }, now));
+  return { ...result, linkToken: tokenFromLink(result.link) };
+}
+
+/** Runs acceptInvitation and also returns the internal refusal reason (tests only). */
+async function acceptWithReason(
+  token: string,
+  user: { id: string; email: string },
+  session: SessionRef,
+  { hooks = {}, now }: { hooks?: AcceptInvitationHooks; now?: Date } = {},
+) {
+  let reason: string | undefined;
+  const result = await acceptInvitation(
+    { token, userId: user.id, userEmail: user.email, session },
+    {
+      ...hooks,
+      onRefusal(r) {
+        reason = r;
+      },
+    },
+    now,
+  );
+  return { result, reason };
+}
+
+async function invitationStatus(invitationId: string) {
+  return (await prisma.invitation.findUniqueOrThrow({ where: { id: invitationId } })).status;
+}
+
+async function acceptedAuditCount(orgId: string) {
+  return prisma.memberAuditEvent.count({
+    where: { organizationId: orgId, action: "INVITATION_ACCEPTED" },
+  });
+}
+
+async function emailOf(userId: string) {
+  return (await prisma.user.findUniqueOrThrow({ where: { id: userId } })).email;
+}
+
+/** A pending invitation inserted directly (bypassing createInvitation's duplicate checks). */
+async function insertInvitation(
+  orgId: string,
+  inviterId: string,
+  email: string,
+  role = "member",
+): Promise<{ invitationId: string; token: string }> {
+  const token = createInviteToken();
+  const invitationId = randomUUID();
+  const now = new Date();
+  await prisma.invitation.create({
+    data: {
+      id: invitationId,
+      organizationId: orgId,
+      email,
+      role,
+      status: "pending",
+      tokenHash: hashInviteToken(token),
+      expiresAt: new Date(now.getTime() + 7 * DAY_MS),
+      createdAt: now,
+      inviterId,
+    },
+  });
+  return { invitationId, token };
+}
+
+describe("createInvitation: role ceilings, input and duplicates (D-03, V-26)", () => {
+  it("an admin invites member and admin but not owner (ROLE_ABOVE_OWN); an owner invites owner", async () => {
+    const { orgId, ids } = await seed(["owner", "admin"]);
+    const [owner, admin] = ids;
+    const fresh = () => `inv-${randomUUID()}@example.test`;
+
+    expect(
+      await createInvitation({ orgId, actorUserId: admin, email: fresh(), role: "owner" }),
+    ).toEqual({ ok: false, error: "ROLE_ABOVE_OWN" });
+    expect(
+      (await createInvitation({ orgId, actorUserId: admin, email: fresh(), role: "admin" })).ok,
+    ).toBe(true);
+    expect(
+      (await createInvitation({ orgId, actorUserId: admin, email: fresh(), role: "member" })).ok,
+    ).toBe(true);
+    const ownerInvite = await invite(orgId, owner, fresh(), "owner");
+    expect(ownerInvite.role).toBe("owner");
+  });
+
+  it("a member or a non-member inviting anyone is NOT_ALLOWED and nothing is written", async () => {
+    const { orgId, ids } = await seed(["owner", "member"]);
+    const [, member] = ids;
+    const outsider = await addUser();
+    for (const actorUserId of [member, outsider.id]) {
+      for (const role of ["member", "admin", "owner"]) {
+        expect(
+          await createInvitation({
+            orgId,
+            actorUserId,
+            email: `x-${randomUUID()}@example.test`,
+            role,
+          }),
+        ).toEqual({ ok: false, error: "NOT_ALLOWED" });
+      }
+    }
+    expect(await prisma.invitation.count({ where: { organizationId: orgId } })).toBe(0);
+    expect(await memberAudit(orgId)).toEqual([]);
+  });
+
+  it("an owner with a mixed owner and admin row inviting owner is ROLE_ABOVE_OWN (V-26 (2)); admin is allowed", async () => {
+    const { orgId, ids } = await seed(["owner", "owner"]);
+    const [, mixed] = ids;
+    await prisma.member.create({
+      data: {
+        id: `z-dup-${randomUUID()}`,
+        organizationId: orgId,
+        userId: mixed,
+        role: "admin",
+        createdAt: new Date(),
+      },
+    });
+    expect(
+      await createInvitation({
+        orgId,
+        actorUserId: mixed,
+        email: `x-${randomUUID()}@example.test`,
+        role: "owner",
+      }),
+    ).toEqual({ ok: false, error: "ROLE_ABOVE_OWN" });
+    expect(
+      (
+        await createInvitation({
+          orgId,
+          actorUserId: mixed,
+          email: `x-${randomUUID()}@example.test`,
+          role: "admin",
+        })
+      ).ok,
+    ).toBe(true);
+  });
+
+  it("rejects an unknown role (INVALID_ROLE) and a malformed address (INVALID_EMAIL) before any write", async () => {
+    const { orgId, ids } = await seed(["owner"]);
+    const [owner] = ids;
+    for (const role of ["viewer", "Owner", "", "member,admin"]) {
+      expect(
+        await createInvitation({ orgId, actorUserId: owner, email: "ok@example.test", role }),
+      ).toEqual({ ok: false, error: "INVALID_ROLE" });
+    }
+    for (const email of [
+      "",
+      "   ",
+      "no-at-sign",
+      "a@b@c.test",
+      "@example.test",
+      "a@",
+      "a b@c.test",
+    ]) {
+      expect(await createInvitation({ orgId, actorUserId: owner, email, role: "member" })).toEqual({
+        ok: false,
+        error: "INVALID_EMAIL",
+      });
+    }
+    expect(await prisma.invitation.count({ where: { organizationId: orgId } })).toBe(0);
+  });
+
+  it("refuses a current member's address (ALREADY_MEMBER) and a second unexpired pending one (PENDING_EXISTS); an expired one does not block", async () => {
+    const { orgId, ids } = await seed(["owner", "member"]);
+    const [owner, member] = ids;
+    const memberEmail = await emailOf(member);
+    expect(
+      await createInvitation({
+        orgId,
+        actorUserId: owner,
+        email: ` ${memberEmail.toUpperCase()}`,
+        role: "admin",
+      }),
+    ).toEqual({ ok: false, error: "ALREADY_MEMBER" });
+
+    const email = `dup-${randomUUID()}@example.test`;
+    await invite(orgId, owner, email, "member");
+    expect(
+      await createInvitation({
+        orgId,
+        actorUserId: owner,
+        email: email.toUpperCase(),
+        role: "member",
+      }),
+    ).toEqual({ ok: false, error: "PENDING_EXISTS" });
+
+    const stale = `stale-${randomUUID()}@example.test`;
+    await invite(orgId, owner, stale, "member", new Date(Date.now() - 8 * DAY_MS));
+    expect(
+      (await createInvitation({ orgId, actorUserId: owner, email: stale, role: "member" })).ok,
+    ).toBe(true);
+  });
+
+  it("INVITE_CONFIG when BETTER_AUTH_URL is missing or not http(s); nothing is written", async () => {
+    const { orgId, ids } = await seed(["owner"]);
+    const before = process.env.BETTER_AUTH_URL;
+    try {
+      for (const value of [undefined, "ftp://example.test"]) {
+        if (value === undefined) delete process.env.BETTER_AUTH_URL;
+        else process.env.BETTER_AUTH_URL = value;
+        expect(
+          await createInvitation({
+            orgId,
+            actorUserId: ids[0],
+            email: "cfg@example.test",
+            role: "member",
+          }),
+        ).toEqual({ ok: false, error: "INVITE_CONFIG" });
+      }
+    } finally {
+      process.env.BETTER_AUTH_URL = before;
+    }
+    expect(await prisma.invitation.count({ where: { organizationId: orgId } })).toBe(0);
+    expect(await memberAudit(orgId)).toEqual([]);
+  });
+});
+
+describe("acceptInvitation: every refusal is one generic INVALID_INVITATION (D-03, T-10-19)", () => {
+  it("accepted by another user, revoked, expired at expiresAt and unknown tokens all fail identically", async () => {
+    const { orgId, ids } = await seed(["owner"]);
+    const [owner] = ids;
+    const reasons: Record<string, string | undefined> = {};
+
+    // Accepted by another user.
+    const first = await addUser();
+    const used = await invite(orgId, owner, first.email, "member");
+    expect(
+      (await acceptWithReason(used.linkToken, first, await addSession(first.id))).result.ok,
+    ).toBe(true);
+    const other = await addUser();
+    const otherSession = await addSession(other.id);
+    let r = await acceptWithReason(used.linkToken, other, otherSession);
+    expect(r.result).toEqual(INVALID);
+    reasons.used = r.reason;
+
+    // Revoked.
+    const revokedUser = await addUser();
+    const revoked = await invite(orgId, owner, revokedUser.email, "member");
+    expect(
+      await revokeInvitation({ orgId, actorUserId: owner, invitationId: revoked.invitationId }),
+    ).toEqual({ ok: true });
+    r = await acceptWithReason(revoked.linkToken, revokedUser, await addSession(revokedUser.id));
+    expect(r.result).toEqual(INVALID);
+    reasons.revoked = r.reason;
+
+    // Expired: now equal to expiresAt.
+    const lateUser = await addUser();
+    const t0 = new Date(Date.now() - 60_000);
+    const late = await invite(orgId, owner, lateUser.email, "member", t0);
+    r = await acceptWithReason(late.linkToken, lateUser, await addSession(lateUser.id), {
+      now: late.expiresAt,
+    });
+    expect(r.result).toEqual(INVALID);
+    reasons.expired = r.reason;
+
+    // Unknown: a well-formed token nobody issued, and a malformed one.
+    const stranger = await addUser();
+    const strangerSession = await addSession(stranger.id);
+    r = await acceptWithReason(createInviteToken(), stranger, strangerSession);
+    expect(r.result).toEqual(INVALID);
+    reasons.unknown = r.reason;
+    r = await acceptWithReason("../../etc/passwd", stranger, strangerSession);
+    expect(r.result).toEqual(INVALID);
+
+    expect(reasons).toEqual({
+      used: "used",
+      revoked: "not-pending",
+      expired: "expired",
+      unknown: "unknown",
+    });
+    // One user-facing text for every reason.
+    for (const reason of Object.values(reasons)) {
+      expect(new InvitationError("INVALID_INVITATION", reason).message).toBe(
+        INVALID_INVITATION_MESSAGE,
+      );
+    }
+    for (const u of [other, revokedUser, lateUser, stranger]) {
+      expect(await memberRows(orgId, u.id)).toEqual([]);
+    }
+    expect(await invitationStatus(late.invitationId)).toBe("pending");
+  });
+
+  it("one millisecond before expiresAt is still accepted (edge AIDA-42)", async () => {
+    const { orgId, ids } = await seed(["owner"]);
+    const user = await addUser();
+    const t0 = new Date(Date.now() - 60_000);
+    const inv = await invite(orgId, ids[0], user.email, "member", t0);
+    // The injected now is ~7 days ahead; the session must outlive it.
+    const session = await addSession(user.id, { expiresAt: new Date(Date.now() + 30 * DAY_MS) });
+    const { result } = await acceptWithReason(inv.linkToken, user, session, {
+      now: new Date(inv.expiresAt.getTime() - 1),
+    });
+    expect(result).toEqual({ ok: true, orgId, role: "member", retried: false });
+    expect(await memberRows(orgId, user.id)).toHaveLength(1);
+  });
+
+  it("a different address fails; the same address in another case with surrounding spaces succeeds", async () => {
+    const { orgId, ids } = await seed(["owner"]);
+    const [owner] = ids;
+    const local = `Mixed.${randomUUID()}`;
+    const user = await addUser(`${local}@Example.test`);
+    const inv = await invite(orgId, owner, `  ${local.toUpperCase()}@EXAMPLE.TEST `, "member");
+
+    const wrong = await addUser();
+    const r = await acceptWithReason(inv.linkToken, wrong, await addSession(wrong.id));
+    expect(r.result).toEqual(INVALID);
+    expect(r.reason).toBe("email-mismatch");
+    // The caller's email must match too: a session claiming the invited address for another user.
+    const r2 = await acceptWithReason(
+      inv.linkToken,
+      { id: wrong.id, email: inv.email },
+      await addSession(wrong.id),
+    );
+    expect(r2.result).toEqual(INVALID);
+    expect(await invitationStatus(inv.invitationId)).toBe("pending");
+
+    const session = await addSession(user.id);
+    const ok = await acceptWithReason(
+      inv.linkToken,
+      { id: user.id, email: `  ${user.email.toLowerCase()}  ` },
+      session,
+    );
+    expect(ok.result).toMatchObject({ ok: true, orgId });
+    expect(await memberRows(orgId, user.id)).toHaveLength(1);
+  });
+
+  it("a user who already holds a member row here is refused and nothing changes", async () => {
+    const { orgId, ids } = await seed(["owner", "member"]);
+    const [owner, member] = ids;
+    const { invitationId, token } = await insertInvitation(
+      orgId,
+      owner,
+      await emailOf(member),
+      "admin",
+    );
+    const session = await addSession(member);
+    const r = await acceptWithReason(token, { id: member, email: await emailOf(member) }, session);
+    expect(r.result).toEqual(INVALID);
+    expect(r.reason).toBe("already-member");
+    expect((await memberRows(orgId, member)).map((m) => m.role)).toEqual(["member"]);
+    expect(await invitationStatus(invitationId)).toBe("pending");
+    expect(await acceptedAuditCount(orgId)).toBe(0);
+    expect(await sessionOrg(session.id)).toBeNull();
+  });
+
+  it("the inviter's current rights decide at accept: a demoted inviter or a mixed-row owner inviter fails (V-26)", async () => {
+    const { orgId, ids } = await seed(["owner", "owner", "admin"]);
+    const [, ownerInviter, adminInviter] = ids;
+
+    // An admin's invitation, then the admin loses admin rights by a direct row write (bypassing
+    // the service, which would also revoke the invitation): the lock-time re-read refuses.
+    const u1 = await addUser();
+    const inv1 = await invite(orgId, adminInviter, u1.email, "member");
+    await prisma.member.updateMany({
+      where: { organizationId: orgId, userId: adminInviter },
+      data: { role: "member" },
+    });
+    const r1 = await acceptWithReason(inv1.linkToken, u1, await addSession(u1.id));
+    expect(r1.result).toEqual(INVALID);
+    expect(r1.reason).toBe("inviter");
+
+    // An owner's owner invitation, then the owner gains a second, admin row: no longer an owner.
+    const u2 = await addUser();
+    const inv2 = await invite(orgId, ownerInviter, u2.email, "owner");
+    await prisma.member.create({
+      data: {
+        id: `z-dup-${randomUUID()}`,
+        organizationId: orgId,
+        userId: ownerInviter,
+        role: "admin",
+        createdAt: new Date(),
+      },
+    });
+    const r2 = await acceptWithReason(inv2.linkToken, u2, await addSession(u2.id));
+    expect(r2.result).toEqual(INVALID);
+    expect(r2.reason).toBe("inviter");
+    expect(await memberRows(orgId, u1.id)).toEqual([]);
+    expect(await memberRows(orgId, u2.id)).toEqual([]);
+  });
+});
+
+describe("acceptInvitation: session gone rolls the whole accept back (V-23)", () => {
+  async function setup() {
+    const { orgId, ids } = await seed(["owner"]);
+    const user = await addUser();
+    const inv = await invite(orgId, ids[0], user.email, "member");
+    return { orgId, user, inv };
+  }
+
+  async function expectNothingAccepted(orgId: string, userId: string, invitationId: string) {
+    expect(await memberRows(orgId, userId)).toEqual([]);
+    expect(await acceptedAuditCount(orgId)).toBe(0);
+    expect(await invitationStatus(invitationId)).toBe("pending");
+  }
+
+  it("the id of a deleted session: SESSION_GONE, nothing accepted, acceptable afterwards with a live session", async () => {
+    const { orgId, user, inv } = await setup();
+    const gone = await addSession(user.id);
+    await prisma.session.delete({ where: { id: gone.id } });
+    const r = await acceptWithReason(inv.linkToken, user, { id: gone.id });
+    expect(r.result).toEqual(SESSION_GONE);
+    await expectNothingAccepted(orgId, user.id, inv.invitationId);
+
+    const live = await addSession(user.id);
+    expect((await acceptWithReason(inv.linkToken, user, { id: live.id })).result).toMatchObject({
+      ok: true,
+      orgId,
+    });
+    expect(await sessionOrg(live.id)).toBe(orgId);
+  });
+
+  it("another user's session: SESSION_GONE, and that session is not touched", async () => {
+    const { orgId, user, inv } = await setup();
+    const other = await addUser();
+    const foreign = await addSession(other.id);
+    const r = await acceptWithReason(inv.linkToken, user, { id: foreign.id });
+    expect(r.result).toEqual(SESSION_GONE);
+    await expectNothingAccepted(orgId, user.id, inv.invitationId);
+    expect(await sessionOrg(foreign.id)).toBeNull();
+    // By token as well.
+    const r2 = await acceptWithReason(inv.linkToken, user, { token: foreign.token });
+    expect(r2.result).toEqual(SESSION_GONE);
+    await expectNothingAccepted(orgId, user.id, inv.invitationId);
+  });
+
+  it("an expired session: SESSION_GONE; a live session named by its token is activated", async () => {
+    const { orgId, user, inv } = await setup();
+    const expired = await addSession(user.id, { expiresAt: new Date(Date.now() - 1000) });
+    const r = await acceptWithReason(inv.linkToken, user, { id: expired.id });
+    expect(r.result).toEqual(SESSION_GONE);
+    await expectNothingAccepted(orgId, user.id, inv.invitationId);
+    expect(await sessionOrg(expired.id)).toBeNull();
+
+    const live = await addSession(user.id);
+    expect((await acceptWithReason(inv.linkToken, user, { token: live.token })).result).toEqual({
+      ok: true,
+      orgId,
+      role: "member",
+      retried: false,
+    });
+    expect(await sessionOrg(live.id)).toBe(orgId);
+  });
+});
+
+describe("acceptInvitation: the retry path (V-23)", () => {
+  it("a second accept by the same user returns retried true, inserts nothing and activates the session again", async () => {
+    const { orgId, ids } = await seed(["owner"]);
+    const user = await addUser();
+    const inv = await invite(orgId, ids[0], user.email, "admin");
+    const session = await addSession(user.id);
+    expect((await acceptWithReason(inv.linkToken, user, session)).result).toEqual({
+      ok: true,
+      orgId,
+      role: "admin",
+      retried: false,
+    });
+    // The response was lost and the session moved elsewhere in between.
+    await prisma.session.update({
+      where: { id: session.id },
+      data: { activeOrganizationId: null },
+    });
+    const second = await addSession(user.id);
+
+    expect((await acceptWithReason(inv.linkToken, user, session)).result).toEqual({
+      ok: true,
+      orgId,
+      role: "admin",
+      retried: true,
+    });
+    expect(await sessionOrg(session.id)).toBe(orgId);
+    expect((await acceptWithReason(inv.linkToken, user, { id: second.id })).result).toMatchObject({
+      retried: true,
+    });
+    expect(await sessionOrg(second.id)).toBe(orgId);
+    expect(await memberRows(orgId, user.id)).toHaveLength(1);
+    expect(await acceptedAuditCount(orgId)).toBe(1);
+  });
+
+  it("after the member is deactivated, a retry is INVALID_INVITATION and inserts nothing", async () => {
+    const { orgId, ids } = await seed(["owner"]);
+    const [owner] = ids;
+    const user = await addUser();
+    const inv = await invite(orgId, owner, user.email, "member");
+    const session = await addSession(user.id);
+    expect((await acceptWithReason(inv.linkToken, user, session)).result.ok).toBe(true);
+    expect(
+      await deactivateMember({ orgId, actorUserId: owner, targetUserId: user.id }),
+    ).toMatchObject({ ok: true });
+    expect(await sessionOrg(session.id)).toBeNull();
+
+    const r = await acceptWithReason(inv.linkToken, user, session);
+    expect(r.result).toEqual(INVALID);
+    expect(r.reason).toBe("member-gone");
+    expect(await memberRows(orgId, user.id)).toEqual([]);
+    expect(await sessionOrg(session.id)).toBeNull();
+    expect(await acceptedAuditCount(orgId)).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Forced-order races (V-16, V-23, V-25). The holder records its backend PID from inside its own
+// transaction in a service hook and parks there on a deferred; the waiter records its PID in
+// beforeLock; waitForBlockedBy proves that exact PID is blocked by the holder's PID before the
+// holder is released. Every race asserts the result its check order produces and the final
+// database state, and ends with assertNoDeadlock.
+// ---------------------------------------------------------------------------------------------
+
+const observer = createObserverClient();
+afterAll(async () => {
+  await observer.close();
+});
+
+type Tx = Prisma.TransactionClient;
+
+function holdPoint() {
+  const pid = deferred<number>();
+  const gate = deferred<void>();
+  return {
+    pid: pid.promise,
+    release: () => gate.resolve(),
+    hook: async (tx: Tx) => {
+      pid.resolve(await backendPid(tx));
+      await gate.promise;
+    },
+  };
+}
+
+function pidPoint() {
+  const pid = deferred<number>();
+  return {
+    pid: pid.promise,
+    hook: async (tx: Tx) => {
+      pid.resolve(await backendPid(tx));
+    },
+  };
+}
+
+async function forcedOrder<H, W>(
+  startHolder: (hook: (tx: Tx) => Promise<void>) => Promise<H>,
+  startWaiter: (hook: (tx: Tx) => Promise<void>) => Promise<W>,
+  proveBlocked: (holderPid: number, waiterPid: number) => Promise<void>,
+): Promise<[PromiseSettledResult<H>, PromiseSettledResult<W>]> {
+  const hold = holdPoint();
+  const wait = pidPoint();
+  const holder = startHolder(hold.hook);
+  holder.catch(() => {});
+  let waiter: Promise<W> | undefined;
+  try {
+    const holderPid = await hold.pid;
+    waiter = startWaiter(wait.hook);
+    waiter.catch(() => {});
+    const waiterPid = await wait.pid;
+    await proveBlocked(holderPid, waiterPid);
+  } finally {
+    hold.release();
+  }
+  const results = (await settleAll<unknown>([holder, waiter ?? Promise.resolve()])) as [
+    PromiseSettledResult<H>,
+    PromiseSettledResult<W>,
+  ];
+  assertNoDeadlock(results);
+  return results;
+}
+
+function settledValue<T>(r: PromiseSettledResult<T>): T {
+  if (r.status !== "fulfilled") throw r.reason;
+  return r.value;
+}
+
+describe("races: the accept waits on the organization lock and re-checks under it (C2)", () => {
+  it("inviter demoted while the accept waits (changeMemberRole parked in afterLock): INVALID_INVITATION, no member row", async () => {
+    const { orgId, ids } = await seed(["owner", "admin"]);
+    const [owner, admin] = ids;
+    const user = await addUser();
+    const inv = await invite(orgId, admin, user.email, "member");
+    const session = await addSession(user.id);
+    let reason: string | undefined;
+
+    const [demote, accept] = await forcedOrder(
+      (hook) =>
+        changeMemberRole(
+          { orgId, actorUserId: owner, targetUserId: admin, newRole: "member" },
+          { afterLock: hook },
+        ),
+      (hook) =>
+        acceptInvitation(
+          { token: inv.linkToken, userId: user.id, userEmail: user.email, session },
+          {
+            beforeLock: hook,
+            onRefusal: (r) => {
+              reason = r;
+            },
+          },
+        ),
+      (holderPid, waiterPid) => waitForBlockedBy(observer.client, holderPid, [waiterPid]),
+    );
+    expect(settledValue(demote)).toMatchObject({ ok: true });
+    expect(settledValue(accept)).toEqual(INVALID);
+    // The demotion lowered the inviter's rights, so it also revoked the invitation (10-03).
+    expect(reason).toBe("not-pending");
+    expect(await invitationStatus(inv.invitationId)).toBe("canceled");
+    expect(await memberRows(orgId, user.id)).toEqual([]);
+    expect(await sessionOrg(session.id)).toBeNull();
+    expect(await acceptedAuditCount(orgId)).toBe(0);
+  });
+
+  it("inviter deactivated while the accept waits (deactivateMember parked in afterDelete): INVALID_INVITATION, no member row", async () => {
+    const { orgId, ids } = await seed(["owner", "admin"]);
+    const [owner, admin] = ids;
+    const user = await addUser();
+    const inv = await invite(orgId, admin, user.email, "member");
+    const session = await addSession(user.id);
+
+    const [deactivate, accept] = await forcedOrder(
+      (hook) =>
+        deactivateMember({ orgId, actorUserId: owner, targetUserId: admin }, { afterDelete: hook }),
+      (hook) =>
+        acceptInvitation(
+          { token: inv.linkToken, userId: user.id, userEmail: user.email, session },
+          { beforeLock: hook },
+        ),
+      (holderPid, waiterPid) => waitForBlockedBy(observer.client, holderPid, [waiterPid]),
+    );
+    expect(settledValue(deactivate)).toMatchObject({ ok: true, invitationsRevoked: 1 });
+    expect(settledValue(accept)).toEqual(INVALID);
+    expect(await invitationStatus(inv.invitationId)).toBe("canceled");
+    expect(await memberRows(orgId, user.id)).toEqual([]);
+    expect(await acceptedAuditCount(orgId)).toBe(0);
+  });
+
+  it("invitation revoked while the accept waits (revokeInvitation parked in afterLock): INVALID_INVITATION, no member row", async () => {
+    const { orgId, ids } = await seed(["owner"]);
+    const [owner] = ids;
+    const user = await addUser();
+    const inv = await invite(orgId, owner, user.email, "member");
+    const session = await addSession(user.id);
+
+    const [revoke, accept] = await forcedOrder(
+      (hook) =>
+        revokeInvitation(
+          { orgId, actorUserId: owner, invitationId: inv.invitationId },
+          { afterLock: hook },
+        ),
+      (hook) =>
+        acceptInvitation(
+          { token: inv.linkToken, userId: user.id, userEmail: user.email, session },
+          { beforeLock: hook },
+        ),
+      (holderPid, waiterPid) => waitForBlockedBy(observer.client, holderPid, [waiterPid]),
+    );
+    expect(settledValue(revoke)).toEqual({ ok: true });
+    expect(settledValue(accept)).toEqual(INVALID);
+    expect(await invitationStatus(inv.invitationId)).toBe("canceled");
+    expect(await memberRows(orgId, user.id)).toEqual([]);
+    expect(await sessionOrg(session.id)).toBeNull();
+  });
+});
+
+describe("races: accept against deactivation of the new member, both commit orders (V-23, D-07, D-10)", () => {
+  async function acceptFirst(otherMembership: boolean) {
+    const { orgId, ids } = await seed(["owner"]);
+    const [owner] = ids;
+    const user = await addUser();
+    let otherOrgId: string | null = null;
+    if (otherMembership) {
+      const other = await seedOrgWithMembers(prisma, []);
+      otherOrgId = other.orgId;
+      await prisma.member.create({
+        data: {
+          id: randomUUID(),
+          organizationId: other.orgId,
+          userId: user.id,
+          role: "member",
+          createdAt: new Date(Date.now() - DAY_MS),
+        },
+      });
+    }
+    const inv = await invite(orgId, owner, user.email, "member");
+    const session = await addSession(user.id, { activeOrganizationId: otherOrgId });
+
+    const [accept, deactivate] = await forcedOrder(
+      (hook) =>
+        acceptInvitation(
+          { token: inv.linkToken, userId: user.id, userEmail: user.email, session },
+          { afterLock: hook },
+        ),
+      (hook) =>
+        deactivateMember(
+          { orgId, actorUserId: owner, targetUserId: user.id },
+          { beforeLock: hook },
+        ),
+      (holderPid, waiterPid) => waitForBlockedBy(observer.client, holderPid, [waiterPid]),
+    );
+    expect(settledValue(accept)).toEqual({ ok: true, orgId, role: "member", retried: false });
+    expect(settledValue(deactivate)).toMatchObject({ ok: true, sessionsMoved: 1 });
+
+    expect(await memberRows(orgId, user.id)).toEqual([]);
+    expect(await sessionOrg(session.id)).toBe(otherOrgId);
+    const actions = (await memberAudit(orgId)).map((a) => a.action);
+    expect(actions).toEqual(["INVITATION_CREATED", "INVITATION_ACCEPTED", "MEMBER_DEACTIVATED"]);
+    expect(await invitationStatus(inv.invitationId)).toBe("accepted");
+  }
+
+  it("accept first (parked in afterLock), deactivation proven blocked: the activated session is moved to null", async () => {
+    await acceptFirst(false);
+  });
+
+  it("accept first, variant: the user's other organization becomes the session's active one (D-07)", async () => {
+    await acceptFirst(true);
+  });
+
+  it("deactivation first (parked in afterDelete): the second invitation is canceled (D-10) and the waiting accept fails", async () => {
+    const { orgId, ids } = await seed(["owner", "member"]);
+    const [owner, member] = ids;
+    const memberEmail = await emailOf(member);
+    const second = await insertInvitation(orgId, owner, memberEmail, "admin");
+    const session = await addSession(member, { activeOrganizationId: orgId });
+    let reason: string | undefined;
+
+    const [deactivate, accept] = await forcedOrder(
+      (hook) =>
+        deactivateMember(
+          { orgId, actorUserId: owner, targetUserId: member },
+          { afterDelete: hook },
+        ),
+      (hook) =>
+        acceptInvitation(
+          { token: second.token, userId: member, userEmail: memberEmail, session },
+          {
+            beforeLock: hook,
+            onRefusal: (r) => {
+              reason = r;
+            },
+          },
+        ),
+      (holderPid, waiterPid) => waitForBlockedBy(observer.client, holderPid, [waiterPid]),
+    );
+    expect(settledValue(deactivate)).toMatchObject({ ok: true, invitationsRevoked: 1 });
+    expect(settledValue(accept)).toEqual(INVALID);
+    expect(reason).toBe("not-pending");
+    expect(await invitationStatus(second.invitationId)).toBe("canceled");
+    expect(await memberRows(orgId, member)).toEqual([]);
+    expect(await sessionOrg(session.id)).toBeNull();
+    expect(await acceptedAuditCount(orgId)).toBe(0);
+  });
+});
+
+describe("races: two parallel accepts by the same user (V-23)", () => {
+  it("both ok, one member row and exactly one retried result, five times on fresh invitations", async () => {
+    const { orgId, ids } = await seed(["owner"]);
+    for (let i = 0; i < 5; i++) {
+      const user = await addUser();
+      const inv = await invite(orgId, ids[0], user.email, "member");
+      const session = await addSession(user.id);
+      const call = () =>
+        acceptInvitation({ token: inv.linkToken, userId: user.id, userEmail: user.email, session });
+      const results = await settleAll([call(), call()]);
+      assertNoDeadlock(results);
+      const values = results.map((r) => settledValue(r));
+      expect(values.every((v) => v.ok)).toBe(true);
+      expect(values.filter((v) => v.ok && v.retried)).toHaveLength(1);
+      expect(await memberRows(orgId, user.id)).toHaveLength(1);
+      expect(await sessionOrg(session.id)).toBe(orgId);
+    }
+    expect(await acceptedAuditCount(orgId)).toBe(5);
+  });
+});
+
+describe("organization isolation", () => {
+  it("org B's token joins only org B; listPendingInvitations(A) never shows B's; revoke with A's id for B's invitation fails", async () => {
+    const a = await seed(["owner"]);
+    const b = await seed(["owner"]);
+    const userB = await addUser();
+    const userA = await addUser();
+    const invA = await invite(a.orgId, a.ids[0], userA.email, "member");
+    const invB = await invite(b.orgId, b.ids[0], userB.email, "admin");
+    const invB2 = await invite(b.orgId, b.ids[0], `b2-${randomUUID()}@example.test`, "member");
+
+    const listA = await listPendingInvitations(a.orgId);
+    expect(listA.map((p) => p.invitationId)).toEqual([invA.invitationId]);
+
+    expect(
+      await revokeInvitation({
+        orgId: a.orgId,
+        actorUserId: a.ids[0],
+        invitationId: invB2.invitationId,
+      }),
+    ).toEqual({ ok: false, error: "NOT_PENDING" });
+    expect(await invitationStatus(invB2.invitationId)).toBe("pending");
+    // B's owner is not an admin of A either.
+    expect(
+      await revokeInvitation({
+        orgId: a.orgId,
+        actorUserId: b.ids[0],
+        invitationId: invA.invitationId,
+      }),
+    ).toEqual({ ok: false, error: "NOT_ALLOWED" });
+    expect(await invitationStatus(invA.invitationId)).toBe("pending");
+
+    const session = await addSession(userB.id, { activeOrganizationId: null });
+    expect((await acceptWithReason(invB.linkToken, userB, session)).result).toEqual({
+      ok: true,
+      orgId: b.orgId,
+      role: "admin",
+      retried: false,
+    });
+    expect(await memberRows(b.orgId, userB.id)).toHaveLength(1);
+    expect(await memberRows(a.orgId, userB.id)).toEqual([]);
+    expect(await sessionOrg(session.id)).toBe(b.orgId);
+    expect(await memberAudit(a.orgId)).toHaveLength(1); // A's own INVITATION_CREATED only
+  });
+});
+
+describe("reads: getInvitationView and listPendingInvitations", () => {
+  it("the view of a valid token: branding name else organization name, role, email, accountExists; invalid otherwise", async () => {
+    const { orgId, ids } = await seed(["owner"]);
+    const [owner] = ids;
+    const known = await addUser();
+    const inv = await invite(orgId, owner, known.email, "admin");
+    const org = await prisma.organization.findUniqueOrThrow({ where: { id: orgId } });
+
+    expect(await getInvitationView(inv.linkToken)).toEqual({
+      state: "valid",
+      workspaceName: org.name,
+      role: "admin",
+      email: known.email,
+      accountExists: true,
+      expiresAt: inv.expiresAt,
+    });
+    await saveBrandingSettings(scopedDb(orgId), orgId, { workspaceName: "Acme Support" });
+    const unknownEmail = `nobody-${randomUUID()}@example.test`;
+    const inv2 = await invite(orgId, owner, unknownEmail, "member");
+    expect(await getInvitationView(inv2.linkToken)).toMatchObject({
+      state: "valid",
+      workspaceName: "Acme Support",
+      accountExists: false,
+      email: unknownEmail,
+    });
+
+    expect(await getInvitationView(inv.linkToken, inv.expiresAt)).toEqual({ state: "invalid" });
+    expect(await getInvitationView(createInviteToken())).toEqual({ state: "invalid" });
+    expect(await getInvitationView("short")).toEqual({ state: "invalid" });
+    await revokeInvitation({ orgId, actorUserId: owner, invitationId: inv2.invitationId });
+    expect(await getInvitationView(inv2.linkToken)).toEqual({ state: "invalid" });
+    await acceptWithReason(inv.linkToken, known, await addSession(known.id));
+    expect(await getInvitationView(inv.linkToken)).toEqual({ state: "invalid" });
+  });
+
+  it("lists pending unexpired invitations with the inviter's name, or 'a former member' when the inviter left", async () => {
+    const { orgId, ids } = await seed(["owner", "admin"]);
+    const [owner, admin] = ids;
+    await prisma.user.update({ where: { id: admin }, data: { name: "Ada Admin" } });
+    const t = Date.now();
+    const p1 = await invite(
+      orgId,
+      admin,
+      `p1-${randomUUID()}@example.test`,
+      "member",
+      new Date(t - 2000),
+    );
+    const p2 = await invite(
+      orgId,
+      owner,
+      `p2-${randomUUID()}@example.test`,
+      "admin",
+      new Date(t - 1000),
+    );
+    await invite(
+      orgId,
+      owner,
+      `old-${randomUUID()}@example.test`,
+      "member",
+      new Date(t - 8 * DAY_MS),
+    );
+    const gone = await invite(orgId, owner, `gone-${randomUUID()}@example.test`, "member");
+    await revokeInvitation({ orgId, actorUserId: owner, invitationId: gone.invitationId });
+
+    let list = await listPendingInvitations(orgId);
+    expect(list.map((p) => p.invitationId)).toEqual([p2.invitationId, p1.invitationId]);
+    expect(list[1]).toMatchObject({ email: p1.email, role: "member", invitedBy: "Ada Admin" });
+
+    // The inviter's member row disappears without the service (so the invitation stays pending).
+    await prisma.member.deleteMany({ where: { organizationId: orgId, userId: admin } });
+    list = await listPendingInvitations(orgId);
+    expect(list.find((p) => p.invitationId === p1.invitationId)?.invitedBy).toBe(
+      FORMER_MEMBER_LABEL,
+    );
   });
 });
