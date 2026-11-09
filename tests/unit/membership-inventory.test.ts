@@ -21,6 +21,19 @@
 //   auth.api; a write to a DOMAIN_MODELS model through a client not bound from scopedDb(...) has
 //   organizationId in its where (update, delete) or data (create) literal; every raw INSERT,
 //   UPDATE or DELETE has an allowlist entry.
+// Rule E (plan 10-16: D-08, R2-3, R3-4, V-11): the public paths. Possession of the status token is
+//   the authorization, and only that ticket's data is reachable. Every entry function under
+//   src/app/(public)/status and src/app/api/public/status calls loadStatusPageData,
+//   loadStatusAttachment or findTicketByStatusToken (src/lib/tickets/status-page-data.ts). Its own
+//   body (with the same-module and src/app helpers it runs) makes no read call on the ticket or
+//   message delegates. Every other model delegate call carries, in its where (reads, updates,
+//   deletes) or data (creates) object literal, an organizationId and a ticketId (or id on the
+//   ticket model) whose initializers reference the value the helper returned, or a value derived
+//   from it. Every call to an imported tenant-reaching src/lib function passes an argument that
+//   references that value. Raw SQL needs a per-function allowlist entry with a reason. These
+//   findings are never allowlisted otherwise: there is no SUMMARY escape hatch (R3-4). Every
+//   other tenant-reaching entry under src/app/(public) or src/app/api/public is a violation unless
+//   allowlisted per function with a reason.
 import path from "node:path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
@@ -30,6 +43,7 @@ import {
   type InventoryRules,
   type NamedFn,
   readSourceTree,
+  type StatusTokenRules,
   type Violation,
 } from "../support/source-inventory";
 
@@ -42,6 +56,7 @@ const AUTHZ = "src/lib/authz.ts";
 const PAGE_ACCESS = "src/lib/page-access.ts";
 const MEMBERSHIP = "src/lib/membership.ts";
 const MEMBER_RIGHTS = "src/lib/workspace-members/member-rights.ts";
+const STATUS_DATA = "src/lib/tickets/status-page-data.ts";
 
 /** DOMAIN_MODELS, read from src/lib/scoped-db.ts at test time (not imported: no database client). */
 function readDomainModels(text: string): string[] {
@@ -82,6 +97,29 @@ const SESSION_READING_CALLS: NamedFn[] = [
   ...at(AUTHZ, "getActiveOrgAccess", "requireOrgAdminScope", "requireOrgAdmin", "getOrgRole"),
 ];
 
+/**
+ * Rule E. Possession of the status token is the authorization, and only that ticket's data is
+ * reachable (D-08, V-11): a status-token entry reaches the ticket through one of the three
+ * helpers, and everything else it touches is bound to the organization and ticket the helper
+ * returned (R3-4).
+ */
+const RULE_E: StatusTokenRules = {
+  statusPrefixes: ["src/app/(public)/status/", "src/app/api/public/status/"],
+  publicPrefixes: ["src/app/(public)/", "src/app/api/public/"],
+  helpers: at(STATUS_DATA, "loadStatusPageData", "loadStatusAttachment", "findTicketByStatusToken"),
+  noReadModels: ["ticket", "message"],
+  defaultKeys: { organization: ["organizationId"], ticket: ["ticketId"] },
+  modelKeys: {
+    // The ticket itself: its own id is the ticket binding.
+    ticket: { organization: ["organizationId"], ticket: ["id"] },
+    // An attachment has no ticketId column; it belongs to the ticket through its message.
+    attachment: { organization: ["organizationId"], ticket: ["ticketId", "messageId"] },
+    // The organization row is the tenant itself: its id must be the helper's organizationId.
+    organization: { organization: ["id"], ticket: [] },
+  },
+  nonTenantCallees: [],
+};
+
 const BASE_RULES: Omit<InventoryRules, "allowlist"> = {
   gates: [
     ...at(SESSION, "getScopedDb"),
@@ -99,9 +137,8 @@ const BASE_RULES: Omit<InventoryRules, "allowlist"> = {
     ...at(MEMBER_RIGHTS, "readMemberRights"),
   ],
   sessionInfra: SESSION_READING_CALLS,
-  // Rule E slot: plan 10-16. Entry functions under src/app/(public) and src/app/api/public have no
-  // session by design (the status token or the public form is their only credential), so Rule A
-  // does not apply to them; plan 10-16 adds Rule E for the status-token loaders here.
+  // Entry functions under src/app/(public) and src/app/api/public have no session by design (the
+  // status token or the public form is their only credential): Rule E judges them, not Rule A.
   ruleAExcludedPrefixes: ["src/app/(public)/", "src/app/api/public/"],
   sessionReadHome: { file: FRESH, function: "readFreshSession" },
   entrySessionReaders: [
@@ -110,6 +147,7 @@ const BASE_RULES: Omit<InventoryRules, "allowlist"> = {
   ],
   sessionReadingCalls: SESSION_READING_CALLS,
   domainModels: DOMAIN_MODELS,
+  ruleE: RULE_E,
 };
 
 const PRE_10_17 = "plan 10-17 puts requirePageAccess first (V-27)";
@@ -277,6 +315,32 @@ const ALLOWLIST: AllowEntry[] = [
     reason:
       "raw UPDATE … RETURNING of one locked ticket, filtered by id and organizationId, with the state join scoped to the same organization",
   },
+
+  // Rule E: public entries that reach tenant data with no status token (kind public-reach).
+  {
+    rule: "E",
+    kind: "public-reach",
+    file: "src/app/(public)/request/page.tsx",
+    function: "RequestPage",
+    reason:
+      "the public request form's brand row: reads the id and name of the single organization (findFirst, single-org v1) and its public logo through loadPublicBrand; no ticket, contact or message row",
+  },
+  {
+    rule: "E",
+    kind: "public-reach",
+    file: "src/app/api/public/intake/route.ts",
+    function: "POST",
+    reason:
+      "anonymous ticket creation from the public request form, rate limited first: resolves the single organization (single-org v1), stores the validated uploads under it, creates the ticket through createTicket and links the uploads to that new ticket's first message; it reads no existing ticket and answers only the new ticket's status token",
+  },
+  {
+    rule: "E",
+    kind: "public-reach",
+    file: "src/app/api/public/logo/[orgId]/[version]/route.ts",
+    function: "GET",
+    reason:
+      "the public logo, rate limited first: readCurrentLogo selects by the organization id and the exact current logo version of the URL and serves only the stored logo bytes (Phase 9, 09-05); no other tenant row",
+  },
 ];
 
 const REAL_RULES: InventoryRules = { ...BASE_RULES, allowlist: ALLOWLIST };
@@ -346,6 +410,33 @@ describe("the real tree", () => {
   it("has exactly one auth.api.getSession call in src, in readFreshSession", () => {
     const hits = [...REAL].filter(([, text]) => text.includes("auth.api.getSession"));
     expect(hits.map(([file]) => file)).toEqual([FRESH]);
+  });
+
+  it("judges every status-token entry through one of the three helpers (Rule E)", () => {
+    const rows = result.inventory.filter((r) =>
+      RULE_E.statusPrefixes.some((p) => r.file.startsWith(p)),
+    );
+    expect(Object.fromEntries(rows.map((r) => [`${r.file}#${r.function}`, r.exemption]))).toEqual({
+      "src/app/(public)/status/[token]/page.tsx#StatusPage": "Rule E: loadStatusPageData",
+      "src/app/api/public/status/[token]/attachments/[id]/route.ts#GET":
+        "Rule E: loadStatusAttachment",
+      "src/app/api/public/status/[token]/csat/route.ts#POST": "Rule E: findTicketByStatusToken",
+      "src/app/api/public/status/[token]/follow-up/route.ts#POST":
+        "Rule E: findTicketByStatusToken",
+    });
+  });
+
+  it("allowlists exactly the three non-token public entries, each suppressing a finding", () => {
+    const entries = ALLOWLIST.filter((e) => e.rule === "E");
+    expect(entries.map((e) => `${e.file}#${e.function}`).sort()).toEqual([
+      "src/app/(public)/request/page.tsx#RequestPage",
+      "src/app/api/public/intake/route.ts#POST",
+      "src/app/api/public/logo/[orgId]/[version]/route.ts#GET",
+    ]);
+    for (const e of entries) {
+      expect(e.reason.trim()).not.toBe("");
+      expect(result.suppressed.some((s) => s.entry === e)).toBe(true);
+    }
   });
 
   it("judges the attachment and messages routes as gated by getScopedDb", () => {
@@ -488,13 +579,15 @@ export default function ThingsPage() {
     expect(names(result.violations)).toEqual(["A src/app/(app)/things/page.tsx#ThingsPage"]);
   });
 
-  it("leaves public entries to Rule E (plan 10-16)", () => {
+  it("leaves public entries to Rule E", () => {
     const route = `import { prisma } from "@/lib/db";
 export async function POST() {
   return Response.json(await prisma.ticket.count());
 }
 `;
-    expect(run({ "src/app/api/public/things/route.ts": route }).violations).toEqual([]);
+    const result = run({ "src/app/api/public/things/route.ts": route });
+    expect(result.violations.filter((v) => v.rule === "A")).toEqual([]);
+    expect(names(result.violations)).toEqual(["E src/app/api/public/things/route.ts#POST"]);
   });
 });
 
@@ -668,6 +761,181 @@ export async function flipRows(ids: string[]) {
       { rule: "D", file: W, function: "flipRows", reason: "fixture" },
     ]);
     expect(allowed.violations).toEqual([]);
+  });
+});
+
+describe("Rule E fixtures (public and status-token paths)", () => {
+  const ROUTE = "src/app/api/public/status/[token]/fx/route.ts";
+  const PAGE = "src/app/(public)/status/[token]/fx/page.tsx";
+  const LOOKUP_IMPORT = 'import { findTicketByStatusToken } from "@/lib/tickets/status-page-data";';
+  const eNames = (vs: Violation[]) => names(vs.filter((v) => v.rule === "E"));
+
+  /** A status-token POST that calls the helper, then runs `body` with `ticket` bound. */
+  const helperRoute = (imports: string, body: string) => `import { prisma } from "@/lib/db";
+${LOOKUP_IMPORT}
+${imports}
+export async function POST(_request: Request, { params }: { params: Promise<{ token: string; orgId: string }> }) {
+  const { token, orgId } = await params;
+  const ticket = await findTicketByStatusToken(token);
+  if (!ticket) return Response.json({ error: "not_found" }, { status: 404 });
+  ${body}
+  return Response.json({ ok: true, orgId });
+}
+`;
+
+  it("flags a status-token route whose POST runs its own ticket lookup by token", () => {
+    const route = `import { prisma } from "@/lib/db";
+export async function POST(_request: Request, { params }: { params: Promise<{ token: string }> }) {
+  const { token } = await params;
+  const ticket = await prisma.ticket.findUnique({ where: { statusToken: token } });
+  return Response.json({ ok: ticket !== null });
+}
+`;
+    const result = run({ [ROUTE]: route });
+    expect(eNames(result.violations)).toContain(`E ${ROUTE}#POST`);
+    const details = result.violations.map((v) => v.detail).join("\n");
+    expect(details).toContain(
+      "calls none of loadStatusPageData, loadStatusAttachment, findTicketByStatusToken",
+    );
+    expect(details).toContain("reads ticket itself");
+  });
+
+  it("flags a status page that calls loadStatusPageData and then reads messages itself", () => {
+    const page = `import { prisma } from "@/lib/db";
+import { loadStatusPageData } from "@/lib/tickets/status-page-data";
+export default async function FxStatusPage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = await params;
+  const data = await loadStatusPageData(token);
+  if (!data) return null;
+  const notes = await prisma.message.findMany({
+    where: { organizationId: data.organizationId, ticketId: data.ticketId },
+  });
+  return notes.length;
+}
+`;
+    const result = run({ [PAGE]: page });
+    expect(eNames(result.violations)).toEqual([`E ${PAGE}#FxStatusPage`]);
+    expect(result.violations[0]?.detail).toContain("reads message itself");
+  });
+
+  it("R3-4: flags a contact read whose where holds only organizationId: ticket.organizationId", () => {
+    const route = helperRoute(
+      "",
+      "await prisma.contact.findFirst({ where: { organizationId: ticket.organizationId } });",
+    );
+    const result = run({ [ROUTE]: route });
+    expect(eNames(result.violations)).toEqual([`E ${ROUTE}#POST`]);
+    expect(result.violations[0]?.detail).toContain("prisma.contact.findFirst");
+    expect(result.violations[0]?.detail).toContain("ticketId");
+  });
+
+  it("R3-4: flags an attachment read whose organizationId comes from a request parameter", () => {
+    const route = helperRoute(
+      "",
+      "await prisma.attachment.findMany({ where: { organizationId: orgId, ticketId: ticket.id } });",
+    );
+    const result = run({ [ROUTE]: route });
+    expect(eNames(result.violations)).toEqual([`E ${ROUTE}#POST`]);
+    expect(result.violations[0]?.detail).toContain("prisma.attachment.findMany");
+    expect(result.violations[0]?.detail).toContain("organizationId");
+  });
+
+  it("flags a route that passes only the raw token to an imported tenant-reaching src/lib function", () => {
+    const route = helperRoute(
+      'import { loadThings } from "@/lib/fx/things";',
+      "await loadThings(token);",
+    );
+    const result = run({ "src/lib/fx/things.ts": LIB_THINGS, [ROUTE]: route });
+    expect(eNames(result.violations)).toEqual([`E ${ROUTE}#POST`]);
+    expect(result.violations[0]?.detail).toContain("loadThings");
+  });
+
+  it("flags a new public page reaching tenant data with neither a helper nor an allowlist entry", () => {
+    const F = "src/app/(public)/things/page.tsx";
+    const page = `import { prisma } from "@/lib/db";
+export default async function PublicThingsPage() {
+  return (await prisma.contact.findMany()).length;
+}
+`;
+    const result = run({ [F]: page });
+    expect(names(result.violations)).toEqual([`E ${F}#PublicThingsPage`]);
+    const allowed = run({ [F]: page }, [
+      { rule: "E", kind: "public-reach", file: F, function: "PublicThingsPage", reason: "fixture" },
+    ]);
+    expect(allowed.violations).toEqual([]);
+    expect(allowed.hygiene).toEqual([]);
+  });
+
+  it("control: the helper then an attachment read bound to ticket.organizationId and ticket.id reports none", () => {
+    const route = helperRoute(
+      'import { loadThings } from "@/lib/fx/things";',
+      `const files = await prisma.attachment.findMany({
+    where: { organizationId: ticket.organizationId, ticketId: ticket.id },
+  });
+  await loadThings(ticket.organizationId);
+  return Response.json({ count: files.length });`,
+    );
+    const result = run({ "src/lib/fx/things.ts": LIB_THINGS, [ROUTE]: route });
+    expect(result.violations).toEqual([]);
+  });
+
+  it("control: writes in a $transaction bound through derived values (the follow-up shape) report none", () => {
+    const route = helperRoute(
+      'import { resolveThing } from "@/lib/fx/things";',
+      `await prisma.$transaction(async (tx) => {
+    const resolved = await resolveThing(tx, ticket.organizationId, ticket.id);
+    const effectiveTicketId = resolved.id;
+    const created = await tx.message.create({
+      data: { organizationId: ticket.organizationId, ticketId: effectiveTicketId, bodyMarkdown: "x" },
+    });
+    await tx.attachment.create({
+      data: { organizationId: ticket.organizationId, messageId: created.id, storageKey: "k" },
+    });
+  });`,
+    );
+    const lib = `import { prisma } from "@/lib/db";
+export async function resolveThing(_tx: unknown, orgId: string, id: string) {
+  return prisma.ticket.findFirstOrThrow({ where: { id, organizationId: orgId } });
+}
+`;
+    expect(run({ "src/lib/fx/things.ts": lib, [ROUTE]: route }).violations).toEqual([]);
+  });
+
+  it("flags a write whose data is not a literal, and raw SQL unless allowlisted as raw-sql", () => {
+    const write = helperRoute(
+      "",
+      "const data = { organizationId: ticket.organizationId, ticketId: ticket.id };\n  await prisma.message.create({ data });",
+    );
+    expect(eNames(run({ [ROUTE]: write }).violations)).toEqual([`E ${ROUTE}#POST`]);
+
+    const raw = helperRoute(
+      "",
+      `await prisma.$executeRawUnsafe('UPDATE "Ticket" SET "subject" = $1 WHERE id = $2', "x", ticket.id);`,
+    );
+    const flagged = run({ [ROUTE]: raw });
+    expect(eNames(flagged.violations)).toEqual([`E ${ROUTE}#POST`]);
+    expect(flagged.violations[0]?.detail).toContain("raw SQL");
+    const allowed = run({ [ROUTE]: raw }, [
+      { rule: "E", kind: "raw-sql", file: ROUTE, function: "POST", reason: "fixture" },
+    ]);
+    expect(allowed.violations).toEqual([]);
+    expect(allowed.hygiene).toEqual([]);
+  });
+
+  it("never lets an allowlist entry suppress a binding or helper finding (no escape hatch, R3-4)", () => {
+    const route = helperRoute(
+      "",
+      "await prisma.contact.findFirst({ where: { organizationId: ticket.organizationId } });",
+    );
+    const result = run({ [ROUTE]: route }, [
+      { rule: "E", kind: "public-reach", file: ROUTE, function: "POST", reason: "fixture" },
+      { rule: "E", kind: "raw-sql", file: ROUTE, function: "POST", reason: "fixture" },
+    ]);
+    expect(eNames(result.violations)).toEqual([`E ${ROUTE}#POST`]);
+    expect(result.hygiene).toEqual([
+      `E ${ROUTE}#POST: suppresses no finding`,
+      `E ${ROUTE}#POST: suppresses no finding`,
+    ]);
   });
 });
 
