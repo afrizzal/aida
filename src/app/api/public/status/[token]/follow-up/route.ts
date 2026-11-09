@@ -25,6 +25,7 @@ import {
   reopenOnCustomerReply,
   resolveReplyTicket,
 } from "@/lib/tickets/reopen-on-reply";
+import { findTicketByStatusToken } from "@/lib/tickets/status-page-data";
 
 // File-bearing endpoints must run on the Node.js runtime (Buffer/node:fs), never Edge.
 export const runtime = "nodejs";
@@ -40,12 +41,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
     return rateLimitedResponse(limit.retryAfterSeconds);
   }
 
-  // Unauthenticated bearer-token flow — the token IS the authorization; bare prisma,
-  // never scopedDb (no session/org context exists on this route).
-  const ticket = await prisma.ticket.findUnique({
-    where: { statusToken: token },
-    select: { id: true, organizationId: true, contactId: true },
-  });
+  // Unauthenticated bearer-token flow — the token IS the authorization, and only that ticket's
+  // data is reachable: the one lookup helper (V-11), never scopedDb (no session/org context).
+  // Every write below carries this ticket's organizationId and ticket id (R3-4, Rule E).
+  const ticket = await findTicketByStatusToken(token);
   if (!ticket) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }

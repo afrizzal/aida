@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod/v4";
 import { CSAT_MAX_BODY_BYTES } from "@/lib/attachments/constants";
-import { prisma } from "@/lib/db";
 import { readBoundedFormData } from "@/lib/http/read-bounded-form-data";
 import { consumeRateLimit } from "@/lib/rate-limit/check-rate-limit";
 import { getRateLimitIdentity } from "@/lib/rate-limit/client-ip";
 import { PUBLIC_RATE_LIMITS, rateLimitedResponse } from "@/lib/rate-limit/public-limits";
 import { recordCsat } from "@/lib/tickets/record-csat";
+import { findTicketByStatusToken } from "@/lib/tickets/status-page-data";
 
 export const runtime = "nodejs";
 
@@ -26,12 +26,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
     return rateLimitedResponse(limit.retryAfterSeconds);
   }
 
-  // Unauthenticated bearer-token flow — the token IS the authorization; bare prisma,
-  // never scopedDb (no session/org context exists on this route).
-  const ticket = await prisma.ticket.findUnique({
-    where: { statusToken: token },
-    include: { state: { select: { group: true } } },
-  });
+  // Unauthenticated bearer-token flow — the token IS the authorization, and only that ticket's
+  // data is reachable: the one lookup helper (V-11), never scopedDb (no session/org context).
+  const ticket = await findTicketByStatusToken(token);
   if (!ticket) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }

@@ -130,6 +130,42 @@ export async function loadStatusPageData(token: string): Promise<StatusPageData 
   }, SNAPSHOT);
 }
 
+/** The longest status token the lookup queries; generateStatusToken writes 32 characters. */
+const MAX_STATUS_TOKEN_LENGTH = 256;
+
+/** The ticket a status token resolves to, as the two status-token POST routes need it. */
+export interface StatusTokenTicket {
+  id: string;
+  organizationId: string;
+  contactId: string;
+  state: { group: StateGroup };
+}
+
+/**
+ * The one token lookup of the two status-token POST routes, csat and follow-up (Phase 10, V-11,
+ * D-08). The rule: possession of the token is the authorization, and only that ticket's data is
+ * reachable. It returns exactly the ticket whose status token equals the token, or null. Every
+ * other read or write those routes make carries the organizationId and the ticket id returned
+ * here (R3-4); the membership inventory's Rule E checks that. The page and the attachment route
+ * keep their own loaders above (one snapshot each); this is not a second loader for the page.
+ *
+ * An empty token, or one longer than MAX_STATUS_TOKEN_LENGTH, returns null without a query. The
+ * select is the union of what the two routes read before (csat: the state group and the id;
+ * follow-up: id, organizationId, contactId). Bare prisma, never scopedDb: no session exists here.
+ */
+export async function findTicketByStatusToken(token: string): Promise<StatusTokenTicket | null> {
+  if (token.length === 0 || token.length > MAX_STATUS_TOKEN_LENGTH) return null;
+  return prisma.ticket.findUnique({
+    where: { statusToken: token },
+    select: {
+      id: true,
+      organizationId: true,
+      contactId: true,
+      state: { select: { group: true } },
+    },
+  });
+}
+
 export interface StatusAttachmentFile {
   organizationId: string;
   storageKey: string;
