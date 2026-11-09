@@ -17,7 +17,7 @@ import {
 } from "@/lib/kb/proposal-copy";
 import { loadProposalReview } from "@/lib/kb/proposal-queries";
 import { htmlLinkTargets, renderMarkdown, renderMarkdownPreview } from "@/lib/markdown/render";
-import { getSessionActor } from "@/lib/session";
+import { requirePageAccess } from "@/lib/page-access";
 import { ProposalReview } from "./proposal-review";
 
 export const dynamic = "force-dynamic";
@@ -67,8 +67,12 @@ interface ProposalReviewPageProps {
  * queries sources or tickets itself.
  */
 export default async function ProposalReviewPage({ params }: ProposalReviewPageProps) {
+  // The membership gate first, outside any try (Phase 10, V-27, C6): a non-member goes to /no-access.
+  const { session, orgId } = await requirePageAccess();
   const { id } = await params;
-  const result = await loadProposalReview(await getSessionActor(), id, { now: new Date() });
+  const result = await loadProposalReview({ userId: session.user.id, orgId }, id, {
+    now: new Date(),
+  });
 
   if (result.kind === "NOT_ALLOWED") {
     return (

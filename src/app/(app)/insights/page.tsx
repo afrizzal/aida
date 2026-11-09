@@ -8,7 +8,7 @@ import type {
   StoredNarrative,
   VolumeDrivers,
 } from "@/lib/insight/types";
-import { getScopedDb } from "@/lib/session";
+import { requirePageAccess } from "@/lib/page-access";
 import { GenerateButton } from "./generate-button";
 import { KbGapsCard } from "./kb-gaps-card";
 import { PeriodTabs } from "./period-tabs";
@@ -33,10 +33,10 @@ interface InsightsPageProps {
 }
 
 export default async function InsightsPage({ searchParams }: InsightsPageProps) {
+  // The membership gate first, outside any try (Phase 10, V-27, C6): a non-member goes to /no-access.
+  const { db } = await requirePageAccess();
   const params = await searchParams;
   const period = parsePeriod(params.period);
-
-  const { db } = await getScopedDb();
 
   // Latest run of any status drives the "Generating…" indicator; latest COMPLETED run is what
   // renders. When the latest run IS the completed one we reuse it — avoids a second query.

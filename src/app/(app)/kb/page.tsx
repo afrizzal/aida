@@ -8,14 +8,15 @@ import { formatRelativeTime } from "@/lib/format-relative-time";
 import { listKbArticles } from "@/lib/kb/article-reads";
 import { PROPOSALS_LINK } from "@/lib/kb/proposal-copy";
 import { findConservativeMembership, isAdminRole } from "@/lib/membership";
-import { getScopedDb } from "@/lib/session";
+import { requirePageAccess } from "@/lib/page-access";
 import { e2eFault } from "@/lib/testing/e2e-fault";
 
 export const dynamic = "force-dynamic";
 
 export default async function KbPage() {
+  // The membership gate first, outside any try (Phase 10, V-27, C6): a non-member goes to /no-access.
+  const { db, session, orgId } = await requirePageAccess();
   await e2eFault("kb-page"); // inert outside the E2E server (src/lib/testing/e2e-fault.ts)
-  const { db, session, orgId } = await getScopedDb();
 
   // UI-SPEC Surface 2 (D-01, pattern finding C1): the Proposals link is for owners and admins
   // only, and the DRAFT count is read from kbProposal only for them. Members see no link. Run

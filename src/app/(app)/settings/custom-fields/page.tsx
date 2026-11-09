@@ -1,8 +1,9 @@
-import { getScopedDb } from "@/lib/session";
+import { requirePageAccess } from "@/lib/page-access";
 import { CustomFieldManager } from "./custom-field-manager";
 
 export default async function CustomFieldsPage() {
-  const { db } = await getScopedDb();
+  // The membership gate first, outside any try (Phase 10, V-27, C6): a non-member goes to /no-access.
+  const { db } = await requirePageAccess();
 
   const definitions = await db.customFieldDefinition.findMany({ orderBy: { position: "asc" } });
 

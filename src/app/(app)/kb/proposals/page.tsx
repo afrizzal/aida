@@ -19,7 +19,7 @@ import {
   sourceCount,
 } from "@/lib/kb/proposal-copy";
 import { loadProposalList } from "@/lib/kb/proposal-queries";
-import { getSessionActor } from "@/lib/session";
+import { requirePageAccess } from "@/lib/page-access";
 import { ProposalListRefresh } from "./proposal-list-refresh";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +43,9 @@ function membershipEndedParts(): { heading: string; body: string } {
  * membership gets its EmptyState and no proposal data is loaded.
  */
 export default async function KbProposalsPage() {
-  const result = await loadProposalList(await getSessionActor());
+  // The membership gate first, outside any try (Phase 10, V-27, C6): a non-member goes to /no-access.
+  const { session, orgId } = await requirePageAccess();
+  const result = await loadProposalList({ userId: session.user.id, orgId });
 
   if (result.kind === "NOT_ALLOWED") {
     return (

@@ -1,7 +1,7 @@
 import { ListOrdered } from "lucide-react";
 import { EmptyState } from "@/components/empty-state";
 import { prisma } from "@/lib/db";
-import { getSessionActor } from "@/lib/session";
+import { requirePageAccess } from "@/lib/page-access";
 import {
   MEMBERS_NOTE,
   MEMBERSHIP_ENDED,
@@ -19,7 +19,9 @@ import { StatusManager } from "./status-manager";
 export const dynamic = "force-dynamic";
 
 export default async function TicketStatusesSettingsPage() {
-  const list = await listStatesForSettings(prisma, await getSessionActor());
+  // The membership gate first, outside any try (Phase 10, V-27, C6): a non-member goes to /no-access.
+  const { session, orgId } = await requirePageAccess();
+  const list = await listStatesForSettings(prisma, { userId: session.user.id, orgId });
 
   if (!list.ok) {
     // AIDA-36 (D-14): the access-ended state keeps the page's one h1.

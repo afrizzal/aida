@@ -1,9 +1,10 @@
 import { prisma } from "@/lib/db";
-import { getScopedDb } from "@/lib/session";
+import { requirePageAccess } from "@/lib/page-access";
 import { TagManager } from "./tag-manager";
 
 export default async function TagsPage() {
-  const { db, orgId } = await getScopedDb();
+  // The membership gate first, outside any try (Phase 10, V-27, C6): a non-member goes to /no-access.
+  const { db, orgId } = await requirePageAccess();
 
   const tags = await db.tag.findMany({ orderBy: { name: "asc" } });
 

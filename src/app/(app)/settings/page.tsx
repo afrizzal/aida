@@ -1,7 +1,7 @@
 import { countKbArticles } from "@/lib/kb/article-reads";
 import { getLlmSettings, isProviderConfigured } from "@/lib/llm/settings";
+import { requirePageAccess } from "@/lib/page-access";
 import { getEmbeddingSettings, isEmbeddingConfigured } from "@/lib/rag/settings";
-import { getScopedDb } from "@/lib/session";
 import { AiToggle } from "./ai-toggle";
 import { EmbeddingProviderForm } from "./embedding-provider-form";
 import { LlmProviderForm } from "./llm-provider-form";
@@ -12,7 +12,8 @@ import { ReembedAllButton } from "./reembed-all-button";
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const { db } = await getScopedDb();
+  // The membership gate first, outside any try (Phase 10, V-27, C6): a non-member goes to /no-access.
+  const { db } = await requirePageAccess();
 
   const setting = await db.setting.findFirst({ where: { key: "aiEnabled" } });
   // Default false (D-18): AI is off until explicitly enabled by the operator

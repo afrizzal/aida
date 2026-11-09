@@ -3,7 +3,7 @@ import { EmptyState } from "@/components/empty-state";
 import { KbArticleForm } from "@/components/kb/kb-article-form";
 import { KbEmbeddingStatusChip } from "@/components/kb/kb-embedding-status-chip";
 import { findKbArticle } from "@/lib/kb/article-reads";
-import { getScopedDb } from "@/lib/session";
+import { requirePageAccess } from "@/lib/page-access";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +16,8 @@ interface KbArticleDetailPageProps {
  * preview is optional and out of scope for this plan.
  */
 export default async function KbArticleDetailPage({ params }: KbArticleDetailPageProps) {
-  const { db } = await getScopedDb();
+  // The membership gate first, outside any try (Phase 10, V-27, C6): a non-member goes to /no-access.
+  const { db } = await requirePageAccess();
   const { id } = await params;
 
   const article = await findKbArticle(db, id);

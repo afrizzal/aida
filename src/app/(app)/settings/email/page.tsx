@@ -1,5 +1,5 @@
 import { getEmailSettings } from "@/lib/channels/email/settings";
-import { getScopedDb } from "@/lib/session";
+import { requirePageAccess } from "@/lib/page-access";
 import { EmailChannelToggle } from "./email-channel-toggle";
 import { EmailSettingsForm } from "./email-settings-form";
 
@@ -7,7 +7,8 @@ import { EmailSettingsForm } from "./email-settings-form";
 export const dynamic = "force-dynamic";
 
 export default async function EmailSettingsPage() {
-  const { db } = await getScopedDb();
+  // The membership gate first, outside any try (Phase 10, V-27, C6): a non-member goes to /no-access.
+  const { db } = await requirePageAccess();
   const settings = await getEmailSettings(db);
 
   return (

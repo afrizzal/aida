@@ -2,7 +2,7 @@ import type { TicketPriority } from "@/generated/prisma/client";
 import { getOrgRole } from "@/lib/authz";
 import { prisma } from "@/lib/db";
 import { isAdminRole } from "@/lib/membership";
-import { getScopedDb } from "@/lib/session";
+import { requirePageAccess } from "@/lib/page-access";
 import { readAutoCloseSettings } from "@/lib/tickets/auto-close-settings";
 import { DEFAULT_SLA_TARGETS } from "@/lib/tickets/sla";
 import { AutoCloseForm } from "./auto-close-form";
@@ -11,7 +11,8 @@ import { SlaForm } from "./sla-form";
 const PRIORITY_ORDER: TicketPriority[] = ["URGENT", "HIGH", "NORMAL", "LOW"];
 
 export default async function SlaPoliciesPage() {
-  const { db, orgId } = await getScopedDb();
+  // The membership gate first, outside any try (Phase 10, V-27, C6): a non-member goes to /no-access.
+  const { db, orgId } = await requirePageAccess();
   const policies = await db.slaPolicy.findMany();
   const policyMap = new Map(policies.map((p) => [p.priority, p]));
 

@@ -165,17 +165,9 @@ const BASE_RULES: Omit<InventoryRules, "allowlist"> = {
   ruleE: RULE_E,
 };
 
-const PRE_10_17 = "plan 10-17 puts requirePageAccess first (V-27)";
-
 /** Every allowlist entry, each with the reason written after reading the function. */
 const ALLOWLIST: AllowEntry[] = [
   // Rule A: tenant-reaching entries with no gate.
-  {
-    rule: "A",
-    file: "src/app/(app)/settings/backups/page.tsx",
-    function: "BackupsSettingsPage",
-    reason: `reads only the instance-wide SystemSetting backup record, and only when getOrgRole (a conservative member read) is owner or admin, so a non-member reads nothing; ${PRE_10_17}`,
-  },
   {
     rule: "A",
     file: "src/app/(auth)/login/page.tsx",

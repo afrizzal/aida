@@ -2,7 +2,7 @@ import { getOrgRole } from "@/lib/authz";
 import { getBrandingSettings, getLogoSetting, logoPublicUrl } from "@/lib/branding/settings";
 import { prisma } from "@/lib/db";
 import { isAdminRole } from "@/lib/membership";
-import { getScopedDb } from "@/lib/session";
+import { requirePageAccess } from "@/lib/page-access";
 import { BrandingForm } from "./branding-form";
 import { LogoCard } from "./logo-card";
 
@@ -10,7 +10,8 @@ import { LogoCard } from "./logo-card";
 export const dynamic = "force-dynamic";
 
 export default async function BrandingSettingsPage() {
-  const { db, orgId } = await getScopedDb();
+  // The membership gate first, outside any try (Phase 10, V-27, C6): a non-member goes to /no-access.
+  const { db, orgId } = await requirePageAccess();
   // organization is a Better Auth model and is NOT in scopedDb's DOMAIN_MODELS — bare prisma.
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
