@@ -228,6 +228,10 @@ The container line of the Larangan above now reads, in the charter: "Dilarang me
 
 Round 1 on this update: `run-loop/codex/fase10-replan-tanya.md`. The points marked "decided in the replan with the Codex brainstorm below" (V-04, V-07, V-08, V-10, V-15, V-18) and the technical consequences of the O-4 default (V-06) are settled in a section "Decided after the Codex brainstorm", added after the answer. Owner items O-4 to O-10 are not put to Codex as decisions.
 
+
+### Amendment during execution (2026-11-13): R10-1, session cookie cache off
+
+- **R10-1 (regression found after plan 10-17):** with the cookie cache on (300 s), every fresh read of V-23 (`disableCookieCache`) ended in better-auth 1.7.20 `setCookieCache`, so every server action set the `session_data` cookie and Next.js re-rendered the route; four E2E cases lost their refusal alert, selection or focus. Fix `0db72a9`: `cookieCache: { enabled: false }` in `src/lib/auth.ts`; `readFreshSession` stays the only session read and keeps `disableCookieCache`. Mentions of a 300 s cookie cache in D-08, V-07 and V-23 above describe the state before this fix. Effect: a valid read sets no cookie; sliding refresh after `updateAge` is unchanged; a deleted session is still refused and its cookies expired; Better Auth's own endpoints now read the session row too. Record: `.planning/debug/r10-1-action-session-cookie.md`.
 ---
 
 *Phase: 10-team*
