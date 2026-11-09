@@ -172,12 +172,6 @@ const ALLOWLIST: AllowEntry[] = [
   // Rule A: tenant-reaching entries with no gate.
   {
     rule: "A",
-    file: "src/app/(app)/layout.tsx",
-    function: "AppLayout",
-    reason: `reads the organization name, branding, logo and saved views after requireSession only; the saved views service checks membership; ${PRE_10_17}`,
-  },
-  {
-    rule: "A",
     file: "src/app/(app)/settings/backups/page.tsx",
     function: "BackupsSettingsPage",
     reason: `reads only the instance-wide SystemSetting backup record, and only when getOrgRole (a conservative member read) is owner or admin, so a non-member reads nothing; ${PRE_10_17}`,
@@ -246,12 +240,6 @@ const ALLOWLIST: AllowEntry[] = [
   },
 
   // Rule C: session readers and auth.api calls outside the gates.
-  {
-    rule: "C",
-    file: "src/app/(app)/layout.tsx",
-    function: "AppLayout",
-    reason: `requireSession only, before the layout's organization reads; ${PRE_10_17}`,
-  },
   {
     rule: "C",
     file: "src/app/api/palette/tickets/route.ts",

@@ -3,45 +3,31 @@ import { Sidebar } from "@/components/sidebar";
 import { TopBar } from "@/components/top-bar";
 import { getBrandingSettings, getLogoSetting, logoPublicUrl } from "@/lib/branding/settings";
 import { prisma } from "@/lib/db";
+import { requirePageAccess } from "@/lib/page-access";
 import { listSavedViewsForViewer } from "@/lib/saved-views/service";
 import { sidebarViewsOrEmpty } from "@/lib/saved-views/ui-state";
-import { scopedDb } from "@/lib/scoped-db";
-import { requireSession } from "@/lib/session";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const session = await requireSession();
-
-  // activeOrganizationId is set at login by databaseHooks.session.create.before.
-  // If null here it means an unexpected state (e.g. orphaned session); show a safe
-  // fallback rather than crashing downstream getScopedDb calls. (AIDA-10)
-  if (!session.session.activeOrganizationId) {
-    // AIDA-36 (D-14, UI-SPEC Surface 5): the fallback is a landmark with the state's one h1
-    // (sr-only); the visible copy is unchanged.
-    return (
-      <main className="flex min-h-screen items-center justify-center">
-        <h1 className="sr-only">Workspace not found</h1>
-        <p className="text-[14px] text-muted-foreground">
-          No workspace found. Please sign out and sign in again.
-        </p>
-      </main>
-    );
-  }
+  // The membership gate first, outside any try (Phase 10, V-27, C6): no session goes to /login, and
+  // no active organization or no member row in it goes to /no-access, before the organization,
+  // branding, logo and saved-view reads below. Each page calls it too, because the layout and the
+  // page render in parallel.
+  const { session, orgId, db } = await requirePageAccess();
 
   const user = {
     name: session.user.name,
     email: session.user.email,
   };
 
-  const orgId = session.session.activeOrganizationId;
   // organization is a Better Auth model and is NOT in scopedDb's DOMAIN_MODELS — bare prisma.
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
     select: { name: true },
   });
-  const { workspaceName } = await getBrandingSettings(scopedDb(orgId), org?.name ?? "AIDA");
+  const { workspaceName } = await getBrandingSettings(db, org?.name ?? "AIDA");
   // The active organization's logo (AIDA-34, D-10, D-11): its versioned public URL, or null for
   // the Sparkles box when none (or a malformed reference) is stored.
-  const logo = await getLogoSetting(scopedDb(orgId));
+  const logo = await getLogoSetting(db);
   const logoUrl = logo ? logoPublicUrl(orgId, logo.version) : null;
 
   // Saved views for the sidebar (AIDA-47, UI-SPEC Surface 1): the viewer's private views and the

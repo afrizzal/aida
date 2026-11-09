@@ -5,8 +5,7 @@ import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { prisma } from "@/lib/db";
 import { findConservativeMembership, isAdminRole } from "@/lib/membership";
-import { scopedDb } from "@/lib/scoped-db";
-import { getSessionActor } from "@/lib/session";
+import { requirePageAccess } from "@/lib/page-access";
 import { e2eFault } from "@/lib/testing/e2e-fault";
 import {
   legacyRedirectSearch,
@@ -39,15 +38,14 @@ export async function TicketListPanel({
   selectedId,
   basePath = "/tickets",
 }: TicketListPanelProps) {
+  // The membership gate first, outside any try (Phase 10, V-27, C6): this server component reads
+  // tenant data itself and renders in parallel with the layout, so it needs its own gate. A
+  // non-member goes to /no-access. loadTicketListPanelData still checks the actor's membership
+  // before any panel data is read (D-01, Codex diff critique D1), so a membership that ends between
+  // the gate and that read gets no roster, no tickets and no tags, only the "membership ended" line.
+  const { session, orgId, db } = await requirePageAccess();
   await e2eFault("tickets-list-delay"); // inert outside the E2E server (src/lib/testing/e2e-fault.ts)
-  // getSessionActor, not getScopedDb (Phase 10, D-08): getScopedDb now throws for a removed member,
-  // and this panel answers that case itself. The actor's membership is checked by
-  // loadTicketListPanelData before any panel data is read (D-01, Codex diff critique D1): a removed
-  // member with a still-valid session gets no roster, no tickets and no tags, only the "membership
-  // ended" line below. Plan 10-17 puts requirePageAccess in front of every page.
-  const actor = await getSessionActor();
-  const { orgId } = actor;
-  const db = scopedDb(orgId);
+  const actor = { userId: session.user.id, orgId };
   const {
     membershipActive,
     tickets,

@@ -1,5 +1,6 @@
-import { ShieldOff, Users } from "lucide-react";
+import { Users } from "lucide-react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/empty-state";
 import { StateChip } from "@/components/tickets/state-chip";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -7,7 +8,7 @@ import { Card } from "@/components/ui/card";
 import { loadContactDetailData } from "@/lib/contacts/contact-detail-data";
 import { prisma } from "@/lib/db";
 import { formatRelativeTime } from "@/lib/format-relative-time";
-import { getSessionActor } from "@/lib/session";
+import { requirePageAccess } from "@/lib/page-access";
 import { e2eFault } from "@/lib/testing/e2e-fault";
 import { NotesForm } from "./notes-form";
 
@@ -26,23 +27,17 @@ function getInitials(name: string): string {
 }
 
 export default async function ContactDetailPage({ params }: ContactDetailPageProps) {
+  // The membership gate first, outside any try (Phase 10, V-27, C6): a non-member goes to /no-access.
+  const { session, orgId } = await requirePageAccess();
   await e2eFault("contact-detail-page"); // inert outside the E2E server (src/lib/testing/e2e-fault.ts)
-  const actor = await getSessionActor();
+  const actor = { userId: session.user.id, orgId };
   const { id } = await params;
 
-  // D-01 and K44: the loader checks the member row before it reads the contact or its tickets.
+  // D-01 and K44: the loader checks the member row again before it reads the contact or its
+  // tickets. A membership that ended between the gate and this read goes to /no-access too (V-27).
   const data = await loadContactDetailData(prisma, actor, id);
 
-  if (data.status === "membership_ended") {
-    return (
-      <EmptyState
-        icon={ShieldOff}
-        headingAs="h1"
-        heading="Your access to this workspace has ended."
-        body="Sign out, then sign in again."
-      />
-    );
-  }
+  if (data.status === "membership_ended") redirect("/no-access");
 
   if (data.status === "not_found") {
     return (

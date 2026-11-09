@@ -4,7 +4,7 @@ import { EmptyState } from "@/components/empty-state";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { formatRelativeTime } from "@/lib/format-relative-time";
-import { getScopedDb } from "@/lib/session";
+import { requirePageAccess } from "@/lib/page-access";
 import { e2eFault } from "@/lib/testing/e2e-fault";
 import { ContactSearch } from "./contact-search";
 
@@ -23,8 +23,9 @@ function getInitials(name: string): string {
 }
 
 export default async function ContactsPage({ searchParams }: ContactsPageProps) {
+  // The membership gate first, outside any try (Phase 10, V-27, C6): a non-member goes to /no-access.
+  const { db } = await requirePageAccess();
   await e2eFault("contacts-page"); // inert outside the E2E server (src/lib/testing/e2e-fault.ts)
-  const { db } = await getScopedDb();
   const { q } = await searchParams;
 
   const contacts = await db.contact.findMany({

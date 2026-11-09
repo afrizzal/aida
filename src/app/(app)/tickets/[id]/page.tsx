@@ -1,4 +1,5 @@
-import { MessageSquare, ShieldOff } from "lucide-react";
+import { MessageSquare } from "lucide-react";
+import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/empty-state";
 import { ActivityFeed } from "@/components/tickets/activity-feed";
 import { AiActivitySection } from "@/components/tickets/ai-activity-section";
@@ -8,9 +9,8 @@ import { SnoozeControl } from "@/components/tickets/snooze-control";
 import { TicketMetaHeader } from "@/components/tickets/ticket-meta-header";
 import { TicketReplyArea } from "@/components/tickets/ticket-reply-area";
 import { prisma } from "@/lib/db";
-import { findConservativeMembership, isAdminRole } from "@/lib/membership";
-import { scopedDb } from "@/lib/scoped-db";
-import { getSessionActor } from "@/lib/session";
+import { isAdminRole } from "@/lib/membership";
+import { requirePageAccess } from "@/lib/page-access";
 import { e2eFault } from "@/lib/testing/e2e-fault";
 import { loadTicketDetailData } from "@/lib/tickets/ticket-detail-data";
 import { TicketListPanel } from "../ticket-list-panel";
@@ -21,31 +21,19 @@ interface TicketDetailPageProps {
 }
 
 export default async function TicketDetailPage({ params, searchParams }: TicketDetailPageProps) {
+  // The membership gate first, outside any try (Phase 10, V-27, C6): a non-member goes to /no-access.
+  const { session, orgId, role, db } = await requirePageAccess();
   await e2eFault("ticket-detail-page"); // inert outside the E2E server (src/lib/testing/e2e-fault.ts)
   const { id } = await params;
   const sp = await searchParams;
-  const actor = await getSessionActor();
+  const actor = { userId: session.user.id, orgId };
 
-  // The actor's member row is checked before the ticket is read (D-01, Codex diff critique
-  // round 2 E1). A removed member with a still-valid session gets the access-ended state: no
-  // ticket, message or roster data, and no throw, so no error boundary (Phase 10 review C6).
+  // The loader checks the actor's member row again before the ticket is read (D-01, Codex diff
+  // critique round 2 E1). A membership that ended between the gate and this read goes to
+  // /no-access as well, so every protected page behaves the same (V-27).
   const detail = await loadTicketDetailData(prisma, actor, id);
 
-  if (detail.status === "membership_ended") {
-    return (
-      <>
-        <TicketListPanel searchParams={sp} selectedId={id} basePath={`/tickets/${id}`} />
-        <div className="flex flex-1 items-center justify-center overflow-y-auto">
-          <EmptyState
-            icon={ShieldOff}
-            headingAs="h1"
-            heading="Your access to this workspace has ended."
-            body="Sign out, then sign in again."
-          />
-        </div>
-      </>
-    );
-  }
+  if (detail.status === "membership_ended") redirect("/no-access");
 
   if (detail.status === "not_found") {
     return (
@@ -83,11 +71,11 @@ export default async function TicketDetailPage({ params, searchParams }: TicketD
   // 12.2 UI-SPEC 1a (D-01, D-09): the "Propose KB article…" menu item is for owners and admins
   // only, and is disabled while AI is off. Both flags are read here, after the membership check
   // above; the menu only hides or explains the entry, and requestProposalAction decides again.
-  const membership = await findConservativeMembership(prisma, actor.userId, actor.orgId);
-  const isAdmin = isAdminRole(membership?.role);
+  // The role is the gate's conservative read (findConservativeMembership) in exactly orgId.
+  const isAdmin = isAdminRole(role);
   const aiSetting = isAdmin
-    ? await scopedDb(actor.orgId).setting.findFirst({
-        where: { organizationId: actor.orgId, key: "aiEnabled" },
+    ? await db.setting.findFirst({
+        where: { organizationId: orgId, key: "aiEnabled" },
         select: { value: true },
       })
     : null;

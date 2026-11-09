@@ -2,6 +2,7 @@ import { MessageSquare } from "lucide-react";
 import { Suspense } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { requirePageAccess } from "@/lib/page-access";
 import { e2eFault } from "@/lib/testing/e2e-fault";
 import { TicketListPanel } from "./ticket-list-panel";
 import { TicketListSkeleton } from "./ticket-list-row";
@@ -11,6 +12,8 @@ interface TicketsPageProps {
 }
 
 export default async function TicketsPage({ searchParams }: TicketsPageProps) {
+  // The membership gate first, outside any try (Phase 10, V-27, C6): a non-member goes to /no-access.
+  await requirePageAccess();
   await e2eFault("tickets-page"); // inert outside the E2E server (src/lib/testing/e2e-fault.ts)
   const params = await searchParams;
 
