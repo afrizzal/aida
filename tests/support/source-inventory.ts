@@ -1325,3 +1325,47 @@ export function findViolations(rules: InventoryRules, sources: Sources): Invento
   }
   return { violations, hygiene, suppressed, inventory };
 }
+
+// ---------------------------------------------------------------------------------------------
+// Rule B (plan 10-17: C6, V-27): the page helper on every protected render entry
+// ---------------------------------------------------------------------------------------------
+
+export interface PageAccessRules {
+  /** The route group whose render entries need the helper, for example "src/app/(app)/". */
+  appPrefix: string;
+  /** The group's root layout: always checked, and its absence is a violation. */
+  rootLayout: string;
+  /** The page helper, with its home module. */
+  helper: NamedFn;
+  /** Gates a render entry may neither import nor call (they throw instead of redirecting). */
+  forbidden: readonly NamedFn[];
+}
+
+export interface PageAccessEntry {
+  file: string;
+  function: string;
+  kind: "page" | "layout" | "component";
+}
+
+export interface PageAccessViolation {
+  file: string;
+  function: string;
+  detail: string;
+}
+
+export interface PageAccessResult {
+  violations: PageAccessViolation[];
+  /** Every render entry the rule judged, sorted by file then function. */
+  checked: PageAccessEntry[];
+  /** page.tsx files under appPrefix, sorted. */
+  pagesFound: string[];
+  /** The pages whose default-exported function was judged, sorted. */
+  pagesChecked: string[];
+}
+
+export function findPageAccessViolations(
+  _rules: PageAccessRules,
+  _sources: Sources,
+): PageAccessResult {
+  return { violations: [], checked: [], pagesFound: [], pagesChecked: [] };
+}
