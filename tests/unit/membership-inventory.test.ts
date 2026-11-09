@@ -117,7 +117,22 @@ const RULE_E: StatusTokenRules = {
     // The organization row is the tenant itself: its id must be the helper's organizationId.
     organization: { organization: ["id"], ticket: [] },
   },
-  nonTenantCallees: [],
+  // Read before listing: each reaches the database but no tenant row, so a call need not carry
+  // the helper's value. Any other tenant-reaching src/lib call must pass it (R3-4).
+  nonTenantCallees: [
+    {
+      name: "consumeRateLimit",
+      home: "src/lib/rate-limit/check-rate-limit.ts",
+      reason:
+        "counts and inserts only RateLimitHit rows of the scope and the hashed client identity under an advisory lock; RateLimitHit has no organization, and it runs before the token lookup by design (D-21, D-22)",
+    },
+    {
+      name: "boundUploadCommitInTx",
+      home: "src/lib/attachments/uncertain-commit.ts",
+      reason:
+        "runs only set_config('idle_in_transaction_session_timeout') and pg_current_xact_id() in the caller's transaction (K155, K158); it reads and writes no row",
+    },
+  ],
 };
 
 const BASE_RULES: Omit<InventoryRules, "allowlist"> = {
@@ -345,8 +360,19 @@ const ALLOWLIST: AllowEntry[] = [
 
 const REAL_RULES: InventoryRules = { ...BASE_RULES, allowlist: ALLOWLIST };
 
-function run(sources: Record<string, string>, allowlist: AllowEntry[] = []) {
-  return findViolations({ ...BASE_RULES, allowlist }, new Map(Object.entries(sources)));
+/**
+ * Runs the rules on fixture sources. The real tree's non-tenant callees are left out (a fixture
+ * calls none of them, and each must be called), unless a case passes its own list.
+ */
+function run(
+  sources: Record<string, string>,
+  allowlist: AllowEntry[] = [],
+  nonTenantCallees: StatusTokenRules["nonTenantCallees"] = [],
+) {
+  return findViolations(
+    { ...BASE_RULES, ruleE: { ...RULE_E, nonTenantCallees }, allowlist },
+    new Map(Object.entries(sources)),
+  );
 }
 
 const names = (vs: Violation[]) => vs.map((v) => `${v.rule} ${v.file}#${v.function}`);
@@ -920,6 +946,40 @@ export async function resolveThing(_tx: unknown, orgId: string, id: string) {
     ]);
     expect(allowed.violations).toEqual([]);
     expect(allowed.hygiene).toEqual([]);
+  });
+
+  it("exempts a listed non-tenant callee, and fails a listed callee that is missing or never called", () => {
+    const lib = `import { prisma } from "@/lib/db";
+export async function countHits(scope: string) {
+  return prisma.rateLimitHit.count({ where: { scope } });
+}
+`;
+    const route = helperRoute(
+      'import { countHits } from "@/lib/fx/hits";',
+      'await countHits("s");',
+    );
+    const sources = { "src/lib/fx/hits.ts": lib, [ROUTE]: route };
+    expect(eNames(run(sources).violations)).toEqual([`E ${ROUTE}#POST`]);
+    const exempt = run(
+      sources,
+      [],
+      [{ name: "countHits", home: "src/lib/fx/hits.ts", reason: "fixture" }],
+    );
+    expect(exempt.violations).toEqual([]);
+    expect(exempt.hygiene).toEqual([]);
+    const stale = run(
+      sources,
+      [],
+      [
+        { name: "countHits", home: "src/lib/fx/hits.ts", reason: "fixture" },
+        { name: "gone", home: "src/lib/fx/hits.ts", reason: " " },
+      ],
+    );
+    expect(stale.hygiene).toEqual([
+      "E non-tenant callee src/lib/fx/hits.ts#gone: empty reason",
+      "E non-tenant callee src/lib/fx/hits.ts#gone: function does not exist",
+      "E non-tenant callee src/lib/fx/hits.ts#gone: no public entry calls it",
+    ]);
   });
 
   it("never lets an allowlist entry suppress a binding or helper finding (no escape hatch, R3-4)", () => {

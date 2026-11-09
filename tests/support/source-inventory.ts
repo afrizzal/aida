@@ -12,7 +12,10 @@
 //     transitively, references the shared prisma client, calls scopedDb( or uses $queryRaw or
 //     $executeRaw;
 //   - whether a src/lib function reads membership (calls a membership reader, directly or through
-//     the functions it calls).
+//     the functions it calls);
+//   - for Rule E (plan 10-16), which identifiers of a public entry hold the value a status-token
+//     helper returned, or a value derived from it, and whether each model delegate call and each
+//     tenant-reaching src/lib call is bound to that value.
 // findViolations runs the rules of tests/unit/membership-inventory.test.ts on the real tree or on
 // in-memory fixture sources. The rules' names and allowlists live in that test; this file only
 // knows how to evaluate them.
@@ -556,10 +559,26 @@ export class Project {
 // Rules
 // ---------------------------------------------------------------------------------------------
 
-export type RuleId = "A" | "C" | "C2" | "D";
+export type RuleId = "A" | "C" | "C2" | "D" | "E";
+
+/**
+ * The kinds of Rule E finding. Only public-reach (a public entry with no status token) and raw-sql
+ * may be allowlisted; the others are never allowlisted (R3-4: no escape hatch).
+ */
+export type RuleEKind =
+  | "public-reach"
+  | "raw-sql"
+  | "no-helper"
+  | "own-read"
+  | "unbound-access"
+  | "unbound-call";
+
+const ALLOWLISTABLE_E_KINDS: ReadonlySet<string> = new Set(["public-reach", "raw-sql"]);
 
 export interface AllowEntry {
   rule: RuleId;
+  /** Rule E only: the kind of finding the entry suppresses (public-reach or raw-sql). */
+  kind?: RuleEKind;
   file: string;
   function: string;
   reason: string;
@@ -567,6 +586,8 @@ export interface AllowEntry {
 
 export interface Violation {
   rule: RuleId;
+  /** Rule E only. */
+  kind?: RuleEKind;
   file: string;
   function: string;
   detail: string;
@@ -576,6 +597,34 @@ export interface Violation {
 export interface NamedFn {
   name: string;
   home: string;
+}
+
+/** Binding keys of a model for Rule E: the property names that may carry each binding. */
+export interface ModelKeys {
+  /** The organization binding (organizationId on most models, id on the organization model). */
+  organization: readonly string[];
+  /** The ticket binding (ticketId on most models, id on the ticket model); empty means none. */
+  ticket: readonly string[];
+}
+
+/** Rule E: the public paths and the three status-token helpers (plan 10-16). */
+export interface StatusTokenRules {
+  /** An entry under one of these must call a helper, and is judged by the binding check. */
+  statusPrefixes: readonly string[];
+  /** Public entries: tenant reach without a helper needs an allowlist entry (kind public-reach). */
+  publicPrefixes: readonly string[];
+  /** The helpers, with their home module. */
+  helpers: readonly NamedFn[];
+  /** Delegates (Prisma accessor names) a status-token entry may never read itself. */
+  noReadModels: readonly string[];
+  defaultKeys: ModelKeys;
+  /** Per-model binding keys, by Prisma accessor name; defaultKeys for any other model. */
+  modelKeys: Readonly<Record<string, ModelKeys>>;
+  /**
+   * src/lib functions whose module reaches the database but that read or write no tenant row, so
+   * a call need not carry the helper's value. Each has a reason and must be called somewhere.
+   */
+  nonTenantCallees: readonly (NamedFn & { reason: string })[];
 }
 
 export interface InventoryRules {
@@ -597,6 +646,8 @@ export interface InventoryRules {
   sessionReadingCalls: readonly NamedFn[];
   /** Rule D: DOMAIN_MODELS model names (PascalCase, as in src/lib/scoped-db.ts). */
   domainModels: readonly string[];
+  /** Rule E. */
+  ruleE: StatusTokenRules;
   allowlist: readonly AllowEntry[];
 }
 
@@ -745,6 +796,243 @@ function sessionReadCount(
   return count;
 }
 
+const READ_OPS = new Set([
+  "findUnique",
+  "findUniqueOrThrow",
+  "findFirst",
+  "findFirstOrThrow",
+  "findMany",
+  "count",
+  "aggregate",
+  "groupBy",
+]);
+
+function unwrapExpr(e: ts.Expression): ts.Expression {
+  let cur = e;
+  while (
+    ts.isAwaitExpression(cur) ||
+    ts.isParenthesizedExpression(cur) ||
+    ts.isNonNullExpression(cur) ||
+    ts.isAsExpression(cur) ||
+    ts.isSatisfiesExpression(cur)
+  ) {
+    cur = cur.expression;
+  }
+  return cur;
+}
+
+function bindingNames(name: ts.BindingName): string[] {
+  if (ts.isIdentifier(name)) return [name.text];
+  const out: string[] = [];
+  for (const el of name.elements) {
+    if (!ts.isOmittedExpression(el)) out.push(...bindingNames(el.name));
+  }
+  return out;
+}
+
+function parametersOf(node: ts.Node): readonly ts.ParameterDeclaration[] {
+  return ts.isFunctionDeclaration(node) || ts.isArrowFunction(node) || ts.isFunctionExpression(node)
+    ? node.parameters
+    : [];
+}
+
+function refersToBound(node: ts.Node, bound: ReadonlySet<string>): boolean {
+  for (const r of valueRefsIn(node)) if (bound.has(r)) return true;
+  return false;
+}
+
+function siteOfCall(call: ts.CallExpression): CallSite {
+  const chain = chainOf(call.expression);
+  return { chain, name: chain[chain.length - 1], node: call, firstArg: call.arguments[0] };
+}
+
+/**
+ * The identifiers, across an entry's closure, that hold the value a helper returned or a value
+ * derived from it: the name a helper call's result is bound to (`const ticket = await
+ * findTicketByStatusToken(token)`), any variable or assignment whose initializer references a
+ * bound name, and the parameter of a closure helper that receives a bound argument. Names are
+ * matched as strings across the closure (a static over-approximation of scope).
+ */
+function statusBoundNames(
+  project: Project,
+  closure: readonly FnRef[],
+  isHelperCall: (ref: FnRef, call: ts.CallExpression) => boolean,
+): Set<string> {
+  const bound = new Set<string>();
+  let changed = true;
+  const add = (n: string) => {
+    if (!bound.has(n)) {
+      bound.add(n);
+      changed = true;
+    }
+  };
+  while (changed) {
+    changed = false;
+    for (const ref of closure) {
+      const visit = (n: ts.Node) => {
+        if (ts.isVariableDeclaration(n) && n.initializer) {
+          const init = unwrapExpr(n.initializer);
+          const seeded = ts.isCallExpression(init) && isHelperCall(ref, init);
+          if (seeded || refersToBound(n.initializer, bound))
+            for (const x of bindingNames(n.name)) add(x);
+        }
+        if (
+          ts.isBinaryExpression(n) &&
+          n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+          ts.isIdentifier(n.left)
+        ) {
+          const right = unwrapExpr(n.right);
+          const seeded = ts.isCallExpression(right) && isHelperCall(ref, right);
+          if (seeded || refersToBound(n.right, bound)) add(n.left.text);
+        }
+        ts.forEachChild(n, visit);
+      };
+      visit(ref.fn.node);
+      for (const site of callsIn(ref.fn.node)) {
+        if (!ts.isCallExpression(site.node)) continue;
+        const next = project.resolveCall(ref, site, (file) => file.startsWith("src/app/"));
+        if (!next) continue;
+        const params = parametersOf(next.fn.node);
+        site.node.arguments.forEach((arg, i) => {
+          const p = params[i];
+          if (p && refersToBound(arg, bound)) for (const x of bindingNames(p.name)) add(x);
+        });
+      }
+    }
+  }
+  return bound;
+}
+
+/** Whether an object literal has one of `keys` with an initializer referencing a bound name. */
+function keyBound(
+  obj: ts.Expression | undefined,
+  keys: readonly string[],
+  bound: ReadonlySet<string>,
+): boolean {
+  for (const k of keys) {
+    const init = propertyOf(obj, k);
+    if (init && refersToBound(init, bound)) return true;
+  }
+  return false;
+}
+
+interface RuleEFinding {
+  kind: RuleEKind;
+  detail: string;
+}
+
+/**
+ * Rule E on one entry: helper use, no own ticket or message read, every model delegate call and
+ * every tenant-reaching src/lib call bound to the helper's value, raw SQL reported.
+ */
+function statusTokenFindings(
+  project: Project,
+  closure: readonly FnRef[],
+  rules: StatusTokenRules,
+  requireHelper: boolean,
+  usedCallees: Set<string>,
+): { findings: RuleEFinding[]; helpersCalled: string[] } {
+  const findings: RuleEFinding[] = [];
+  const helpersCalled = new Set<string>();
+  const isHelperCall = (ref: FnRef, call: ts.CallExpression) =>
+    rules.helpers.some((h) => isCallOf(project, ref, siteOfCall(call), h));
+  for (const ref of closure) {
+    for (const site of callsIn(ref.fn.node)) {
+      if (ts.isCallExpression(site.node) && isHelperCall(ref, site.node))
+        helpersCalled.add(site.name);
+    }
+  }
+  if (requireHelper && helpersCalled.size === 0) {
+    findings.push({
+      kind: "no-helper",
+      detail: `calls none of ${rules.helpers.map((h) => h.name).join(", ")}`,
+    });
+  }
+  const bound = statusBoundNames(project, closure, isHelperCall);
+  for (const ref of closure) {
+    const where = `in ${ref.mod.file}#${ref.fn.name}`;
+    for (const site of callsIn(ref.fn.node)) {
+      const chainText = site.chain.join(".");
+      if (
+        RAW_NAMES.has(site.name) ||
+        (ts.isTaggedTemplateExpression(site.node) && site.name === "sql")
+      ) {
+        findings.push({ kind: "raw-sql", detail: `raw SQL (${site.name}) ${where}` });
+        continue;
+      }
+      if (!ts.isCallExpression(site.node)) continue;
+      const call = site.node;
+      if (isHelperCall(ref, call)) continue;
+
+      // A model delegate call: <client>.<model>.<op>, the client being prisma, a $transaction
+      // callback parameter or any other receiver (judged strictly whatever it is).
+      const model = site.chain[site.chain.length - 2];
+      if (
+        site.chain.length >= 3 &&
+        (READ_OPS.has(site.name) || WRITE_OPS.has(site.name)) &&
+        model !== undefined &&
+        !model.startsWith("$")
+      ) {
+        const op = site.name;
+        if (READ_OPS.has(op) && rules.noReadModels.includes(model)) {
+          findings.push({
+            kind: "own-read",
+            detail: `reads ${model} itself (${chainText}) ${where}`,
+          });
+          continue;
+        }
+        const keys = rules.modelKeys[model] ?? rules.defaultKeys;
+        const arg = site.firstArg;
+        const parts: { label: string; obj: ts.Expression | undefined }[] = [];
+        if (op === "upsert") {
+          parts.push({ label: "where", obj: propertyOf(arg, "where") });
+          parts.push({ label: "create", obj: propertyOf(arg, "create") });
+        } else if (op.startsWith("create")) {
+          const data = propertyOf(arg, "data");
+          if (data && ts.isArrayLiteralExpression(data) && data.elements.length > 0) {
+            for (const el of data.elements) parts.push({ label: "data", obj: el });
+          } else parts.push({ label: "data", obj: data });
+        } else parts.push({ label: "where", obj: propertyOf(arg, "where") });
+        for (const part of parts) {
+          const missing: string[] = [];
+          if (!keyBound(part.obj, keys.organization, bound))
+            missing.push(keys.organization.join(" or "));
+          if (keys.ticket.length > 0 && !keyBound(part.obj, keys.ticket, bound))
+            missing.push(keys.ticket.join(" or "));
+          if (missing.length > 0) {
+            findings.push({
+              kind: "unbound-access",
+              detail: `${chainText} without ${missing.join(" and ")} bound to the helper's result in its ${part.label} literal ${where}`,
+            });
+          }
+        }
+        continue;
+      }
+
+      // A call to an imported src/lib function (or a method of an imported src/lib value).
+      const b = project.bindingOf(ref, site.chain[0]);
+      if (!b || b.typeOnly || !b.resolved?.startsWith("src/lib/")) continue;
+      if (b.resolved === "src/lib/db.ts") continue; // the client itself: its delegates are judged above
+      if (rules.helpers.some((h) => h.home === b.resolved && h.name === b.imported)) continue;
+      const exempt = rules.nonTenantCallees.find(
+        (c) => c.home === b.resolved && c.name === b.imported,
+      );
+      if (exempt) {
+        usedCallees.add(`${exempt.home}#${exempt.name}`);
+        continue;
+      }
+      if (!project.libReaches(b.resolved)) continue;
+      if (!call.arguments.some((a) => refersToBound(a, bound))) {
+        findings.push({
+          kind: "unbound-call",
+          detail: `calls ${chainText} (${b.resolved}) with no argument referencing the helper's result ${where}`,
+        });
+      }
+    }
+  }
+  return { findings, helpersCalled: [...helpersCalled].sort() };
+}
+
 export function findViolations(rules: InventoryRules, sources: Sources): InventoryResult {
   const project = new Project(sources);
   const raw: Violation[] = [];
@@ -752,6 +1040,8 @@ export function findViolations(rules: InventoryRules, sources: Sources): Invento
   const readers = new Map(rules.membershipReaders.map((r) => [r.name, r.home]));
   const allowedA = (file: string, fn: string) =>
     rules.allowlist.find((e) => e.rule === "A" && e.file === file && e.function === fn);
+  /** Rule E non-tenant callees that some public entry calls (hygiene). */
+  const usedCallees = new Set<string>();
 
   // Rules A, C (entry readers) and C2, per entry function under src/app.
   for (const entry of project.entries()) {
@@ -810,6 +1100,50 @@ export function findViolations(rules: InventoryRules, sources: Sources): Invento
 
     const excluded = rules.ruleAExcludedPrefixes.find((p) => entry.file.startsWith(p));
     const allow = allowedA(entry.file, entry.function);
+
+    // Rule E: public entries. A status-token entry (or any public entry that calls a helper) is
+    // judged by the binding check; any other tenant-reaching public entry needs an allowlist entry.
+    const ruleE = rules.ruleE;
+    const isStatus = ruleE.statusPrefixes.some((p) => entry.file.startsWith(p));
+    const isPublic = isStatus || ruleE.publicPrefixes.some((p) => entry.file.startsWith(p));
+    let eExemption = "";
+    if (isPublic) {
+      const { findings, helpersCalled } = statusTokenFindings(
+        project,
+        closure,
+        ruleE,
+        isStatus,
+        usedCallees,
+      );
+      if (isStatus || helpersCalled.length > 0) {
+        for (const f of findings) {
+          raw.push({
+            rule: "E",
+            kind: f.kind,
+            file: entry.file,
+            function: entry.function,
+            detail: f.detail,
+          });
+        }
+        eExemption = helpersCalled.length > 0 ? `Rule E: ${helpersCalled.join(", ")}` : "";
+      } else if (reach) {
+        raw.push({
+          rule: "E",
+          kind: "public-reach",
+          file: entry.file,
+          function: entry.function,
+          detail: "public entry reaches tenant data without a status-token helper",
+        });
+        const e = rules.allowlist.find(
+          (a) =>
+            a.rule === "E" &&
+            a.kind === "public-reach" &&
+            a.file === entry.file &&
+            a.function === entry.function,
+        );
+        eExemption = e ? `Rule E allowlist: ${e.reason}` : "";
+      } else eExemption = "Rule E: no tenant reach";
+    }
     if (reach && gatesFound.size === 0 && !excluded) {
       raw.push({
         rule: "A",
@@ -826,11 +1160,13 @@ export function findViolations(rules: InventoryRules, sources: Sources): Invento
       kind: entry.kind,
       tenantReach: reach,
       gates: [...gatesFound].join(", "),
-      exemption: excluded
-        ? `excluded (${excluded})`
-        : reach && gatesFound.size === 0
-          ? (allow?.reason ?? "")
-          : "",
+      exemption: isPublic
+        ? eExemption
+        : excluded
+          ? `excluded (${excluded})`
+          : reach && gatesFound.size === 0
+            ? (allow?.reason ?? "")
+            : "",
     });
 
     if (entry.kind === "server-action" || entry.kind === "route-handler") {
@@ -950,11 +1286,17 @@ export function findViolations(rules: InventoryRules, sources: Sources): Invento
   const suppressed: { entry: AllowEntry; violation: Violation }[] = [];
   const used = new Set<AllowEntry>();
   for (const v of raw) {
-    const neverAllowed = v.rule === "C" && v.detail.includes("never allowlisted");
+    const neverAllowed =
+      (v.rule === "C" && v.detail.includes("never allowlisted")) ||
+      (v.rule === "E" && !ALLOWLISTABLE_E_KINDS.has(v.kind ?? ""));
     const entry = neverAllowed
       ? undefined
       : rules.allowlist.find(
-          (e) => e.rule === v.rule && e.file === v.file && e.function === v.function,
+          (e) =>
+            e.rule === v.rule &&
+            e.file === v.file &&
+            e.function === v.function &&
+            (v.rule !== "E" || e.kind === v.kind),
         );
     if (entry) {
       used.add(entry);
@@ -970,7 +1312,16 @@ export function findViolations(rules: InventoryRules, sources: Sources): Invento
     else if (e.function !== "<module>" && !mod.functions.has(e.function)) {
       hygiene.push(`${label}: function does not exist`);
     }
+    if (e.rule === "E" && !ALLOWLISTABLE_E_KINDS.has(e.kind ?? "")) {
+      hygiene.push(`${label}: a Rule E entry names kind public-reach or raw-sql`);
+    }
     if (!used.has(e)) hygiene.push(`${label}: suppresses no finding`);
+  }
+  for (const c of rules.ruleE.nonTenantCallees) {
+    const label = `E non-tenant callee ${c.home}#${c.name}`;
+    if (!c.reason.trim()) hygiene.push(`${label}: empty reason`);
+    if (!project.exported(c.home, c.name)) hygiene.push(`${label}: function does not exist`);
+    if (!usedCallees.has(`${c.home}#${c.name}`)) hygiene.push(`${label}: no public entry calls it`);
   }
   return { violations, hygiene, suppressed, inventory };
 }
