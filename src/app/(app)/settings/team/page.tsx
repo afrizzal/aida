@@ -1,5 +1,5 @@
 import { requirePageAccess } from "@/lib/page-access";
-import { listMembers } from "@/lib/workspace-members/member-admin";
+import { countOpenAssignedTickets, listMembers } from "@/lib/workspace-members/member-admin";
 import { TEAM_SUBTITLE, TEAM_TITLE, type TeamRole } from "./team-copy";
 import { type TeamMember, TeamMembersCard } from "./team-member-row";
 
@@ -20,12 +20,20 @@ export default async function TeamSettingsPage() {
   const actorUserId = session.user.id;
   const actorRole: TeamRole = entries.find((m) => m.userId === actorUserId)?.role ?? "member";
 
-  const members: TeamMember[] = entries.map((m) => ({
-    userId: m.userId,
-    name: m.name,
-    email: m.email,
-    role: m.role,
-  }));
+  const canManage = actorRole === "owner" || actorRole === "admin";
+
+  // The Deactivate dialog's "{Name} has {N} open tickets assigned." (D-07), counted with the same
+  // open definition reassignOpenTickets uses; only for owners and admins, never for the actor.
+  const members: TeamMember[] = await Promise.all(
+    entries.map(async (m) => ({
+      userId: m.userId,
+      name: m.name,
+      email: m.email,
+      role: m.role,
+      openTickets:
+        canManage && m.userId !== actorUserId ? await countOpenAssignedTickets(orgId, m.userId) : 0,
+    })),
+  );
 
   return (
     <div className="space-y-6">

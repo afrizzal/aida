@@ -1,9 +1,11 @@
 "use client";
 
+import { UserMinus } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
   Select,
@@ -14,7 +16,9 @@ import {
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { changeRoleAction } from "./actions";
+import { DeactivateDialog } from "./deactivate-dialog";
 import {
+  DEACTIVATE_TRIGGER,
   displayName,
   grantableRoles,
   initialsOf,
@@ -43,6 +47,8 @@ export interface TeamMember {
   name: string;
   email: string;
   role: TeamRole;
+  /** Open tickets assigned to the member (countOpenAssignedTickets); 0 for actors without rights. */
+  openTickets: number;
 }
 
 /** What the actor may do on a row (UI-SPEC "Who may do what"; the server is authoritative). */
@@ -51,15 +57,19 @@ export interface RowRights {
   roleOptions: TeamRole[];
   /** An admin actor looking at an owner row: Badge with the owner tooltip. */
   ownerTooltip: boolean;
+  /** "Deactivate member" is shown. */
+  canDeactivate: boolean;
 }
 
 export function rowRights(actorUserId: string, actorRole: TeamRole, member: TeamMember): RowRights {
   const own = member.userId === actorUserId;
-  if (own || actorRole === "member") return { roleOptions: [], ownerTooltip: false };
-  if (actorRole === "admin" && member.role === "owner") {
-    return { roleOptions: [], ownerTooltip: true };
+  if (own || actorRole === "member") {
+    return { roleOptions: [], ownerTooltip: false, canDeactivate: false };
   }
-  return { roleOptions: grantableRoles(actorRole), ownerTooltip: false };
+  if (actorRole === "admin" && member.role === "owner") {
+    return { roleOptions: [], ownerTooltip: true, canDeactivate: false };
+  }
+  return { roleOptions: grantableRoles(actorRole), ownerTooltip: false, canDeactivate: true };
 }
 
 const ERROR_CALLOUT =
@@ -76,6 +86,16 @@ export function TeamMembersCard({
 }) {
   const [roleError, setRoleError] = useState<RoleErrorKey | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  // The Deactivate dialog: a snapshot of the target, kept after the row leaves the list (A7).
+  const [deactivate, setDeactivate] = useState<{ target: TeamMember; key: number } | null>(null);
+  const [deactivateOpen, setDeactivateOpen] = useState(false);
+  const removedRef = useRef(false);
+
+  function openDeactivate(member: TeamMember) {
+    removedRef.current = false;
+    setDeactivate((prev) => ({ target: member, key: (prev?.key ?? 0) + 1 }));
+    setDeactivateOpen(true);
+  }
 
   return (
     // Card is flex-col with a 16px gap (--card-spacing): the contract's space-y-4 stack.
@@ -107,9 +127,28 @@ export function TeamMembersCard({
             rights={rowRights(actorUserId, actorRole, member)}
             onRoleChangeStart={() => setRoleError(null)}
             onRoleError={setRoleError}
+            onDeactivate={() => openDeactivate(member)}
           />
         ))}
       </ul>
+      {deactivate && (
+        <DeactivateDialog
+          key={deactivate.key}
+          open={deactivateOpen}
+          target={deactivate.target}
+          reassignees={members.filter((m) => m.userId !== deactivate.target.userId)}
+          onOpenChange={setDeactivateOpen}
+          onRemoved={() => {
+            removedRef.current = true;
+          }}
+          onCloseAutoFocus={(event) => {
+            // After a removal the trigger is gone: focus moves to the Members heading (UI-SPEC).
+            if (!removedRef.current) return;
+            event.preventDefault();
+            headingRef.current?.focus();
+          }}
+        />
+      )}
     </Card>
   );
 }
@@ -120,12 +159,14 @@ export function TeamMemberRow({
   rights,
   onRoleChangeStart,
   onRoleError,
+  onDeactivate,
 }: {
   member: TeamMember;
   isSelf: boolean;
   rights: RowRights;
   onRoleChangeStart: () => void;
   onRoleError: (error: RoleErrorKey) => void;
+  onDeactivate: () => void;
 }) {
   const [pendingRole, setPendingRole] = useState<TeamRole | null>(null);
   const name = displayName(member.name, member.email);
@@ -209,6 +250,19 @@ export function TeamMemberRow({
         </TooltipProvider>
       ) : (
         roleBadge
+      )}
+
+      {rights.canDeactivate && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="text-[13px] text-destructive"
+          onClick={onDeactivate}
+        >
+          <UserMinus className="size-4" aria-hidden="true" />
+          {DEACTIVATE_TRIGGER}
+        </Button>
       )}
     </li>
   );
