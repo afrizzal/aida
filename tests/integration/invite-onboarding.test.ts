@@ -14,7 +14,7 @@
 // suite.
 import { randomUUID } from "node:crypto";
 import { betterAuth } from "better-auth";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 const env = vi.hoisted(() => {
   const previous = {
@@ -34,19 +34,56 @@ import { POST as acceptPost } from "@/app/(auth)/invite/[token]/accept/route";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { readFreshSession } from "@/lib/fresh-session";
+import { rateLimitLockKey } from "@/lib/rate-limit/check-rate-limit";
+import { rateLimitKeyForIp } from "@/lib/rate-limit/client-ip";
+import { PUBLIC_RATE_LIMITS } from "@/lib/rate-limit/public-limits";
 import {
   type CreateInvitationSuccess,
   createInvitation,
+  revokeInvitation,
 } from "@/lib/workspace-members/invitations";
+import {
+  acceptAsSignedIn,
+  signInAndAccept,
+  signUpAndAccept,
+} from "@/lib/workspace-members/invite-onboarding";
 import { uniqueClientIp } from "../support/client-ip";
 import { seedOrgWithMembers } from "../support/inbox-fixtures";
 
-afterAll(() => {
+const SETUP_COMPLETE = "setupComplete";
+/** The setupComplete row as this file found it, restored afterwards (other files share the DB). */
+let setupBefore: string | null = null;
+
+beforeAll(async () => {
+  const row = await prisma.systemSetting.findUnique({ where: { key: SETUP_COMPLETE } });
+  setupBefore = row?.value ?? null;
+  await markSetupComplete();
+});
+
+afterAll(async () => {
+  if (setupBefore === null) {
+    await prisma.systemSetting.deleteMany({ where: { key: SETUP_COMPLETE } });
+  } else {
+    await prisma.systemSetting.upsert({
+      where: { key: SETUP_COMPLETE },
+      update: { value: setupBefore },
+      create: { key: SETUP_COMPLETE, value: setupBefore },
+    });
+  }
   for (const [key, value] of Object.entries(env.previous)) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
 });
+
+/** What /setup writes once the first workspace exists (src/app/(auth)/setup/actions.ts). */
+async function markSetupComplete() {
+  await prisma.systemSetting.upsert({
+    where: { key: SETUP_COMPLETE },
+    update: { value: "true" },
+    create: { key: SETUP_COMPLETE, value: "true" },
+  });
+}
 
 const ORIGIN = env.origin;
 
@@ -195,5 +232,434 @@ describe("tracer: a signed-in invited user posts Accept and the next request is 
     // Recorded for the SUMMARY: a cache-trusting read would still name A from the cached copy,
     // which is why AIDA never reads that way (defence in depth with the cache off).
     expect((await cacheTrustingRead(cookie))?.session.activeOrganizationId).toBe(user.orgA);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Task 2: create account and sign in, fixed to the invited address (D-05, V-04, V-13, R3-1, C9)
+// ---------------------------------------------------------------------------------------------
+
+const NEW_PASSWORD = "correct horse battery";
+
+/** The users whose email is `email` (any case). */
+function usersWithEmail(email: string) {
+  return prisma.user.findMany({
+    where: { email: { equals: email, mode: "insensitive" } },
+    select: { id: true, email: true, name: true },
+  });
+}
+
+function freshEmail() {
+  return `invitee-${randomUUID()}@example.test`;
+}
+
+function invitationStatus(invitationId: string) {
+  return prisma.invitation
+    .findUniqueOrThrow({ where: { id: invitationId }, select: { status: true } })
+    .then((r) => r.status);
+}
+
+describe("signUpAndAccept: the account is created only for the invited address", () => {
+  it("creates the user with exactly the invited address, the member row with the invited role, and a session active in the organization", async () => {
+    const email = freshEmail();
+    const { orgId, token } = await invite(email, "admin");
+
+    const result = await signUpAndAccept({
+      token,
+      name: "New Invitee",
+      password: NEW_PASSWORD,
+      requestHeaders: new Headers({ "x-forwarded-for": uniqueClientIp() }),
+      // Not a parameter: a caller that smuggles an address in changes nothing.
+      ...({ email: "attacker@example.test" } as object),
+    });
+
+    expect(result.kind).toBe("ok");
+    const users = await usersWithEmail(email);
+    expect(users).toHaveLength(1);
+    expect(users[0].email).toBe(email);
+    expect(await usersWithEmail("attacker@example.test")).toEqual([]);
+    const rows = await prisma.member.findMany({
+      where: { organizationId: orgId, userId: users[0].id },
+      select: { role: true },
+    });
+    expect(rows.map((r) => r.role)).toEqual(["admin"]);
+    expect(result.setCookies.join("\n")).toContain("session_token=");
+    const session = await readFreshSession(new Headers({ cookie: cookieFrom(result.setCookies) }));
+    expect(session?.user.id).toBe(users[0].id);
+    expect(session?.session.activeOrganizationId).toBe(orgId);
+  });
+
+  it("refuses as invalid when an account with that address already exists, and creates nothing", async () => {
+    const existing = await createAccount(freshEmail());
+    const { orgId, invitationId, token } = await invite(existing.email);
+
+    const result = await signUpAndAccept({
+      token,
+      name: "Second Account",
+      password: NEW_PASSWORD,
+      requestHeaders: new Headers(),
+    });
+
+    expect(result).toEqual({ kind: "invalid", setCookies: [] });
+    expect(await usersWithEmail(existing.email)).toHaveLength(1);
+    expect(await memberRows(orgId, existing.userId)).toEqual([]);
+    expect(await invitationStatus(invitationId)).toBe("pending");
+  });
+
+  it("R3-1: a link revoked before the form is submitted creates no account", async () => {
+    const email = freshEmail();
+    const { orgId, ownerId, invitationId, token } = await invite(email);
+    expect(await revokeInvitation({ orgId, actorUserId: ownerId, invitationId })).toEqual({
+      ok: true,
+    });
+
+    const result = await signUpAndAccept({
+      token,
+      name: "Too Late",
+      password: NEW_PASSWORD,
+      requestHeaders: new Headers(),
+    });
+
+    expect(result).toEqual({ kind: "invalid", setCookies: [] });
+    expect(await usersWithEmail(email)).toEqual([]);
+  });
+
+  it("R3-1: a link expired before the form is submitted creates no account", async () => {
+    const email = freshEmail();
+    const { invitationId, token } = await invite(email);
+    await prisma.invitation.update({
+      where: { id: invitationId },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+
+    const result = await signUpAndAccept({
+      token,
+      name: "Too Late",
+      password: NEW_PASSWORD,
+      requestHeaders: new Headers(),
+    });
+
+    expect(result).toEqual({ kind: "invalid", setCookies: [] });
+    expect(await usersWithEmail(email)).toEqual([]);
+  });
+
+  it("refuses with server_error and creates no user while setupComplete is absent", async () => {
+    const email = freshEmail();
+    const { invitationId, token } = await invite(email);
+    await prisma.systemSetting.deleteMany({ where: { key: SETUP_COMPLETE } });
+    try {
+      const result = await signUpAndAccept({
+        token,
+        name: "Before Setup",
+        password: NEW_PASSWORD,
+        requestHeaders: new Headers(),
+      });
+      expect(result).toEqual({ kind: "server_error", setCookies: [] });
+      expect(await usersWithEmail(email)).toEqual([]);
+      expect(await invitationStatus(invitationId)).toBe("pending");
+    } finally {
+      await markSetupComplete();
+    }
+  });
+});
+
+describe("C9: account created, accept failed, and the defined retry", () => {
+  for (const fault of ["revoked", "expired"] as const) {
+    it(`the invitation ${fault} between sign-up and accept leaves the account signed in with no membership; a new invitation joins through sign-in`, async () => {
+      const email = freshEmail();
+      const first = await invite(email);
+
+      const failed = await signUpAndAccept(
+        {
+          token: first.token,
+          name: "Unlucky Invitee",
+          password: NEW_PASSWORD,
+          requestHeaders: new Headers(),
+        },
+        {
+          afterAccount: async () => {
+            if (fault === "revoked") {
+              const revoked = await revokeInvitation({
+                orgId: first.orgId,
+                actorUserId: first.ownerId,
+                invitationId: first.invitationId,
+              });
+              expect(revoked).toEqual({ ok: true });
+            } else {
+              await prisma.invitation.update({
+                where: { id: first.invitationId },
+                data: { expiresAt: new Date(Date.now() - 1000) },
+              });
+            }
+          },
+        },
+      );
+
+      expect(failed.kind).toBe("invalid");
+      const users = await usersWithEmail(email);
+      expect(users).toHaveLength(1);
+      const userId = users[0].id;
+      expect(await memberRows(first.orgId, userId)).toEqual([]);
+      // Signed in (the route hands these cookies to the browser), with no membership anywhere.
+      const signedIn = await readFreshSession(
+        new Headers({ cookie: cookieFrom(failed.setCookies) }),
+      );
+      expect(signedIn?.user.id).toBe(userId);
+      expect(signedIn?.session.activeOrganizationId).toBeNull();
+      expect(await prisma.member.count({ where: { userId } })).toBe(0);
+
+      // The retry: a new invitation to the same address, joined through the sign-in path.
+      const second = await createInvitation({
+        orgId: first.orgId,
+        actorUserId: first.ownerId,
+        email,
+        role: "member",
+      });
+      if (!second.ok || second.delivery === "sent") throw new Error("no copyable invitation");
+      const token = second.link.slice(second.link.lastIndexOf("/") + 1);
+      const retried = await signInAndAccept({
+        token,
+        password: NEW_PASSWORD,
+        requestHeaders: new Headers(),
+      });
+
+      expect(retried.kind).toBe("ok");
+      expect(await memberRows(first.orgId, userId)).toHaveLength(1);
+      const session = await readFreshSession(
+        new Headers({ cookie: cookieFrom(retried.setCookies) }),
+      );
+      expect(session?.user.id).toBe(userId);
+      expect(session?.session.activeOrganizationId).toBe(first.orgId);
+    });
+  }
+});
+
+describe("signInAndAccept", () => {
+  it("joins with the right password and activates the new session", async () => {
+    const account = await createAccount(freshEmail());
+    const { orgId, invitationId, token } = await invite(account.email);
+
+    const result = await signInAndAccept({
+      token,
+      password: account.password,
+      requestHeaders: new Headers(),
+    });
+
+    expect(result.kind).toBe("ok");
+    expect(await memberRows(orgId, account.userId)).toHaveLength(1);
+    expect(await invitationStatus(invitationId)).toBe("accepted");
+    const session = await readFreshSession(new Headers({ cookie: cookieFrom(result.setCookies) }));
+    expect(session?.session.activeOrganizationId).toBe(orgId);
+  });
+
+  it("refuses a wrong password as wrong_password and accepts nothing", async () => {
+    const account = await createAccount(freshEmail());
+    const { orgId, invitationId, token } = await invite(account.email);
+
+    const result = await signInAndAccept({
+      token,
+      password: "not the password",
+      requestHeaders: new Headers(),
+    });
+
+    expect(result).toEqual({ kind: "wrong_password", setCookies: [] });
+    expect(await memberRows(orgId, account.userId)).toEqual([]);
+    expect(await invitationStatus(invitationId)).toBe("pending");
+  });
+});
+
+describe("V-23: a session revoked before accept", () => {
+  it("a session row deleted after the view gives signed_out, accepts nothing, and sign-in then joins", async () => {
+    const user = await signedInMemberOfOtherOrg();
+    const { orgId: orgB, invitationId, token } = await invite(user.email);
+    // The session is valid first, so the result below cannot come from a bad cookie.
+    const before = await readFreshSession(new Headers({ cookie: user.cookie }));
+    expect(before?.user.id).toBe(user.userId);
+
+    await prisma.session.delete({ where: { token: user.token } });
+
+    const result = await acceptAsSignedIn({
+      token,
+      requestHeaders: new Headers({ cookie: user.cookie }),
+    });
+    expect(result).toEqual({ kind: "signed_out" });
+    expect(await memberRows(orgB, user.userId)).toEqual([]);
+    expect(await invitationStatus(invitationId)).toBe("pending");
+
+    const joined = await signInAndAccept({
+      token,
+      password: user.password,
+      requestHeaders: new Headers(),
+    });
+    expect(joined.kind).toBe("ok");
+    expect(await memberRows(orgB, user.userId)).toHaveLength(1);
+  });
+
+  it("SESSION_GONE inside accept (the row deleted after the fresh read) gives signed_out and rolls the accept back", async () => {
+    const user = await signedInMemberOfOtherOrg();
+    const { orgId: orgB, invitationId, token } = await invite(user.email);
+    expect((await readFreshSession(new Headers({ cookie: user.cookie })))?.user.id).toBe(
+      user.userId,
+    );
+
+    const result = await acceptAsSignedIn(
+      { token, requestHeaders: new Headers({ cookie: user.cookie }) },
+      {
+        // After the fresh read and before the locked transaction: the session ends.
+        beforeLock: async () => {
+          await prisma.session.delete({ where: { token: user.token } });
+        },
+      },
+    );
+
+    expect(result).toEqual({ kind: "signed_out" });
+    expect(await memberRows(orgB, user.userId)).toEqual([]);
+    expect(await invitationStatus(invitationId)).toBe("pending");
+  });
+});
+
+describe("the accept route (V-24): Origin, rate limit, validation, 303", () => {
+  /** The limiter rows of the inviteAccept scope for this client address. */
+  function limiterRows(ip: string) {
+    const { scope } = PUBLIC_RATE_LIMITS.inviteAccept;
+    const ipHash = rateLimitLockKey(scope, rateLimitKeyForIp(ip)).slice(scope.length + 1);
+    return prisma.rateLimitHit.count({ where: { scope, ipHash } });
+  }
+
+  it("refuses a request with no Origin with 403 before any read: the invitation is unchanged and no limiter row is written", async () => {
+    const user = await signedInMemberOfOtherOrg();
+    const { orgId: orgB, invitationId, token } = await invite(user.email);
+    const before = await prisma.invitation.findUniqueOrThrow({ where: { id: invitationId } });
+    const ip = uniqueClientIp();
+
+    const response = await post(
+      token,
+      { intent: "accept" },
+      { cookie: user.cookie, origin: null, ip },
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "forbidden_origin" });
+    expect(await prisma.invitation.findUniqueOrThrow({ where: { id: invitationId } })).toEqual(
+      before,
+    );
+    expect(await memberRows(orgB, user.userId)).toEqual([]);
+    expect(await limiterRows(ip)).toBe(0);
+  });
+
+  it("refuses a foreign Origin with 403 and accepts nothing", async () => {
+    const user = await signedInMemberOfOtherOrg();
+    const { orgId: orgB, invitationId, token } = await invite(user.email);
+    const ip = uniqueClientIp();
+
+    for (const origin of ["https://evil.example.test", `${ORIGIN}.evil.example.test`, "null"]) {
+      const response = await post(token, { intent: "accept" }, { cookie: user.cookie, origin, ip });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: "forbidden_origin" });
+    }
+    expect(await invitationStatus(invitationId)).toBe("pending");
+    expect(await memberRows(orgB, user.userId)).toEqual([]);
+    expect(await limiterRows(ip)).toBe(0);
+  });
+
+  it("answers the eleventh POST in an hour from one identity with 429, before the token lookup", async () => {
+    const ip = uniqueClientIp();
+    const token = `not-a-token-${randomUUID()}`;
+    for (let i = 0; i < PUBLIC_RATE_LIMITS.inviteAccept.max; i++) {
+      // Unknown intent: refused after the limit was consumed.
+      expect((await post(token, { intent: "probe" }, { ip })).status).toBe(400);
+    }
+    expect(await limiterRows(ip)).toBe(10);
+    const limited = await post(token, { intent: "accept" }, { ip });
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toEqual({ error: "rate_limited" });
+    expect(Number(limited.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+  });
+
+  it("intent sign-up answers 303 to /tickets?joined=1 with the new session cookie; a posted email field is ignored", async () => {
+    const email = freshEmail();
+    const { orgId, token } = await invite(email);
+
+    const response = await post(token, {
+      intent: "sign-up",
+      name: "Route Invitee",
+      password: NEW_PASSWORD,
+      email: "someone-else@example.test",
+    });
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(`${ORIGIN}/tickets?joined=1`);
+    const setCookies = response.headers.getSetCookie();
+    expect(setCookies.filter((c) => c.split("=")[0].endsWith("session_token"))).toHaveLength(1);
+    const users = await usersWithEmail(email);
+    expect(users).toHaveLength(1);
+    expect(await usersWithEmail("someone-else@example.test")).toEqual([]);
+    const session = await readFreshSession(new Headers({ cookie: cookieFrom(setCookies) }));
+    expect(session?.user.id).toBe(users[0].id);
+    expect(session?.session.activeOrganizationId).toBe(orgId);
+  });
+
+  it("intent sign-in with a wrong password answers 303 to ?error=password and sets no cookie", async () => {
+    const account = await createAccount(freshEmail());
+    const { orgId, token } = await invite(account.email);
+
+    const response = await post(token, { intent: "sign-in", password: "wrong password!" });
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(`${ORIGIN}/invite/${token}?error=password`);
+    expect(response.headers.getSetCookie()).toEqual([]);
+    expect(await memberRows(orgId, account.userId)).toEqual([]);
+  });
+
+  it("intent sign-in with the right password answers 303 to /tickets?joined=1 with the session cookie", async () => {
+    const account = await createAccount(freshEmail());
+    const { orgId, token } = await invite(account.email);
+
+    const response = await post(token, { intent: "sign-in", password: account.password });
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(`${ORIGIN}/tickets?joined=1`);
+    const session = await readFreshSession(
+      new Headers({ cookie: cookieFrom(response.headers.getSetCookie()) }),
+    );
+    expect(session?.user.id).toBe(account.userId);
+    expect(session?.session.activeOrganizationId).toBe(orgId);
+  });
+
+  it("refuses invalid sign-up fields with 303 to ?error=field and creates no account", async () => {
+    const email = freshEmail();
+    const { token } = await invite(email);
+    for (const fields of [
+      { name: "   ", password: NEW_PASSWORD },
+      { name: "x".repeat(101), password: NEW_PASSWORD },
+      { name: "Short Password", password: "1234567" },
+      { name: "Long Password", password: "p".repeat(129) },
+    ]) {
+      const response = await post(token, { intent: "sign-up", ...fields });
+      expect(response.status).toBe(303);
+      expect(response.headers.get("location")).toBe(`${ORIGIN}/invite/${token}?error=field`);
+    }
+    expect(await usersWithEmail(email)).toEqual([]);
+  });
+
+  it("signed out, accept answers 303 back to the link (the page then renders the sign-in or create-account state)", async () => {
+    const email = freshEmail();
+    const { invitationId, token } = await invite(email);
+
+    const response = await post(token, { intent: "accept" });
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(`${ORIGIN}/invite/${token}`);
+    expect(await invitationStatus(invitationId)).toBe("pending");
+  });
+
+  it("an unknown token answers 303 back to the link with no detail", async () => {
+    const user = await signedInMemberOfOtherOrg();
+    const token = "A".repeat(43);
+
+    const response = await post(token, { intent: "accept" }, { cookie: user.cookie });
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(`${ORIGIN}/invite/${token}`);
   });
 });
