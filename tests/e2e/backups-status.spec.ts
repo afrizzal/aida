@@ -102,13 +102,29 @@ test.afterAll(async () => {
 });
 
 test.describe("Settings -> Backups (D-04, Surface 4)", () => {
-  test("the Backups tab is the last settings tab and is active on its page", async ({ page }) => {
+  // Phase 10 (V-19, UI-SPEC amendment A2) appends Team and Notifications after Backups, so Backups
+  // is no longer the last tab: the full order is pinned instead, and Backups is the active one.
+  test("the Backups tab follows Email, precedes Team, and is active on its page", async ({
+    page,
+  }) => {
     await setRecord(null);
     await open(page);
     const tabs = page.getByRole("main").getByRole("navigation").getByRole("link");
-    await expect(tabs.last()).toHaveText("Backups");
-    await expect(tabs.last()).toHaveAttribute("href", ROUTE);
-    await expect(tabs.last()).toHaveClass(/bg-primary\/10/);
+    await expect(tabs).toHaveText([
+      "AI Features",
+      "Branding",
+      "SLA Policies",
+      "Statuses",
+      "Tags",
+      "Custom Fields",
+      "Email",
+      "Backups",
+      "Team",
+      "Notifications",
+    ]);
+    const backups = tabs.filter({ hasText: /^Backups$/ });
+    await expect(backups).toHaveAttribute("href", ROUTE);
+    await expect(backups).toHaveClass(/bg-primary\/10/);
   });
 
   test("none: no record shows the empty state and nothing else", async ({ page }) => {
