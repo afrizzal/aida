@@ -193,7 +193,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 5. Preferences apply, and the digest sends one batched email through a fake SMTP with no PII in the subject.
 
 **Stays open for a human:** a test with real email.
-**Plans:** 12/17 plans complete (replanned 2026-11-13 after the owner unparked the phase: 16 plans rewritten in place, 10-17 new; plan checker passed with info notes only, plus a second pass tracing drift items D1 to D43 and the cycle 3 findings; no further Codex plan review per owner item 2)
+**Plans:** 13/17 plans complete (replanned 2026-11-13 after the owner unparked the phase: 16 plans rewritten in place, 10-17 new; plan checker passed with info notes only, plus a second pass tracing drift items D1 to D43 and the cycle 3 findings; no further Codex plan review per owner item 2)
 **Wave 1**
 
 - [x] 10-01-PLAN.md — Lay the whole Phase 10 data foundation in one migration (`20261115100000_team_foundation`) and the shared workspace-member modules (Wave 1)
@@ -217,7 +217,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 - [x] 10-08-PLAN.md — Build the invitation landing page and its join flows (AIDA-42, D-05) through one Origin-checked POST route (V-24) (Wave 4)
 - [x] 10-09-PLAN.md — Deliver the batched email digest (AIDA-46): leased scheduled job, one PII-free email per recipient, sender deadline (V-29) (Wave 4)
-- [ ] 10-10-PLAN.md — Build Settings → Team (AIDA-43, AIDA-42 UI): members, invite dialog, pending invitations, per UI-SPEC (Wave 4)
+- [x] 10-10-PLAN.md — Build Settings → Team (AIDA-43, AIDA-42 UI): members, invite dialog, pending invitations, per UI-SPEC (Wave 4)
 - [ ] 10-12-PLAN.md — Add the member autocomplete to the internal-note composer (AIDA-45, UI-SPEC Surface 4) (Wave 4)
 
 **Wave 5** *(blocked on Wave 4 completion)*
@@ -560,7 +560,7 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 |---|---|---|---|---|
 | 8. Security Hardening | v2.0 | 18/18 (Part A) | Part A verified: human_needed (2026-11-12); Part B moved to Phase 8.1, waits for owner | - |
 | 9. Operations | v2.0 | 13/13 | Verified: human_needed (stack proofs SP-1 to SP-3 and human checks open) | - |
-| 10. Team | v2.0 | 12/17 | Executing (replanned 2026-11-13; plan checker passed) | - |
+| 10. Team | v2.0 | 13/17 | Executing (replanned 2026-11-13; plan checker passed) | - |
 | 11. Inbox | v2.0 | 9/9 | Verified: human_needed (visual, dark mode, 360px and screen-reader checks open) | - |
 | 12. Ticket Lifecycle (relations, merge, snooze, activity) | v2.0 | 10/10 | Verified: human_needed (visual, dark mode, layout widths and screen-reader checks open; AIDA-53 closed by owner decision 12-o1 on 2026-11-11) | - |
 | 12.1. Ticket Lifecycle (custom states, SLA pause) | v2.0 | 17/17 | Verified: human_needed (visual, dark mode, contrast by eye, screen reader and UAT open; K47 deferred) | - |
