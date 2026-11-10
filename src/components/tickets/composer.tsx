@@ -27,7 +27,7 @@ import {
   initialMentionDraft,
   type MentionCandidate,
   mentionDraftReducer,
-  reconcileMentionIds,
+  outgoingMentionIds,
   shouldOfferMentions,
 } from "@/lib/mentions/composer-tokens";
 import { cn } from "@/lib/utils";
@@ -288,9 +288,9 @@ export function Composer({ ticketId, insertedText, onInsertedConsumed }: Compose
     if (fromDraft && mode === "public") form.set("fromDraft", "true");
     // Mention ids go only with an internal note (D-21): a public reply never carries the field,
     // whatever the text holds. The server re-validates every id (src/lib/mentions/mentions.ts).
-    if (mode === "internal") {
-      const mentionIds = reconcileMentionIds(body, draft.spans);
-      if (mentionIds.length > 0) form.set("mentions", JSON.stringify(mentionIds));
+    const mentionIds = outgoingMentionIds(draft);
+    if (mode === "internal" && mentionIds.length > 0) {
+      form.set("mentions", JSON.stringify(mentionIds));
     }
     for (const file of files) form.append("file", file);
 
@@ -354,6 +354,14 @@ export function Composer({ ticketId, insertedText, onInsertedConsumed }: Compose
             : {})}
         />
       </MentionAutocomplete>
+
+      {/* D-21, C7: shown after an internal-to-public switch removed inserted member names, until
+          the next switch back or the send (mentionDraftReducer clears it). */}
+      {draft.switchNote && (
+        <p role="status" className="mt-1 text-[12px] text-muted-foreground">
+          Mentions only work in internal notes. The mentioned names were removed from this reply.
+        </p>
+      )}
 
       {files.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">

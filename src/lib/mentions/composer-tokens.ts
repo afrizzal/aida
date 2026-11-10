@@ -327,6 +327,19 @@ export function stripMentionTokens(
   return result;
 }
 
+/**
+ * The ids a send carries: the intact spans' ids in internal mode, and none at all in public mode
+ * (D-21), whatever the text or the spans hold. The composer builds its `mentions` field from this.
+ */
+export function outgoingMentionIds(state: {
+  mode: MentionMode;
+  text: string;
+  spans: readonly MentionSpan[];
+}): string[] {
+  if (state.mode !== "internal") return [];
+  return reconcileMentionIds(state.text, state.spans);
+}
+
 /** The composer's whole draft. `caret` is where the textarea's caret goes after the next render. */
 export interface MentionDraftState {
   text: string;

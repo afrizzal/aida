@@ -16,6 +16,7 @@ import {
   type MentionQuery,
   mentionDraftReducer,
   mentionOptionLabel,
+  outgoingMentionIds,
   reconcileMentionIds,
   shouldOfferMentions,
   stripMentionTokens,
@@ -322,6 +323,15 @@ describe("mentionDraftReducer", () => {
       fromDraft: false,
       mode: "public",
     });
+  });
+
+  it("outgoingMentionIds sends the ids only in internal mode, never from a public draft (D-21)", () => {
+    const state = mention(type(internal, "Hi "), OMEGA);
+    expect(outgoingMentionIds(state)).toEqual(["u-omega"]);
+    // Even a public state that still held a span would send nothing.
+    expect(outgoingMentionIds({ ...state, mode: "public" })).toEqual([]);
+    const switched = mentionDraftReducer(state, { type: "setMode", mode: "public" });
+    expect(outgoingMentionIds(switched)).toEqual([]);
   });
 
   it("reconcileMentionIds sends each intact id once, in text order", () => {
