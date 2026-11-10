@@ -1,4 +1,5 @@
 import type { LucideIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface EmptyStateProps {
   icon: LucideIcon;
@@ -10,12 +11,25 @@ interface EmptyStateProps {
    * one h1. Classes are the same either way.
    */
   headingAs?: "h1" | "h2";
+  /** Extra classes merged on the root with cn(), e.g. the bell's compact "min-h-0 py-8". */
+  className?: string;
 }
 
-export function EmptyState({ icon: Icon, heading, body, headingAs = "h2" }: EmptyStateProps) {
+export function EmptyState({
+  icon: Icon,
+  heading,
+  body,
+  headingAs = "h2",
+  className,
+}: EmptyStateProps) {
   const Heading = headingAs;
   return (
-    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
+    <div
+      className={cn(
+        "flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center",
+        className,
+      )}
+    >
       <div className="relative">
         <div
           className="pointer-events-none absolute inset-0 -m-3 rounded-2xl bg-primary/5 blur-[2px]"
