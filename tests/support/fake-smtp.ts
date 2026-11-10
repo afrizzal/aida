@@ -3,8 +3,8 @@
 // Phase 10 email test (invitations, digests, the mention leak test) points the organization's
 // email settings at it. Real email is never sent.
 //
-// Protocol: EHLO and HELO (EHLO advertises AUTH PLAIN LOGIN and, by default, never STARTTLS, so
-// nodemailer authenticates and stays on plain TCP), AUTH PLAIN and LOGIN (any credentials), MAIL
+// Protocol: EHLO and HELO (EHLO advertises AUTH PLAIN LOGIN unless `advertiseAuth` is false and,
+// by default, never STARTTLS, so nodemailer authenticates and stays on plain TCP), AUTH PLAIN and LOGIN (any credentials), MAIL
 // FROM, RCPT TO, DATA with dot-unstuffing up to the terminating line, RSET, NOOP and QUIT. No
 // PIPELINING is advertised, so the client sends one command at a time.
 //
@@ -72,6 +72,12 @@ export interface FakeSmtpMessage {
 export interface FakeSmtpOptions {
   /** Advertise STARTTLS in the EHLO reply (default false; the server never upgrades). */
   advertiseStartTls?: boolean;
+  /**
+   * Advertise AUTH in the EHLO reply (default true). False models a relay without
+   * authentication: nodemailer then sends without AUTH, so an organization's settings can point
+   * here with no SMTP user and no stored password (plan 10-13, E2E: no encryption key needed).
+   */
+  advertiseAuth?: boolean;
 }
 
 type SessionState =
@@ -262,7 +268,9 @@ export class FakeSmtpServer {
     switch (verb) {
       case "EHLO": {
         this.resetEnvelope(session);
-        const lines = [`250-${HOSTNAME} greets you`, "250-AUTH PLAIN LOGIN", "250-8BITMIME"];
+        const lines = [`250-${HOSTNAME} greets you`];
+        if (this.options.advertiseAuth !== false) lines.push("250-AUTH PLAIN LOGIN");
+        lines.push("250-8BITMIME");
         if (this.options.advertiseStartTls || this.mode === "starttls") lines.push("250-STARTTLS");
         lines.push("250 SMTPUTF8");
         this.reply(session, lines.join("\r\n"));

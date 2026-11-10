@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import type { Page, Response } from "@playwright/test";
 import { createTicket, orgId } from "./support/db";
 import { expect, test } from "./support/fixtures";
+import { createOrg, insertInvitation, uniqueEmail } from "./support/team";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADMIN_STORAGE = path.resolve(__dirname, ".auth/admin.json");
@@ -264,6 +265,62 @@ test.describe("CSP: anonymous public pages", () => {
     );
     expect(headers["referrer-policy"]).toBe("no-referrer");
     expect(headers["x-content-type-options"]).toBe("nosniff");
+  });
+});
+
+// Phase 10 (V-01, V-27, plan 10-13): the invitation page in its valid and invalid states, and the
+// no-access page. The invitation belongs to an organization of its own, so no shared data changes.
+test.describe("CSP: invitation and no-access pages", () => {
+  let inviteToken: string;
+  let workspaceName: string;
+
+  test.beforeAll(async () => {
+    const org = await createOrg("CSP Invite Workspace", [{ role: "owner", name: "CSP Owner" }]);
+    workspaceName = org.name;
+    ({ token: inviteToken } = await insertInvitation({
+      orgId: org.orgId,
+      email: uniqueEmail("csp-invitee"),
+      role: "member",
+      inviterId: org.users[0].id,
+    }));
+  });
+
+  test("/invite/<valid token> has zero violations and sends no referrer", async ({ page }) => {
+    const collector = await collectCsp(page);
+    const response = await gotoWarm(page, `/invite/${inviteToken}`);
+    expectEnforcedCsp(response);
+    expect(response.headers()["referrer-policy"]).toBe("no-referrer");
+    await expect(
+      page.getByRole("heading", { level: 1, name: `Join ${workspaceName}` }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Create account and join" })).toBeVisible();
+    await expectNoViolations(page, collector);
+  });
+
+  test("/invite/<unknown token> has zero violations and sends no referrer", async ({ page }) => {
+    const collector = await collectCsp(page);
+    const response = await gotoWarm(page, `/invite/${"Z".repeat(43)}`);
+    expectEnforcedCsp(response);
+    expect(response.headers()["referrer-policy"]).toBe("no-referrer");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "This invitation link is not valid" }),
+    ).toBeVisible();
+    await expectNoViolations(page, collector);
+  });
+
+  test.describe("signed in", () => {
+    test.use({ storageState: ADMIN_STORAGE });
+
+    test("/no-access has zero violations", async ({ page }) => {
+      const collector = await collectCsp(page);
+      const response = await gotoWarm(page, "/no-access");
+      expectEnforcedCsp(response);
+      await expect(
+        page.getByRole("heading", { level: 1, name: "You don't have access to this workspace" }),
+      ).toBeVisible();
+      await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+      await expectNoViolations(page, collector);
+    });
   });
 });
 
