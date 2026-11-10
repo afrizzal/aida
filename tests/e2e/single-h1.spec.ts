@@ -574,6 +574,12 @@ test.describe
           url: "/settings/team",
           h1: "Team",
         },
+        {
+          route: "/settings/notifications",
+          state: "own preferences (member)",
+          url: "/settings/notifications",
+          h1: "Notifications",
+        },
       ]);
       await context.close();
     });
