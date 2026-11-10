@@ -4,6 +4,7 @@ import { Search } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useSyncExternalStore } from "react";
 import { useCommands } from "@/components/command-provider";
+import { NotificationBell } from "@/components/notification-bell";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { UserMenu } from "@/components/user-menu";
@@ -63,6 +64,8 @@ export function TopBar({ user }: TopBarProps) {
             </kbd>
           )}
         </Button>
+        {/* AIDA-44 (D-19, V-19, amendment A8): the bell sits between Search and ThemeToggle. */}
+        <NotificationBell />
         <ThemeToggle />
         <UserMenu user={user} />
       </div>
