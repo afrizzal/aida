@@ -5,6 +5,11 @@
 // carries the returned session cookie, as in membership-gate.test.ts: only the Next request scope
 // is replaced (`next/headers` returns those headers, `next/navigation`'s redirect throws). The
 // outbound queue is a recording double. Mentioned people are plain user and member rows.
+//
+// Leak proofs (D-21, V-12, T-10-26): the outbound worker sends only OUTBOUND PUBLIC messages and
+// re-renders bodyMarkdown, so the assertion is on the mail it hands to the SMTP transport. The
+// transport is a test double that records each mail (as in email-outbound-merge.test.ts, which
+// V-15 allows for plain sends): no SMTP server is contacted and no email is sent.
 import { randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -27,11 +32,31 @@ const env = await vi.hoisted(async () => {
 // The queue double records what the route enqueues after commit; nothing is sent from it.
 const queue = vi.hoisted(() => ({ sent: [] as { name: string; data: unknown }[] }));
 
+interface SentMail {
+  to: unknown;
+  subject: string;
+  text?: string;
+  html?: string;
+}
+
+// Every mail the worker hands to the transport.
+const transport = vi.hoisted(() => ({ sent: [] as SentMail[] }));
+
 vi.mock("next/headers", () => ({ headers: async () => env.requestHeaders }));
 vi.mock("next/navigation", () => ({
   redirect: (target: string) => {
     throw new Error(`NEXT_REDIRECT ${target}`);
   },
+}));
+// The worker imports this module by a relative path; the alias resolves to the same file, so the
+// worker gets this recording transport.
+vi.mock("@/lib/channels/email/smtp-client", () => ({
+  createSmtpTransport: () => ({
+    sendMail: async (mail: SentMail) => {
+      transport.sent.push(mail);
+      return { messageId: "fake" };
+    },
+  }),
 }));
 vi.mock("@/lib/queue/boss-client", () => ({
   getBoss: async () => ({
@@ -44,8 +69,14 @@ vi.mock("@/lib/queue/boss-client", () => ({
 
 import { POST as messagesPost } from "@/app/api/tickets/[id]/messages/route";
 import { auth } from "@/lib/auth";
+import { saveEmailSettings } from "@/lib/channels/email/settings";
 import { prisma } from "@/lib/db";
+import { MAX_MENTIONS } from "@/lib/mentions/mentions";
+import { scopedDb } from "@/lib/scoped-db";
+import { loadStatusPageData } from "@/lib/tickets/status-page-data";
+import { emailOutboundSendHandler } from "@/lib/worker/jobs/email-outbound-send";
 import { seedTicket } from "../support/inbox-fixtures";
+import { seedContactTicket } from "../support/lifecycle-fixtures";
 
 const MENTION_SPAN_OPEN = '<span class="font-semibold text-primary-emphasis">';
 
@@ -60,6 +91,7 @@ afterAll(async () => {
 beforeEach(() => {
   env.requestHeaders = new Headers();
   queue.sent.length = 0;
+  transport.sent.length = 0;
 });
 
 type Role = "owner" | "admin" | "member";
@@ -200,5 +232,313 @@ describe("mention tracer (D-20)", () => {
     ]);
     // An internal note is never queued for the customer.
     expect(queue.sent).toEqual([]);
+  });
+});
+
+async function messageCount(ticketId: string): Promise<number> {
+  return prisma.message.count({ where: { ticketId, direction: "OUTBOUND" } });
+}
+
+async function expectRefused(response: Response, code: string) {
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ error: code });
+}
+
+describe("mention field validation over HTTP (D-21, V-12)", () => {
+  it("refuses a mention on a public reply with 400 mentions_not_allowed and writes nothing", async () => {
+    const author = await signedInAuthor();
+    const mira = await person("Mira Public", author.orgId);
+    const ticket = await seedTicket(author.orgId);
+
+    await expectRefused(
+      await post(ticket.id, {
+        mode: "public",
+        body: "Hello @Mira Public",
+        mentions: JSON.stringify([mira.id]),
+      }),
+      "mentions_not_allowed",
+    );
+    // A mode outside the two counts as public (the route's default), so it is refused too.
+    await expectRefused(
+      await post(ticket.id, {
+        mode: "INTERNAL",
+        body: "Hello @Mira Public",
+        mentions: JSON.stringify([mira.id]),
+      }),
+      "mentions_not_allowed",
+    );
+    expect(await messageCount(ticket.id)).toBe(0);
+    expect(await prisma.messageMention.count({ where: { organizationId: author.orgId } })).toBe(0);
+    expect(await mentionNotifications(author.orgId)).toEqual([]);
+    expect(queue.sent).toEqual([]);
+  });
+
+  it("refuses malformed mention data and more than MAX_MENTIONS ids with 400 invalid_mentions", async () => {
+    const author = await signedInAuthor();
+    const mira = await person("Mira Malformed", author.orgId);
+    const ticket = await seedTicket(author.orgId);
+    const tooMany = Array.from({ length: MAX_MENTIONS + 1 }, () => randomUUID());
+    expect(tooMany).toHaveLength(51);
+
+    for (const mentions of [
+      "[not json",
+      JSON.stringify({ ids: [mira.id] }),
+      JSON.stringify(mira.id),
+      JSON.stringify([mira.id, 42]),
+      JSON.stringify([""]),
+      JSON.stringify(["x".repeat(129)]),
+      JSON.stringify(tooMany),
+    ]) {
+      await expectRefused(
+        await post(ticket.id, { mode: "internal", body: "Note @Mira Malformed", mentions }),
+        "invalid_mentions",
+      );
+    }
+    expect(await messageCount(ticket.id)).toBe(0);
+    expect(await prisma.messageMention.count({ where: { organizationId: author.orgId } })).toBe(0);
+    expect(await mentionNotifications(author.orgId)).toEqual([]);
+  });
+
+  it("accepts exactly MAX_MENTIONS ids", async () => {
+    const author = await signedInAuthor();
+    const ticket = await seedTicket(author.orgId);
+    const ids = Array.from({ length: MAX_MENTIONS }, () => randomUUID());
+    const response = await post(ticket.id, {
+      mode: "internal",
+      body: "Note with fifty unknown ids",
+      mentions: JSON.stringify(ids),
+    });
+    expect(response.status).toBe(200);
+    // None of them is a member, so nothing is recorded.
+    const message = await latestMessage(ticket.id);
+    expect(await mentionsOf(message.id)).toEqual([]);
+  });
+});
+
+describe("who is recorded and notified (D-16, D-20, V-26, T-10-27)", () => {
+  it("collapses duplicates, drops the author, non-members and users of another organization", async () => {
+    const author = await signedInAuthor();
+    const ana = await person("Ana Dupe", author.orgId);
+    const outsider = await person("Otto Outsider");
+    const otherOrg = await createOrg();
+    const foreign = await person("Fay Foreign", otherOrg);
+    const ticket = await seedTicket(author.orgId);
+
+    const response = await post(ticket.id, {
+      mode: "internal",
+      body: "@Ana Dupe @Ana Dupe @Note Author @Otto Outsider @Fay Foreign",
+      mentions: JSON.stringify([
+        ana.id,
+        ana.id,
+        author.userId,
+        outsider.id,
+        foreign.id,
+        randomUUID(),
+      ]),
+    });
+    expect(response.status).toBe(200);
+
+    const message = await latestMessage(ticket.id);
+    expect(await mentionsOf(message.id)).toEqual([
+      { organizationId: author.orgId, mentionedUserId: ana.id },
+    ]);
+    expect(await mentionNotifications(author.orgId)).toEqual([
+      {
+        recipientUserId: ana.id,
+        actorUserId: author.userId,
+        eventKey: `mention:${message.id}`,
+        entityType: "ticket",
+        entityId: ticket.id,
+      },
+    ]);
+    // Nothing reached the other organization or the outsider.
+    expect(await prisma.notification.count({ where: { organizationId: otherOrg } })).toBe(0);
+    expect(
+      await prisma.notification.count({
+        where: { recipientUserId: { in: [outsider.id, foreign.id, author.userId] } },
+      }),
+    ).toBe(0);
+    // Only the validated member's name became a span, twice; the others stay plain text.
+    expect(message.bodyHtml.match(/<span\b/g)).toHaveLength(2);
+    expect(message.bodyHtml).toContain(`${MENTION_SPAN_OPEN}@Ana Dupe</span>`);
+    for (const plain of ["@Note Author", "@Otto Outsider", "@Fay Foreign"]) {
+      expect(message.bodyHtml).toContain(plain);
+      expect(message.bodyHtml).not.toContain(`${MENTION_SPAN_OPEN}${plain}`);
+    }
+  });
+
+  it("shows the email local part for a member without a name, never the full email", async () => {
+    const author = await signedInAuthor();
+    const nameless = await person("", author.orgId);
+    const local = nameless.email.slice(0, nameless.email.indexOf("@"));
+    const ticket = await seedTicket(author.orgId);
+
+    const response = await post(ticket.id, {
+      mode: "internal",
+      body: `Over to @${local} please`,
+      mentions: JSON.stringify([nameless.id]),
+    });
+    expect(response.status).toBe(200);
+    const message = await latestMessage(ticket.id);
+    expect(message.bodyHtml).toContain(`${MENTION_SPAN_OPEN}@${local}</span>`);
+    expect(message.bodyHtml).not.toContain(nameless.email);
+    expect(await mentionsOf(message.id)).toHaveLength(1);
+  });
+
+  it("keeps the span of a former member in history and records no new mention of them", async () => {
+    const author = await signedInAuthor();
+    const lea = await person("Lea Leaver", author.orgId);
+    const ticket = await seedTicket(author.orgId);
+
+    expect(
+      (
+        await post(ticket.id, {
+          mode: "internal",
+          body: "First @Lea Leaver",
+          mentions: JSON.stringify([lea.id]),
+        })
+      ).status,
+    ).toBe(200);
+    const first = await latestMessage(ticket.id);
+    await prisma.member.deleteMany({ where: { organizationId: author.orgId, userId: lea.id } });
+
+    expect(
+      (
+        await post(ticket.id, {
+          mode: "internal",
+          body: "Second @Lea Leaver",
+          mentions: JSON.stringify([lea.id]),
+        })
+      ).status,
+    ).toBe(200);
+    const second = await latestMessage(ticket.id);
+    expect(second.id).not.toBe(first.id);
+
+    const stored = await prisma.message.findUniqueOrThrow({
+      where: { id: first.id },
+      select: { bodyHtml: true },
+    });
+    expect(stored.bodyHtml).toContain(`${MENTION_SPAN_OPEN}@Lea Leaver</span>`);
+    expect(second.bodyHtml).not.toContain("<span");
+    expect(await mentionsOf(second.id)).toEqual([]);
+    expect(await mentionNotifications(author.orgId)).toEqual([
+      expect.objectContaining({ recipientUserId: lea.id, eventKey: `mention:${first.id}` }),
+    ]);
+  });
+});
+
+describe("a mention never reaches the customer (D-21, V-12, T-10-26)", () => {
+  const SELF_ADDRESS = "support@mentions.test";
+
+  async function seedEmailTicket(author: Author) {
+    await saveEmailSettings(scopedDb(author.orgId), author.orgId, {
+      enabled: true,
+      fromAddress: SELF_ADDRESS,
+      smtpHost: "fake-smtp.invalid",
+      smtpPort: 2525,
+      smtpSecure: false,
+      smtpUser: "fake",
+    });
+    const contactEmail = `mention-contact-${randomUUID()}@example.test`;
+    const ticket = await seedContactTicket(author.orgId, { contactEmail });
+    return { ticket, contactEmail };
+  }
+
+  /** The one public reply the route queued, sent by the worker through the recording transport. */
+  async function sendQueuedReply(): Promise<SentMail> {
+    expect(queue.sent).toHaveLength(1);
+    const [job] = queue.sent;
+    expect(job.name).toBe("email-outbound-send");
+    await emailOutboundSendHandler(job.data as { messageId: string });
+    expect(transport.sent).toHaveLength(1);
+    return transport.sent[0];
+  }
+
+  it("a public reply sent after a note with a mention carries no mention, class or member email", async () => {
+    const author = await signedInAuthor();
+    const quill = await person("Quillon Vantablack", author.orgId);
+    const { ticket, contactEmail } = await seedEmailTicket(author);
+
+    expect(
+      (
+        await post(ticket.id, {
+          mode: "internal",
+          body: "@Quillon Vantablack can you confirm the refund?",
+          mentions: JSON.stringify([quill.id]),
+        })
+      ).status,
+    ).toBe(200);
+    const note = await latestMessage(ticket.id);
+    expect(note.bodyHtml).toContain(`${MENTION_SPAN_OPEN}@Quillon Vantablack</span>`);
+    expect(await mentionsOf(note.id)).toHaveLength(1);
+    // The internal note is never queued.
+    expect(queue.sent).toEqual([]);
+
+    const replyText = "Your refund was approved today.";
+    expect((await post(ticket.id, { mode: "public", body: replyText })).status).toBe(200);
+    const mail = await sendQueuedReply();
+
+    // Presence first: this is the reply, addressed to the contact.
+    expect(mail.to).toBe(contactEmail);
+    expect(mail.text).toContain(replyText);
+    expect(mail.html).toContain(replyText);
+    // Then absence, in both parts.
+    for (const part of [mail.text ?? "", mail.html ?? ""]) {
+      expect(part).not.toContain("Quillon");
+      expect(part).not.toContain("Vantablack");
+      expect(part).not.toContain("text-primary-emphasis");
+      expect(part).not.toContain("font-semibold");
+      expect(part).not.toContain(quill.email);
+      expect(part).not.toContain("refund?");
+    }
+
+    // The customer status page shows the reply and nothing of the note.
+    const statusRow = await prisma.ticket.findUniqueOrThrow({
+      where: { id: ticket.id },
+      select: { statusToken: true },
+    });
+    const page = await loadStatusPageData(statusRow.statusToken);
+    expect(page?.messages.some((m) => m.bodyHtml.includes(replyText))).toBe(true);
+    for (const message of page?.messages ?? []) {
+      expect(message.visibility).toBe("PUBLIC");
+      expect(message.bodyHtml).not.toContain("Quillon");
+      expect(message.bodyHtml).not.toContain("text-primary-emphasis");
+      expect(message.bodyHtml).not.toContain(quill.email);
+    }
+  });
+
+  it("a plain @Name in a public reply stays plain text and notifies nobody", async () => {
+    const author = await signedInAuthor();
+    const quill = await person("Quillon Plaintext", author.orgId);
+    const { ticket } = await seedEmailTicket(author);
+
+    const replyText = "Thanks! @Quillon Plaintext from our team will follow up.";
+    expect((await post(ticket.id, { mode: "public", body: replyText })).status).toBe(200);
+    const reply = await latestMessage(ticket.id);
+    expect(reply.visibility).toBe("PUBLIC");
+    expect(reply.bodyHtml).not.toContain("<span");
+    expect(await mentionsOf(reply.id)).toEqual([]);
+    expect(await mentionNotifications(author.orgId)).toEqual([]);
+    expect(await prisma.notification.count({ where: { recipientUserId: quill.id } })).toBe(0);
+
+    const mail = await sendQueuedReply();
+    expect(mail.text).toContain("@Quillon Plaintext");
+    expect(mail.html).toContain("@Quillon Plaintext");
+    expect(mail.html).not.toContain("<span");
+    expect(mail.html).not.toContain("text-primary-emphasis");
+    expect(mail.text).not.toContain(quill.email);
+    expect(mail.html).not.toContain(quill.email);
+  });
+
+  it("an empty mentions list on a public reply is no mention and sends normally", async () => {
+    const author = await signedInAuthor();
+    const { ticket } = await seedEmailTicket(author);
+    const replyText = "All set on our side.";
+    expect(
+      (await post(ticket.id, { mode: "public", body: replyText, mentions: "[]" })).status,
+    ).toBe(200);
+    const mail = await sendQueuedReply();
+    expect(mail.text).toContain(replyText);
+    expect(await prisma.messageMention.count({ where: { organizationId: author.orgId } })).toBe(0);
   });
 });
