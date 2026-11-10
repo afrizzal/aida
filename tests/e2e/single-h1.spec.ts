@@ -70,6 +70,7 @@ const APP_PAGE_ROUTES = [
   "/settings/branding",
   "/settings/custom-fields",
   "/settings/email",
+  "/settings/notifications",
   "/settings/sla",
   "/settings/statuses",
   "/settings/tags",
@@ -412,6 +413,12 @@ test.describe
         { route: "/settings/email", state: "page", url: "/settings/email", h1: "Email" },
         { route: "/settings/backups", state: "page", url: "/settings/backups", h1: "Backups" },
         { route: "/settings/team", state: "page", url: "/settings/team", h1: "Team" },
+        {
+          route: "/settings/notifications",
+          state: "page",
+          url: "/settings/notifications",
+          h1: "Notifications",
+        },
       ]);
 
       // UI duplicate title: on /kb the top bar shows "Knowledge Base" and the page h1 is sr-only, so
@@ -601,6 +608,7 @@ test.describe
         { route: "/settings/statuses", url: "/settings/statuses" },
         { route: "/settings/tags", url: "/settings/tags" },
         { route: "/settings/team", url: "/settings/team" },
+        { route: "/settings/notifications", url: "/settings/notifications" },
       ]);
       await context.close();
     });
