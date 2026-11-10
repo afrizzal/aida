@@ -49,9 +49,11 @@ function rehypeSafeLinks() {
 //   - it is made from text that already sits in the tree, never from raw HTML (remark-rehype runs
 //     without allowDangerousHtml, so a literal span in the Markdown never reaches the tree);
 //   - the sanitize schema of renderMarkdown allows span with exactly MENTION_CLASS_NAMES;
-//   - after the sanitize pass, rehypeMentionSpanGuard keeps a span only when its class list is
-//     exactly those two classes and its children are text, drops every other property (the
-//     schema's global `id` and friends), and unwraps any other span to its children.
+//   - rehypeMentionSpanGuard runs right before and right after the sanitize pass: it keeps a span
+//     only when its class list is exactly those two classes and its children are text, drops
+//     every other property (the schema's global `id` and friends), and unwraps any other span to
+//     its children. Running it before the pass too means a span carrying an extra class is
+//     unwrapped, not trimmed by the sanitizer into the mention shape.
 // The shared `schema` above stays unchanged, so inbound email HTML (sanitizeEmailHtml), the KB
 // preview and task content cannot carry the mention classes. A name that contains `@` is never
 // wrapped, so the markup never carries an email address.
@@ -163,8 +165,8 @@ function isMentionSpan(node: Element): boolean {
 }
 
 /**
- * After the sanitize pass: a span survives only in the exact mention shape, with no property but
- * its two classes; any other span is replaced by its children.
+ * Before and after the sanitize pass: a span survives only in the exact mention shape, with no
+ * property but its two classes; any other span is replaced by its children.
  */
 export function rehypeMentionSpanGuard() {
   return (tree: Root) => {
@@ -188,6 +190,7 @@ const processor = unified()
   .use(remarkRehype)
   .use(rehypeSafeLinks)
   .use(rehypeMentions)
+  .use(rehypeMentionSpanGuard)
   .use(rehypeSanitize, renderSanitizeSchema)
   .use(rehypeMentionSpanGuard)
   .use(rehypeStringify);

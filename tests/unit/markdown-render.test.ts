@@ -1,9 +1,17 @@
+import rehypeParse from "rehype-parse";
+import rehypeSanitize from "rehype-sanitize";
+import rehypeStringify from "rehype-stringify";
+import { unified } from "unified";
 import { describe, expect, it } from "vitest";
 import {
   htmlLinkTargets,
+  MENTION_CLASS_NAMES,
+  rehypeMentionSpanGuard,
   renderMarkdown,
   renderMarkdownPreview,
+  renderSanitizeSchema,
   renderTaskMarkdown,
+  sanitizeEmailHtml,
 } from "@/lib/markdown/render";
 
 describe("renderMarkdown", () => {
@@ -233,5 +241,132 @@ describe("renderTaskMarkdown (run decision K65, contract C9)", () => {
     expect(html).toContain("<ul>");
     expect(html).toContain("<li>one</li>");
     expect(html).toContain("<a ");
+  });
+});
+
+// Phase 10, plan 10-07 (AIDA-45, D-20, T-10-28): the mention span is the only addition to
+// sanitized output, and only when the server supplies validated names.
+describe("renderMarkdown mentions (D-20)", () => {
+  const SPAN = '<span class="font-semibold text-primary-emphasis">';
+
+  function spanCount(html: string): number {
+    return html.match(/<span\b/g)?.length ?? 0;
+  }
+
+  /** Every opening tag name in the html, with its count. */
+  function tagCounts(html: string): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const match of html.matchAll(/<([a-z][a-z0-9]*)\b/g)) {
+      counts.set(match[1], (counts.get(match[1]) ?? 0) + 1);
+    }
+    return counts;
+  }
+
+  /** The stages renderMarkdown runs after its tree is built: guard, schema, guard. */
+  function sanitizeLikeRenderMarkdown(html: string): string {
+    return String(
+      unified()
+        .use(rehypeParse, { fragment: true })
+        .use(rehypeMentionSpanGuard)
+        .use(rehypeSanitize, renderSanitizeSchema)
+        .use(rehypeMentionSpanGuard)
+        .use(rehypeStringify)
+        .processSync(html),
+    );
+  }
+
+  it("renders no span without mentionNames", () => {
+    const html = renderMarkdown("hi @Ana");
+    expect(spanCount(html)).toBe(0);
+    expect(html).toBe("<p>hi @Ana</p>");
+  });
+
+  it("wraps an exact @name in the mention span", () => {
+    expect(renderMarkdown("hi @Ana, see this", { mentionNames: ["Ana"] })).toBe(
+      `<p>hi ${SPAN}@Ana</span>, see this</p>`,
+    );
+  });
+
+  it("does not wrap a longer word or an @ inside a word", () => {
+    expect(spanCount(renderMarkdown("hi @Anabel", { mentionNames: ["Ana"] }))).toBe(0);
+    expect(spanCount(renderMarkdown("hi @Ana_b", { mentionNames: ["Ana"] }))).toBe(0);
+    expect(spanCount(renderMarkdown("mail x@Ana now", { mentionNames: ["Ana"] }))).toBe(0);
+  });
+
+  it("leaves @name inside inline code, a fenced block and a link as plain text", () => {
+    const names = { mentionNames: ["Ana"] };
+    expect(renderMarkdown("run `@Ana` now", names)).toBe("<p>run <code>@Ana</code> now</p>");
+    const fenced = renderMarkdown("```\n@Ana\n```", names);
+    expect(fenced).toContain("<pre><code>@Ana\n</code></pre>");
+    expect(spanCount(fenced)).toBe(0);
+    const linked = renderMarkdown("[@Ana](https://example.test/a)", names);
+    expect(spanCount(linked)).toBe(0);
+    expect(linked).toContain(">@Ana</a>");
+  });
+
+  it("prefers the longer name: @Zeta Prime is one span", () => {
+    const html = renderMarkdown("ping @Zeta Prime and @Zeta", {
+      mentionNames: ["Zeta", "Zeta Prime"],
+    });
+    expect(html).toBe(`<p>ping ${SPAN}@Zeta Prime</span> and ${SPAN}@Zeta</span></p>`);
+    expect(spanCount(html)).toBe(2);
+  });
+
+  it("drops a literal span tag in the Markdown, mention classes included", () => {
+    const markdown = 'Hi <span class="font-semibold text-primary-emphasis">@Ana</span> there';
+    expect(spanCount(renderMarkdown(markdown))).toBe(0);
+    expect(renderMarkdown(markdown)).not.toContain("text-primary-emphasis");
+    // With names, only the text node becomes a span: still exactly one.
+    expect(spanCount(renderMarkdown(markdown, { mentionNames: ["Ana"] }))).toBe(1);
+  });
+
+  it("never lets another class or attribute on a span survive sanitization", () => {
+    const html = sanitizeLikeRenderMarkdown(
+      [
+        '<span class="font-semibold text-primary-emphasis" style="color:red" data-x="1" id="m" title="t">@Ana</span>',
+        '<span class="font-semibold text-primary-emphasis evil">@Bo</span>',
+        '<span class="font-semibold">@Cy</span>',
+        '<span class="text-primary-emphasis" id="d">@Di</span>',
+        '<span style="position:fixed">@Ed</span>',
+        '<span class="font-semibold text-primary-emphasis"><b>@Fa</b></span>',
+      ].join(" "),
+    );
+    expect(html).toBe(`${SPAN}@Ana</span> @Bo @Cy @Di @Ed <b>@Fa</b>`);
+    for (const forbidden of ["style", "data-x", "id=", "title", "evil", "position"]) {
+      expect(html).not.toContain(forbidden);
+    }
+    expect(MENTION_CLASS_NAMES).toEqual(["font-semibold", "text-primary-emphasis"]);
+  });
+
+  it("50 distinct mentions render 50 spans and no other new element", () => {
+    const names = Array.from({ length: 50 }, (_, i) => `Member ${String(i).padStart(2, "0")}`);
+    const markdown = `Heads up ${names.map((name) => `@${name}`).join(", ")}.`;
+    const plain = renderMarkdown(markdown);
+    const mentioned = renderMarkdown(markdown, { mentionNames: names });
+    expect(spanCount(plain)).toBe(0);
+    expect(spanCount(mentioned)).toBe(50);
+    const before = tagCounts(plain);
+    const after = tagCounts(mentioned);
+    after.delete("span");
+    expect(after).toEqual(before);
+    for (const name of names) expect(mentioned).toContain(`${SPAN}@${name}</span>`);
+  });
+
+  it("escapes a hostile name as text and never wraps a name that contains @", () => {
+    const hostile = 'Ana" onclick="x()';
+    const html = renderMarkdown(`hi @${hostile}`, { mentionNames: [hostile] });
+    expect(html).not.toMatch(/<span[^>]*onclick/);
+    expect(spanCount(html)).toBe(1);
+    const withEmail = renderMarkdown("hi @bo@example.test", { mentionNames: ["bo@example.test"] });
+    expect(spanCount(withEmail)).toBe(0);
+  });
+
+  it("keeps the mention classes out of inbound email HTML (shared schema unchanged)", () => {
+    const html = sanitizeEmailHtml(
+      '<p><span class="font-semibold text-primary-emphasis">@Ana</span></p>',
+    );
+    expect(html).not.toContain("text-primary-emphasis");
+    expect(renderMarkdownPreview("@Ana")).toBe("<p>@Ana</p>");
+    expect(renderTaskMarkdown("@Ana")).toBe("<p>@Ana</p>");
   });
 });
