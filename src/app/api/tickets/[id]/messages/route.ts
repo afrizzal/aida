@@ -12,6 +12,13 @@ import { getEmailSettings } from "@/lib/channels/email/settings";
 import { resolveActiveProvider } from "@/lib/llm/active-provider";
 import { renderMarkdown } from "@/lib/markdown/render";
 import { AccessDeniedError, findActiveMembership } from "@/lib/membership";
+import {
+  MentionError,
+  type MentionedMember,
+  parseMentionField,
+  recordMentions,
+  resolveMentionedMembers,
+} from "@/lib/mentions/mentions";
 import { getBoss } from "@/lib/queue/boss-client";
 import { getScopedDb } from "@/lib/session";
 import { getAgentMessageObserver, lockTicketForAgentWrite } from "@/lib/tickets/merge";
@@ -67,6 +74,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   if (!body.trim() && files.length === 0) {
     return NextResponse.json({ error: "empty_message" }, { status: 400 });
+  }
+
+  // Phase 10, AIDA-45 (D-20, D-21, V-12): the mentioned user ids travel in the `mentions` field.
+  // Malformed data, more than MAX_MENTIONS ids, or any mention on a public reply is a 400 here,
+  // before any file is staged and before the transaction, so nothing is written. Plain `@text`
+  // in a public reply is only text: it has no ids, so it is never a mention.
+  let mentionIds: string[];
+  try {
+    mentionIds = parseMentionField(form.get("mentions"), mode);
+  } catch (err) {
+    if (err instanceof MentionError) {
+      return NextResponse.json({ error: err.code }, { status: err.status });
+    }
+    throw err;
   }
 
   const stored: {
@@ -133,6 +154,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       if (observer?.afterLock) await observer.afterLock(tx);
       if (!lock.ok) return { ok: false as const, error: lock.error };
 
+      // AIDA-45 (V-12, V-26): mentioned ids are validated against the organization's member rows
+      // here, after the membership re-check and the ticket lock and inside this transaction.
+      // Deviation from V-12's word order (recorded in the plan's ledger): this runs just before
+      // message.create rather than after it, because bodyHtml is computed at create time and
+      // needs the validated names; the writes below still follow the create in this transaction.
+      // Internal notes only (D-21; parseMentionField already refused ids on a public reply).
+      const mentioned: MentionedMember[] =
+        mode === "internal" && mentionIds.length > 0
+          ? await resolveMentionedMembers(tx, orgId, session.user.id, mentionIds)
+          : [];
+
       const message = await tx.message.create({
         data: {
           organizationId: orgId,
@@ -141,10 +173,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           visibility: mode === "internal" ? "INTERNAL" : "PUBLIC",
           authorUserId: session.user.id,
           bodyMarkdown: body,
-          bodyHtml: renderMarkdown(body),
+          bodyHtml: renderMarkdown(body, { mentionNames: mentioned.map((m) => m.displayName) }),
           deliveryStatus: shouldQueue ? "QUEUED" : undefined,
         },
       });
+
+      // One MessageMention and one MENTION notification per validated member (D-16, D-20).
+      if (mentioned.length > 0) {
+        await recordMentions(tx, orgId, {
+          messageId: message.id,
+          ticketId,
+          authorUserId: session.user.id,
+          members: mentioned,
+        });
+      }
 
       for (const file of stored) {
         await tx.attachment.create({

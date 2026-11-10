@@ -42,16 +42,168 @@ function rehypeSafeLinks() {
   };
 }
 
+// Phase 10, AIDA-45 (D-20, V-12, T-10-28): mentions in internal notes. The server passes the
+// display names of the members it validated inside the message transaction
+// (src/lib/mentions/mentions.ts); only then does an exact `@` plus one of those names in a text
+// node become a mention span. The span is the only addition to sanitized output:
+//   - it is made from text that already sits in the tree, never from raw HTML (remark-rehype runs
+//     without allowDangerousHtml, so a literal span in the Markdown never reaches the tree);
+//   - the sanitize schema of renderMarkdown allows span with exactly MENTION_CLASS_NAMES;
+//   - after the sanitize pass, rehypeMentionSpanGuard keeps a span only when its class list is
+//     exactly those two classes and its children are text, drops every other property (the
+//     schema's global `id` and friends), and unwraps any other span to its children.
+// The shared `schema` above stays unchanged, so inbound email HTML (sanitizeEmailHtml), the KB
+// preview and task content cannot carry the mention classes. A name that contains `@` is never
+// wrapped, so the markup never carries an email address.
+
+/** The classes of a mention span, and the only classes a span may keep (UI-SPEC, D-20). */
+export const MENTION_CLASS_NAMES = ["font-semibold", "text-primary-emphasis"] as const;
+
+/** The sanitize schema of renderMarkdown: the shared schema plus the one mention span shape. */
+export const renderSanitizeSchema: Schema = {
+  ...schema,
+  attributes: {
+    ...schema.attributes,
+    span: [["className", ...MENTION_CLASS_NAMES]],
+  },
+};
+
+const MENTION_SKIP_TAGS = new Set(["a", "code", "pre"]);
+const NAME_CHAR_BEFORE = /[\p{L}\p{N}_]$/u;
+const NAME_CHAR_AFTER = /^[\p{L}\p{N}_]/u;
+
+function mentionSpan(name: string): Element {
+  return {
+    type: "element",
+    tagName: "span",
+    properties: { className: [...MENTION_CLASS_NAMES] },
+    children: [{ type: "text", value: `@${name}` }],
+  };
+}
+
+/**
+ * Splits one text value at every `@name` occurrence (names sorted longest first). An occurrence
+ * counts only at a word boundary: no letter, digit or `_` right before the `@` or right after the
+ * name, so "@Anabel" is not "@Ana". Returns null when nothing matched.
+ */
+function splitMentions(value: string, names: readonly string[]): ElementContent[] | null {
+  const out: ElementContent[] = [];
+  let last = 0;
+  let at = value.indexOf("@");
+  while (at !== -1) {
+    let matched: string | undefined;
+    if (!NAME_CHAR_BEFORE.test(value.slice(Math.max(0, at - 2), at))) {
+      for (const name of names) {
+        const end = at + 1 + name.length;
+        if (value.startsWith(name, at + 1) && !NAME_CHAR_AFTER.test(value.slice(end, end + 2))) {
+          matched = name;
+          break;
+        }
+      }
+    }
+    if (matched === undefined) {
+      at = value.indexOf("@", at + 1);
+      continue;
+    }
+    if (at > last) out.push({ type: "text", value: value.slice(last, at) });
+    out.push(mentionSpan(matched));
+    last = at + 1 + matched.length;
+    at = value.indexOf("@", last);
+  }
+  if (out.length === 0) return null;
+  if (last < value.length) out.push({ type: "text", value: value.slice(last) });
+  return out;
+}
+
+function wrapMentions(parent: Root | Element, names: readonly string[]): void {
+  const next: (typeof parent.children)[number][] = [];
+  let changed = false;
+  for (const child of parent.children) {
+    if (child.type === "element") {
+      if (!MENTION_SKIP_TAGS.has(child.tagName)) wrapMentions(child, names);
+      next.push(child);
+    } else if (child.type === "text") {
+      const parts = splitMentions(child.value, names);
+      if (parts) {
+        next.push(...parts);
+        changed = true;
+      } else {
+        next.push(child);
+      }
+    } else {
+      next.push(child);
+    }
+  }
+  if (changed) parent.children = next as typeof parent.children;
+}
+
+interface MentionFileData {
+  mentionNames?: readonly string[];
+}
+
+/** Before the sanitize pass: wraps the validated names (passed in the file's data) in spans. */
+function rehypeMentions() {
+  return (tree: Root, file: { data: unknown }) => {
+    const raw = (file.data as MentionFileData).mentionNames ?? [];
+    const names = [...new Set(raw)]
+      .filter((name) => typeof name === "string" && name.trim() !== "" && !name.includes("@"))
+      .sort((a, b) => b.length - a.length);
+    if (names.length > 0) wrapMentions(tree, names);
+  };
+}
+
+function isMentionSpan(node: Element): boolean {
+  const className = node.properties?.className;
+  return (
+    Array.isArray(className) &&
+    className.length === MENTION_CLASS_NAMES.length &&
+    MENTION_CLASS_NAMES.every((name) => className.includes(name)) &&
+    node.children.every((child) => child.type === "text")
+  );
+}
+
+/**
+ * After the sanitize pass: a span survives only in the exact mention shape, with no property but
+ * its two classes; any other span is replaced by its children.
+ */
+export function rehypeMentionSpanGuard() {
+  return (tree: Root) => {
+    visit(tree, "element", (node: Element, index, parent) => {
+      if (node.tagName !== "span") return;
+      if (isMentionSpan(node)) {
+        node.properties = { className: [...MENTION_CLASS_NAMES] };
+        return;
+      }
+      if (!parent || index === undefined) return;
+      parent.children.splice(index, 1, ...node.children);
+      // Visit the span's former children next (they take its place).
+      return index;
+    });
+  };
+}
+
 const processor = unified()
   .use(remarkParse)
   .use(remarkGfm)
   .use(remarkRehype)
   .use(rehypeSafeLinks)
-  .use(rehypeSanitize, schema)
+  .use(rehypeMentions)
+  .use(rehypeSanitize, renderSanitizeSchema)
+  .use(rehypeMentionSpanGuard)
   .use(rehypeStringify);
 
-export function renderMarkdown(markdown: string): string {
-  return String(processor.processSync(markdown));
+export interface RenderMarkdownOptions {
+  /**
+   * Display names of mentioned members, validated by the server inside the message transaction
+   * (src/lib/mentions/mentions.ts). Never pass names taken from the request.
+   */
+  mentionNames?: readonly string[];
+}
+
+export function renderMarkdown(markdown: string, options: RenderMarkdownOptions = {}): string {
+  const mentionData: MentionFileData = { mentionNames: options.mentionNames ?? [] };
+  const data: Record<string, unknown> = { ...mentionData };
+  return String(processor.processSync({ value: markdown, data }));
 }
 
 // Phase 12.2, run decision K54 (review a2-CR-01): the KB proposal review page previews a body the
