@@ -19,8 +19,18 @@
 //   drop-on-data         the socket is destroyed on the DATA command, with no reply;
 //   drop-after-data-end  the whole message is read and recorded in `received`, then the socket is
 //                        destroyed with no reply (the client cannot know whether it was accepted);
-//   delay-ms             like none, but every reply waits `delayMs` first.
+//   delay-ms             like none, but every reply waits `delayMs` first;
+//   trickle              like none, but the reply to the end of the data (250) is written one
+//                        byte at a time with `tricklePauseMs` (default 200 ms) between bytes, so
+//                        the client's inactivity timeout never fires while the reply takes
+//                        longer than any deadline (plan 10-09, V-29);
+//   starttls             EHLO advertises STARTTLS and the server answers 220 to it, then it
+//                        cannot complete a handshake: the first bytes after the 220 (the TLS
+//                        ClientHello) close the connection.
 // `delayMs` also applies to any other mode when given.
+//
+// Counters: `connections` counts accepted TCP connections and `startTlsCommands` counts STARTTLS
+// commands, so a test can prove that a client never connected or did try to upgrade.
 //
 // Relative imports only (none), so tests/e2e can import it too.
 import net from "node:net";
@@ -32,7 +42,9 @@ export type FakeSmtpMode =
   | "reject-data"
   | "drop-on-data"
   | "drop-after-data-end"
-  | "delay-ms";
+  | "delay-ms"
+  | "trickle"
+  | "starttls";
 
 export const FAKE_SMTP_MODES: readonly FakeSmtpMode[] = [
   "none",
@@ -42,6 +54,8 @@ export const FAKE_SMTP_MODES: readonly FakeSmtpMode[] = [
   "drop-on-data",
   "drop-after-data-end",
   "delay-ms",
+  "trickle",
+  "starttls",
 ];
 
 export interface FakeSmtpMessage {
@@ -60,7 +74,13 @@ export interface FakeSmtpOptions {
   advertiseStartTls?: boolean;
 }
 
-type SessionState = "command" | "auth-plain" | "auth-login-user" | "auth-login-pass" | "data";
+type SessionState =
+  | "command"
+  | "auth-plain"
+  | "auth-login-user"
+  | "auth-login-pass"
+  | "data"
+  | "tls";
 
 interface Session {
   socket: net.Socket;
@@ -87,11 +107,16 @@ export class FakeSmtpServer {
   private readonly options: FakeSmtpOptions;
   private mode: FakeSmtpMode = "none";
   private delayMs = 0;
+  private tricklePauseMs = 200;
   private boundPort = 0;
   /** Every accepted message, in arrival order. */
   readonly messages: FakeSmtpMessage[] = [];
   /** Every fully received message, accepted or not, in arrival order. */
   readonly received: FakeSmtpMessage[] = [];
+  /** Accepted TCP connections since the last reset. */
+  connections = 0;
+  /** STARTTLS commands since the last reset. */
+  startTlsCommands = 0;
 
   constructor(options: FakeSmtpOptions = {}) {
     this.options = options;
@@ -116,15 +141,21 @@ export class FakeSmtpServer {
   }
 
   /** Changes the fault mode for every following command (open connections included). */
-  setMode(mode: FakeSmtpMode, { delayMs }: { delayMs?: number } = {}): void {
+  setMode(
+    mode: FakeSmtpMode,
+    { delayMs, tricklePauseMs }: { delayMs?: number; tricklePauseMs?: number } = {},
+  ): void {
     this.mode = mode;
     this.delayMs = delayMs ?? (mode === "delay-ms" ? 100 : 0);
+    this.tricklePauseMs = tricklePauseMs ?? 200;
   }
 
   /** Forgets every captured message and resets the mode to none. */
   reset(): void {
     this.messages.length = 0;
     this.received.length = 0;
+    this.connections = 0;
+    this.startTlsCommands = 0;
     this.setMode("none");
   }
 
@@ -137,6 +168,7 @@ export class FakeSmtpServer {
 
   private onConnection(socket: net.Socket): void {
     this.sockets.add(socket);
+    this.connections += 1;
     socket.setEncoding("utf8");
     socket.on("error", () => {});
     socket.on("close", () => this.sockets.delete(socket));
@@ -150,6 +182,11 @@ export class FakeSmtpServer {
       queue: Promise.resolve(),
     };
     socket.on("data", (chunk: string) => {
+      if (session.state === "tls") {
+        // starttls mode: a handshake is never completed.
+        socket.destroy();
+        return;
+      }
       session.buffer += chunk;
       let index = session.buffer.indexOf("\r\n");
       while (index !== -1 && !socket.destroyed) {
@@ -169,6 +206,20 @@ export class FakeSmtpServer {
       if (session.socket.destroyed) return;
       session.socket.write(`${text}\r\n`);
       after?.();
+    });
+  }
+
+  /** Writes the reply one byte at a time, `tricklePauseMs` apart (trickle mode). */
+  private trickle(session: Session, text: string, done: () => void): void {
+    const pause = this.tricklePauseMs;
+    session.queue = session.queue.then(async () => {
+      const bytes = [...`${text}\r\n`];
+      for (const [index, byte] of bytes.entries()) {
+        if (index > 0) await new Promise((r) => setTimeout(r, pause));
+        if (session.socket.destroyed) return;
+        session.socket.write(byte);
+      }
+      done();
     });
   }
 
@@ -212,7 +263,7 @@ export class FakeSmtpServer {
       case "EHLO": {
         this.resetEnvelope(session);
         const lines = [`250-${HOSTNAME} greets you`, "250-AUTH PLAIN LOGIN", "250-8BITMIME"];
-        if (this.options.advertiseStartTls) lines.push("250-STARTTLS");
+        if (this.options.advertiseStartTls || this.mode === "starttls") lines.push("250-STARTTLS");
         lines.push("250 SMTPUTF8");
         this.reply(session, lines.join("\r\n"));
         return;
@@ -279,6 +330,16 @@ export class FakeSmtpServer {
         session.dataLines = [];
         this.reply(session, "354 End data with <CR><LF>.<CR><LF>");
         return;
+      case "STARTTLS":
+        this.startTlsCommands += 1;
+        if (this.mode !== "starttls") {
+          this.reply(session, "502 5.5.2 Command not implemented");
+          return;
+        }
+        this.reply(session, "220 2.0.0 Ready to start TLS", () => {
+          session.state = "tls";
+        });
+        return;
       case "RSET":
         this.resetEnvelope(session);
         this.reply(session, "250 2.0.0 OK");
@@ -316,6 +377,15 @@ export class FakeSmtpServer {
     }
     if (this.mode === "drop-after-data-end") {
       this.drop(session);
+      return;
+    }
+    if (this.mode === "trickle") {
+      // Accepted only once the whole reply has been written; a client cut off earlier never
+      // learns of it, so the message counts as received only.
+      this.trickle(session, "250 2.0.0 OK queued", () => {
+        message.accepted = true;
+        this.messages.push(message);
+      });
       return;
     }
     message.accepted = true;

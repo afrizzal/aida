@@ -89,6 +89,8 @@ services:
       # Credential encryption at rest (email IMAP/SMTP passwords, future LLM keys) —
       # required for saving channel credentials in Settings; see .env.example
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
+      # Email digest cadence, shown on Settings → Notifications (the worker sends; see below)
+      AIDA_DIGEST_INTERVAL_HOURS: ${AIDA_DIGEST_INTERVAL_HOURS:-4}
     volumes:
       - uploads_data:/data/uploads
     healthcheck:
@@ -130,6 +132,10 @@ services:
       # Shared uploads volume (K68): the project file cleanup job deletes stored files and the
       # inbound email poll stores attachments here, so both reach the files the app serves.
       UPLOADS_DIR: /data/uploads
+      # Email digest (AIDA-46): links in the digest point at the app's own URL, never a request
+      # header; the interval is 1, 2, 3, 4, 6, 8, 12 or 24 hours (default 4), read at start.
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL}
+      AIDA_DIGEST_INTERVAL_HOURS: ${AIDA_DIGEST_INTERVAL_HOURS:-4}
     volumes:
       - uploads_data:/data/uploads
     restart: unless-stopped
