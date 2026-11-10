@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { authClient } from "@/lib/auth-client";
 
 // The invitation card (Phase 10, plan 10-08; UI-SPEC Surface 2 and its Copywriting rows). The
@@ -24,9 +26,22 @@ interface JoinState {
   error: InviteCardError | null;
 }
 
+/** The server's field limits, shown and checked before submit (the route checks them again). */
+export interface InviteFieldLimits {
+  nameMaxLength: number;
+  passwordMinLength: number;
+  passwordMaxLength: number;
+}
+
+interface SignedOutState extends JoinState {
+  /** The invited address, shown read-only; never posted (the server uses the invitation's). */
+  invitedEmail: string;
+  limits: InviteFieldLimits;
+}
+
 export type InviteCardState =
-  | ({ kind: "sign_up"; invitedEmail: string } & JoinState)
-  | ({ kind: "sign_in"; invitedEmail: string } & JoinState)
+  | ({ kind: "sign_up" } & SignedOutState)
+  | ({ kind: "sign_in" } & SignedOutState)
   | ({ kind: "accept"; currentEmail: string } & JoinState)
   | { kind: "wrong_account"; currentEmail: string }
   | { kind: "invalid" }
@@ -39,6 +54,14 @@ const CALLOUT_CLASS =
   "rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-[13px] text-destructive";
 
 const SERVER_ERROR_COPY = "Something went wrong while joining. Wait a moment and try again.";
+/** The login form's copy for refused credentials (UI-SPEC: "the existing login error copy"). */
+const WRONG_PASSWORD_COPY =
+  "Invalid email or password. Please check your credentials and try again.";
+/** Amendment A6 (b): the server refused the fields (the client checks normally catch this). */
+const FIELD_ERROR_COPY = "Check your name and password, then try again.";
+const LABEL_CLASS = "text-[13px] font-semibold";
+const FIELD_ERROR_CLASS = "text-[12px] text-destructive";
+const HELP_CLASS = "text-[12px] text-muted-foreground";
 
 function CardShell({
   title,
@@ -117,9 +140,198 @@ function AcceptForm({ state }: { state: Extract<InviteCardState, { kind: "accept
     >
       {state.error === "server" && <ServerErrorCallout />}
       <form method="post" action={state.actionPath} onSubmit={onSubmit}>
-        {/* Never disabled: a disabled input would be left out of the posted form. */}
+        {/* Never disabled: a disabled input would be left out of the posted form; while a
+            submit is pending the inputs turn read-only and only the button is disabled. */}
         <input type="hidden" name="intent" value="accept" />
         <SubmitButton pending={pending} label="Accept invitation" pendingLabel="Joining…" />
+      </form>
+    </CardShell>
+  );
+}
+
+/** The read-only invited address (aria-readonly). It has no name, so it is never posted. */
+function InvitedEmailField({ email }: { email: string }) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor="invite-email" className={LABEL_CLASS}>
+        Email
+      </Label>
+      <Input
+        id="invite-email"
+        type="email"
+        value={email}
+        readOnly
+        aria-readonly="true"
+        autoComplete="username"
+      />
+    </div>
+  );
+}
+
+function FieldError({ id, message }: { id: string; message: string | null }) {
+  if (!message) return null;
+  return (
+    <p id={id} className={FIELD_ERROR_CLASS}>
+      {message}
+    </p>
+  );
+}
+
+function SignUpForm({ state }: { state: Extract<InviteCardState, { kind: "sign_up" }> }) {
+  const { pending, onSubmit } = usePendingSubmit();
+  const { nameMaxLength, passwordMinLength, passwordMaxLength } = state.limits;
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const passwordRule = `Password must be at least ${passwordMinLength} characters`;
+
+  function check(event: FormEvent<HTMLFormElement>) {
+    const data = new FormData(event.currentTarget);
+    const name = String(data.get("name") ?? "").trim();
+    const password = String(data.get("password") ?? "");
+    const nextNameError =
+      name.length === 0
+        ? "Your name is required"
+        : name.length > nameMaxLength
+          ? `Use at most ${nameMaxLength} characters`
+          : null;
+    const nextPasswordError =
+      password.length < passwordMinLength || password.length > passwordMaxLength
+        ? passwordRule
+        : null;
+    setNameError(nextNameError);
+    setPasswordError(nextPasswordError);
+    if (nextNameError || nextPasswordError) {
+      event.preventDefault();
+      return;
+    }
+    onSubmit(event);
+  }
+
+  return (
+    <CardShell
+      title={`Join ${state.workspaceName}`}
+      body={`You were invited as ${state.roleLabel}. Create your account to join.`}
+    >
+      <form
+        method="post"
+        action={state.actionPath}
+        onSubmit={check}
+        noValidate
+        className="space-y-4"
+      >
+        <input type="hidden" name="intent" value="sign-up" />
+        <div className="space-y-2">
+          <Label htmlFor="invite-name" className={LABEL_CLASS}>
+            Name
+          </Label>
+          <Input
+            id="invite-name"
+            name="name"
+            autoComplete="name"
+            required
+            maxLength={nameMaxLength}
+            readOnly={pending}
+            aria-invalid={nameError ? true : undefined}
+            aria-describedby={nameError ? "invite-name-error" : undefined}
+          />
+          <FieldError id="invite-name-error" message={nameError} />
+        </div>
+        <InvitedEmailField email={state.invitedEmail} />
+        <div className="space-y-2">
+          <Label htmlFor="invite-password" className={LABEL_CLASS}>
+            Password
+          </Label>
+          <Input
+            id="invite-password"
+            name="password"
+            type="password"
+            autoComplete="new-password"
+            required
+            minLength={passwordMinLength}
+            maxLength={passwordMaxLength}
+            readOnly={pending}
+            aria-invalid={passwordError ? true : undefined}
+            aria-describedby={passwordError ? "invite-password-error" : "invite-password-help"}
+          />
+          {passwordError ? (
+            <FieldError id="invite-password-error" message={passwordError} />
+          ) : (
+            <p id="invite-password-help" className={HELP_CLASS}>
+              {passwordRule}.
+            </p>
+          )}
+        </div>
+        {state.error === "field" && (
+          <div role="alert" className={CALLOUT_CLASS}>
+            {FIELD_ERROR_COPY}
+          </div>
+        )}
+        {state.error === "server" && <ServerErrorCallout />}
+        <SubmitButton
+          pending={pending}
+          label="Create account and join"
+          pendingLabel="Creating account…"
+        />
+      </form>
+    </CardShell>
+  );
+}
+
+function SignInForm({ state }: { state: Extract<InviteCardState, { kind: "sign_in" }> }) {
+  const { pending, onSubmit } = usePendingSubmit();
+  const [passwordError, setPasswordError] = useState<string | null>(
+    state.error === "password" ? WRONG_PASSWORD_COPY : null,
+  );
+
+  function check(event: FormEvent<HTMLFormElement>) {
+    const password = String(new FormData(event.currentTarget).get("password") ?? "");
+    if (password.length === 0 || password.length > state.limits.passwordMaxLength) {
+      setPasswordError("Password is required");
+      event.preventDefault();
+      return;
+    }
+    setPasswordError(null);
+    onSubmit(event);
+  }
+
+  return (
+    <CardShell
+      title={`Join ${state.workspaceName}`}
+      body={`You were invited as ${state.roleLabel}. Sign in to join.`}
+    >
+      <form
+        method="post"
+        action={state.actionPath}
+        onSubmit={check}
+        noValidate
+        className="space-y-4"
+      >
+        <input type="hidden" name="intent" value="sign-in" />
+        <InvitedEmailField email={state.invitedEmail} />
+        <div className="space-y-2">
+          <Label htmlFor="invite-password" className={LABEL_CLASS}>
+            Password
+          </Label>
+          <Input
+            id="invite-password"
+            name="password"
+            type="password"
+            autoComplete="current-password"
+            required
+            maxLength={state.limits.passwordMaxLength}
+            readOnly={pending}
+            aria-invalid={passwordError ? true : undefined}
+            aria-describedby={passwordError ? "invite-password-error" : undefined}
+          />
+          <FieldError id="invite-password-error" message={passwordError} />
+        </div>
+        {state.error === "field" && (
+          <div role="alert" className={CALLOUT_CLASS}>
+            {FIELD_ERROR_COPY}
+          </div>
+        )}
+        {state.error === "server" && <ServerErrorCallout />}
+        <SubmitButton pending={pending} label="Sign in and join" pendingLabel="Signing in…" />
       </form>
     </CardShell>
   );
@@ -194,17 +406,9 @@ export function InviteCard({ state }: { state: InviteCardState }) {
     case "throttled":
       return <Throttled />;
     case "sign_up":
+      return <SignUpForm state={state} />;
     case "sign_in":
-      return (
-        <CardShell
-          title={`Join ${state.workspaceName}`}
-          body={`You were invited as ${state.roleLabel}. ${
-            state.kind === "sign_up" ? "Create your account to join." : "Sign in to join."
-          }`}
-        >
-          {state.error === "server" && <ServerErrorCallout />}
-        </CardShell>
-      );
+      return <SignInForm state={state} />;
     default:
       return <Invalid />;
   }

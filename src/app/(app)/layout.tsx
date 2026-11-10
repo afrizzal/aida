@@ -1,4 +1,6 @@
+import { Suspense } from "react";
 import { CommandProvider } from "@/components/command-provider";
+import { JoinWelcomeToast } from "@/components/join-welcome-toast";
 import { Sidebar } from "@/components/sidebar";
 import { TopBar } from "@/components/top-bar";
 import { getBrandingSettings, getLogoSetting, logoPublicUrl } from "@/lib/branding/settings";
@@ -47,6 +49,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <main className="flex-1 overflow-auto p-6">{children}</main>
         </div>
       </div>
+      {/* After an invitation join (/tickets?joined=1, plan 10-08): "Welcome to {workspace name}."
+          once, then the parameter leaves the URL. useSearchParams needs the Suspense boundary. */}
+      <Suspense fallback={null}>
+        <JoinWelcomeToast workspaceName={workspaceName} />
+      </Suspense>
     </CommandProvider>
   );
 }

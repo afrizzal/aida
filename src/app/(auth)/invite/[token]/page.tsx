@@ -8,6 +8,11 @@ import {
 import { PUBLIC_RATE_LIMITS } from "@/lib/rate-limit/public-limits";
 import { getCurrentSession } from "@/lib/session";
 import { getInvitationView, normaliseInviteEmail } from "@/lib/workspace-members/invitations";
+import {
+  INVITEE_NAME_MAX_LENGTH,
+  INVITEE_PASSWORD_MAX_LENGTH,
+  INVITEE_PASSWORD_MIN_LENGTH,
+} from "@/lib/workspace-members/invite-onboarding";
 import { InviteCard, type InviteCardError, type InviteCardState } from "./invite-card";
 
 // The invitation page (Phase 10, plan 10-08, AIDA-42; D-03, D-05, V-04, V-23; UI-SPEC Surface 2).
@@ -23,6 +28,12 @@ import { InviteCard, type InviteCardError, type InviteCardState } from "./invite
 export const dynamic = "force-dynamic";
 
 const ROLE_LABELS = { owner: "Owner", admin: "Admin", member: "Member" } as const;
+
+const FIELD_LIMITS = {
+  nameMaxLength: INVITEE_NAME_MAX_LENGTH,
+  passwordMinLength: INVITEE_PASSWORD_MIN_LENGTH,
+  passwordMaxLength: INVITEE_PASSWORD_MAX_LENGTH,
+} as const;
 
 const CARD_ERRORS: ReadonlySet<string> = new Set(["server", "field", "password"]);
 
@@ -73,6 +84,7 @@ export default async function InvitePage({ params, searchParams }: InvitePagePro
       workspaceName: view.workspaceName,
       roleLabel: ROLE_LABELS[view.role],
       invitedEmail: view.email,
+      limits: FIELD_LIMITS,
       actionPath,
       error: cardError(error),
     };
