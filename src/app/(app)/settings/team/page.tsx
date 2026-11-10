@@ -1,6 +1,15 @@
 import { requirePageAccess } from "@/lib/page-access";
+import { listPendingInvitations } from "@/lib/workspace-members/invitations";
 import { countOpenAssignedTickets, listMembers } from "@/lib/workspace-members/member-admin";
-import { TEAM_SUBTITLE, TEAM_TITLE, type TeamRole } from "./team-copy";
+import { InviteDialog } from "./invite-dialog";
+import { PendingInvitationList, type PendingInvitationRow } from "./pending-invitation-list";
+import {
+  expiresInText,
+  pendingRowMeta,
+  TEAM_SUBTITLE,
+  TEAM_TITLE,
+  type TeamRole,
+} from "./team-copy";
 import { type TeamMember, TeamMembersCard } from "./team-member-row";
 
 // Settings -> Team (Phase 10, AIDA-43, AIDA-42 UI; UI-SPEC Surface 1 with amendments A2 and A7).
@@ -35,6 +44,16 @@ export default async function TeamSettingsPage() {
     })),
   );
 
+  // Pending invitations: owners and admins only; members read none (UI-SPEC permission row).
+  const now = new Date();
+  const pending: PendingInvitationRow[] = canManage
+    ? (await listPendingInvitations(orgId, now)).map((inv) => ({
+        invitationId: inv.invitationId,
+        email: inv.email,
+        meta: pendingRowMeta(inv.role, inv.invitedBy, expiresInText(inv.expiresAt, now)),
+      }))
+    : [];
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -42,8 +61,10 @@ export default async function TeamSettingsPage() {
           <h1 className="text-[18px] font-semibold">{TEAM_TITLE}</h1>
           <p className="text-[13px] text-muted-foreground">{TEAM_SUBTITLE}</p>
         </div>
+        {canManage && <InviteDialog actorRole={actorRole} />}
       </div>
       <TeamMembersCard members={members} actorUserId={actorUserId} actorRole={actorRole} />
+      {canManage && <PendingInvitationList invitations={pending} />}
     </div>
   );
 }

@@ -2,13 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { getSessionActor } from "@/lib/session";
+import { createInvitation, revokeInvitation } from "@/lib/workspace-members/invitations";
 import {
   changeMemberRole,
   countOpenAssignedTickets,
   deactivateMember,
   reassignOpenTickets,
 } from "@/lib/workspace-members/member-admin";
-import type { DeactivateErrorKey, RoleErrorKey, TeamRole } from "./team-copy";
+import type { DeactivateErrorKey, InviteErrorKey, RoleErrorKey, TeamRole } from "./team-copy";
 
 // The server actions of /settings/team (Phase 10, AIDA-43, AIDA-42 UI; D-08, V-27, K141). Each
 // action reads the session ONCE through the session actor helper (the actor never comes from
@@ -134,4 +135,74 @@ export async function reassignTicketsAction(
   const counts = await runReassignment(actor.orgId, actor.userId, fromUserId, toUserId);
   revalidatePath(TEAM_PATH);
   return { ok: true, ...counts };
+}
+
+/** RFC 5321 path limit; createInvitation applies the full address check. */
+const MAX_EMAIL_LENGTH = 254;
+
+export type InviteResult =
+  | { ok: true; delivery: "sent"; email: string }
+  | { ok: true; delivery: "smtp_off" | "send_failed"; email: string; link: string }
+  | { ok: false; error: InviteErrorKey };
+
+/**
+ * Invites one email with one role into the actor's organization (createInvitation, 10-05, D-03,
+ * D-06). The service re-checks the actor's rights and role ceiling under the organization lock.
+ * The link is returned only when the email was not delivered (smtp_off, send_failed) and only to
+ * this owner or admin; it is never logged and never stored here (T-10-40).
+ */
+export async function inviteMemberAction(email: unknown, role: unknown): Promise<InviteResult> {
+  if (typeof email !== "string" || email.trim().length === 0 || email.length > MAX_EMAIL_LENGTH) {
+    return { ok: false, error: "invalid_email" };
+  }
+  if (typeof role !== "string") return { ok: false, error: "unknown" };
+  const actor = await getSessionActor();
+  let result: Awaited<ReturnType<typeof createInvitation>>;
+  try {
+    result = await createInvitation({
+      orgId: actor.orgId,
+      actorUserId: actor.userId,
+      email,
+      role,
+    });
+  } catch {
+    // No error text reaches the browser or the log from here.
+    return { ok: false, error: "unknown" };
+  }
+  if (!result.ok) {
+    switch (result.error) {
+      case "INVALID_EMAIL":
+        return { ok: false, error: "invalid_email" };
+      case "ALREADY_MEMBER":
+        return { ok: false, error: "already_member" };
+      case "PENDING_EXISTS":
+        return { ok: false, error: "pending_exists" };
+      case "ROLE_ABOVE_OWN":
+        return { ok: false, error: "role_above_own" };
+      case "NOT_ALLOWED":
+        return { ok: false, error: "not_allowed" };
+      // INVITE_CONFIG (no valid BETTER_AUTH_URL) has no Copywriting row of its own: the unknown row.
+      default:
+        return { ok: false, error: "unknown" };
+    }
+  }
+  revalidatePath(TEAM_PATH);
+  if (result.delivery === "sent") return { ok: true, delivery: "sent", email: result.email };
+  return { ok: true, delivery: result.delivery, email: result.email, link: result.link };
+}
+
+export type RevokeResult = { ok: boolean };
+
+/** Revokes a pending invitation of the actor's organization (revokeInvitation, 10-05). */
+export async function revokeInvitationAction(invitationId: unknown): Promise<RevokeResult> {
+  if (typeof invitationId !== "string") return { ok: false };
+  const actor = await getSessionActor();
+  const result = await revokeInvitation({
+    orgId: actor.orgId,
+    actorUserId: actor.userId,
+    invitationId,
+  });
+  if (!result.ok) return { ok: false };
+  revalidatePath(TEAM_PATH);
+  return { ok: true };
 }
