@@ -10,6 +10,12 @@
 // underlying network call to stub-llm is identical either way, and this container is exactly as
 // cut off from the internet as the `app` container is (same network, same lack of a route).
 //
+// Phase 10 (plan 10-09, D-26) adds two flows through the same configured SMTP (stub-smtp), so
+// they add no destination: `invitation-email-sent` (createInvitation emails the invitee) and
+// `digest-email-sent` (one notification, then runDigests sends the digest). Both build links from
+// BETTER_AUTH_URL, which this container does not get from the egress compose file; the probe sets
+// a placeholder that is only written into the email text and never contacted.
+//
 // Writes ONE line to stdout prefixed `PROBE_RESULT:` with a JSON summary the host-side vitest
 // test parses; exits 0 iff every flow succeeded.
 import { randomUUID } from "node:crypto";
@@ -19,14 +25,20 @@ import { prisma } from "@/lib/db";
 import { createKbArticle } from "@/lib/kb/create-article";
 import { saveLlmSettings } from "@/lib/llm/settings";
 import { testProviderConnection } from "@/lib/llm/test-connection";
+import { runDigests } from "@/lib/notifications/digest";
+import { insertNotifications } from "@/lib/notifications/store";
+import { TICKET_ENTITY } from "@/lib/notifications/types";
 import { generateDraftReply } from "@/lib/rag/generate-draft";
 import { saveEmbeddingSettings } from "@/lib/rag/settings";
 import { scopedDb } from "@/lib/scoped-db";
 import { createTicket } from "@/lib/tickets/create-ticket";
+import { createInvitation } from "@/lib/workspace-members/invitations";
 
 const STUB_LLM_URL = process.env.STUB_LLM_URL ?? "http://stub-llm:11434";
 const SMTP_HOST = process.env.STUB_SMTP_HOST ?? "stub-smtp";
 const SMTP_PORT = Number(process.env.STUB_SMTP_PORT ?? "3025");
+// Link text only (invitation and digest emails); nothing ever connects to it.
+process.env.BETTER_AUTH_URL ??= "http://aida.egress-probe.test";
 
 interface FlowResult {
   name: string;
@@ -224,6 +236,78 @@ async function main() {
         ),
       );
     }
+  }
+
+  // --- Phase 10 flows: an owner of the probe organization (created once) ---
+  const owner = await run("create-probe-owner", async () => {
+    const email = "egress-probe-owner@example.com";
+    const existing = await prisma.user.findUnique({ where: { email } });
+    const now = new Date();
+    const user =
+      existing ??
+      (await prisma.user.create({
+        data: {
+          id: randomUUID(),
+          name: "Egress Probe Owner",
+          email,
+          emailVerified: true,
+          createdAt: now,
+          updatedAt: now,
+        },
+      }));
+    const member = await prisma.member.findFirst({
+      where: { organizationId: orgId, userId: user.id },
+    });
+    if (!member) {
+      await prisma.member.create({
+        data: {
+          id: randomUUID(),
+          organizationId: orgId,
+          userId: user.id,
+          role: "owner",
+          createdAt: now,
+        },
+      });
+    }
+    return user;
+  });
+
+  // --- FLOW 6: an invitation email (through the configured SMTP, stub-smtp) ---
+  if (owner) {
+    await run("invitation-email-sent", async () => {
+      const result = await createInvitation({
+        orgId,
+        actorUserId: owner.id,
+        email: `egress-invitee-${randomUUID()}@example.com`,
+        role: "member",
+      });
+      if (!result.ok) throw new Error(`createInvitation refused: ${result.error}`);
+      if (result.delivery !== "sent") throw new Error(`invitation email ${result.delivery}`);
+      return result;
+    });
+  }
+
+  // --- FLOW 7: a digest email (one notification, then the digest run, via stub-smtp) ---
+  if (owner && ticket) {
+    await run("digest-email-sent", async () => {
+      await prisma.$transaction((tx) =>
+        insertNotifications(tx, orgId, [
+          {
+            recipientUserId: owner.id,
+            type: "ASSIGNED",
+            eventKey: `egress-probe:${randomUUID()}`,
+            entityType: TICKET_ENTITY,
+            entityId: ticket.id,
+          },
+        ]),
+      );
+      const result = await runDigests();
+      const mine = result.reports.find(
+        (r) => r.organizationId === orgId && r.recipientUserId === owner.id,
+      );
+      if (mine?.outcome !== "sent") throw new Error(`digest ${mine?.outcome ?? "not attempted"}`);
+      return mine;
+    });
   }
 
   await boss.stop({ graceful: false, timeout: 1000 }).catch(() => {});

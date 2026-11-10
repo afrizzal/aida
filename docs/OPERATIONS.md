@@ -558,6 +558,78 @@ and one copy of these limits, also when the production build loads the code once
 are kept process-wide (`src/lib/db.ts`, `src/lib/rate-limit/check-rate-limit.ts`). The `worker`
 container is a separate process with its own pool (`DB_POOL_MAX=5`).
 
+## Team and notifications
+
+### The email digest
+
+The `worker` emails each member a digest of their unread notifications: one email per member per
+run, with the constant subject "Your AIDA updates". The body holds counts, ticket numbers and links
+into the app only, never a customer name or email address, a ticket subject, message text or AI
+input. Links start with `BETTER_AUTH_URL`, so the `worker` service needs that variable too
+(`docker-compose.yml` passes it). Each member chooses which events reach the digest under
+Settings → Notifications.
+
+- **How often:** `AIDA_DIGEST_INTERVAL_HOURS`, one of `1`, `2`, `3`, `4`, `6`, `8`, `12` or `24`
+  hours; any other value, or none, means `4`. Runs start on the hour (`24` means daily at 00:00
+  UTC). The worker reads the value when it starts, so a change takes effect when the worker
+  restarts: `docker compose up -d worker`.
+- **Email off:** no digest is attempted for a workspace whose email is turned off in Settings →
+  Email, or has no SMTP host or from address. Its notifications stay in the bell.
+- **Which server:** the digest goes through the workspace's own SMTP settings, the same server as
+  ticket replies. AIDA adds no other destination.
+
+**Delivery guarantee.** A digest is marked sent, and its notifications marked as emailed, only
+after the SMTP server accepted the whole message (its final reply after the data). If the server
+rejects it with an error reply (at the recipient, at the data command or after the data), nothing
+is marked and the next run sends it again; this rejection causes no duplicate. When the
+connection drops, or the 45-second send deadline cuts it off, with no reply, AIDA cannot tell
+whether the server accepted the message. It then keeps the batch for its five-minute lease and
+sends it again after that. Each such attempt can add one copy, so repeated ambiguous failures can
+deliver more than one duplicate. A crash of the worker after the server accepted the message and
+before the database recorded it can also resend it once after the lease. AIDA does not claim
+exactly-once delivery.
+
+A member removed from the workspace gets no digest: membership, the member's choices and
+owner or admin rights are checked again right before each send.
+
+### Unassigned tickets
+
+A customer reply or an SLA alert on a ticket with no assignee notifies every owner and admin of the
+workspace, in the bell and in the digest, where those notifications have their own line ("On
+unassigned tickets"). Each owner or admin can turn this off for themselves under Settings →
+Notifications ("Unassigned tickets"). Two limits apply for now (owner item O-7):
+
+- A new ticket notifies nobody, whether it comes in by email or through the public request form.
+- A ticket whose assignee was removed from the workspace notifies nobody until it is reassigned:
+  the removed member gets nothing, and the unassigned rule does not apply. When you remove a
+  member, use the offer to reassign their open tickets.
+
+### Invitation links and access logs
+
+An invitation link carries its token in the URL path (`/invite/<token>`). AIDA stores only a hash
+of the token, never logs the link, and the invitation page sends no referrer. The shipped
+`Caddyfile` has no access log. **If you enable access logging in Caddy, or put another proxy or a
+CDN in front of AIDA that logs request paths, those logs record invitation tokens.** Protect such
+logs like credentials, or redact the `/invite/` path in them. A leaked token works only once and
+expires 7 days after the invitation was sent; revoke an invitation from Settings → Team if its link
+may have leaked.
+
+### Removing a member
+
+Removing (deactivating) a member ends their access to every page and to the API at once: their
+next request is refused, whatever session they still hold. Their account and their ticket history
+stay. The dialog offers to reassign their open tickets. Removal does not change project access
+rules: a **private project** whose only manager is removed is left with no manager, and nobody
+else can then reach it (owner item 14-o1). Before removing someone, check the private projects
+they manage.
+
+### Upgrading Better Auth
+
+The invitation and membership flows are built on `better-auth` 1.7.20. A later Better Auth upgrade
+must rerun the invitation and membership suites (`tests/integration/invitations.test.ts`,
+`tests/integration/invite-onboarding.test.ts`, `tests/integration/team-member-admin.test.ts` and
+the other Phase 10 suites) before it ships.
+
 ## Environment variable reference
 
 Every variable in `.env.example`, and nothing else. `Required` means the app will not function correctly (or will refuse to boot) without it.
@@ -586,6 +658,7 @@ Every variable in `.env.example`, and nothing else. `Required` means the app wil
 | `DEMO_ADMIN_EMAIL` | No | `admin@demo.aida.test` | Email for the auto-created demo admin account. Only takes effect when `DEMO_MODE=true`. |
 | `DEMO_ADMIN_PASSWORD` | No | `aida-demo-2026` | Password for the auto-created demo admin (and demo agent) account. Only takes effect when `DEMO_MODE=true`. |
 | `DEMO_AGENT_EMAIL` | No | `agent@demo.aida.test` | Email for the auto-created demo agent account ("Sam Rivera"). Only takes effect when `DEMO_MODE=true`. |
+| `AIDA_DIGEST_INTERVAL_HOURS` | No | `4` | Hours between email digests: `1`, `2`, `3`, `4`, `6`, `8`, `12` or `24`; any other value means `4`. Read by the `worker` at start, so a change takes effect on worker restart. See [The email digest](#the-email-digest). |
 | `BACKUP_ENABLED` | No | `true` | `true` runs the `backup` service's daily backup; `false` keeps the service up without running any. See [Backups](#scheduled-backups-the-backup-service). |
 | `BACKUP_SCHEDULE` | No | `02:00` | Daily backup time, `HH:MM`, 24-hour, **UTC**. An invalid value stops the `backup` service with exit code 2 and a log line naming the format. |
 | `BACKUP_RETENTION` | No | `7` | Number of successful backup sets kept in the `backups_data` volume, 1 to 9999. Older sets are removed after each successful run. |
