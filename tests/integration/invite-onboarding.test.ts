@@ -183,6 +183,8 @@ interface PostOptions {
   origin?: string | null;
   /** The client address; default a fresh one per request. */
   ip?: string;
+  /** Sec-Fetch-Site and Sec-Fetch-Mode, as a browser sends them; default none. */
+  fetchMetadata?: { site: string; mode: string };
 }
 
 /** A browser form post (url-encoded, as an HTML form sends it) to the accept route. */
@@ -191,6 +193,10 @@ function acceptRequest(token: string, fields: Record<string, string>, opts: Post
   const origin = opts.origin === undefined ? ORIGIN : opts.origin;
   if (origin !== null) headers.set("origin", origin);
   if (opts.cookie) headers.set("cookie", opts.cookie);
+  if (opts.fetchMetadata) {
+    headers.set("sec-fetch-site", opts.fetchMetadata.site);
+    headers.set("sec-fetch-mode", opts.fetchMetadata.mode);
+  }
   return new Request(`${ORIGIN}/invite/${token}/accept`, {
     method: "POST",
     headers,
@@ -554,6 +560,57 @@ describe("the accept route (V-24): Origin, rate limit, validation, 303", () => {
 
     for (const origin of ["https://evil.example.test", `${ORIGIN}.evil.example.test`, "null"]) {
       const response = await post(token, { intent: "accept" }, { cookie: user.cookie, origin, ip });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: "forbidden_origin" });
+    }
+    expect(await invitationStatus(invitationId)).toBe("pending");
+    expect(await memberRows(orgB, user.userId)).toEqual([]);
+    expect(await limiterRows(ip)).toBe(0);
+  });
+
+  // Plan 10-13 (found by the E2E): the invitation page sends Referrer-Policy: no-referrer (D-04),
+  // so a browser sends its own form post with Origin "null". Only that shape with same-origin
+  // navigation metadata is admitted; the same "null" from another site, or with partial metadata,
+  // and a missing Origin with metadata, stay refused.
+  it("admits the card's own post under no-referrer: Origin null with same-origin navigation metadata joins", async () => {
+    const user = await signedInMemberOfOtherOrg();
+    const { orgId: orgB, token } = await invite(user.email);
+    const response = await post(
+      token,
+      { intent: "accept" },
+      {
+        cookie: user.cookie,
+        origin: "null",
+        fetchMetadata: { site: "same-origin", mode: "navigate" },
+      },
+    );
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(`${ORIGIN}/tickets?joined=1`);
+    expect(await memberRows(orgB, user.userId)).toHaveLength(1);
+  });
+
+  it("refuses Origin null from another site or with partial metadata, and a missing Origin with metadata", async () => {
+    const user = await signedInMemberOfOtherOrg();
+    const { orgId: orgB, invitationId, token } = await invite(user.email);
+    const ip = uniqueClientIp();
+    const cases: Array<{ origin: string | null; fetchMetadata: { site: string; mode: string } }> = [
+      { origin: "null", fetchMetadata: { site: "cross-site", mode: "navigate" } },
+      { origin: "null", fetchMetadata: { site: "same-site", mode: "navigate" } },
+      { origin: "null", fetchMetadata: { site: "none", mode: "navigate" } },
+      { origin: "null", fetchMetadata: { site: "same-origin", mode: "cors" } },
+      { origin: "null", fetchMetadata: { site: "same-origin", mode: "no-cors" } },
+      { origin: null, fetchMetadata: { site: "same-origin", mode: "navigate" } },
+      {
+        origin: "https://evil.example.test",
+        fetchMetadata: { site: "same-origin", mode: "navigate" },
+      },
+    ];
+    for (const { origin, fetchMetadata } of cases) {
+      const response = await post(
+        token,
+        { intent: "accept" },
+        { cookie: user.cookie, origin, fetchMetadata, ip },
+      );
       expect(response.status).toBe(403);
       expect(await response.json()).toEqual({ error: "forbidden_origin" });
     }

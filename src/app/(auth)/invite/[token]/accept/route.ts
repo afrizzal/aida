@@ -4,7 +4,9 @@
 // the page needs no client fetch and no server action (CSP, V-24). The order is fixed:
 //   (a) Origin: it acts on a signed-in session, so a request whose Origin header is missing or is
 //       not the origin of BETTER_AUTH_URL is refused with 403 before anything else is read (a
-//       cross-site form post cannot accept on someone's behalf; threat T-10-33);
+//       cross-site form post cannot accept on someone's behalf; threat T-10-33). The one other
+//       shape admitted is the card's own post under the page's no-referrer policy: Origin "null"
+//       with same-origin navigation fetch metadata (isSameOriginPost);
 //   (b) the inviteAccept rate limit on the proxy-written client identity, before the token lookup
 //       and the body (threat T-10-33b);
 //   (c) the body, bounded in bytes and parts;
@@ -62,6 +64,29 @@ function seeOther(origin: string, path: string, setCookies: readonly string[] = 
   return response;
 }
 
+/**
+ * Whether the request is a same-origin post from this application (V-24). Two shapes pass:
+ *   - the Origin header equals the configured origin;
+ *   - the Origin header is the literal "null" AND the browser's fetch metadata names a same-origin
+ *     navigation (Sec-Fetch-Site: same-origin, Sec-Fetch-Mode: navigate). The invitation page sends
+ *     Referrer-Policy: no-referrer (D-04), and under that policy a browser serialises the Origin of
+ *     its own form post as "null" (Fetch Standard, "append a request `Origin` header"), so the
+ *     card's own form arrives this way; found by the E2E of plan 10-13. Sec-Fetch-* are forbidden
+ *     request headers: no page script can set them, and a cross-site form or a sandboxed frame
+ *     (which also sends "null") is labelled cross-site.
+ * Everything else is refused: a missing Origin (with or without metadata), a foreign Origin, and
+ * "null" without that metadata.
+ */
+function isSameOriginPost(headers: Headers, origin: string): boolean {
+  const sent = headers.get("origin");
+  if (sent === origin) return true;
+  return (
+    sent === "null" &&
+    headers.get("sec-fetch-site") === "same-origin" &&
+    headers.get("sec-fetch-mode") === "navigate"
+  );
+}
+
 /** A string field of the form, or null when absent or a file. */
 function field(form: FormData, name: string): string | null {
   const value = form.get(name);
@@ -97,8 +122,7 @@ function targetFor(result: OnboardingResult, invitePath: string): string {
 export async function POST(request: Request, { params }: { params: Promise<{ token: string }> }) {
   // (a) Origin first, before any read.
   const origin = expectedOrigin();
-  const sent = request.headers.get("origin");
-  if (origin === null || sent === null || sent !== origin) {
+  if (origin === null || !isSameOriginPost(request.headers, origin)) {
     return NextResponse.json({ error: "forbidden_origin" }, { status: 403 });
   }
 
