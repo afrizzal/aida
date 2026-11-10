@@ -4,6 +4,7 @@ import { Lock, Paperclip } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   type ChangeEvent,
+  type KeyboardEvent,
   type SyntheticEvent,
   useEffect,
   useLayoutEffect,
@@ -15,7 +16,7 @@ import { toast } from "sonner";
 import { useRegisterCommands } from "@/components/command-provider";
 import { AttachmentChip, formatBytes } from "@/components/tickets/attachment-chip";
 import { type ComposerMode, ComposerToggle } from "@/components/tickets/composer-toggle";
-import { MentionAutocomplete } from "@/components/tickets/mention-autocomplete";
+import { type MentionAria, MentionAutocomplete } from "@/components/tickets/mention-autocomplete";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ALLOWED_MIME, MAX_BYTES } from "@/lib/attachments/constants";
@@ -30,6 +31,11 @@ import {
   shouldOfferMentions,
 } from "@/lib/mentions/composer-tokens";
 import { cn } from "@/lib/utils";
+
+type MembersState =
+  | { status: "loading" }
+  | { status: "ready"; list: MentionCandidate[] }
+  | { status: "failed" };
 
 interface ComposerProps {
   ticketId: string;
@@ -55,8 +61,13 @@ export function Composer({ ticketId, insertedText, onInsertedConsumed }: Compose
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // The textarea caret when nothing is selected, else null: where a mention query is read.
   const [cursor, setCursor] = useState<number | null>(null);
-  // The members the composer can mention, fetched once per mount; null while loading.
-  const [members, setMembers] = useState<MentionCandidate[] | null>(null);
+  // The members the composer can mention, fetched once per mount (UI-SPEC Surface 4).
+  const [members, setMembers] = useState<MembersState>({ status: "loading" });
+  // The trigger "@" whose list the agent closed with Escape or an outside click.
+  const [dismissedAt, setDismissedAt] = useState<number | null>(null);
+  // The highlighted option, for the query it was chosen in (a new query highlights the first).
+  const [active, setActive] = useState<{ key: string; index: number }>({ key: "", index: 0 });
+  const [mentionAria, setMentionAria] = useState<MentionAria>({ listId: null, activeId: null });
 
   const isInternal = mode === "internal";
 
@@ -120,18 +131,29 @@ export function Composer({ ticketId, insertedText, onInsertedConsumed }: Compose
     }
   }, [insertedText]);
 
-  // The member list, once per mount (UI-SPEC Surface 4). A failure leaves it empty: typing @ then
-  // opens nothing, the @ stays typed text and no id is ever recorded (E6 error).
+  // The member list, once per mount (UI-SPEC Surface 4). A failure turns the trigger off: typing @
+  // then opens nothing, the @ stays typed text, the note can still be saved and no id is ever
+  // recorded (E6 error).
   useEffect(() => {
     let cancelled = false;
     fetch("/api/members/mentionable", { headers: { accept: "application/json" } })
       .then(async (res) => {
         if (!res.ok) throw new Error("members_failed");
-        const data = (await res.json()) as { members?: MentionCandidate[] };
-        if (!cancelled) setMembers(Array.isArray(data.members) ? data.members : []);
+        const data = (await res.json()) as { members?: unknown };
+        if (!Array.isArray(data.members)) throw new Error("members_failed");
+        const list = data.members.filter(
+          (m): m is MentionCandidate =>
+            typeof m === "object" &&
+            m !== null &&
+            typeof m.id === "string" &&
+            typeof m.name === "string" &&
+            m.name !== "" &&
+            typeof m.email === "string",
+        );
+        if (!cancelled) setMembers({ status: "ready", list });
       })
       .catch(() => {
-        if (!cancelled) setMembers([]);
+        if (!cancelled) setMembers({ status: "failed" });
       });
     return () => {
       cancelled = true;
@@ -151,13 +173,30 @@ export function Composer({ ticketId, insertedText, onInsertedConsumed }: Compose
     setCursor(caret);
   }, [draft]);
 
+  // Public mode never opens the list (D-21), and neither does a failed member list.
   const mentionQuery =
-    isInternal && members !== null && members.length > 0 && cursor !== null
+    isInternal && members.status !== "failed" && cursor !== null
       ? findMentionQuery(body, cursor, draft.spans)
       : null;
+  const membersLoading = members.status === "loading";
   const mentionOptions =
-    mentionQuery && members ? filterMentionCandidates(members, mentionQuery.query) : [];
-  const mentionOpen = shouldOfferMentions(mentionQuery, mentionOptions.length);
+    mentionQuery && members.status === "ready"
+      ? filterMentionCandidates(members.list, mentionQuery.query)
+      : [];
+  const mentionOpen =
+    mentionQuery !== null &&
+    mentionQuery.start !== dismissedAt &&
+    (membersLoading || shouldOfferMentions(mentionQuery, mentionOptions.length));
+  const activeKey = mentionQuery ? `${mentionQuery.start}:${mentionQuery.query}` : "";
+  const activeIndex =
+    active.key === activeKey && active.index < mentionOptions.length ? active.index : 0;
+  const activeOption = mentionOpen ? (mentionOptions[activeIndex] ?? null) : null;
+
+  // A closed list stays closed for its own "@" only: once that trigger is gone, the next opens.
+  const mentionStart = mentionQuery?.start ?? null;
+  useEffect(() => {
+    if (dismissedAt !== null && mentionStart !== dismissedAt) setDismissedAt(null);
+  }, [mentionStart, dismissedAt]);
 
   function pickMention(candidate: MentionCandidate) {
     if (!mentionQuery || !isInternal) return;
@@ -166,6 +205,43 @@ export function Composer({ ticketId, insertedText, onInsertedConsumed }: Compose
       query: mentionQuery,
       member: { userId: candidate.id, name: candidate.name },
     });
+  }
+
+  function highlight(index: number) {
+    setActive({ key: activeKey, index });
+  }
+
+  function handleAriaChange(next: MentionAria) {
+    setMentionAria((prev) =>
+      prev.listId === next.listId && prev.activeId === next.activeId ? prev : next,
+    );
+  }
+
+  // Keys while the list is open (UI-SPEC Surface 4): ArrowUp and ArrowDown move, Enter or Tab
+  // inserts the highlighted member, Escape closes and leaves the typed text. Focus never leaves
+  // the textarea; with no option, Enter and Tab keep their usual meaning.
+  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (!mentionOpen || !mentionQuery || event.nativeEvent.isComposing) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      setDismissedAt(mentionQuery.start);
+      return;
+    }
+    const plain = !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey;
+    const count = mentionOptions.length;
+    if (!plain || count === 0) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      highlight((activeIndex + 1) % count);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      highlight((activeIndex - 1 + count) % count);
+    } else if (event.key === "Enter" || event.key === "Tab") {
+      event.preventDefault();
+      const option = mentionOptions[activeIndex];
+      if (option) pickMention(option);
+    }
   }
 
   function handleTextChange(event: ChangeEvent<HTMLTextAreaElement>) {
@@ -240,17 +316,43 @@ export function Composer({ ticketId, insertedText, onInsertedConsumed }: Compose
         <ComposerToggle mode={mode} onChange={changeMode} />
       </div>
 
-      <MentionAutocomplete open={mentionOpen} options={mentionOptions} onPick={pickMention}>
-        <div className={cn(isInternal && "rounded-lg border border-warning/30 bg-warning/5 p-2")}>
-          <Textarea
-            ref={textareaRef}
-            value={body}
-            onChange={handleTextChange}
-            onSelect={handleSelect}
-            placeholder={isInternal ? "Write an internal note…" : "Write a reply…"}
-            className="min-h-[96px]"
-          />
-        </div>
+      <MentionAutocomplete
+        open={mentionOpen}
+        loading={membersLoading}
+        query={mentionQuery?.query ?? ""}
+        options={mentionOptions}
+        activeId={activeOption?.id ?? null}
+        onActiveChange={(id) => {
+          const index = mentionOptions.findIndex((option) => option.id === id);
+          if (index !== -1 && index !== activeIndex) highlight(index);
+        }}
+        onPick={pickMention}
+        onDismiss={() => {
+          if (mentionQuery) setDismissedAt(mentionQuery.start);
+        }}
+        onAriaChange={handleAriaChange}
+        anchorClassName={cn(isInternal && "rounded-lg border border-warning/30 bg-warning/5 p-2")}
+      >
+        <Textarea
+          ref={textareaRef}
+          value={body}
+          onChange={handleTextChange}
+          onSelect={handleSelect}
+          onKeyDown={handleKeyDown}
+          placeholder={isInternal ? "Write an internal note…" : "Write a reply…"}
+          className="min-h-[96px]"
+          {...(isInternal
+            ? {
+                role: "combobox",
+                "aria-autocomplete": "list" as const,
+                "aria-haspopup": "listbox" as const,
+                "aria-expanded": mentionOpen,
+                "aria-controls": mentionOpen ? (mentionAria.listId ?? undefined) : undefined,
+                "aria-activedescendant":
+                  mentionOpen && activeOption ? (mentionAria.activeId ?? undefined) : undefined,
+              }
+            : {})}
+        />
       </MentionAutocomplete>
 
       {files.length > 0 && (
