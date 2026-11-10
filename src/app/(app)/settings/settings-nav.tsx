@@ -13,6 +13,9 @@ const navItems = [
   { href: "/settings/custom-fields", label: "Custom Fields" },
   { href: "/settings/email", label: "Email" },
   { href: "/settings/backups", label: "Backups" },
+  // Phase 10 (V-19, UI-SPEC amendment A2): after Backups, the last item today.
+  { href: "/settings/team", label: "Team" },
+  { href: "/settings/notifications", label: "Notifications" },
 ] as const;
 
 export function SettingsNav() {

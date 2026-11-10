@@ -73,6 +73,7 @@ const APP_PAGE_ROUTES = [
   "/settings/sla",
   "/settings/statuses",
   "/settings/tags",
+  "/settings/team",
 ] as const;
 type AppPageRoute = (typeof APP_PAGE_ROUTES)[number];
 
@@ -410,6 +411,7 @@ test.describe
         },
         { route: "/settings/email", state: "page", url: "/settings/email", h1: "Email" },
         { route: "/settings/backups", state: "page", url: "/settings/backups", h1: "Backups" },
+        { route: "/settings/team", state: "page", url: "/settings/team", h1: "Team" },
       ]);
 
       // UI duplicate title: on /kb the top bar shows "Knowledge Base" and the page h1 is sr-only, so
@@ -559,6 +561,12 @@ test.describe
           url: "/settings/statuses",
           h1: STATUS_PAGE_TITLE,
         },
+        {
+          route: "/settings/team",
+          state: "read only (member)",
+          url: "/settings/team",
+          h1: "Team",
+        },
       ]);
       await context.close();
     });
@@ -592,6 +600,7 @@ test.describe
         { route: "/settings/sla", url: "/settings/sla" },
         { route: "/settings/statuses", url: "/settings/statuses" },
         { route: "/settings/tags", url: "/settings/tags" },
+        { route: "/settings/team", url: "/settings/team" },
       ]);
       await context.close();
     });
