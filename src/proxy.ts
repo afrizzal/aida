@@ -26,11 +26,13 @@ const PUBLIC_PREFIXES = [
 // refuses, and organization({ allowUserToCreateOrganization: false }) means the attacker
 // cannot self-serve an org either. Recovery would need a manual `DELETE FROM "user"` — there
 // is no in-product path. `disableSignUp: true` was considered and rejected: it would also
-// disable the three server-side, in-process auth.api.signUpEmail() callers that legitimately
-// bootstrap the product — src/app/(auth)/setup/actions.ts, src/lib/bootstrap.ts, and
-// src/lib/demo/identities.ts. Those calls go straight to Better Auth's internal handler and
-// never traverse this proxy, so blocking only the HTTP route below closes the anonymous path
-// while leaving every legitimate bootstrap path intact. This check MUST run before the
+// disable the four server-side, in-process auth.api.signUpEmail() callers that legitimately
+// create accounts — src/app/(auth)/setup/actions.ts, src/lib/bootstrap.ts and
+// src/lib/demo/identities.ts bootstrap the product, and src/lib/workspace-members/
+// invite-onboarding.ts (plan 10-08, V-04) creates an invitee's account, only for the exact
+// address of a valid pending invitation and only once setupComplete is set. Those calls go
+// straight to Better Auth's internal handler and never traverse this proxy, so blocking only the
+// HTTP route below closes the anonymous path while leaving every legitimate path intact. This check MUST run before the
 // PUBLIC_PREFIXES allow-list below, because "/api/auth" is itself a public prefix and would
 // otherwise short-circuit past it.
 //

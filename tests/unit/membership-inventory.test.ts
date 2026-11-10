@@ -276,6 +276,20 @@ const ALLOWLIST: AllowEntry[] = [
   },
   {
     rule: "C",
+    file: "src/lib/workspace-members/invite-onboarding.ts",
+    function: "signUpAndAccept",
+    reason:
+      "account creation or sign-in for the exact invited address only: in-process auth.api.signUpEmail with the invitation's own email, after the link was validated and only once setupComplete is set (plan 10-08, D-05, V-04, R3-1)",
+  },
+  {
+    rule: "C",
+    file: "src/lib/workspace-members/invite-onboarding.ts",
+    function: "signInAndAccept",
+    reason:
+      "account creation or sign-in for the exact invited address only: in-process auth.api.signInEmail as the invitation's own email, after the link was validated (plan 10-08, D-05)",
+  },
+  {
+    rule: "C",
     file: "src/lib/bootstrap.ts",
     function: "createFirstOrgAndAdmin",
     reason:

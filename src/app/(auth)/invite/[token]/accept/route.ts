@@ -13,6 +13,13 @@
 //   (f) a 303 to the next page: /tickets?joined=1 on success, else back to the same link, whose
 //       page renders the matching state.
 //
+// Intents: `accept` (signed in), `sign-up` (name and password; the email is always the
+// invitation's own, so a posted email field is never read) and `sign-in` (password). A sign-up or
+// sign-in that created a session appends its Set-Cookie values to the 303, also when the accept
+// after it failed (C9: the account stays signed in, with no membership). In the Next runtime
+// Better Auth's nextCookies plugin also writes them through cookies(); Next merges those into this
+// response by cookie name, and a cookie this response sets wins, so each one is sent once.
+//
 // Nothing here logs: the token is a bearer credential in the path (C12).
 import { NextResponse } from "next/server";
 import { getAppOrigin } from "@/lib/app-url";
@@ -20,11 +27,20 @@ import { readBoundedFormData } from "@/lib/http/read-bounded-form-data";
 import { consumeRateLimit } from "@/lib/rate-limit/check-rate-limit";
 import { getRateLimitIdentity } from "@/lib/rate-limit/client-ip";
 import { PUBLIC_RATE_LIMITS, rateLimitedResponse } from "@/lib/rate-limit/public-limits";
-import { acceptAsSignedIn, type OnboardingResult } from "@/lib/workspace-members/invite-onboarding";
+import {
+  acceptAsSignedIn,
+  INVITEE_NAME_MAX_LENGTH,
+  INVITEE_PASSWORD_MAX_LENGTH,
+  INVITEE_PASSWORD_MIN_LENGTH,
+  type JoinResult,
+  type OnboardingResult,
+  signInAndAccept,
+  signUpAndAccept,
+} from "@/lib/workspace-members/invite-onboarding";
 
 export const runtime = "nodejs";
 
-/** The form carries at most intent, name and password: a few hundred bytes. */
+/** The form carries at most intent, name, password and the read-only email: under 1 KiB. */
 const MAX_FORM_BYTES = 4 * 1024;
 const MAX_FORM_PARTS = 4;
 
@@ -37,8 +53,30 @@ function expectedOrigin(): string | null {
   }
 }
 
-function seeOther(origin: string, path: string): NextResponse {
-  return new NextResponse(null, { status: 303, headers: { Location: `${origin}${path}` } });
+function seeOther(origin: string, path: string, setCookies: readonly string[] = []): NextResponse {
+  const response = new NextResponse(null, {
+    status: 303,
+    headers: { Location: `${origin}${path}` },
+  });
+  for (const cookie of setCookies) response.headers.append("set-cookie", cookie);
+  return response;
+}
+
+/** A string field of the form, or null when absent or a file. */
+function field(form: FormData, name: string): string | null {
+  const value = form.get(name);
+  return typeof value === "string" ? value : null;
+}
+
+/** The sign-up name, trimmed, when it is 1 to 100 characters; else null. */
+function validName(value: string | null): string | null {
+  const name = value?.trim() ?? "";
+  return name.length >= 1 && name.length <= INVITEE_NAME_MAX_LENGTH ? name : null;
+}
+
+function validPassword(value: string | null, minLength: number): string | null {
+  if (value === null) return null;
+  return value.length >= minLength && value.length <= INVITEE_PASSWORD_MAX_LENGTH ? value : null;
 }
 
 /** The 303 target of a join result. */
@@ -82,13 +120,27 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
   const { token } = await params;
   const invitePath = `/invite/${encodeURIComponent(token)}`;
 
-  // (d) The intent.
-  const intent = form.get("intent");
-  if (intent !== "accept") {
-    return NextResponse.json({ error: "invalid_intent" }, { status: 400 });
+  // (d) The intent and its fields; (e) the one onboarding call; (f) the 303.
+  const intent = field(form, "intent");
+  const requestHeaders = request.headers;
+  if (intent === "accept") {
+    const result = await acceptAsSignedIn({ token, requestHeaders });
+    return seeOther(origin, targetFor(result, invitePath));
   }
-
-  // (e) and (f).
-  const result = await acceptAsSignedIn({ token, requestHeaders: request.headers });
-  return seeOther(origin, targetFor(result, invitePath));
+  if (intent === "sign-up" || intent === "sign-in") {
+    const name = intent === "sign-up" ? validName(field(form, "name")) : "";
+    const password = validPassword(
+      field(form, "password"),
+      intent === "sign-up" ? INVITEE_PASSWORD_MIN_LENGTH : 1,
+    );
+    if (name === null || password === null) {
+      return seeOther(origin, `${invitePath}?error=field`);
+    }
+    const result: JoinResult =
+      intent === "sign-up"
+        ? await signUpAndAccept({ token, name, password, requestHeaders })
+        : await signInAndAccept({ token, password, requestHeaders });
+    return seeOther(origin, targetFor(result, invitePath), result.setCookies);
+  }
+  return NextResponse.json({ error: "invalid_intent" }, { status: 400 });
 }

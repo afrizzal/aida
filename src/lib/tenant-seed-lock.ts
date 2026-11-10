@@ -12,7 +12,9 @@
 // creation, createTicket, the KB writes) run on their own pooled connections and commit on their
 // own, so a crash mid-seed leaves those rows behind with no marker. The lock serialises the three
 // paths above and the /setup wizard (K145, review a-WR-1); user sign-up outside /setup does not
-// take it (stated limit).
+// take it (stated limit). That includes invitee sign-up (src/lib/workspace-members/
+// invite-onboarding.ts, plan 10-08, V-04): an organization already exists and setupComplete is
+// required, so it cannot race the creation of the first tenant.
 //
 // Relative imports only: src/lib/bootstrap.ts imports this module.
 // ---------------------------------------------------------------------------
