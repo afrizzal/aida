@@ -205,6 +205,20 @@ const ALLOWLIST: AllowEntry[] = [
   },
   {
     rule: "A",
+    file: "src/app/(auth)/invite/[token]/page.tsx",
+    function: "InvitePage",
+    reason:
+      "public onboarding before membership (plan 10-08, D-05): rate limited first, then getInvitationView shows only the workspace name, the role and the invited address of the one invitation behind the token; the session is read only through the fresh getCurrentSession (V-23)",
+  },
+  {
+    rule: "A",
+    file: "src/app/(auth)/invite/[token]/accept/route.ts",
+    function: "POST",
+    reason:
+      "Origin-checked, rate-limited public onboarding (plan 10-08, V-24): every join goes through invite-onboarding.ts, whose one readFreshSession read and acceptInvitation check the invited email and the inviter under the organization lock before any member row is written (V-23)",
+  },
+  {
+    rule: "A",
     file: "src/app/api/health/route.ts",
     function: "GET",
     reason:
@@ -245,6 +259,13 @@ const ALLOWLIST: AllowEntry[] = [
     function: "GET",
     reason:
       "readFreshSession from the request headers (no Next request scope in a route); its service checks membership (V-05)",
+  },
+  {
+    rule: "C",
+    file: "src/app/(auth)/invite/[token]/page.tsx",
+    function: "InvitePage",
+    reason:
+      "public onboarding before membership (plan 10-08): one fresh getCurrentSession read decides the card state (accept, wrong account or signed out); it grants nothing, every join is a POST to the accept route (V-23, V-24)",
   },
   {
     rule: "C",
