@@ -7,15 +7,21 @@
 //       from address, is skipped before anything is claimed (D-24).
 //   (b) Claim, one transaction: a per-pair advisory transaction lock; this pair's CLAIMED digests
 //       whose lease expired become RELEASED; an unexpired CLAIMED digest left means another run
-//       holds the pair, so it is skipped; the enabled types (digest and in-app switch on, defaults
-//       when no row) and the unassigned-ticket switch decide what store.claimDigestCandidates
-//       (FOR UPDATE SKIP LOCKED) takes; a CLAIMED NotificationDigest freezes the ids with
-//       leaseExpiresAt = now + LEASE_MS.
+//       holds the pair, so it is skipped; store.claimDigestCandidates (FOR UPDATE SKIP LOCKED)
+//       takes the recipient's own rows of the enabled types (digest and in-app switch on,
+//       defaults when no row) and, when the unassigned-ticket switch is on and the recipient is an
+//       owner or admin, every fallback row whatever its type; a CLAIMED NotificationDigest freezes
+//       the ids with leaseExpiresAt = now + LEASE_MS.
 //   (c) After the commit: the beforeSend hook, then the re-check (C8, D-25, V-28): no member row
-//       cancels the digest; types now switched off are left out; fallback rows are left out when
-//       the recipient opted out of unassigned tickets or is no longer an owner or admin; rows
-//       read, archived or digested since are left out (store.readDigestRows). Nothing left
+//       cancels the digest; rows of types now switched off are left out; fallback rows are left
+//       out when the recipient opted out of unassigned tickets or is no longer an owner or admin;
+//       rows read, archived or digested since are left out (store.readDigestRows). Nothing left
 //       cancels the digest.
+//
+// One rule for fallback rows (K166, V-28): the "Unassigned tickets" switch and the owner or admin
+// role alone decide them, in the bell (emit.ts writes them without the per-type in-app switch) and
+// here alike; the per-type switches govern the recipient's own tickets only. That is the copy of
+// Settings -> Notifications: "Owners and admins get these, in the app and in the digest".
 //   (d) The mail (D-24, UI-SPEC, amendment A4): the constant subject, per-type counts, ticket
 //       numbers and links, fallback rows on their own line. Only ticket number and id are read.
 //   (e) Lease check (V-29): right before connecting, the remaining lease must exceed the send
@@ -110,7 +116,10 @@ export interface RunDigestsResult {
 
 type Clock = () => Date;
 
-/** The types whose digest and in-app switches are both on (a missing row means on). */
+/**
+ * The types whose digest and in-app switches are both on (a missing row means on). They decide the
+ * recipient's own rows only; fallback rows follow the unassigned-ticket switch (K166).
+ */
 async function enabledDigestTypes(
   orgId: string,
   userId: string,
@@ -208,9 +217,7 @@ async function recheck(orgId: string, userId: string, ids: string[]): Promise<Di
   const enabled = await enabledDigestTypes(orgId, userId);
   const fallbackAllowed = (await getUnassignedSetting(orgId, userId)) && rights.isAdmin;
   const rows = await readDigestRows(prisma, orgId, userId, ids);
-  return rows.filter(
-    (row) => enabled.has(row.type) && (!row.unassignedFallback || fallbackAllowed),
-  );
+  return rows.filter((row) => (row.unassignedFallback ? fallbackAllowed : enabled.has(row.type)));
 }
 
 function ticketList(

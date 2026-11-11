@@ -104,9 +104,10 @@ export interface TicketEvent {
  *   unassignedFallbackRecipients, minus the actor, minus users whose "Unassigned tickets" switch
  *   is off (one NotificationSetting read, explicit organization term), every row marked
  *   `unassignedFallback: true`. The per-type in-app switch is not applied to these rows: the
- *   fallback has its own switch, which governs in-app and digest alike (V-28; a flagged
- *   assumption of plan 10-04). No cap and no silent truncation: the rows are written in chunks
- *   of at most FALLBACK_INSERT_CHUNK, all in tx, duplicates skipped.
+ *   fallback has its own switch, which governs in-app and digest alike (V-28; run decision K166,
+ *   digest.ts claims and re-checks these rows by the same rule). No cap and no silent
+ *   truncation: the rows are written in chunks of at most FALLBACK_INSERT_CHUNK, all in tx,
+ *   duplicates skipped.
  */
 export async function emitForTicket(
   tx: EmitForTicketTx,

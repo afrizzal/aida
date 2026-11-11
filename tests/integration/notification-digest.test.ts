@@ -20,8 +20,9 @@ import {
   type DigestSendOutcome,
   sendDigestMail,
 } from "@/lib/notifications/digest-sender";
+import { emitForTicket } from "@/lib/notifications/emit";
 import { setPreference, setUnassignedSetting } from "@/lib/notifications/preferences";
-import { insertNotifications } from "@/lib/notifications/store";
+import { countUnread, insertNotifications, listRecent } from "@/lib/notifications/store";
 import { type NotificationTypeName, TICKET_ENTITY } from "@/lib/notifications/types";
 import { scopedDb } from "@/lib/scoped-db";
 import { createTicket } from "@/lib/tickets/create-ticket";
@@ -677,6 +678,105 @@ describe("changes between the claim and the send (C8, D-25, V-28)", () => {
     expect(text).not.toContain(link(tf.id));
     await allStamped([nAssigned]);
     await noneStamped([nFallback]);
+  });
+});
+
+// K166 (c-WR-01, V-28): one rule for unassigned-fallback rows on both surfaces. A fallback row
+// follows the "Unassigned tickets" switch and the recipient's owner or admin role only ("Owners and
+// admins get these, in the app and in the digest"); the per-type switches ("… on my tickets",
+// "… assigned to you") govern the recipient's own tickets only. The rows come from the real
+// emitter (emitForTicket), the bell is the store's own read (listRecent, countUnread).
+describe("unassigned-fallback rows follow one rule in the bell and in the digest (K166, V-28)", () => {
+  async function ownerAndAdmin() {
+    const { orgId, members } = await seedOrg({ roles: ["owner", "admin"] });
+    const [owner, admin] = members;
+    if (!owner || !admin) throw new Error("owner and admin expected");
+    return { orgId, owner, admin };
+  }
+
+  function reply(orgId: string, ticketId: string, assigneeId: string | null) {
+    return emitForTicket(prisma, orgId, {
+      assigneeId,
+      type: "CUSTOMER_REPLY",
+      eventKey: `message:k166-${randomUUID()}`,
+      entityId: ticketId,
+    });
+  }
+
+  it("CUSTOMER_REPLY in app off (owner) or digest off (admin), Unassigned tickets on: the reply on an unassigned ticket is in both bells and both digests; the per-type switches still govern assigned rows", async () => {
+    const { orgId, owner, admin } = await ownerAndAdmin();
+    await setPreference(orgId, owner.id, "CUSTOMER_REPLY", { inApp: false });
+    await setPreference(orgId, admin.id, "CUSTOMER_REPLY", { digest: false });
+    const unassigned = await seedTicket(orgId);
+    const ownersTicket = await seedTicket(orgId, { assigneeId: owner.id });
+    const adminsTicket = await seedTicket(orgId, { assigneeId: admin.id });
+
+    expect(await reply(orgId, unassigned.id, null)).toBe(2);
+    // Control, assigned rows: the owner's in-app switch is off, so no row; the admin's in-app
+    // switch is on, so a row, which the admin's digest switch keeps out of the digest.
+    expect(await reply(orgId, ownersTicket.id, owner.id)).toBe(0);
+    expect(await reply(orgId, adminsTicket.id, admin.id)).toBe(1);
+
+    // The bell.
+    const ownerBell = await listRecent(orgId, owner.id);
+    expect(ownerBell.map((r) => [r.entityId, r.unassignedFallback])).toEqual([
+      [unassigned.id, true],
+    ]);
+    expect(await countUnread(orgId, owner.id)).toBe(1);
+    const adminBell = await listRecent(orgId, admin.id);
+    expect(new Set(adminBell.map((r) => `${r.entityId}:${r.unassignedFallback}`))).toEqual(
+      new Set([`${unassigned.id}:true`, `${adminsTicket.id}:false`]),
+    );
+
+    // The digest.
+    const result = await runDigests({ timing: FAST });
+    expect(
+      reportFor(result, orgId)
+        .map((r) => r.outcome)
+        .sort(),
+    ).toEqual(["sent", "sent"]);
+    for (const member of [owner, admin]) {
+      const delivered = messagesTo(member.email);
+      expect(delivered).toHaveLength(1);
+      const { text } = await parse(delivered[0]?.raw ?? "");
+      expect(text).toContain(
+        `On unassigned tickets: 1 (#${unassigned.number} ${link(unassigned.id)})`,
+      );
+      expect(text).not.toContain("Customer replies:");
+      expect(text).not.toContain(link(ownersTicket.id));
+      expect(text).not.toContain(link(adminsTicket.id));
+    }
+    const adminAssignedRow = adminBell.find((r) => r.entityId === adminsTicket.id);
+    await allStamped(
+      [...ownerBell.map((r) => r.id), ...adminBell.map((r) => r.id)].filter(
+        (id) => id !== adminAssignedRow?.id,
+      ),
+    );
+    await noneStamped([adminAssignedRow?.id ?? "missing"]);
+  });
+
+  it("Unassigned tickets off, every per-type switch on: the reply on an unassigned ticket is in neither the bell nor the digest; an existing fallback row is not claimed", async () => {
+    const { orgId, owner, admin } = await ownerAndAdmin();
+    const unassigned = await seedTicket(orgId);
+    // Written while the switch was on, then the owner opts out before the digest runs.
+    expect(await reply(orgId, unassigned.id, null)).toBe(2);
+    await setUnassignedSetting(orgId, owner.id, false);
+    expect(await reply(orgId, unassigned.id, null)).toBe(1);
+
+    const ownerBefore = await listRecent(orgId, owner.id);
+    expect(ownerBefore).toHaveLength(1);
+    const result = await runDigests({ timing: FAST });
+    // Presence: the admin, whose switch is on, gets both replies.
+    const toAdmin = messagesTo(admin.email);
+    expect(toAdmin).toHaveLength(1);
+    expect((await parse(toAdmin[0]?.raw ?? "")).text).toContain(
+      `On unassigned tickets: 2 (#${unassigned.number} ${link(unassigned.id)})`,
+    );
+    expect(reportFor(result, orgId).find((r) => r.recipientUserId === owner.id)?.outcome).toBe(
+      "nothing",
+    );
+    expect(messagesTo(owner.email, smtp.received)).toHaveLength(0);
+    await noneStamped(ownerBefore.map((r) => r.id));
   });
 });
 

@@ -259,7 +259,7 @@ describe("emitForTicket: assignee or the unassigned fallback (V-28, owner item 1
     expect(rows.map((r) => r.recipientUserId).sort()).toEqual(users.map((u) => u.id).sort());
   });
 
-  it("fallback rows follow only the unassigned switch, not the per-type in-app switch (flagged assumption)", async () => {
+  it("fallback rows follow only the unassigned switch, not the per-type in-app switch (V-28, K166)", async () => {
     const { orgId, users } = await seedOrgWithMembers(prisma, ["owner"]);
     const [owner] = users;
     await setPreference(orgId, owner.id, "SLA_AT_RISK", { inApp: false });
@@ -433,8 +433,21 @@ describe("digest data access (D-23, C10)", () => {
       claimDigestCandidates(tx, orgId, x.id, types, false),
     );
     expect(withoutFallback.map((r) => r.id)).toEqual([oldest, newest]);
+    // K166: a fallback row follows includeFallback alone, whatever its type is in the list.
     expect(
-      await prisma.$transaction((tx) => claimDigestCandidates(tx, orgId, x.id, [], true)),
+      (await prisma.$transaction((tx) => claimDigestCandidates(tx, orgId, x.id, [], true))).map(
+        (r) => r.id,
+      ),
+    ).toEqual([fallback]);
+    expect(
+      (
+        await prisma.$transaction((tx) =>
+          claimDigestCandidates(tx, orgId, x.id, ["ASSIGNED"], true),
+        )
+      ).map((r) => r.id),
+    ).toEqual([oldest, fallback]);
+    expect(
+      await prisma.$transaction((tx) => claimDigestCandidates(tx, orgId, x.id, [], false)),
     ).toEqual([]);
   });
 

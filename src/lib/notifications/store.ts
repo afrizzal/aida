@@ -230,10 +230,12 @@ export interface DigestClaimTx {
 }
 
 /**
- * Locks and returns this recipient's unread, not archived, not yet digested rows of the given
- * types in this organization, oldest first (createdAt, then id), for the rest of tx. Rows another
- * open transaction has locked are skipped, never waited for, so two digest runs never claim the
- * same row. Fallback rows (V-28) are left out when includeFallback is false.
+ * Locks and returns this recipient's unread, not archived, not yet digested rows in this
+ * organization, oldest first (createdAt, then id), for the rest of tx: the rows of the given types
+ * that are not fallback rows, plus every fallback row (V-28) when includeFallback is true. A
+ * fallback row is claimed whatever its type: the "Unassigned tickets" switch alone governs it
+ * (K166). Rows another open transaction has locked are skipped, never waited for, so two digest
+ * runs never claim the same row.
  *
  * Deviation from D-15, recorded in plan 10-04 (C10): this is the only raw SQL of the module,
  * because a row-lock-and-skip claim has no Prisma equivalent. Every value is a bound parameter,
@@ -251,7 +253,7 @@ export async function claimDigestCandidates(
   for (const type of wanted) {
     if (!isNotificationType(type)) throw new Error(`unknown notification type: ${String(type)}`);
   }
-  if (wanted.length === 0) return [];
+  if (wanted.length === 0 && !includeFallback) return [];
   const rows = await tx.$queryRaw<ClaimedNotification[]>`
     SELECT "id", "type"::text AS "type", "entityId", "unassignedFallback"
     FROM "Notification"
@@ -260,8 +262,10 @@ export async function claimDigestCandidates(
       AND "readAt" IS NULL
       AND "archivedAt" IS NULL
       AND "digestedAt" IS NULL
-      AND "type"::text = ANY(${wanted}::text[])
-      AND (${includeFallback}::boolean OR "unassignedFallback" = false)
+      AND (
+        ("unassignedFallback" = false AND "type"::text = ANY(${wanted}::text[]))
+        OR ("unassignedFallback" = true AND ${includeFallback}::boolean)
+      )
     ORDER BY "createdAt", "id"
     FOR UPDATE SKIP LOCKED
   `;
