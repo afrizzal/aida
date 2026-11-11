@@ -1,4 +1,4 @@
-// The email digest (Phase 10, AIDA-46, D-23, D-24, D-25, C8, C10, R2-5, V-28, V-29).
+// The email digest (Phase 10, AIDA-46, D-23, D-24, D-25, C8, C10, R2-5, V-28, V-29, K166, K170).
 //
 // runDigests is the scheduled job's body. Per (organization, recipient) pair:
 //
@@ -17,25 +17,30 @@
 //       out when the recipient opted out of unassigned tickets or is no longer an owner or admin;
 //       rows read, archived or digested since are left out (store.readDigestRows). Nothing left
 //       cancels the digest.
-//
-// One rule for fallback rows (K166, V-28): the "Unassigned tickets" switch and the owner or admin
-// role alone decide them, in the bell (emit.ts writes them without the per-type in-app switch) and
-// here alike; the per-type switches govern the recipient's own tickets only. That is the copy of
-// Settings -> Notifications: "Owners and admins get these, in the app and in the digest".
 //   (d) The mail (D-24, UI-SPEC, amendment A4): the constant subject, per-type counts, ticket
 //       numbers and links, fallback rows on their own line. Only ticket number and id are read.
 //   (e) Lease check (V-29): right before connecting, the remaining lease must exceed the send
 //       deadline plus the commit margin, else the claim is released and nothing connects. The
 //       deadline is min(SEND_DEADLINE_MS, remaining lease - COMMIT_MARGIN_MS).
-//   (f) Record (R2-5): accepted -> afterSend hook, then one transaction moves CLAIMED -> SENT and
-//       stamps exactly the sent ids; a transient rejection (4xx) -> CLAIMED -> RELEASED at once,
-//       nothing stamped (the next run sends it once); a permanent rejection (5xx, run decision
-//       K170) -> one transaction moves CLAIMED -> CANCELED and stamps the ids it tried to send, so
-//       they are never emailed and no later run writes another NotificationDigest row for them
-//       (they stay in the bell; a new notification starts a new batch); ambiguous -> left CLAIMED
-//       until its lease expires, nothing stamped. Every status change is conditional on the digest's own id and status CLAIMED:
-//       that is the fence. An ambiguous attempt can add one copy, so repeated ambiguous failures
-//       can deliver more than one duplicate; exactly-once is not claimed (docs/OPERATIONS.md).
+//   (f) Record (R2-5):
+//       - accepted: the afterSend hook, then one transaction moves CLAIMED -> SENT, stamps exactly
+//         the sent ids and keeps only those ids on the digest row (review c-IN-04: the row says
+//         what the member received, not what was claimed);
+//       - a transient rejection (4xx): CLAIMED -> RELEASED at once, nothing stamped; the next run
+//         sends it once;
+//       - a permanent rejection (5xx, K170): one transaction moves CLAIMED -> CANCELED and stamps
+//         the ids it tried to send, which it keeps on the row. They are never emailed, and no
+//         later run writes another NotificationDigest row for them; they stay in the bell, and a
+//         new notification starts a new batch;
+//       - ambiguous: left CLAIMED until its lease expires, nothing stamped.
+//       Every status change is conditional on the digest's own id and status CLAIMED: that is the
+//       fence. An ambiguous attempt can add one copy, so repeated ambiguous failures can deliver
+//       more than one duplicate; exactly-once is not claimed (docs/OPERATIONS.md).
+//
+// One rule for fallback rows (K166, V-28): the "Unassigned tickets" switch and the owner or admin
+// role alone decide them, in the bell (emit.ts writes them without the per-type in-app switch) and
+// here alike; the per-type switches govern the recipient's own tickets only. That is the copy of
+// Settings -> Notifications: "Owners and admins get these, in the app and in the digest".
 //
 // Logging (K170): every failed send and every pair that throws writes one line with the error
 // class and codes only (digest-log.ts); the job handler adds one summary line per run.
@@ -365,7 +370,7 @@ async function processPair(
     const closed = await prisma.$transaction(async (tx) => {
       const moved = await tx.notificationDigest.updateMany({
         where: { id: claim.digestId, status: "CLAIMED" },
-        data: { status: "CANCELED" },
+        data: { status: "CANCELED", notificationIds: sentIds },
       });
       if (moved.count !== 1) return false;
       await stampDigested(tx, orgId, userId, sentIds, clock());
@@ -381,9 +386,7 @@ async function processPair(
     return;
   }
   if (result.outcome === "ambiguous") {
-    digestLog(
-      `send ambiguous: ${label}${result.deadlineReached ? " deadline=reached" : ""}`,
-    );
+    digestLog(`send ambiguous: ${label}${result.deadlineReached ? " deadline=reached" : ""}`);
     report.outcome = "ambiguous";
     return;
   }
@@ -393,7 +396,7 @@ async function processPair(
     const now = clock();
     const moved = await tx.notificationDigest.updateMany({
       where: { id: claim.digestId, status: "CLAIMED" },
-      data: { status: "SENT", sentAt: now },
+      data: { status: "SENT", sentAt: now, notificationIds: sentIds },
     });
     if (moved.count !== 1) return false;
     await stampDigested(tx, orgId, userId, sentIds, now);

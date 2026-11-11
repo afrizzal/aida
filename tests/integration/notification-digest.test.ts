@@ -760,6 +760,10 @@ describe("changes between the claim and the send (C8, D-25, V-28)", () => {
     await allStamped([assignedId]);
     await noneStamped([mentionId]);
     expect(await statuses(orgId, owner.id)).toEqual(["SENT"]);
+    // Review c-IN-04: the SENT row records the ids that were sent, not every id it claimed.
+    expect((await digestsOf(orgId, owner.id)).map((d) => [...d.notificationIds])).toEqual([
+      [assignedId],
+    ]);
   });
 
   it("control: the same batch without the hook includes the mention line", async () => {
