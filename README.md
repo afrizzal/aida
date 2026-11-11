@@ -118,8 +118,9 @@ provider.
 - You want a fully managed SaaS with an uptime SLA and a support contract to call when something breaks.
 - You need a mature marketplace of third-party integrations and pre-built apps.
 - You need multi-brand or multi-workspace administration in the UI today — the data model is
-  multi-tenant-ready, but v1 ships a single workspace in the UI, and there is currently no in-product
-  way to invite a second team member to a workspace.
+  multi-tenant-ready, but v1 ships a single workspace in the UI. Admins invite team members to that
+  workspace by email with a role from Settings → Team, or copy the invitation link when email is not
+  set up.
 - You're not comfortable operating a server yourself, including its backups and updates.
 - You need live chat / real-time messaging — AIDA starts with web-form and email intake; live chat isn't built yet.
 
