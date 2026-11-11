@@ -38,6 +38,7 @@
 //
 // Relative imports only and no framework import.
 import { randomUUID } from "node:crypto";
+import { z } from "zod/v4";
 import type { Prisma } from "../../generated/prisma/client";
 import { getAppBaseUrl } from "../app-url";
 import { getBrandingSettings } from "../branding/settings";
@@ -78,12 +79,23 @@ export function normaliseInviteEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-/** A plausible single address: one `@`, a non-empty local part and domain, no whitespace. */
+/**
+ * Exactly one address that Better Auth's sign-up will also accept (K163, b-WR-4): the invitee's
+ * account is created by auth.api.signUpEmail with this address, which refuses anything that
+ * fails `z.email()` of the installed zod 4 (better-auth dist/api/routes/sign-up.mjs), so the same
+ * schema is applied here, before any write. That rule also refuses address-list syntax (a comma,
+ * a semicolon, angle brackets, a display name, a quoted local part, an IP literal), which
+ * nodemailer would otherwise read as other or extra recipients. Single-label domains such as
+ * `it@intranet` are refused as sign-up refuses them.
+ */
+const SIGN_UP_EMAIL = z.email();
+
 function isPlausibleEmail(email: string): boolean {
   if (email.length === 0 || email.length > MAX_EMAIL_LENGTH) return false;
   if (/\s/.test(email)) return false;
   const at = email.indexOf("@");
-  return at > 0 && at === email.lastIndexOf("@") && at < email.length - 1;
+  if (at <= 0 || at !== email.lastIndexOf("@") || at >= email.length - 1) return false;
+  return SIGN_UP_EMAIL.safeParse(email).success;
 }
 
 const isNonEmptyString = (value: unknown): value is string =>

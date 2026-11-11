@@ -382,6 +382,42 @@ describe("createInvitation: role ceilings, input and duplicates (D-03, V-26)", (
     expect(await prisma.invitation.count({ where: { organizationId: orgId } })).toBe(0);
   });
 
+  // K163 (b-WR-4): the address is checked with the rule Better Auth's sign-up applies to the same
+  // address later (z.email() of the installed zod 4), and it must be exactly one address. A
+  // single-label domain, a non-ASCII local part and address-list syntax that nodemailer would read
+  // as other or extra recipients are refused before any write; an ordinary address with a plus
+  // tag and a subdomain is accepted.
+  it("K163: refuses what Better Auth's sign-up would refuse and address-list syntax (INVALID_EMAIL), before any write", async () => {
+    const { orgId, ids } = await seed(["owner"]);
+    const [owner] = ids;
+    for (const email of [
+      "it@intranet",
+      "ops@corp.local1",
+      "ünïcode@example.test",
+      "a,b@example.test",
+      "a@example.test,b@example.test",
+      "<other@example.test>x",
+      "Name <a@example.test>",
+      "a;b@example.test",
+      '"quoted"@example.test',
+      "a@[192.0.2.1]",
+    ]) {
+      expect(
+        await createInvitation({ orgId, actorUserId: owner, email, role: "member" }),
+        email,
+      ).toEqual({ ok: false, error: "INVALID_EMAIL" });
+    }
+    expect(await prisma.invitation.count({ where: { organizationId: orgId } })).toBe(0);
+
+    const accepted = await createInvitation({
+      orgId,
+      actorUserId: owner,
+      email: `First.Last+tag-${randomUUID().slice(0, 8)}@sub.example.test`,
+      role: "member",
+    });
+    expect(accepted.ok).toBe(true);
+  });
+
   it("refuses a current member's address (ALREADY_MEMBER) and a second unexpired pending one (PENDING_EXISTS); an expired one does not block", async () => {
     const { orgId, ids } = await seed(["owner", "member"]);
     const [owner, member] = ids;
