@@ -4,7 +4,6 @@ import { AppUrlError, assertAppUrlAtStart } from "../app-url";
 import { assertDatabaseUrlConsistent, DatabaseUrlMismatchError } from "../db-url";
 import { KB_PROPOSAL_GENERATE_QUEUE } from "../kb/proposal-contract";
 import { ensureKbProposalQueue } from "../kb/proposal-queue";
-import { digestCron, NOTIFICATION_DIGEST_QUEUE } from "../notifications/digest-config";
 import { PROJECT_FILE_CLEANUP_CRON, PROJECT_FILE_CLEANUP_QUEUE } from "../projects/contract";
 import { aiTriageHandler } from "./jobs/ai-triage";
 import { autoCloseHandler } from "./jobs/auto-close";
@@ -14,7 +13,7 @@ import { heartbeatHandler } from "./jobs/heartbeat";
 import { insightRunHandler } from "./jobs/insight-run";
 import { kbEmbedArticleHandler } from "./jobs/kb-embed-article";
 import { kbProposalGenerateHandler } from "./jobs/kb-proposal-generate";
-import { notificationDigestHandler } from "./jobs/notification-digest";
+import { registerNotificationDigest } from "./jobs/notification-digest";
 import { projectFileCleanupHandler } from "./jobs/project-file-cleanup";
 import { rateLimitCleanupHandler } from "./jobs/rate-limit-cleanup";
 import { slaFlagHandler } from "./jobs/sla-flag";
@@ -171,15 +170,13 @@ async function main() {
   });
   await boss.schedule(PROJECT_FILE_CLEANUP_QUEUE, PROJECT_FILE_CLEANUP_CRON, {});
 
-  // Email digest (Phase 10, AIDA-46, D-23, D-24): every AIDA_DIGEST_INTERVAL_HOURS (default 4),
-  // one email per recipient through the organization's configured SMTP, recorded only on the
-  // server's final acceptance. Singleton so a slow run never overlaps the next one; the per-pair
-  // advisory lock and the lease keep two runs apart anyway. Needs BETTER_AUTH_URL for its links.
-  await boss.createQueue(NOTIFICATION_DIGEST_QUEUE, { policy: "singleton" });
-  await boss.work(NOTIFICATION_DIGEST_QUEUE, async (jobs: Job[]) => {
-    await notificationDigestHandler(jobs);
-  });
-  await boss.schedule(NOTIFICATION_DIGEST_QUEUE, digestCron(), {});
+  // Email digest (Phase 10, AIDA-46, D-23, D-24, K169): every AIDA_DIGEST_INTERVAL_HOURS (default
+  // 4), one email per recipient through the organization's configured SMTP, recorded only on the
+  // server's final acceptance. Singleton, no retry, an expiry of the interval, and the job's signal
+  // stops a run before its next claim: an expired run is never retried and stops after the pair in
+  // flight, which the per-pair advisory lock and the lease keep apart from the next run
+  // (notification-digest.ts). Needs BETTER_AUTH_URL for its links.
+  await registerNotificationDigest(boss);
 
   console.log("[worker] started");
 

@@ -81,6 +81,11 @@ export interface DigestHookContext {
 export interface RunDigestsDeps {
   /** The clock; read at the claim, the lease check and the record. Defaults to the real time. */
   now?: () => Date;
+  /**
+   * The pg-boss job's signal (K169): once aborted (the job expired, or the worker stops), the run
+   * stops before its next claim; the pair in flight finishes.
+   */
+  signal?: AbortSignal;
   /** Test overrides of the timing constants, checked with assertDigestTiming. */
   timing?: Partial<DigestTiming>;
   /** Test seams, awaited in this order around one digest. */
@@ -112,6 +117,8 @@ export interface DigestPairReport {
 export interface RunDigestsResult {
   pairs: number;
   reports: DigestPairReport[];
+  /** True when the signal stopped the run before every pair was processed. */
+  stopped: boolean;
 }
 
 type Clock = () => Date;
@@ -368,7 +375,8 @@ async function processPair(
 /**
  * Builds and sends every due digest once. Never throws for one pair: a pair that fails is
  * reported as `failed` and left as it stands (a CLAIMED digest waits for its lease). Throws only
- * when the timing overrides are invalid or BETTER_AUTH_URL is not usable, before any claim.
+ * when the timing overrides are invalid or BETTER_AUTH_URL is not usable, before any claim. An
+ * aborted `signal` stops the run before the next pair (`stopped`).
  */
 export async function runDigests(deps: RunDigestsDeps = {}): Promise<RunDigestsResult> {
   const timing: DigestTiming = { ...DIGEST_TIMING, ...deps.timing };
@@ -380,8 +388,13 @@ export async function runDigests(deps: RunDigestsDeps = {}): Promise<RunDigestsR
   const pairs = await listDigestPairs(prisma);
   const settingsByOrg = new Map<string, EmailSettings | null>();
   const reports: DigestPairReport[] = [];
+  let stopped = false;
 
   for (const pair of pairs) {
+    if (deps.signal?.aborted) {
+      stopped = true;
+      break;
+    }
     const report: DigestPairReport = {
       organizationId: pair.organizationId,
       recipientUserId: pair.recipientUserId,
@@ -412,5 +425,5 @@ export async function runDigests(deps: RunDigestsDeps = {}): Promise<RunDigestsR
       report.outcome = "failed";
     }
   }
-  return { pairs: pairs.length, reports };
+  return { pairs: pairs.length, reports, stopped };
 }

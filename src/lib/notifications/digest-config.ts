@@ -40,6 +40,15 @@ export function digestCron(env: Env = process.env): string {
   return `0 */${hours} * * *`;
 }
 
+/**
+ * pg-boss's expiry of one digest job, in seconds (K169): the interval, so a run that has not ended
+ * by the next scheduled run is failed and its signal aborted, at most 23 hours (pg-boss refuses an
+ * expiry of 24 hours or more).
+ */
+export function digestExpireSeconds(env: Env = process.env): number {
+  return Math.min(digestIntervalHours(env), 23) * 3600;
+}
+
 /** The cadence in words, for the preferences page: "every hour", "every N hours", "once a day". */
 export function digestIntervalText(env: Env = process.env): string {
   const hours = digestIntervalHours(env);
