@@ -13,8 +13,8 @@
 //   (c) the body, bounded in bytes and parts;
 //   (d) the intent and its fields, validated here;
 //   (e) one call into src/lib/workspace-members/invite-onboarding.ts with the request headers;
-//   (f) a 303 to the next page: /tickets?joined=1 on success, else back to the same link, whose
-//       page renders the matching state.
+//   (f) a 303 with a relative Location (K160) to the next page: /tickets?joined=1 on success,
+//       else back to the same link, whose page renders the matching state.
 //
 // Intents: `accept` (signed in), `sign-up` (name and password; the email is always the
 // invitation's own, so a posted email field is never read) and `sign-in` (password). A sign-up or
@@ -25,7 +25,7 @@
 //
 // Nothing here logs: the token is a bearer credential in the path (C12).
 import { NextResponse } from "next/server";
-import { getAppOrigin, getTrustedAppOrigins } from "@/lib/app-url";
+import { getTrustedAppOrigins } from "@/lib/app-url";
 import { readBoundedFormData } from "@/lib/http/read-bounded-form-data";
 import { consumeRateLimit } from "@/lib/rate-limit/check-rate-limit";
 import { getRateLimitIdentity } from "@/lib/rate-limit/client-ip";
@@ -47,20 +47,14 @@ export const runtime = "nodejs";
 const MAX_FORM_BYTES = 4 * 1024;
 const MAX_FORM_PARTS = 4;
 
-/** The configured origin, or null when BETTER_AUTH_URL is missing or invalid (refuse all). */
-function expectedOrigin(): string | null {
-  try {
-    return getAppOrigin();
-  } catch {
-    return null;
-  }
-}
-
-function seeOther(origin: string, path: string, setCookies: readonly string[] = []): NextResponse {
-  const response = new NextResponse(null, {
-    status: 303,
-    headers: { Location: `${origin}${path}` },
-  });
+/**
+ * A 303 to `path`, a root-relative target (K160, b-WR-5). The browser resolves it against the URL
+ * it actually posted to, so the redirect keeps the scheme and host the invitee is on (behind
+ * Caddy, https://localhost while BETTER_AUTH_URL may say http://localhost) and depends on no
+ * request header. Every caller passes a path that starts with exactly one "/".
+ */
+function seeOther(path: string, setCookies: readonly string[] = []): NextResponse {
+  const response = new NextResponse(null, { status: 303, headers: { Location: path } });
   for (const cookie of setCookies) response.headers.append("set-cookie", cookie);
   return response;
 }
@@ -119,8 +113,7 @@ function targetFor(result: OnboardingResult, invitePath: string): string {
 
 export async function POST(request: Request, { params }: { params: Promise<{ token: string }> }) {
   // (a) Origin first, before any read.
-  const origin = expectedOrigin();
-  if (origin === null || !isSameOriginPost(request.headers)) {
+  if (!isSameOriginPost(request.headers)) {
     return NextResponse.json({ error: "forbidden_origin" }, { status: 403 });
   }
 
@@ -147,7 +140,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
   const requestHeaders = request.headers;
   if (intent === "accept") {
     const result = await acceptAsSignedIn({ token, requestHeaders });
-    return seeOther(origin, targetFor(result, invitePath));
+    return seeOther(targetFor(result, invitePath));
   }
   if (intent === "sign-up" || intent === "sign-in") {
     const name = intent === "sign-up" ? validName(field(form, "name")) : "";
@@ -156,13 +149,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
       intent === "sign-up" ? INVITEE_PASSWORD_MIN_LENGTH : 1,
     );
     if (name === null || password === null) {
-      return seeOther(origin, `${invitePath}?error=field`);
+      return seeOther(`${invitePath}?error=field`);
     }
     const result: JoinResult =
       intent === "sign-up"
         ? await signUpAndAccept({ token, name, password, requestHeaders })
         : await signInAndAccept({ token, password, requestHeaders });
-    return seeOther(origin, targetFor(result, invitePath), result.setCookies);
+    return seeOther(targetFor(result, invitePath), result.setCookies);
   }
   return NextResponse.json({ error: "invalid_intent" }, { status: 400 });
 }

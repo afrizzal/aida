@@ -229,7 +229,7 @@ describe("tracer: a signed-in invited user posts Accept and the next request is 
     const response = await post(token, { intent: "accept" }, { cookie });
 
     expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe(`${ORIGIN}/tickets?joined=1`);
+    expect(response.headers.get("location")).toBe(`/tickets?joined=1`);
     // The next request, with exactly the cookies held before accept, is in B.
     const after = await readFreshSession(new Headers({ cookie }));
     expect(after?.user.id).toBe(user.userId);
@@ -666,6 +666,34 @@ describe("the accept route (V-24): Origin, rate limit, validation, 303", () => {
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
   });
 
+  // K160 (b-WR-5): every 303 has a relative Location, so the browser resolves it against the URL
+  // it actually posted to. With the shipped default (BETTER_AUTH_URL http://localhost, Caddy
+  // serving https://localhost) an absolute target on BETTER_AUTH_URL would send the browser from
+  // https to http after the form post, which CSP form-action 'self' blocks.
+  it("K160: a join posted from a trusted origin with another scheme gets a relative Location, never one on BETTER_AUTH_URL", async () => {
+    const otherScheme = ORIGIN.replace(/^http:/, "https:");
+    const before = process.env.BETTER_AUTH_TRUSTED_ORIGINS;
+    process.env.BETTER_AUTH_TRUSTED_ORIGINS = otherScheme;
+    try {
+      const user = await signedInMemberOfOtherOrg();
+      const { orgId: orgB, token } = await invite(user.email);
+      const response = await post(
+        token,
+        { intent: "accept" },
+        { cookie: user.cookie, origin: otherScheme },
+      );
+      expect(response.status).toBe(303);
+      const location = response.headers.get("location") ?? "";
+      expect(location).toBe("/tickets?joined=1");
+      expect(location.startsWith("//")).toBe(false);
+      expect(location).not.toContain(ORIGIN);
+      expect(await memberRows(orgB, user.userId)).toHaveLength(1);
+    } finally {
+      if (before === undefined) delete process.env.BETTER_AUTH_TRUSTED_ORIGINS;
+      else process.env.BETTER_AUTH_TRUSTED_ORIGINS = before;
+    }
+  });
+
   it("intent sign-up answers 303 to /tickets?joined=1 with the new session cookie; a posted email field is ignored", async () => {
     const email = freshEmail();
     const { orgId, token } = await invite(email);
@@ -678,7 +706,7 @@ describe("the accept route (V-24): Origin, rate limit, validation, 303", () => {
     });
 
     expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe(`${ORIGIN}/tickets?joined=1`);
+    expect(response.headers.get("location")).toBe(`/tickets?joined=1`);
     const setCookies = response.headers.getSetCookie();
     expect(setCookies.filter((c) => c.split("=")[0].endsWith("session_token"))).toHaveLength(1);
     const users = await usersWithEmail(email);
@@ -696,7 +724,7 @@ describe("the accept route (V-24): Origin, rate limit, validation, 303", () => {
     const response = await post(token, { intent: "sign-in", password: "wrong password!" });
 
     expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe(`${ORIGIN}/invite/${token}?error=password`);
+    expect(response.headers.get("location")).toBe(`/invite/${token}?error=password`);
     expect(response.headers.getSetCookie()).toEqual([]);
     expect(await memberRows(orgId, account.userId)).toEqual([]);
   });
@@ -708,7 +736,7 @@ describe("the accept route (V-24): Origin, rate limit, validation, 303", () => {
     const response = await post(token, { intent: "sign-in", password: account.password });
 
     expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe(`${ORIGIN}/tickets?joined=1`);
+    expect(response.headers.get("location")).toBe(`/tickets?joined=1`);
     const session = await readFreshSession(
       new Headers({ cookie: cookieFrom(response.headers.getSetCookie()) }),
     );
@@ -727,7 +755,7 @@ describe("the accept route (V-24): Origin, rate limit, validation, 303", () => {
     ]) {
       const response = await post(token, { intent: "sign-up", ...fields });
       expect(response.status).toBe(303);
-      expect(response.headers.get("location")).toBe(`${ORIGIN}/invite/${token}?error=field`);
+      expect(response.headers.get("location")).toBe(`/invite/${token}?error=field`);
     }
     expect(await usersWithEmail(email)).toEqual([]);
   });
@@ -739,7 +767,7 @@ describe("the accept route (V-24): Origin, rate limit, validation, 303", () => {
     const response = await post(token, { intent: "accept" });
 
     expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe(`${ORIGIN}/invite/${token}`);
+    expect(response.headers.get("location")).toBe(`/invite/${token}`);
     expect(await invitationStatus(invitationId)).toBe("pending");
   });
 
@@ -750,6 +778,6 @@ describe("the accept route (V-24): Origin, rate limit, validation, 303", () => {
     const response = await post(token, { intent: "accept" }, { cookie: user.cookie });
 
     expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe(`${ORIGIN}/invite/${token}`);
+    expect(response.headers.get("location")).toBe(`/invite/${token}`);
   });
 });
