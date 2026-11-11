@@ -32,7 +32,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 - [ ] **Phase 8: Security Hardening** — Dependency audit to zero critical and high, non-root containers, CSP, trusted client IP, public-route abuse controls
 - [ ] **Phase 8.1: Docker test tooling and runtime proofs** — Split from Phase 8 after plan review cycle 4 (owner decision 2026-11-11): container harness, runtime proofs, full gate, CI egress job; waits for owner (`08-SPLIT.md`)
 - [ ] **Phase 9: Operations** (executed, verified human_needed 2026-11-12) — Backup schedule, logo upload, password encoding, single `<h1>`, seed guard, permanent regression tests, repo health
-- [ ] **Phase 10: Team** (replanned 2026-11-13, 17 plans, plan checker passed; execution next) — Invitations and roles, notifications and mentions
+- [ ] **Phase 10: Team** (replanned 2026-11-13, 17 plans executed; code review next) — Invitations and roles, notifications and mentions
 - [ ] **Phase 11: Inbox** — Saved views, bulk actions, command palette, keyboard inbox, auto-close
 - [ ] **Phase 12: Ticket Lifecycle** — Relations, merge, snooze and the activity feed (split K32)
 - [ ] **Phase 12.1: Ticket Lifecycle** — Custom states with SLA pause
@@ -193,7 +193,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 5. Preferences apply, and the digest sends one batched email through a fake SMTP with no PII in the subject.
 
 **Stays open for a human:** a test with real email.
-**Plans:** 16/17 plans complete (replanned 2026-11-13 after the owner unparked the phase: 16 plans rewritten in place, 10-17 new; plan checker passed with info notes only, plus a second pass tracing drift items D1 to D43 and the cycle 3 findings; no further Codex plan review per owner item 2)
+**Plans:** 17/17 plans complete (replanned 2026-11-13 after the owner unparked the phase: 16 plans rewritten in place, 10-17 new; plan checker passed with info notes only, plus a second pass tracing drift items D1 to D43 and the cycle 3 findings; no further Codex plan review per owner item 2)
 **Wave 1**
 
 - [x] 10-01-PLAN.md — Lay the whole Phase 10 data foundation in one migration (`20261115100000_team_foundation`) and the shared workspace-member modules (Wave 1)
@@ -230,7 +230,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
-- [ ] 10-14-PLAN.md — Run the phase gate and the §9 design checklist, record evidence per requirement, list what stays open (Wave 7)
+- [x] 10-14-PLAN.md — Run the phase gate and the §9 design checklist, record evidence per requirement, list what stays open (Wave 7)
 
 ### Phase 11: Inbox
 
@@ -560,7 +560,7 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 |---|---|---|---|---|
 | 8. Security Hardening | v2.0 | 18/18 (Part A) | Part A verified: human_needed (2026-11-12); Part B moved to Phase 8.1, waits for owner | - |
 | 9. Operations | v2.0 | 13/13 | Verified: human_needed (stack proofs SP-1 to SP-3 and human checks open) | - |
-| 10. Team | v2.0 | 16/17 | Executing (replanned 2026-11-13; plan checker passed) | - |
+| 10. Team | v2.0 | 17/17 | Executed; code review next (gate in 10-GATE.md) | - |
 | 11. Inbox | v2.0 | 9/9 | Verified: human_needed (visual, dark mode, 360px and screen-reader checks open) | - |
 | 12. Ticket Lifecycle (relations, merge, snooze, activity) | v2.0 | 10/10 | Verified: human_needed (visual, dark mode, layout widths and screen-reader checks open; AIDA-53 closed by owner decision 12-o1 on 2026-11-11) | - |
 | 12.1. Ticket Lifecycle (custom states, SLA pause) | v2.0 | 17/17 | Verified: human_needed (visual, dark mode, contrast by eye, screen reader and UAT open; K47 deferred) | - |
