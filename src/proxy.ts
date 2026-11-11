@@ -13,7 +13,8 @@ const PUBLIC_PREFIXES = [
   "/api/public",
   // Plan 10-15 (V-04): the invitation page and its accept route. No branch of its own: it is
   // forwarded through forwardWithSecurityHeaders like every public path, and csp.ts gives it
-  // Referrer-Policy no-referrer because the token is in the path.
+  // Referrer-Policy same-origin (K159, amends D-04): the token is in the path, so no Referer may
+  // reach another origin, and the card's own post must carry its real Origin.
   "/invite",
 ];
 

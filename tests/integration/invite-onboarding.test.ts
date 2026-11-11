@@ -568,13 +568,14 @@ describe("the accept route (V-24): Origin, rate limit, validation, 303", () => {
     expect(await limiterRows(ip)).toBe(0);
   });
 
-  // Plan 10-13 (found by the E2E): the invitation page sends Referrer-Policy: no-referrer (D-04),
-  // so a browser sends its own form post with Origin "null". Only that shape with same-origin
-  // navigation metadata is admitted; the same "null" from another site, or with partial metadata,
-  // and a missing Origin with metadata, stay refused.
-  it("admits the card's own post under no-referrer: Origin null with same-origin navigation metadata joins", async () => {
+  // K159 (b-WR-1, a-IN-2; amends D-04): the invitation page sends Referrer-Policy: same-origin, so
+  // a browser sends the card's own post with its real Origin. The "null" Origin plus fetch
+  // metadata shape that dd941e0 admitted under no-referrer is refused again, whatever the
+  // metadata says; so is a missing Origin with metadata and a foreign Origin with metadata.
+  it("refuses Origin null even with same-origin navigation metadata (the dd941e0 shape) and accepts nothing", async () => {
     const user = await signedInMemberOfOtherOrg();
-    const { orgId: orgB, token } = await invite(user.email);
+    const { orgId: orgB, invitationId, token } = await invite(user.email);
+    const ip = uniqueClientIp();
     const response = await post(
       token,
       { intent: "accept" },
@@ -582,14 +583,17 @@ describe("the accept route (V-24): Origin, rate limit, validation, 303", () => {
         cookie: user.cookie,
         origin: "null",
         fetchMetadata: { site: "same-origin", mode: "navigate" },
+        ip,
       },
     );
-    expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe(`${ORIGIN}/tickets?joined=1`);
-    expect(await memberRows(orgB, user.userId)).toHaveLength(1);
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "forbidden_origin" });
+    expect(await invitationStatus(invitationId)).toBe("pending");
+    expect(await memberRows(orgB, user.userId)).toEqual([]);
+    expect(await limiterRows(ip)).toBe(0);
   });
 
-  it("refuses Origin null from another site or with partial metadata, and a missing Origin with metadata", async () => {
+  it("refuses Origin null with any other metadata, and a missing or foreign Origin with metadata", async () => {
     const user = await signedInMemberOfOtherOrg();
     const { orgId: orgB, invitationId, token } = await invite(user.email);
     const ip = uniqueClientIp();
@@ -617,6 +621,35 @@ describe("the accept route (V-24): Origin, rate limit, validation, 303", () => {
     expect(await invitationStatus(invitationId)).toBe("pending");
     expect(await memberRows(orgB, user.userId)).toEqual([]);
     expect(await limiterRows(ip)).toBe(0);
+  });
+
+  // K159: the exact match also admits an origin the operator listed in BETTER_AUTH_TRUSTED_ORIGINS
+  // (the shipped default lists http://localhost and https://localhost, because Caddy serves
+  // https://localhost while BETTER_AUTH_URL is http://localhost). Exact equality only: a listed
+  // origin with another port or a suffix is still refused.
+  it("admits an exact origin from BETTER_AUTH_TRUSTED_ORIGINS and refuses near misses of it", async () => {
+    const trusted = "https://alias.invite-onboarding.example.test";
+    const before = process.env.BETTER_AUTH_TRUSTED_ORIGINS;
+    process.env.BETTER_AUTH_TRUSTED_ORIGINS = `${ORIGIN}, ${trusted}/`;
+    try {
+      const user = await signedInMemberOfOtherOrg();
+      const { orgId: orgB, token } = await invite(user.email);
+      for (const origin of [`${trusted}:444`, `${trusted}.evil.example.test`, `${trusted}/`]) {
+        const refused = await post(token, { intent: "accept" }, { cookie: user.cookie, origin });
+        expect(refused.status, origin).toBe(403);
+      }
+      expect(await memberRows(orgB, user.userId)).toEqual([]);
+      const response = await post(
+        token,
+        { intent: "accept" },
+        { cookie: user.cookie, origin: trusted },
+      );
+      expect(response.status).toBe(303);
+      expect(await memberRows(orgB, user.userId)).toHaveLength(1);
+    } finally {
+      if (before === undefined) delete process.env.BETTER_AUTH_TRUSTED_ORIGINS;
+      else process.env.BETTER_AUTH_TRUSTED_ORIGINS = before;
+    }
   });
 
   it("answers the eleventh POST in an hour from one identity with 429, before the token lookup", async () => {

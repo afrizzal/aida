@@ -19,7 +19,8 @@ import { InviteCard, type InviteCardError, type InviteCardState } from "./invite
 // It lives in the (auth) group, so the auth layout draws the background and this renders only the
 // card. The server decides the one state; the token is never rendered as text (it is only in the
 // URL and in the form's action). The proxy lists /invite as public and sends Referrer-Policy
-// no-referrer for it (plan 10-15). Every join goes through the POST route beside this page.
+// same-origin for it (plan 10-15; K159 amends D-04), so no Referer leaves the origin and the
+// card's own post carries its real Origin. Every join goes through the POST route beside this page.
 //
 // The view is rate limited before the token lookup (V-04), on the client identity the proxy
 // writes. A throttled view looks nothing up and shows the server-error copy (amendment A6).

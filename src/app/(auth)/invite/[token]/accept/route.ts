@@ -3,10 +3,11 @@
 // The one join endpoint of the invitation page: a plain HTML form posts here and gets a 303, so
 // the page needs no client fetch and no server action (CSP, V-24). The order is fixed:
 //   (a) Origin: it acts on a signed-in session, so a request whose Origin header is missing or is
-//       not the origin of BETTER_AUTH_URL is refused with 403 before anything else is read (a
-//       cross-site form post cannot accept on someone's behalf; threat T-10-33). The one other
-//       shape admitted is the card's own post under the page's no-referrer policy: Origin "null"
-//       with same-origin navigation fetch metadata (isSameOriginPost);
+//       not exactly one of the application's origins (getTrustedAppOrigins: the origin of
+//       BETTER_AUTH_URL plus BETTER_AUTH_TRUSTED_ORIGINS) is refused with 403 before anything else
+//       is read (a cross-site form post cannot accept on someone's behalf; threat T-10-33). The
+//       page sends Referrer-Policy same-origin (K159), so the card's own post carries its real
+//       Origin; "null" and fetch metadata are never admitted (isSameOriginPost);
 //   (b) the inviteAccept rate limit on the proxy-written client identity, before the token lookup
 //       and the body (threat T-10-33b);
 //   (c) the body, bounded in bytes and parts;
@@ -24,7 +25,7 @@
 //
 // Nothing here logs: the token is a bearer credential in the path (C12).
 import { NextResponse } from "next/server";
-import { getAppOrigin } from "@/lib/app-url";
+import { getAppOrigin, getTrustedAppOrigins } from "@/lib/app-url";
 import { readBoundedFormData } from "@/lib/http/read-bounded-form-data";
 import { consumeRateLimit } from "@/lib/rate-limit/check-rate-limit";
 import { getRateLimitIdentity } from "@/lib/rate-limit/client-ip";
@@ -65,26 +66,23 @@ function seeOther(origin: string, path: string, setCookies: readonly string[] = 
 }
 
 /**
- * Whether the request is a same-origin post from this application (V-24). Two shapes pass:
- *   - the Origin header equals the configured origin;
- *   - the Origin header is the literal "null" AND the browser's fetch metadata names a same-origin
- *     navigation (Sec-Fetch-Site: same-origin, Sec-Fetch-Mode: navigate). The invitation page sends
- *     Referrer-Policy: no-referrer (D-04), and under that policy a browser serialises the Origin of
- *     its own form post as "null" (Fetch Standard, "append a request `Origin` header"), so the
- *     card's own form arrives this way; found by the E2E of plan 10-13. Sec-Fetch-* are forbidden
- *     request headers: no page script can set them, and a cross-site form or a sandboxed frame
- *     (which also sends "null") is labelled cross-site.
- * Everything else is refused: a missing Origin (with or without metadata), a foreign Origin, and
- * "null" without that metadata.
+ * Whether the request is a same-origin post from this application (V-24, K159): its Origin header
+ * is exactly one of the trusted origins (string equality). Everything else is refused: a missing
+ * Origin, a foreign one, and the literal "null" whatever fetch metadata comes with it. The
+ * invitation page sends Referrer-Policy same-origin, under which a browser sends its own form
+ * post with the page's real Origin (Fetch Standard); "null" there would mean an opaque origin
+ * such as a sandboxed frame. A BETTER_AUTH_URL that is missing or invalid refuses everything.
  */
-function isSameOriginPost(headers: Headers, origin: string): boolean {
+function isSameOriginPost(headers: Headers): boolean {
   const sent = headers.get("origin");
-  if (sent === origin) return true;
-  return (
-    sent === "null" &&
-    headers.get("sec-fetch-site") === "same-origin" &&
-    headers.get("sec-fetch-mode") === "navigate"
-  );
+  if (sent === null) return false;
+  let trusted: string[];
+  try {
+    trusted = getTrustedAppOrigins();
+  } catch {
+    return false;
+  }
+  return trusted.includes(sent);
 }
 
 /** A string field of the form, or null when absent or a file. */
@@ -122,7 +120,7 @@ function targetFor(result: OnboardingResult, invitePath: string): string {
 export async function POST(request: Request, { params }: { params: Promise<{ token: string }> }) {
   // (a) Origin first, before any read.
   const origin = expectedOrigin();
-  if (origin === null || !isSameOriginPost(request.headers, origin)) {
+  if (origin === null || !isSameOriginPost(request.headers)) {
     return NextResponse.json({ error: "forbidden_origin" }, { status: 403 });
   }
 

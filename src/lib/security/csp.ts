@@ -22,10 +22,19 @@
 export const CSP_NONCE_HEADER = "x-nonce";
 
 /**
- * Paths whose URL carries a token (a status token, D-14; an invitation token, plan 10-15 V-04),
- * so the token must never leak through `Referer`.
+ * Paths whose URL carries a status token (D-14), so the token must never leak through `Referer`.
+ * Their pages post no form that needs an Origin.
  */
-export const NO_REFERRER_PATH_PREFIXES = ["/status", "/api/public/status", "/invite"] as const;
+export const NO_REFERRER_PATH_PREFIXES = ["/status", "/api/public/status"] as const;
+
+/**
+ * Paths whose URL carries an invitation token (plan 10-15 V-04) and whose page posts a form to its
+ * own origin (K159, amends D-04). `same-origin` sends a Referer only to AIDA itself, which already
+ * has the token, and never to another origin; and under it the browser sends the page's real
+ * Origin on the card's own post, so the accept route can require an exact Origin match. Under
+ * `no-referrer` the browser sends that post with `Origin: null`.
+ */
+export const SAME_ORIGIN_REFERRER_PATH_PREFIXES = ["/invite"] as const;
 
 /**
  * sonner 2.0.7 injects one static <style> at module load (`__insertCSS` in dist/index.mjs) and
@@ -74,10 +83,15 @@ export function buildCsp(nonce: string, opts: { isDev: boolean }): string {
  * X-Frame-Options backs up frame-ancestors 'none' for browsers without CSP2 (Claude's discretion).
  */
 export function securityHeadersFor(pathname: string): Record<string, string> {
-  const noReferrer = NO_REFERRER_PATH_PREFIXES.some((p) => pathname.startsWith(p));
   return {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
-    "Referrer-Policy": noReferrer ? "no-referrer" : "strict-origin-when-cross-origin",
+    "Referrer-Policy": referrerPolicyFor(pathname),
   };
+}
+
+function referrerPolicyFor(pathname: string): string {
+  if (NO_REFERRER_PATH_PREFIXES.some((p) => pathname.startsWith(p))) return "no-referrer";
+  if (SAME_ORIGIN_REFERRER_PATH_PREFIXES.some((p) => pathname.startsWith(p))) return "same-origin";
+  return "strict-origin-when-cross-origin";
 }

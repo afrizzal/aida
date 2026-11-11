@@ -444,10 +444,11 @@ describe("proxy — 10-15 Better Auth organization and admin plugin block", () =
 });
 
 // Plan 10-15 (V-04, D-04, T-10-09, T-10-53): /invite is public and goes through the same
-// forwarding helper as every public path (nonce CSP, proxy-written client identity), with
-// Referrer-Policy no-referrer because the invitation token is in the URL path.
+// forwarding helper as every public path (nonce CSP, proxy-written client identity). Its
+// Referrer-Policy is same-origin (K159, amends D-04): the invitation token is in the URL path, so
+// no Referer may reach another origin, while the card's own post carries its real Origin.
 describe("proxy — 10-15 /invite entry point", () => {
-  it("Z5: GET /invite/abc without a cookie passes through with no-referrer, the nonce CSP and the client identity", () => {
+  it("Z5: GET /invite/abc without a cookie passes through with same-origin, the nonce CSP and the client identity", () => {
     const response = proxy(
       new NextRequest("http://localhost/invite/abc", {
         headers: { "x-aida-client-ip": "9.9.9.9", "x-forwarded-for": "203.0.113.5" },
@@ -456,7 +457,7 @@ describe("proxy — 10-15 /invite entry point", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("location")).toBeNull();
     expect(response.headers.get("x-middleware-next")).toBe("1");
-    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(response.headers.get("referrer-policy")).toBe("same-origin");
     const csp = response.headers.get("content-security-policy") ?? "";
     const nonce = response.headers.get("x-middleware-request-x-nonce") ?? "";
     expect(nonce.length).toBeGreaterThanOrEqual(22);
@@ -467,7 +468,7 @@ describe("proxy — 10-15 /invite entry point", () => {
     expect(response.headers.get("x-frame-options")).toBe("DENY");
   });
 
-  it("Z6: POST /invite/abc/accept passes through with no-referrer and the nonce CSP, with and without a cookie", () => {
+  it("Z6: POST /invite/abc/accept passes through with same-origin and the nonce CSP, with and without a cookie", () => {
     for (const headers of [{}, { cookie: "better-auth.session_token=abc" }] as Record<
       string,
       string
@@ -478,7 +479,7 @@ describe("proxy — 10-15 /invite entry point", () => {
       expect(response.status).toBe(200);
       expect(response.headers.get("location")).toBeNull();
       expect(response.headers.get("x-middleware-next")).toBe("1");
-      expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+      expect(response.headers.get("referrer-policy")).toBe("same-origin");
       const csp = response.headers.get("content-security-policy") ?? "";
       expect(cspNonce(csp)).toBe(response.headers.get("x-middleware-request-x-nonce"));
       expect(response.headers.get("x-middleware-request-x-aida-client-ip")).toBe(

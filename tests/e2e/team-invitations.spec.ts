@@ -556,7 +556,7 @@ test.describe("AIDA-42: invitations in the browser", () => {
     await memberA.context.close();
   });
 
-  test("D-04: the invitation page sends Referrer-Policy no-referrer and never shows the token; an unknown token gets the invalid card", async ({
+  test("D-04 (amended by K159): the invitation page sends Referrer-Policy same-origin and never shows the token; an unknown token gets the invalid card", async ({
     browser,
   }) => {
     const org = await createOrg("Header Workspace", [{ role: "owner", name: "Header Owner" }]);
@@ -571,14 +571,67 @@ test.describe("AIDA-42: invitations in the browser", () => {
     await gotoWarm(page, invitePath(token));
     const valid = await page.goto(invitePath(token));
     expect(valid?.status()).toBe(200);
-    expect(valid?.headers()["referrer-policy"]).toBe("no-referrer");
+    expect(valid?.headers()["referrer-policy"]).toBe("same-origin");
     await expect(page.getByRole("heading", { level: 1, name: `Join ${org.name}` })).toBeVisible();
     // The token is only in the URL and the form action, never in the page text.
     expect(await page.locator("body").innerText()).not.toContain(token);
 
     const unknown = await page.goto(invitePath("A".repeat(43)));
-    expect(unknown?.headers()["referrer-policy"]).toBe("no-referrer");
+    expect(unknown?.headers()["referrer-policy"]).toBe("same-origin");
     await expect(page.getByRole("heading", { level: 1, name: INVALID_HEADING })).toBeVisible();
+    await context.close();
+  });
+
+  test("K159: the card's own form post carries the page's real Origin and joins; a navigation to another origin sends no Referer with the token", async ({
+    browser,
+  }) => {
+    const org = await createOrg("Origin Workspace", [{ role: "owner", name: "Origin Owner" }]);
+    const email = uniqueEmail("origin");
+    const { token } = await insertInvitation({
+      orgId: org.orgId,
+      email,
+      role: "member",
+      inviterId: org.users[0].id,
+    });
+    const context = await browser.newContext(NO_COOKIES);
+    const page = await context.newPage();
+    await gotoWarm(page, invitePath(token));
+    const view = await page.goto(invitePath(token));
+    // The policy that keeps the token from every other origin (D-04 as amended by K159).
+    expect.soft(view?.headers()["referrer-policy"]).toBe("same-origin");
+    await expect(page.getByRole("heading", { level: 1, name: `Join ${org.name}` })).toBeVisible();
+
+    // AIDA loads nothing from another origin, so a navigation the page itself starts towards
+    // another origin stands in for any third party: 127.0.0.1 is another origin than localhost.
+    const otherOrigin = `http://127.0.0.1:${new URL(page.url()).port}/login`;
+    const crossRequest = page.waitForRequest((r) => r.url().startsWith(otherOrigin));
+    await page
+      .evaluate((url) => {
+        window.location.assign(url);
+      }, otherOrigin)
+      .catch(() => undefined);
+    const crossHeaders = await (await crossRequest).allHeaders();
+    expect.soft(crossHeaders.referer).toBeUndefined();
+    expect.soft(JSON.stringify(crossHeaders)).not.toContain(token);
+    // Let that navigation finish before the next one, so neither interrupts the other.
+    await page.waitForURL((url) => url.hostname === "127.0.0.1", { timeout: 45_000 });
+
+    // Back on the card: its own post carries the page's real Origin and joins.
+    await gotoWarm(page, invitePath(token));
+    await expect(page.getByRole("heading", { level: 1, name: `Join ${org.name}` })).toBeVisible();
+    await warmAcceptRoute(page.request, token);
+    await page.getByLabel("Name").fill("Origin Invitee");
+    await page.getByLabel("Password", { exact: true }).fill(TEAM_PASSWORD);
+    const acceptRequest = page.waitForRequest(
+      (r) => r.method() === "POST" && new URL(r.url()).pathname === acceptPath(token),
+    );
+    await page.getByRole("button", { name: "Create account and join" }).click();
+    const acceptHeaders = await (await acceptRequest).allHeaders();
+    expect.soft(acceptHeaders.origin).toBe(new URL(page.url()).origin);
+    await page.waitForURL(/\/tickets/, { timeout: 60_000 });
+    await expect(page.getByText(`Welcome to ${org.name}.`)).toBeVisible();
+    const user = await prisma.user.findFirstOrThrow({ where: { email }, select: { id: true } });
+    expect(await memberCount(org.orgId, user.id)).toBe(1);
     await context.close();
   });
 

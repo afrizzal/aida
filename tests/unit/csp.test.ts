@@ -8,6 +8,7 @@ import {
   CSP_NONCE_HEADER,
   createNonce,
   NO_REFERRER_PATH_PREFIXES,
+  SAME_ORIGIN_REFERRER_PATH_PREFIXES,
   securityHeadersFor,
 } from "../../src/lib/security/csp";
 
@@ -94,24 +95,31 @@ describe("createNonce (D-11)", () => {
 });
 
 describe("securityHeadersFor (D-14)", () => {
-  it("G: exports the nonce header name and the no-referrer prefixes", () => {
+  it("G: exports the nonce header name, the no-referrer prefixes and the same-origin prefixes", () => {
     expect(CSP_NONCE_HEADER).toBe("x-nonce");
-    // Plan 10-15 (V-04): /invite carries an invitation token in its path.
-    expect(NO_REFERRER_PATH_PREFIXES).toEqual(["/status", "/api/public/status", "/invite"]);
+    expect(NO_REFERRER_PATH_PREFIXES).toEqual(["/status", "/api/public/status"]);
+    // K159 (amends D-04): /invite carries an invitation token in its path, and its card posts a
+    // form to its own origin, so it gets same-origin: no Referer to any other origin, and the
+    // browser sends the real Origin on the card's own post.
+    expect(SAME_ORIGIN_REFERRER_PATH_PREFIXES).toEqual(["/invite"]);
   });
 
-  it("H: /status, /api/public/status and /invite paths get no-referrer", () => {
-    for (const path of [
-      "/status",
-      "/status/abc",
-      "/api/public/status/abc/csat",
-      "/invite/abc",
-      "/invite/abc/accept",
-    ]) {
+  it("H: /status and /api/public/status paths get no-referrer", () => {
+    for (const path of ["/status", "/status/abc", "/api/public/status/abc/csat"]) {
       expect(securityHeadersFor(path)).toEqual({
         "X-Content-Type-Options": "nosniff",
         "X-Frame-Options": "DENY",
         "Referrer-Policy": "no-referrer",
+      });
+    }
+  });
+
+  it("H2 (K159): /invite paths get same-origin, never a policy that sends the path elsewhere", () => {
+    for (const path of ["/invite/abc", "/invite/abc/accept"]) {
+      expect(securityHeadersFor(path)).toEqual({
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": "same-origin",
       });
     }
   });

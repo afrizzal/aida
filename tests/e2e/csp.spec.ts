@@ -285,11 +285,13 @@ test.describe("CSP: invitation and no-access pages", () => {
     }));
   });
 
-  test("/invite/<valid token> has zero violations and sends no referrer", async ({ page }) => {
+  test("/invite/<valid token> has zero violations and sends a same-origin referrer policy (K159)", async ({
+    page,
+  }) => {
     const collector = await collectCsp(page);
     const response = await gotoWarm(page, `/invite/${inviteToken}`);
     expectEnforcedCsp(response);
-    expect(response.headers()["referrer-policy"]).toBe("no-referrer");
+    expect(response.headers()["referrer-policy"]).toBe("same-origin");
     await expect(
       page.getByRole("heading", { level: 1, name: `Join ${workspaceName}` }),
     ).toBeVisible();
@@ -297,11 +299,13 @@ test.describe("CSP: invitation and no-access pages", () => {
     await expectNoViolations(page, collector);
   });
 
-  test("/invite/<unknown token> has zero violations and sends no referrer", async ({ page }) => {
+  test("/invite/<unknown token> has zero violations and sends a same-origin referrer policy (K159)", async ({
+    page,
+  }) => {
     const collector = await collectCsp(page);
     const response = await gotoWarm(page, `/invite/${"Z".repeat(43)}`);
     expectEnforcedCsp(response);
-    expect(response.headers()["referrer-policy"]).toBe("no-referrer");
+    expect(response.headers()["referrer-policy"]).toBe("same-origin");
     await expect(
       page.getByRole("heading", { level: 1, name: "This invitation link is not valid" }),
     ).toBeVisible();
