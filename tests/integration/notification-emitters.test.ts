@@ -368,11 +368,12 @@ describe("CUSTOMER_REPLY: email ingest appending to a ticket (V-10, ingest-messa
     expect(human.result).toBe("appended");
     expect(await notificationsOf(orgId)).toHaveLength(1);
 
-    for (const headers of [
+    const autoHeaders: Record<string, string>[] = [
       { "Auto-Submitted": "auto-replied" },
       { "Auto-Submitted": "auto-generated" },
       { Precedence: "auto_reply" },
-    ]) {
+    ];
+    for (const headers of autoHeaders) {
       for (const ticket of [assigned, unassigned]) {
         const auto = await ingestEmail(
           orgId,
