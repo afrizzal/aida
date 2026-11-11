@@ -233,13 +233,17 @@ export async function ingestMessage(
       // assignee, or every current owner and admin who has not opted out when it is unassigned,
       // in this transaction. Plain reads after the ticket lock above, no lock of their own. The
       // notification holds ids only, never the customer's text (T-10-25). The new-ticket branch
-      // below emits nothing (O-7 (a) default).
-      await emitForTicket(tx, orgId, {
-        assigneeId: await ticketAssigneeId(tx, orgId, ticketIdToUpdate),
-        type: "CUSTOMER_REPLY",
-        eventKey: `message:${created.id}`,
-        entityId: ticketIdToUpdate,
-      });
+      // below emits nothing (O-7 (a) default). Auto mail (an out-of-office, an auto-acknowledgement)
+      // threads and never reopens (D-13), and is not a customer reply either, so it notifies
+      // nobody (review c-IN-01): a loop with an auto-responder adds no notification.
+      if (!isAuto) {
+        await emitForTicket(tx, orgId, {
+          assigneeId: await ticketAssigneeId(tx, orgId, ticketIdToUpdate),
+          type: "CUSTOMER_REPLY",
+          eventKey: `message:${created.id}`,
+          entityId: ticketIdToUpdate,
+        });
+      }
 
       for (const file of saved) {
         await tx.attachment.create({

@@ -281,13 +281,14 @@ async function assign(ticketId: string, assigneeId: string | null): Promise<void
 }
 
 /** Feeds one email through ingestMessage the way email-ingest.test.ts does. */
-async function ingestEmail(orgId: string, subject: string) {
+async function ingestEmail(orgId: string, subject: string, headers: Record<string, string> = {}) {
   const buf = await new MailComposer({
     from: `customer-${randomUUID()}@example.com`,
     to: SELF_ADDRESS,
     subject,
     text: `Customer text ${randomUUID()}`,
     messageId: `<emitters-${randomUUID()}@test.local>`,
+    headers,
   })
     .compile()
     .build();
@@ -352,6 +353,37 @@ describe("CUSTOMER_REPLY: email ingest appending to a ticket (V-10, ingest-messa
     );
     expect(rows.every((r) => r.recipientUserId === member.id)).toBe(true);
     expect(await countUnread(orgId, member.id)).toBe(2);
+  });
+
+  // Review c-IN-01 (F3): auto mail (an out-of-office, an auto-acknowledgement) threads onto the
+  // ticket and never reopens it (D-13); it is not a customer reply either, so it notifies nobody.
+  it("an auto-reply threaded onto a ticket is appended but notifies nobody, on an assigned or an unassigned ticket", async () => {
+    const { orgId, users } = await seedOrgWithMembers(prisma, ["owner", "admin", "member"]);
+    const [, , member] = users;
+    const assigned = await seedTicket(orgId, { assigneeId: member.id });
+    const unassigned = await seedTicket(orgId);
+
+    // Presence: a human reply notifies the assignee.
+    const human = await ingestEmail(orgId, `Re: help [#${assigned.number}]`);
+    expect(human.result).toBe("appended");
+    expect(await notificationsOf(orgId)).toHaveLength(1);
+
+    for (const headers of [
+      { "Auto-Submitted": "auto-replied" },
+      { "Auto-Submitted": "auto-generated" },
+      { Precedence: "auto_reply" },
+    ]) {
+      for (const ticket of [assigned, unassigned]) {
+        const auto = await ingestEmail(
+          orgId,
+          `Out of office: Re: help [#${ticket.number}]`,
+          headers,
+        );
+        expect(auto.result).toBe("appended");
+        expect(auto.message?.ticketId).toBe(ticket.id);
+      }
+    }
+    expect(await notificationsOf(orgId)).toHaveLength(1);
   });
 
   it("a reply threaded onto a merged source notifies the target's assignee and names the target", async () => {
