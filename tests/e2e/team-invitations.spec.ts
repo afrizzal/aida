@@ -55,15 +55,32 @@ function acceptPath(token: string): string {
 
 /**
  * Polls the accept route until it is compiled, with a request that carries no Origin: the route
- * answers 403 before it reads anything (V-24), so the poll changes nothing.
+ * refuses it before it reads anything (V-24), with a 303 back to the card (K161), so the poll
+ * changes nothing.
  */
 async function warmAcceptRoute(request: APIRequestContext, token: string): Promise<void> {
   await expect
-    .poll(async () => (await request.post(acceptPath(token), { maxRedirects: 0 })).status(), {
-      timeout: 60_000,
-      intervals: [500, 1000, 2000],
-    })
-    .toBe(403);
+    .poll(
+      async () =>
+        (await request.post(acceptPath(token), { maxRedirects: 0 })).headers().location ?? "",
+      { timeout: 60_000, intervals: [500, 1000, 2000] },
+    )
+    .toBe(`${invitePath(token)}?error=origin`);
+}
+
+/**
+ * K161: a refused accept post answers 303 back to the card with a readable state, never a JSON
+ * body the browser would show as text.
+ */
+async function expectCardRefusal(
+  response: Awaited<ReturnType<APIRequestContext["post"]>>,
+  token: string,
+  state: string,
+) {
+  expect(response.status()).toBe(303);
+  expect(response.headers().location).toBe(`${invitePath(token)}?error=${state}`);
+  expect(response.headers()["content-type"] ?? "").not.toContain("json");
+  expect(await response.text()).toBe("");
 }
 
 /** The pending invitation's token from a link (the token is the last path segment). */
@@ -392,7 +409,7 @@ test.describe("AIDA-42: invitations in the browser", () => {
     await context.close();
   });
 
-  test("V-24: an accept POST without an Origin header answers 403 and creates no membership", async ({
+  test("V-24, K161: an accept POST without an Origin header is refused back to the card and creates no membership", async ({
     browser,
   }) => {
     const orgA = await createOrg("Origin Workspace", [{ role: "owner", name: "Origin Owner" }]);
@@ -413,13 +430,12 @@ test.describe("AIDA-42: invitations in the browser", () => {
       form: { intent: "accept" },
       maxRedirects: 0,
     });
-    expect(response.status()).toBe(403);
-    await expect(response.json()).resolves.toEqual({ error: "forbidden_origin" });
+    await expectCardRefusal(response, token, "origin");
     expect(await memberCount(orgA.orgId, visitor.id)).toBe(0);
     await context.close();
   });
 
-  test("V-24: an accept POST with a foreign Origin answers 403 and creates no membership; the same session then accepts through the card", async ({
+  test("V-24, K161: an accept POST with a foreign Origin is refused back to the card and creates no membership; the same session then accepts through the card", async ({
     browser,
   }) => {
     const orgA = await createOrg("Foreign Workspace", [{ role: "owner", name: "Foreign Owner" }]);
@@ -440,8 +456,7 @@ test.describe("AIDA-42: invitations in the browser", () => {
       headers: { Origin: "http://evil.test" },
       maxRedirects: 0,
     });
-    expect(response.status()).toBe(403);
-    await expect(response.json()).resolves.toEqual({ error: "forbidden_origin" });
+    await expectCardRefusal(response, token, "origin");
     expect(await memberCount(orgA.orgId, visitor.id)).toBe(0);
 
     // The refusal was the Origin, not the session: the card's own same-origin post accepts.
@@ -449,6 +464,56 @@ test.describe("AIDA-42: invitations in the browser", () => {
     await page.waitForURL(/\/tickets/, { timeout: 60_000 });
     await expect(page.getByText(`Welcome to ${orgA.name}.`)).toBeVisible();
     expect(await memberCount(orgA.orgId, visitor.id)).toBe(1);
+    await context.close();
+  });
+
+  test("K161: a refused form post of the card lands on the card with the server-error callout, never raw JSON; a throttled refusal reads the same", async ({
+    browser,
+  }) => {
+    const org = await createOrg("Refusal Workspace", [{ role: "owner", name: "Refusal Owner" }]);
+    const email = uniqueEmail("refusal");
+    const { token } = await insertInvitation({
+      orgId: org.orgId,
+      email,
+      role: "member",
+      inviterId: org.users[0].id,
+    });
+    const context = await browser.newContext(NO_COOKIES);
+    const page = await context.newPage();
+    await gotoWarm(page, invitePath(token));
+    await expect(page.getByRole("heading", { level: 1, name: `Join ${org.name}` })).toBeVisible();
+    await warmAcceptRoute(page.request, token);
+
+    // Two extra fields make the browser's own post five parts, which the route refuses (V-24).
+    await page.evaluate(() => {
+      const form = document.querySelector("form");
+      for (const name of ["extra-1", "extra-2"]) {
+        const input = document.createElement("input");
+        input.type = "hidden";
+        input.name = name;
+        input.value = "x";
+        form?.appendChild(input);
+      }
+    });
+    await page.getByLabel("Name").fill("Refused Invitee");
+    await page.getByLabel("Password", { exact: true }).fill(TEAM_PASSWORD);
+    await page.getByRole("button", { name: "Create account and join" }).click();
+    await page.waitForURL((url) => url.searchParams.get("error") === "request", {
+      timeout: 60_000,
+    });
+    await expect(page.getByRole("heading", { level: 1, name: `Join ${org.name}` })).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: "Something went wrong" })).toHaveText(
+      "Something went wrong while joining. Wait a moment and try again.",
+    );
+    expect(await page.locator("body").innerText()).not.toContain('"error"');
+    expect(await userCountByEmail(email)).toBe(0);
+
+    // The throttled refusal's target reads the same, and the card still offers its form.
+    await page.goto(`${invitePath(token)}?error=throttled`);
+    await expect(page.getByRole("alert").filter({ hasText: "Something went wrong" })).toHaveText(
+      "Something went wrong while joining. Wait a moment and try again.",
+    );
+    await expect(page.getByRole("button", { name: "Create account and join" })).toBeVisible();
     await context.close();
   });
 
@@ -585,8 +650,8 @@ test.describe("AIDA-42: invitations in the browser", () => {
   test("K159: the card's own form post carries the page's real Origin and joins; a navigation to another origin sends no Referer with the token", async ({
     browser,
   }) => {
-    const org = await createOrg("Origin Workspace", [{ role: "owner", name: "Origin Owner" }]);
-    const email = uniqueEmail("origin");
+    const org = await createOrg("Referrer Workspace", [{ role: "owner", name: "Referrer Owner" }]);
+    const email = uniqueEmail("referrer");
     const { token } = await insertInvitation({
       orgId: org.orgId,
       email,

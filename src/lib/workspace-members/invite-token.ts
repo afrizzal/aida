@@ -21,6 +21,15 @@ export function hashInviteToken(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
 }
 
+/**
+ * The rate-limit identity of a token for the per-invitation accept limit (K161): its stored hash
+ * with a prefix, so the raw token never becomes a limiter key. Any string is accepted, so an
+ * unknown token is limited the same way before any lookup.
+ */
+export function inviteTokenRateLimitIdentity(token: string): string {
+  return `invite-token:${hashInviteToken(token)}`;
+}
+
 /** True for a string in the shape createInviteToken produces; anything else is never looked up. */
 export function isInviteTokenShape(token: unknown): token is string {
   return typeof token === "string" && /^[A-Za-z0-9_-]{43}$/.test(token);

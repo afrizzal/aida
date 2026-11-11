@@ -4,17 +4,20 @@
 // the page needs no client fetch and no server action (CSP, V-24). The order is fixed:
 //   (a) Origin: it acts on a signed-in session, so a request whose Origin header is missing or is
 //       not exactly one of the application's origins (getTrustedAppOrigins: the origin of
-//       BETTER_AUTH_URL plus BETTER_AUTH_TRUSTED_ORIGINS) is refused with 403 before anything else
-//       is read (a cross-site form post cannot accept on someone's behalf; threat T-10-33). The
+//       BETTER_AUTH_URL plus BETTER_AUTH_TRUSTED_ORIGINS) is refused before anything else is
+//       read (a cross-site form post cannot accept on someone's behalf; threat T-10-33). The
 //       page sends Referrer-Policy same-origin (K159), so the card's own post carries its real
 //       Origin; "null" and fetch metadata are never admitted (isSameOriginPost);
-//   (b) the inviteAccept rate limit on the proxy-written client identity, before the token lookup
-//       and the body (threat T-10-33b);
+//   (b) the rate limits before the token lookup and the body (threat T-10-33b; K161):
+//       inviteAccept on the proxy-written client identity, then inviteAcceptToken on the token;
 //   (c) the body, bounded in bytes and parts;
 //   (d) the intent and its fields, validated here;
 //   (e) one call into src/lib/workspace-members/invite-onboarding.ts with the request headers;
 //   (f) a 303 with a relative Location (K160) to the next page: /tickets?joined=1 on success,
 //       else back to the same link, whose page renders the matching state.
+// A refusal in (a) to (d) is a 303 back to the link too (K161, b-WR-3): ?error=origin,
+// ?error=throttled or ?error=request, which the page shows as its server-error callout. The form
+// post is a browser navigation, so a JSON body would be shown to the invitee as raw text.
 //
 // Intents: `accept` (signed in), `sign-up` (name and password; the email is always the
 // invitation's own, so a posted email field is never read) and `sign-in` (password). A sign-up or
@@ -29,7 +32,7 @@ import { getTrustedAppOrigins } from "@/lib/app-url";
 import { readBoundedFormData } from "@/lib/http/read-bounded-form-data";
 import { consumeRateLimit } from "@/lib/rate-limit/check-rate-limit";
 import { getRateLimitIdentity } from "@/lib/rate-limit/client-ip";
-import { PUBLIC_RATE_LIMITS, rateLimitedResponse } from "@/lib/rate-limit/public-limits";
+import { PUBLIC_RATE_LIMITS } from "@/lib/rate-limit/public-limits";
 import {
   acceptAsSignedIn,
   INVITEE_NAME_MAX_LENGTH,
@@ -40,6 +43,7 @@ import {
   signInAndAccept,
   signUpAndAccept,
 } from "@/lib/workspace-members/invite-onboarding";
+import { inviteTokenRateLimitIdentity } from "@/lib/workspace-members/invite-token";
 
 export const runtime = "nodejs";
 
@@ -112,28 +116,31 @@ function targetFor(result: OnboardingResult, invitePath: string): string {
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ token: string }> }) {
-  // (a) Origin first, before any read.
-  if (!isSameOriginPost(request.headers)) {
-    return NextResponse.json({ error: "forbidden_origin" }, { status: 403 });
-  }
+  // The path parameter only: no lookup and no body read happen before (a) and (b).
+  const { token } = await params;
+  const invitePath = `/invite/${encodeURIComponent(token)}`;
 
-  // (b) The limit before the token lookup and the body parse.
-  const { scope, max, windowMs } = PUBLIC_RATE_LIMITS.inviteAccept;
-  const limit = await consumeRateLimit(scope, getRateLimitIdentity(request), { max, windowMs });
-  if (!limit.allowed) return rateLimitedResponse(limit.retryAfterSeconds);
+  // (a) Origin first, before any read.
+  if (!isSameOriginPost(request.headers)) return seeOther(`${invitePath}?error=origin`);
+
+  // (b) The limits before the token lookup and the body parse: per client address, then per token.
+  const perAddress = PUBLIC_RATE_LIMITS.inviteAccept;
+  const addressLimit = await consumeRateLimit(perAddress.scope, getRateLimitIdentity(request), {
+    max: perAddress.max,
+    windowMs: perAddress.windowMs,
+  });
+  if (!addressLimit.allowed) return seeOther(`${invitePath}?error=throttled`);
+  const perToken = PUBLIC_RATE_LIMITS.inviteAcceptToken;
+  const tokenLimit = await consumeRateLimit(perToken.scope, inviteTokenRateLimitIdentity(token), {
+    max: perToken.max,
+    windowMs: perToken.windowMs,
+  });
+  if (!tokenLimit.allowed) return seeOther(`${invitePath}?error=throttled`);
 
   // (c) The bounded body.
   const body = await readBoundedFormData(request, MAX_FORM_BYTES, { maxParts: MAX_FORM_PARTS });
-  if (!body.ok) {
-    if (body.reason === "invalid") {
-      return NextResponse.json({ error: "invalid_form_data" }, { status: 400 });
-    }
-    return NextResponse.json({ error: "payload_too_large" }, { status: 413 });
-  }
+  if (!body.ok) return seeOther(`${invitePath}?error=request`);
   const form = body.form;
-
-  const { token } = await params;
-  const invitePath = `/invite/${encodeURIComponent(token)}`;
 
   // (d) The intent and its fields; (e) the one onboarding call; (f) the 303.
   const intent = field(form, "intent");
@@ -157,5 +164,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
         : await signInAndAccept({ token, password, requestHeaders });
     return seeOther(targetFor(result, invitePath), result.setCookies);
   }
-  return NextResponse.json({ error: "invalid_intent" }, { status: 400 });
+  return seeOther(`${invitePath}?error=request`);
 }

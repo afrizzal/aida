@@ -38,8 +38,17 @@ const FIELD_LIMITS = {
 
 const CARD_ERRORS: ReadonlySet<string> = new Set(["server", "field", "password"]);
 
+/**
+ * The accept route's refusals before any join (K161): a foreign or missing Origin, a rate limit, a
+ * body or intent it cannot read. Each shows the server-error callout over the card's own form
+ * (UI-SPEC "Invite page: server error"; the throttled copy of amendment A6), never more detail.
+ */
+const REFUSAL_ERRORS: ReadonlySet<string> = new Set(["origin", "throttled", "request"]);
+
 function cardError(value: string | string[] | undefined): InviteCardError | null {
-  return typeof value === "string" && CARD_ERRORS.has(value) ? (value as InviteCardError) : null;
+  if (typeof value !== "string") return null;
+  if (REFUSAL_ERRORS.has(value)) return "server";
+  return CARD_ERRORS.has(value) ? (value as InviteCardError) : null;
 }
 
 interface InvitePageProps {

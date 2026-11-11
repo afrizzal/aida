@@ -47,6 +47,7 @@ import {
   signInAndAccept,
   signUpAndAccept,
 } from "@/lib/workspace-members/invite-onboarding";
+import { inviteTokenRateLimitIdentity } from "@/lib/workspace-members/invite-token";
 import { uniqueClientIp } from "../support/client-ip";
 import { seedOrgWithMembers } from "../support/inbox-fixtures";
 
@@ -532,7 +533,30 @@ describe("the accept route (V-24): Origin, rate limit, validation, 303", () => {
     return prisma.rateLimitHit.count({ where: { scope, ipHash } });
   }
 
-  it("refuses a request with no Origin with 403 before any read: the invitation is unchanged and no limiter row is written", async () => {
+  /** The limiter rows of the inviteAcceptToken scope for this invitation token. */
+  function tokenLimiterRows(token: string) {
+    const { scope } = PUBLIC_RATE_LIMITS.inviteAcceptToken;
+    const ipHash = rateLimitLockKey(scope, inviteTokenRateLimitIdentity(token)).slice(
+      scope.length + 1,
+    );
+    return prisma.rateLimitHit.count({ where: { scope, ipHash } });
+  }
+
+  /**
+   * K161 (b-WR-3, a-WR-3): a refusal of the form post is a 303 back to the invitation page with a
+   * readable state, never a JSON body the browser would show as text. It sets no cookie.
+   */
+  async function expectRefusal(response: Response, token: string, state: string) {
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      `/invite/${encodeURIComponent(token)}?error=${state}`,
+    );
+    expect(response.headers.get("content-type") ?? "").not.toContain("json");
+    expect(response.headers.getSetCookie()).toEqual([]);
+    expect(await response.text()).toBe("");
+  }
+
+  it("refuses a request with no Origin before any read (303 ?error=origin): the invitation is unchanged and no limiter row is written", async () => {
     const user = await signedInMemberOfOtherOrg();
     const { orgId: orgB, invitationId, token } = await invite(user.email);
     const before = await prisma.invitation.findUniqueOrThrow({ where: { id: invitationId } });
@@ -544,8 +568,7 @@ describe("the accept route (V-24): Origin, rate limit, validation, 303", () => {
       { cookie: user.cookie, origin: null, ip },
     );
 
-    expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({ error: "forbidden_origin" });
+    await expectRefusal(response, token, "origin");
     expect(await prisma.invitation.findUniqueOrThrow({ where: { id: invitationId } })).toEqual(
       before,
     );
@@ -553,15 +576,14 @@ describe("the accept route (V-24): Origin, rate limit, validation, 303", () => {
     expect(await limiterRows(ip)).toBe(0);
   });
 
-  it("refuses a foreign Origin with 403 and accepts nothing", async () => {
+  it("refuses a foreign Origin (303 ?error=origin) and accepts nothing", async () => {
     const user = await signedInMemberOfOtherOrg();
     const { orgId: orgB, invitationId, token } = await invite(user.email);
     const ip = uniqueClientIp();
 
     for (const origin of ["https://evil.example.test", `${ORIGIN}.evil.example.test`, "null"]) {
       const response = await post(token, { intent: "accept" }, { cookie: user.cookie, origin, ip });
-      expect(response.status).toBe(403);
-      expect(await response.json()).toEqual({ error: "forbidden_origin" });
+      await expectRefusal(response, token, "origin");
     }
     expect(await invitationStatus(invitationId)).toBe("pending");
     expect(await memberRows(orgB, user.userId)).toEqual([]);
@@ -586,8 +608,7 @@ describe("the accept route (V-24): Origin, rate limit, validation, 303", () => {
         ip,
       },
     );
-    expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({ error: "forbidden_origin" });
+    await expectRefusal(response, token, "origin");
     expect(await invitationStatus(invitationId)).toBe("pending");
     expect(await memberRows(orgB, user.userId)).toEqual([]);
     expect(await limiterRows(ip)).toBe(0);
@@ -615,8 +636,7 @@ describe("the accept route (V-24): Origin, rate limit, validation, 303", () => {
         { intent: "accept" },
         { cookie: user.cookie, origin, fetchMetadata, ip },
       );
-      expect(response.status).toBe(403);
-      expect(await response.json()).toEqual({ error: "forbidden_origin" });
+      await expectRefusal(response, token, "origin");
     }
     expect(await invitationStatus(invitationId)).toBe("pending");
     expect(await memberRows(orgB, user.userId)).toEqual([]);
@@ -636,7 +656,7 @@ describe("the accept route (V-24): Origin, rate limit, validation, 303", () => {
       const { orgId: orgB, token } = await invite(user.email);
       for (const origin of [`${trusted}:444`, `${trusted}.evil.example.test`, `${trusted}/`]) {
         const refused = await post(token, { intent: "accept" }, { cookie: user.cookie, origin });
-        expect(refused.status, origin).toBe(403);
+        await expectRefusal(refused, token, "origin");
       }
       expect(await memberRows(orgB, user.userId)).toEqual([]);
       const response = await post(
@@ -652,18 +672,84 @@ describe("the accept route (V-24): Origin, rate limit, validation, 303", () => {
     }
   });
 
-  it("answers the eleventh POST in an hour from one identity with 429, before the token lookup", async () => {
+  // K161 (a-WR-3, b-WR-3): 60 posts per hour per client address, so a team behind one address can
+  // join, plus 10 per hour per invitation token, so password guessing through one link stays
+  // capped whatever the address. Both are consumed before the token lookup and the body.
+  it("K161: the 61st POST in an hour from one address lands on the invitation page as throttled, before the token lookup", async () => {
+    expect(PUBLIC_RATE_LIMITS.inviteAccept.max).toBe(60);
     const ip = uniqueClientIp();
-    const token = `not-a-token-${randomUUID()}`;
     for (let i = 0; i < PUBLIC_RATE_LIMITS.inviteAccept.max; i++) {
-      // Unknown intent: refused after the limit was consumed.
-      expect((await post(token, { intent: "probe" }, { ip })).status).toBe(400);
+      // A different unknown token each time, so only the address limit can fill up; the unknown
+      // intent is refused after the limits were consumed.
+      const token = `not-a-token-${randomUUID()}`;
+      await expectRefusal(await post(token, { intent: "probe" }, { ip }), token, "request");
     }
-    expect(await limiterRows(ip)).toBe(10);
+    expect(await limiterRows(ip)).toBe(60);
+    const token = `not-a-token-${randomUUID()}`;
     const limited = await post(token, { intent: "accept" }, { ip });
-    expect(limited.status).toBe(429);
-    expect(await limited.json()).toEqual({ error: "rate_limited" });
-    expect(Number(limited.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+    await expectRefusal(limited, token, "throttled");
+    expect(await tokenLimiterRows(token)).toBe(0);
+  });
+
+  it("K161: the 11th POST in an hour for one invitation is throttled from any address and joins nothing; another invitation from the same address is not", async () => {
+    expect(PUBLIC_RATE_LIMITS.inviteAcceptToken.max).toBe(10);
+    const account = await createAccount(freshEmail());
+    const { orgId, invitationId, token } = await invite(account.email);
+    for (let i = 0; i < PUBLIC_RATE_LIMITS.inviteAcceptToken.max; i++) {
+      // A fresh address each time, so only the token limit can fill up.
+      const wrong = await post(token, { intent: "sign-in", password: `wrong-${i}` });
+      expect(wrong.headers.get("location")).toBe(`/invite/${token}?error=password`);
+    }
+    expect(await tokenLimiterRows(token)).toBe(10);
+    // The right password from a new address: still throttled, and nothing is accepted.
+    const ip = uniqueClientIp();
+    await expectRefusal(
+      await post(token, { intent: "sign-in", password: account.password }, { ip }),
+      token,
+      "throttled",
+    );
+    expect(await memberRows(orgId, account.userId)).toEqual([]);
+    expect(await invitationStatus(invitationId)).toBe("pending");
+    // The same address is not throttled for another invitation.
+    const other = await createAccount(freshEmail());
+    const second = await invite(other.email);
+    const joined = await post(
+      second.token,
+      { intent: "sign-in", password: other.password },
+      { ip },
+    );
+    expect(joined.headers.get("location")).toBe("/tickets?joined=1");
+  });
+
+  it("K161: a malformed, oversized or many-part body and an unknown intent land on the invitation page as ?error=request", async () => {
+    const email = freshEmail();
+    const { invitationId, token } = await invite(email);
+    const send = (body: string, contentType: string) =>
+      acceptPost(
+        new Request(`${ORIGIN}/invite/${token}/accept`, {
+          method: "POST",
+          headers: {
+            origin: ORIGIN,
+            "x-forwarded-for": uniqueClientIp(),
+            "content-type": contentType,
+          },
+          body,
+        }),
+        { params: Promise.resolve({ token }) },
+      );
+    const formType = "application/x-www-form-urlencoded";
+    const cases: Array<[string, Response]> = [
+      ["json body", await send(JSON.stringify({ intent: "accept" }), "application/json")],
+      ["oversized", await send(`intent=sign-up&name=${"x".repeat(5 * 1024)}`, formType)],
+      ["five parts", await send("intent=sign-up&name=a&password=b&email=c&extra=d", formType)],
+      ["unknown intent", await post(token, { intent: "probe" })],
+    ];
+    for (const [label, response] of cases) {
+      expect(response.status, label).toBe(303);
+      await expectRefusal(response, token, "request");
+    }
+    expect(await usersWithEmail(email)).toEqual([]);
+    expect(await invitationStatus(invitationId)).toBe("pending");
   });
 
   // K160 (b-WR-5): every 303 has a relative Location, so the browser resolves it against the URL

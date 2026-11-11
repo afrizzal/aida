@@ -14,13 +14,17 @@ export const PUBLIC_RATE_LIMITS = {
   // The sidebar and the public pages load a logo once per version per browser (immutable cache),
   // so 300 per minute per identity leaves room for many users behind one address (09-05, D-09).
   logo: { scope: "public-logo", max: 300, windowMs: 60 * 1000 },
-  // The invitation page and its accept route (plan 10-08, V-04, V-24), both consumed before the
-  // token lookup. Both values are hypotheses to tune from real traffic, like the limits above:
+  // The invitation page and its accept route (plan 10-08, V-04, V-24), all consumed before the
+  // token lookup. The values are hypotheses to tune from real traffic, like the limits above:
   // 60 views per minute per identity leaves room for reloads and many invitees behind one
-  // address, while token probing through the page is slowed; 10 accepts per hour per identity
-  // covers a few wrong passwords and retries, and caps password guessing through the sign-in path.
+  // address, while token probing through the page is slowed. The accept route has two limits
+  // (K161, a-WR-3): 60 posts per hour per identity, so a team joining together from one office
+  // address is not locked out, and 10 posts per hour per invitation token (keyed on
+  // inviteTokenRateLimitIdentity, never the raw token), which covers a few wrong passwords and
+  // retries and caps password guessing through one link whatever the address.
   inviteView: { scope: "invite-view", max: 60, windowMs: 60 * 1000 },
-  inviteAccept: { scope: "invite-accept", max: 10, windowMs: HOUR_MS },
+  inviteAccept: { scope: "invite-accept", max: 60, windowMs: HOUR_MS },
+  inviteAcceptToken: { scope: "invite-accept-token", max: 10, windowMs: HOUR_MS },
 } as const;
 
 export function rateLimitedResponse(retryAfterSeconds: number) {
