@@ -753,6 +753,32 @@ describe("acceptInvitation: the retry path (V-23)", () => {
     expect(await sessionOrg(session.id)).toBeNull();
     expect(await acceptedAuditCount(orgId)).toBe(1);
   });
+
+  // b-IN-5: the email says the link "works once and expires"; the retry path (a response lost
+  // after commit) is bounded by the same expiry, so an accepted link is not a permanent
+  // "switch organization" handle for its acceptor.
+  it("b-IN-5: after the invitation's expiry, a retry by the acceptor is INVALID_INVITATION and does not move the session", async () => {
+    const { orgId, ids } = await seed(["owner"]);
+    const user = await addUser();
+    const inv = await invite(orgId, ids[0], user.email, "member");
+    const session = await addSession(user.id);
+    expect((await acceptWithReason(inv.linkToken, user, session)).result.ok).toBe(true);
+    await prisma.session.update({
+      where: { id: session.id },
+      data: { activeOrganizationId: null },
+    });
+    await prisma.invitation.update({
+      where: { id: inv.invitationId },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+
+    const r = await acceptWithReason(inv.linkToken, user, session);
+    expect(r.result).toEqual(INVALID);
+    expect(r.reason).toBe("expired");
+    expect(await sessionOrg(session.id)).toBeNull();
+    expect(await memberRows(orgId, user.id)).toHaveLength(1);
+    expect(await acceptedAuditCount(orgId)).toBe(1);
+  });
 });
 
 // ---------------------------------------------------------------------------------------------

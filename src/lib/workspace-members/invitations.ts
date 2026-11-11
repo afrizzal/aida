@@ -17,10 +17,10 @@
 //   1. lockOrganization(tx, thatOrgId, hooks);
 //   2. the invitation re-read by tokenHash AND organizationId;
 //   3. retry path first: status `accepted`, an INVITATION_ACCEPTED row with this invitationId and
-//      targetUserId = the user exists, and the user holds a member row here → the session is
-//      activated again and the result is `retried: true`; nothing is inserted. The Better Auth
-//      table stores no acceptor, so the append-only audit row is the record of who accepted (the
-//      only decision this service reads from MemberAuditEvent);
+//      targetUserId = the user exists, now is before expiresAt, and the user holds a member row
+//      here → the session is activated again and the result is `retried: true`; nothing is
+//      inserted. The Better Auth table stores no acceptor, so the append-only audit row is the
+//      record of who accepted (the only decision this service reads from MemberAuditEvent);
 //   4. otherwise: status `pending`; now before expiresAt (at or after it is expired); the invited
 //      email equals the user's email after trim and lower-case; the role is owner, admin or
 //      member; the inviter's CURRENT rights allow it (isOwner for `owner`, isAdmin otherwise,
@@ -463,6 +463,9 @@ export async function acceptInvitation(
           select: { id: true },
         });
         if (!acceptedByUser) refuse("used");
+        // Bounded by the link's own expiry (review b-IN-5): the email promises a link that
+        // expires, so an accepted link is no permanent "switch organization" handle.
+        if (now.getTime() >= invitation.expiresAt.getTime()) refuse("expired");
         if (!rights.isMember) refuse("member-gone");
         await activateSessionInTx(tx, { userId, orgId, session, now });
         const role = isMemberRole(invitation.role) ? invitation.role : "member";
