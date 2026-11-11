@@ -15,11 +15,6 @@ export interface SmtpConnectionConfig {
 }
 
 /**
- * Creates a nodemailer SMTP transporter with EXPLICIT connection/greeting/socket timeouts
- * (RESEARCH.md Pitfall 5) — a misconfigured host/port must fail fast with a clear error
- * rather than hang on Node's OS-default socket timeout (often 2+ minutes).
- */
-/**
  * nodemailer's `getSocket` transport option (Phase 10, V-29): called once per send with the
  * transport options; the callback receives `{ connection: socket }` with an already connected
  * plain TCP socket, which nodemailer then uses instead of opening its own. TLS handling stays
