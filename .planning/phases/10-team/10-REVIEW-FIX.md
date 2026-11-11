@@ -232,3 +232,156 @@ Both moves followed a stall in the E2E global setup at `/setup` (owner item next
 
 1. K159 red, attempt 1, at 09:26: `page.waitForURL` timeout at `global-setup.ts:174`. The server log shows only repeated `GET /setup` and "Compiled" lines. Moved to the Trash folder `aida-next-1794536825`.
 2. K162 red, attempt 1, at 09:41: `locator.click` timeout on "Create workspace" at `global-setup.ts:173`, while `/setup` kept navigating. Moved to the Trash folder `aida-next-1794537728`.
+
+## F2
+
+**Date:** 2026-11-13. **Scope:** K164 and K165, for findings a-WR-1 and a-WR-2, plus b-IN-4 (the same root cause as a-WR-2) and a-IN-7 (it touches the same routes as K164). The other part a info items are in `deferred-items.md`. **Where it ran:** the main checkout on `v2/run-loop`, no worktree (`workflow.use_worktrees` is `false`, and the dispatch named the branch). Runs used `AIDA_TEST_RUN_ID=mweduwiq-bf4e247751ce7dbf`. **Result:** 2 of 2 decisions fixed, 2 info items fixed (b-IN-4, a-IN-7), 3 commits.
+
+**How red was shown.** Each new test was run and seen failing before the fix it pins, except where the fix was already written when the test first ran. There the red run used the old behaviour put back by hand in the one or two lines that carry it (marked `TEMP-RED`, never committed), and the file was restored from a copy in the run's temporary directory right after. No `git checkout`, `git restore` or `git stash` was used. Each such run says so below.
+
+### a-WR-2, b-IN-4 / K165: links use the bare origin; a path stops the app and the worker at start
+
+**Change.**
+- `src/lib/app-url.ts`: `parseAppUrl` refuses a `BETTER_AUTH_URL` that is not a bare origin with the new reason `not_origin`. That covers any path (`/aida`, `/api/auth`, `//`), a query, a fragment (also an empty `?` or `#`) and credentials. `getAppBaseUrl` returns the origin only. `getAppOrigin` and `getTrustedAppOrigins` refuse the same values, so the accept route's Origin check fails closed on them. The message names the variable and what is expected, never the value.
+- **Where start-up validation lives:** the new `assertAppUrlAtStart(env)` in `app-url.ts`, which is framework-free and uses relative imports only, so the worker bundle can load it. It is called in `src/instrumentation.ts` `register()`, right after the database URL check, and in `src/lib/worker/index.ts` before pg-boss is created. This is the same pattern as `assertDatabaseUrlConsistent`. On `AppUrlError` each logs one `[boot] …` line and exits 1.
+- **An unset value is not refused at start.** Today's paths stay: invitations answer `INVITE_CONFIG` and the digest pass refuses. K165 asks only for a path to be refused.
+- **Docs:** one comment block in `.env.example`; in `docs/OPERATIONS.md`, a paragraph under "The email digest" and the `BETTER_AUTH_URL` row of the variable reference; the same row on the website's environment page.
+
+**Tests.**
+- Unit, `tests/unit/app-url.test.ts`:
+  - the path cases are refused with `not_origin` by all three readers;
+  - query, fragment and credentials are refused;
+  - the message carries no value;
+  - `assertAppUrlAtStart` passes for a bare origin and for an unset value, and refuses `not_origin`, `invalid` and `scheme`;
+  - the old case "keeps a path prefix" is replaced.
+- Unit, new `tests/unit/app-url-boot.test.ts`:
+  - `register()` with four bad values exits 1, logs `[boot]` and `BETTER_AUTH_URL` but not the value, and runs no tenant bootstrap; two bare origins start normally;
+  - the worker runs for real through `tsx` with `DATABASE_URL` pointed at loopback port 1. It exits 1 with the `[boot]` line and no connection error.
+- Integration:
+  - `invitations.test.ts`: the `INVITE_CONFIG` case adds `…/aida` and `…/api/auth`; nothing is written;
+  - `notification-digest.test.ts`, new case: with both path values `runDigests` throws `AppUrlError` `not_origin` before any claim, so there is no digest row and no mail. Restored, the same notification is sent with an origin-only link.
+
+**Runs.**
+- Red, unit: exit 1, 10 failed and 12 passed (22). The worker's red was `[worker] fatal: Error: connect ECONNREFUSED 127.0.0.1:1`, so it got past where the check now sits.
+- Red, integration, with the old path-keeping lines put back by hand: exit 1, 2 failed and 60 passed (62).
+  - The invitation with `…/aida` was created (`ok: true`).
+  - The digest pass with `…/aida` sent its email.
+- Green:
+  - Unit: exit 0, 22 passed. The first attempt had one `tsc` error in the new test (a spawn `env` without `NODE_ENV`); after the fix `tsc` exit 0.
+  - Integration, `invitations`, `notification-digest` and `invite-onboarding`: exit 0, 89 passed.
+
+**Files:** `src/lib/app-url.ts`, `src/instrumentation.ts`, `src/lib/worker/index.ts`, `.env.example`, `docs/OPERATIONS.md`, `website/src/content/docs/configuration/environment.md`, `tests/unit/app-url.test.ts`, `tests/unit/app-url-boot.test.ts` (new), `tests/integration/invitations.test.ts`, `tests/integration/notification-digest.test.ts`.
+
+**Commit:** `4bcae5e` fix(10-F2): K165 links use the bare origin of BETTER_AUTH_URL; a path stops app and worker at start
+
+### a-WR-1 / K164 (with a-IN-7): no active organization or no member row is the typed MEMBERSHIP_ENDED refusal
+
+**Change.**
+- **The gates.**
+  - `AccessDeniedError` (`src/lib/membership.ts`) now carries `code: "MEMBERSHIP_ENDED"` beside `status: 403`.
+  - `getSessionActor` throws it when the session names no organization, like `getScopedDb`. It used to throw a plain `Error`.
+  - `requireOrgAdminScope` throws it for no organization or no member row. A member without an admin role keeps `Error("Forbidden: admin role required")`, the v1 role refusal, which K164 does not cover (see `deferred-items.md`).
+- **One refusal path for actions.** New framework-free helpers in `membership.ts`:
+  - `nullOnAccessDenied` turns only `AccessDeniedError` into null and rethrows everything else, the redirect to `/login` included;
+  - `membershipEnded()` builds the refusal, and `isMembershipEnded()` tests for it on the client;
+  - `membershipEndedNotice()` is for the three v1 forms that display `error`. It carries the code and the app's sentence from `state-copy.ts`.
+- **Every server action that calls a gate**, 66 in all, now refuses this way. On the refusal it returns at once, before any read, write or `revalidatePath`, so the page is not re-rendered and keeps its state (R10-1).
+  - 54 actions read the gate as `await gate().catch(nullOnAccessDenied)`.
+  - The 7 KB proposal actions map `AccessDeniedError` in their existing catch.
+  - The 5 notification actions already did this.
+
+  What each returns:
+  - `{ ok: false, error: "MEMBERSHIP_ENDED" }` for the ticket, bulk, merge, relation, snooze, saved-view, new-ticket, status, SLA, contact, insight, KB, tag, custom-field delete, AI and email actions;
+  - `{ ok: false, code: "MEMBERSHIP_ENDED" }` for the KB proposal actions, and `{ kind: "MEMBERSHIP_ENDED" }` for the start selection. These used to map the thrown error to UNKNOWN;
+  - `membership_ended` for the Team actions, a new key in `team-copy.ts`. Its copy is the app's existing access-ended sentence, so no new copy;
+  - for saveBranding and create/update custom field, the code with the sentence in `error`;
+  - the notification and notification-settings actions return their existing `membership_ended`.
+
+  The gate call stays inside each exported action, so the membership inventory (Rules A and C2) sees it unchanged.
+- **Routes.**
+  - The logo route answers 403 `membership_ended` for no organization or no member row. It used to answer 401 and 403 `not_allowed`.
+  - The messages, notifications and mentionable routes already answered 403. The attachment route keeps its deliberate 404 (D-08, no existence oracle).
+- **Client.** These show the access-ended sentence instead of "… Try again":
+  - the ticket header's eight field changes (`fieldChangeError`);
+  - the Team dialogs (through the copy keys);
+  - the logo card;
+  - the three connection-test buttons.
+
+  The other v1 forms keep their own failure line, and their state is kept (`deferred-items.md`).
+- **a-IN-7.** New `src/lib/http/gate-failure.ts`. In the attachment, messages, notifications, mentionable and logo routes, only Next's redirect error is a 401. It is recognised by its `NEXT_REDIRECT;replace|push;…` digest, the same test as Next's `isRedirectError`. Any other gate failure is a 500 with one fixed line, `[<route>] session gate failed: <error class>`, with no error text in the line or the body. Server actions rethrow such a failure; it is not reported as MEMBERSHIP_ENDED.
+
+**Tests.**
+- Unit, new `tests/unit/membership-ended-refusals.test.ts`, 107 cases. The real gates, actions and routes run; Better Auth's `getSession`, the member read, Next's request scope and cache, and the queue are replaced, and every other database access throws and is recorded.
+  - All three gates throw the typed error; the non-admin role refusal is unchanged.
+  - Without an active organization, every one of the 66 server actions in the table returns its refusal. Each reads the session once, touches nothing and revalidates nothing.
+  - The 33 actions behind `getScopedDb` or `requireOrgAdminScope` do the same with no member row.
+  - The routes answer 403, and the attachment 404, in both states.
+  - a-IN-7: a throwing session read gives 500 on all five routes, with no error text in the body or the log. With no session the answer is still 401. Actions rethrow the failure.
+- Integration, new `tests/integration/membership-ended-refusals.test.ts`: real sign-up and sign-in, the real `deactivateMember`, a one-organization install.
+  - First, presence: `changePriority` succeeds and the bell answers 200.
+  - After deactivation the session row's `activeOrganizationId` is null. Seventeen representative actions return their refusal with no `revalidatePath`. The four routes answer 403, and the attachment 404. A database snapshot is unchanged: the ticket fields, counts of tickets, audit events, tags, views, states, settings, proposals and messages, and the member rows.
+  - A second case keeps the organization on the session and deletes the member row, with the same result. There the Team action answers `not_allowed`, from the 10-03 service; it is not thrown.
+- Updated: `membership-gate.test.ts` (the mocked redirect carries Next's digest; a non-member is refused by `requireOrgAdminScope` with `AccessDeniedError`), `authz-conservative-membership.test.ts` (no member row is `AccessDeniedError`), `tests/unit/logo-upload-route.test.ts` (role null is `membership_ended`), `tests/unit/settings-connection-actions.test.ts` (type narrowing only).
+- E2E, `tests/e2e/team-deactivation.spec.ts`, V-27 case: after the refused assignment from the open ticket page, the access-ended sentence is visible and "Couldn't update assignee. Try again." is not. The URL and the header are unchanged.
+
+**Runs.**
+- Red, unit, with the two original gate lines put back by hand and no caller changed yet: exit 1, 94 failed and 13 passed (107).
+  - The actions rejected with `Error: No active organization on session — cannot scope queries` or `Error: Forbidden: admin role required`, or answered `UNKNOWN`.
+  - The logo route answered 401 and `not_allowed`. The routes answered 401 to a database failure.
+- Red, integration, with the same two lines put back by hand: exit 1, 3 failed and 26 passed (29), across `membership-ended-refusals` and `membership-gate`.
+- Red, E2E (`team-deactivation.spec.ts --grep V-27`), with the `getSessionActor` line put back by hand: exit 1. The sentence was not found, and the page showed "Couldn't update assignee. Try again.". Global setup did not stall.
+- Green:
+  - Unit, the new file: exit 0, 107 passed.
+  - Integration, `membership-ended-refusals`, `membership-gate` and `authz-conservative-membership`. The first run gave exit 1, with one existing case still expecting "Forbidden" for no member row. I updated it to K164's contract. Then exit 0, 38 passed.
+  - `tsc` exit 0. Three client buttons and one test needed narrowing for the new result variant.
+
+**Files:** `src/lib/membership.ts`, `src/lib/session.ts`, `src/lib/authz.ts`, `src/lib/http/gate-failure.ts` (new), 23 server action files under `src/app/(app)/`, `team-copy.ts`, `logo-card.tsx`, the three connection-test buttons, `src/components/tickets/ticket-meta-header.tsx`, the five routes named above, `tests/unit/membership-ended-refusals.test.ts` (new), `tests/integration/membership-ended-refusals.test.ts` (new), `tests/integration/membership-gate.test.ts`, `tests/integration/authz-conservative-membership.test.ts`, `tests/unit/logo-upload-route.test.ts`, `tests/unit/settings-connection-actions.test.ts`, `tests/e2e/team-deactivation.spec.ts`.
+
+**Commit:** `1575ec4` fix(10-F2): K164 no active organization or member row is a typed MEMBERSHIP_ENDED refusal; a-IN-7 gate failure is 500. a-IN-7 shares the commit with K164: both change the same five catch blocks and are pinned by the same unit file.
+
+### Other part a info items
+
+These are recorded in `deferred-items.md`, one row each:
+- a-IN-1: `auth.ts`, the session setup F2 leaves alone;
+- a-IN-3: page files and `page-access.ts`;
+- a-IN-4: a page behaviour, which K164 leaves to `requirePageAccess`;
+- a-IN-6: a schema change, which is not allowed.
+
+a-IN-2 and a-IN-5 were fixed in F1. The same file records four K164 and K165 limits:
+- the v1 form copy;
+- the Team service's `not_allowed` for a non-member actor whose session still names the organization;
+- the unchanged non-admin role refusal;
+- the stale "sends no referrer" sentence in `docs/OPERATIONS.md` (K159).
+
+**Commit:** `108beba` docs(10-F2): record part a info items and K164 limits not done in F2; b-IN-4 fixed
+
+### Final checks
+
+Run at `108beba`, after the last commit. `colima status` exit 0 and `docker info` exit 0 before each Docker step.
+
+| Command | Exit | Counts |
+|---|---|---|
+| `pnpm typecheck` | 0 | 0 errors |
+| `pnpm lint` | 0 | 767 files, 1 warning, pre-existing and known: `tests/unit/container-config.test.ts:160` |
+| `pnpm test` | 0 | 114 files, 2101 tests passed |
+| `vitest --config vitest.integration.config.ts`: `membership-ended-refusals`, `membership-gate`, `authz-conservative-membership`, `invitations`, `notification-digest`, `invite-onboarding` | 0 | 6 files, 127 passed |
+| `pnpm test:integration` (full, once) | 0 | 132 files, 1849 tests passed, 467.6 s |
+| `pnpm test:e2e` `team-deactivation`, `bulk-actions`, `snooze`, `ticket-statuses` (one process) | 0 | 52 passed (5, 12, 15 and 20), 0 failed, 0 flaky |
+
+The unit run includes `membership-inventory.test.ts` (Rules A to E) and `page-access-inventory.test.ts`, and both passed.
+- The session cookie cache is still off (`src/lib/auth.ts:17`, `cookieCache: { enabled: false }`, from `0db72a9`).
+- `readFreshSession` stays the only session read.
+- F2 did not touch `auth.ts`, `fresh-session.ts`, `page-access.ts`, `package.json`, the lockfile or the schema.
+
+Not run: the full `pnpm test:e2e`. Only the four refusal specs the dispatch named were run.
+
+### Not done, and limits
+
+- **Manual items:** I made no visual, dark-mode or screen-reader check of the access-ended toasts, callouts and dialog lines.
+- **Browser coverage:** the E2E ran in Chromium on `http://localhost:3100` only.
+- **Default compose stack:** no run used the compose stack. The start-up refusal is proven by `register()` in a unit test and by the worker run through `tsx`, not by a container that exits.
+- **Report:** this section is written and left uncommitted for the orchestrator.
+
+### `.next` moves
+
+None. Global setup did not stall in either E2E run (the K164 red run and the final run).
