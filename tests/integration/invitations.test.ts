@@ -449,11 +449,17 @@ describe("createInvitation: role ceilings, input and duplicates (D-03, V-26)", (
     ).toBe(true);
   });
 
-  it("INVITE_CONFIG when BETTER_AUTH_URL is missing or not http(s); nothing is written", async () => {
+  it("INVITE_CONFIG when BETTER_AUTH_URL is missing, not http(s) or not a bare origin (K165); nothing is written", async () => {
     const { orgId, ids } = await seed(["owner"]);
     const before = process.env.BETTER_AUTH_URL;
     try {
-      for (const value of [undefined, "ftp://example.test"]) {
+      for (const value of [
+        undefined,
+        "ftp://example.test",
+        // K165 (a-WR-2, b-IN-4): a path is never kept in a link, and /api/auth is no exception.
+        `${BASE_URL}/aida`,
+        `${BASE_URL}/api/auth`,
+      ]) {
         if (value === undefined) delete process.env.BETTER_AUTH_URL;
         else process.env.BETTER_AUTH_URL = value;
         expect(

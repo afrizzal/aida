@@ -9,6 +9,7 @@
 import { randomUUID } from "node:crypto";
 import { simpleParser } from "mailparser";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { AppUrlError } from "@/lib/app-url";
 import { saveEmailSettings } from "@/lib/channels/email/settings";
 import { createSmtpTransport, type SmtpConnectionConfig } from "@/lib/channels/email/smtp-client";
 import { prisma } from "@/lib/db";
@@ -186,6 +187,40 @@ describe("tracer: one recipient's notifications claimed, emailed on an owned soc
     const again = await runDigests({ timing: FAST });
     expect(again.reports.filter((r) => r.organizationId === orgId)).toEqual([]);
     expect(messagesTo(owner.email)).toHaveLength(1);
+  });
+});
+
+// K165 (a-WR-2, b-IN-4): the digest links are the bare origin plus the ticket path. A
+// BETTER_AUTH_URL with a path (the worker also refuses it at start) never reaches a link: the pass
+// throws before any claim, so nothing is sent and no NotificationDigest row is written.
+describe("digest links come from the bare origin of BETTER_AUTH_URL (K165)", () => {
+  it("a path-bearing BETTER_AUTH_URL stops the pass before any claim; restored, the same rows are sent with origin-only links", async () => {
+    const { orgId, members } = await seedOrg({ roles: ["owner"] });
+    const [owner] = members;
+    if (!owner) throw new Error("no owner");
+    const t1 = await seedTicket(orgId);
+    await notify(orgId, owner.id, "ASSIGNED", t1.id);
+
+    const saved = process.env.BETTER_AUTH_URL;
+    try {
+      for (const value of [`${BASE_URL}/aida`, `${BASE_URL}/api/auth`]) {
+        process.env.BETTER_AUTH_URL = value;
+        const err = await runDigests({ timing: FAST }).catch((e: unknown) => e);
+        expect(err, value).toBeInstanceOf(AppUrlError);
+        expect((err as AppUrlError).reason, value).toBe("not_origin");
+      }
+    } finally {
+      process.env.BETTER_AUTH_URL = saved;
+    }
+    expect(await digestsOf(orgId, owner.id)).toEqual([]);
+    expect(messagesTo(owner.email)).toHaveLength(0);
+
+    // Presence: with the bare origin the same notification is sent, its link has no path prefix.
+    const result = await runDigests({ timing: FAST });
+    expect(result.reports.filter((r) => r.organizationId === orgId)[0]?.outcome).toBe("sent");
+    const { text } = await parse(messagesTo(owner.email)[0]?.raw ?? "");
+    expect(text).toContain(`#${t1.number} ${link(t1.id)}`);
+    expect(link(t1.id)).toBe(`http://digest.example.test:3100/tickets/${t1.id}`);
   });
 });
 

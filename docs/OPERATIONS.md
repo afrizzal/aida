@@ -569,6 +569,15 @@ input. Links start with `BETTER_AUTH_URL`, so the `worker` service needs that va
 (`docker-compose.yml` passes it). Each member chooses which events reach the digest under
 Settings → Notifications.
 
+`BETTER_AUTH_URL` must be the bare public origin, for example `https://help.example.com`: a scheme,
+a host and an optional port, with no path. AIDA does not run under a sub-path such as
+`https://example.com/aida`, and `/api/auth` is not part of the value either. Both the `app` and the
+`worker` refuse to start on a value with a path, a query, a fragment or credentials, and log one
+line that names the variable:
+`[boot] BETTER_AUTH_URL must be the bare public origin (…)`. Fix the value in `.env`, then
+`docker compose up -d`. Invitation and digest links are that origin plus `/invite/…` or
+`/tickets/…`.
+
 - **How often:** `AIDA_DIGEST_INTERVAL_HOURS`, one of `1`, `2`, `3`, `4`, `6`, `8`, `12` or `24`
   hours; any other value, or none, means `4`. Runs start on the hour (`24` means daily at 00:00
   UTC). The worker reads the value when it starts, so a change takes effect when the worker
@@ -636,7 +645,7 @@ Every variable in `.env.example`, and nothing else. `Required` means the app wil
 
 | Variable | Required | Default | What it does |
 |---|---|---|---|
-| `BETTER_AUTH_URL` | Yes | `http://localhost` | Public URL of the app, used by Better Auth for callbacks/cookies. Behind Caddy, this is your Caddy-facing URL (`http://localhost` or `https://yourdomain.com`), not `:3000`. |
+| `BETTER_AUTH_URL` | Yes | `http://localhost` | Public URL of the app, used by Better Auth for callbacks/cookies and as the base of invitation and digest links. Behind Caddy, this is your Caddy-facing URL (`http://localhost` or `https://yourdomain.com`), not `:3000`. **The bare origin only** (scheme, host, optional port): a path such as `/aida` or `/api/auth`, a query or a fragment stops the `app` and the `worker` at start. |
 | `NEXT_PUBLIC_APP_URL` | Yes | `http://localhost` | Public app URL exposed to the browser (links in emails, absolute URLs in client code). |
 | `BETTER_AUTH_SECRET` | Yes | — | Session-signing secret. Generate with `openssl rand -base64 32`. **Must be preserved across restores/migrations** — changing it invalidates every existing session. |
 | `BETTER_AUTH_TRUSTED_ORIGINS` | Yes | `http://localhost,https://localhost` | Comma-separated extra origins trusted for CSRF checks. |

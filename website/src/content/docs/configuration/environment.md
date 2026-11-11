@@ -10,7 +10,7 @@ This table covers exactly the variables in `.env.example` — nothing more, noth
 
 | Variable | Required | Default | What it does |
 |---|---|---|---|
-| `BETTER_AUTH_URL` | Yes | `http://localhost` | Public URL of the app, used by Better Auth for callbacks/cookies. Behind Caddy, this is your Caddy-facing URL (`http://localhost` or `https://yourdomain.com`), not `:3000`. |
+| `BETTER_AUTH_URL` | Yes | `http://localhost` | Public URL of the app, used by Better Auth for callbacks/cookies and as the base of invitation and digest links. Behind Caddy, this is your Caddy-facing URL (`http://localhost` or `https://yourdomain.com`), not `:3000`. **The bare origin only** (scheme, host, optional port): a path such as `/aida` or `/api/auth`, a query or a fragment stops the `app` and the `worker` at start. |
 | `NEXT_PUBLIC_APP_URL` | Yes | `http://localhost` | Public app URL exposed to the browser — links in emails, absolute URLs in client code. |
 | `BETTER_AUTH_SECRET` | Yes | — | Session-signing secret. Generate with `openssl rand -base64 32`. |
 | `BETTER_AUTH_TRUSTED_ORIGINS` | Yes | `http://localhost,https://localhost` | Comma-separated extra origins trusted for CSRF checks. |

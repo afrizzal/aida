@@ -13,6 +13,18 @@ export async function register() {
       }
       throw err;
     }
+    // Refuse to boot on a BETTER_AUTH_URL that is set but is not a bare http(s) origin (K165): a
+    // path breaks sign-in or every invitation link. The message names the variable, never a value.
+    const { AppUrlError, assertAppUrlAtStart } = await import("@/lib/app-url");
+    try {
+      assertAppUrlAtStart(process.env);
+    } catch (err) {
+      if (err instanceof AppUrlError) {
+        console.error(`[boot] ${err.message}`);
+        process.exit(1);
+      }
+      throw err;
+    }
     // One log line, never a boot failure; the limiter keeps failing closed (review b-IN-b7).
     const { warnIfRateLimitPepperUnsafe } = await import("@/lib/rate-limit/pepper-check");
     warnIfRateLimitPepperUnsafe();

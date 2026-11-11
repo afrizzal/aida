@@ -7,23 +7,41 @@
 // host header: a link built from a request header can be poisoned by whoever sends the request
 // (threat T-10-20).
 //
+// BETTER_AUTH_URL must be the bare public origin (K165, review a-WR-2 and b-IN-4). Better Auth
+// takes any path of that URL as its own base path, while AIDA mounts it at /api/auth and has no
+// Next basePath: a sub-path such as /aida breaks sign-in, and /api/auth would put every invitation
+// and digest link under Better Auth's catch-all. So a path, a query, a fragment or credentials are
+// refused here (reason not_origin), and both the app (src/instrumentation.ts) and the worker
+// (src/lib/worker/index.ts) refuse to start on such a value (assertAppUrlAtStart). Sub-path
+// deployments are not supported.
+//
 // Pure environment read. Relative imports only (none today) and no framework import: the worker
 // may bundle it.
 
-export type AppUrlErrorReason = "missing" | "invalid" | "scheme";
+export type AppUrlErrorReason = "missing" | "invalid" | "scheme" | "not_origin";
 
-/** BETTER_AUTH_URL is missing, does not parse, or is not http or https. Never carries the value. */
+function messageFor(reason: AppUrlErrorReason): string {
+  switch (reason) {
+    case "missing":
+      return "BETTER_AUTH_URL is not set";
+    case "invalid":
+      return "BETTER_AUTH_URL is not a valid URL";
+    case "scheme":
+      return "BETTER_AUTH_URL must use http or https";
+    case "not_origin":
+      return "BETTER_AUTH_URL must be the bare public origin (scheme, host and optional port, for example https://help.example.com) with no path, query, fragment or credentials; AIDA does not support a sub-path";
+  }
+}
+
+/**
+ * BETTER_AUTH_URL is missing, does not parse, is not http or https, or is not a bare origin.
+ * Never carries the value.
+ */
 export class AppUrlError extends Error {
   readonly reason: AppUrlErrorReason;
 
   constructor(reason: AppUrlErrorReason) {
-    super(
-      reason === "missing"
-        ? "BETTER_AUTH_URL is not set"
-        : reason === "invalid"
-          ? "BETTER_AUTH_URL is not a valid URL"
-          : "BETTER_AUTH_URL must use http or https",
-    );
+    super(messageFor(reason));
     this.name = "AppUrlError";
     this.reason = reason;
   }
@@ -41,21 +59,41 @@ function parseAppUrl(env: Env): URL {
     throw new AppUrlError("invalid");
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new AppUrlError("scheme");
+  // The URL parser gives a bare origin the path "/" whether or not a trailing slash was written; a
+  // "?" or "#" with nothing after it still counts, so the raw text is checked too.
+  const bare =
+    url.pathname === "/" &&
+    url.search === "" &&
+    url.hash === "" &&
+    url.username === "" &&
+    url.password === "" &&
+    !raw.includes("?") &&
+    !raw.includes("#");
+  if (!bare) throw new AppUrlError("not_origin");
   return url;
 }
 
 /**
- * The origin plus path of BETTER_AUTH_URL with no trailing slash, for example
- * `https://help.example.com` or `https://example.com/aida`. Query and fragment are dropped.
- * Throws AppUrlError when the variable is missing, invalid or not http(s).
+ * The base of every link AIDA builds (invitation and digest links): the origin of BETTER_AUTH_URL,
+ * for example `https://help.example.com`, never with a path (K165). Throws AppUrlError when the
+ * variable is missing, invalid, not http(s) or not a bare origin.
  */
 export function getAppBaseUrl(env: Env = process.env): string {
-  const url = parseAppUrl(env);
-  const path = url.pathname.replace(/\/+$/, "");
-  return `${url.origin}${path}`;
+  return parseAppUrl(env).origin;
 }
 
-/** The origin of BETTER_AUTH_URL (scheme, host and port), for Origin checks. */
+/**
+ * The start-up check of BETTER_AUTH_URL (K165), run by the app (src/instrumentation.ts) and the
+ * worker (src/lib/worker/index.ts) before either serves: a value that is set must be a bare http(s)
+ * origin, or this throws AppUrlError and the caller logs its message and exits. An unset or blank
+ * value passes here: invitations then answer INVITE_CONFIG and the digest pass refuses, as before.
+ */
+export function assertAppUrlAtStart(env: Env = process.env): void {
+  if ((env.BETTER_AUTH_URL?.trim() ?? "") === "") return;
+  parseAppUrl(env);
+}
+
+/** The origin of BETTER_AUTH_URL (scheme, host and port), for Origin checks; refused like getAppBaseUrl. */
 export function getAppOrigin(env: Env = process.env): string {
   return parseAppUrl(env).origin;
 }

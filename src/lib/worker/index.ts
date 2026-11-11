@@ -1,5 +1,6 @@
 import type { Job, JobWithMetadata } from "pg-boss";
 import { PgBoss } from "pg-boss";
+import { AppUrlError, assertAppUrlAtStart } from "../app-url";
 import { assertDatabaseUrlConsistent, DatabaseUrlMismatchError } from "../db-url";
 import { KB_PROPOSAL_GENERATE_QUEUE } from "../kb/proposal-contract";
 import { ensureKbProposalQueue } from "../kb/proposal-queue";
@@ -28,6 +29,17 @@ async function main() {
     assertDatabaseUrlConsistent(process.env);
   } catch (err) {
     if (err instanceof DatabaseUrlMismatchError) {
+      console.error(`[boot] ${err.message}`);
+      process.exit(1);
+    }
+    throw err;
+  }
+  // K165: the digest links start with BETTER_AUTH_URL, so a value that is set but is not a bare
+  // http(s) origin stops the worker here, like the app; the message names the variable only.
+  try {
+    assertAppUrlAtStart(process.env);
+  } catch (err) {
+    if (err instanceof AppUrlError) {
       console.error(`[boot] ${err.message}`);
       process.exit(1);
     }
