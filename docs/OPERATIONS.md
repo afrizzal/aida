@@ -586,17 +586,44 @@ line that names the variable:
   Email, or has no SMTP host or from address. Its notifications stay in the bell.
 - **Which server:** the digest goes through the workspace's own SMTP settings, the same server as
   ticket replies. AIDA adds no other destination.
+- **Replies to a digest:** the digest is marked as automatic mail (`Auto-Submitted:
+  auto-generated`), so out-of-office responders do not answer it, and AIDA's inbox poll treats
+  such mail as automatic. It is sent from the workspace's support address, though, so a member who
+  answers a digest by hand writes to the support inbox, and that reply opens a ticket.
 
 **Delivery guarantee.** A digest is marked sent, and its notifications marked as emailed, only
-after the SMTP server accepted the whole message (its final reply after the data). If the server
-rejects it with an error reply (at the recipient, at the data command or after the data), nothing
-is marked and the next run sends it again; this rejection causes no duplicate. When the
-connection drops, or the 45-second send deadline cuts it off, with no reply, AIDA cannot tell
-whether the server accepted the message. It then keeps the batch for its five-minute lease and
-sends it again after that. Each such attempt can add one copy, so repeated ambiguous failures can
+after the SMTP server accepted the whole message (its final reply after the data). When the
+server rejects it with an error reply (at login, at the recipient, at the data command or after
+the data), what happens depends on the reply code:
+
+- **A temporary rejection (a `4xx` code):** nothing is marked, and the next run sends the digest
+  again. This rejection causes no duplicate.
+- **A permanent rejection (a `5xx` code)**, for example `550` (no such mailbox) or `535` (the SMTP
+  password is wrong): AIDA does not try that batch again. Its notifications stay in the member's
+  bell but are not emailed, and later runs write nothing more for them. The next notification
+  for that member starts a new digest. Fix the cause (the address, the SMTP settings), and the
+  following digests go out again.
+
+When the connection drops, or the 45-second send deadline cuts it off, with no reply, AIDA cannot
+tell whether the server accepted the message. It then keeps the batch for its five-minute lease
+and sends it again on the first scheduled run after that lease, which by default is the next run,
+up to 4 hours later. Each such attempt can add one copy, so repeated ambiguous failures can
 deliver more than one duplicate. A crash of the worker after the server accepted the message and
-before the database recorded it can also resend it once after the lease. AIDA does not claim
+before the database recorded it can also resend it once on such a later run. AIDA does not claim
 exactly-once delivery.
+
+**What the worker log shows.** Each run writes one line with its counts, for example
+`[notification-digest] run: pairs=3 sent=2 rejected=0 rejectedPermanent=1 ambiguous=0 failed=0 leaseShort=0 stopped=false`.
+Each failed send writes one line with the error class and its codes only, for example
+`[notification-digest] send rejected (permanent): class=Error code=EAUTH reply=535`. A run that
+fails as a whole (for example an unusable `BETTER_AUTH_URL`) writes
+`[notification-digest] run failed: class=…`. The log never names an address, a member, a ticket
+or the server's reply text.
+
+**Slow runs.** A run is a pg-boss job with no retry that expires at the next scheduled run (at
+most after 23 hours). An expired run, or one the worker is stopping, finishes the email it is
+sending and then stops; the next run picks up the rest. Two runs never send the same member's
+batch at once.
 
 A member removed from the workspace gets no digest: membership, the member's choices and
 owner or admin rights are checked again right before each send.
@@ -606,7 +633,9 @@ owner or admin rights are checked again right before each send.
 A customer reply or an SLA alert on a ticket with no assignee notifies every owner and admin of the
 workspace, in the bell and in the digest, where those notifications have their own line ("On
 unassigned tickets"). Each owner or admin can turn this off for themselves under Settings →
-Notifications ("Unassigned tickets"). Two limits apply for now (owner item O-7):
+Notifications ("Unassigned tickets"). That switch alone decides these notifications, in the bell
+and in the digest: the switches of each event type apply to the member's own tickets only. Two
+limits apply for now (owner item O-7):
 
 - A new ticket notifies nobody, whether it comes in by email or through the public request form.
 - A ticket whose assignee was removed from the workspace notifies nobody until it is reassigned:
@@ -616,7 +645,8 @@ Notifications ("Unassigned tickets"). Two limits apply for now (owner item O-7):
 ### Invitation links and access logs
 
 An invitation link carries its token in the URL path (`/invite/<token>`). AIDA stores only a hash
-of the token, never logs the link, and the invitation page sends no referrer. The shipped
+of the token, never logs the link, and the invitation page sends a referrer to AIDA itself only
+(`Referrer-Policy: same-origin`), never to another site. The shipped
 `Caddyfile` has no access log. **If you enable access logging in Caddy, or put another proxy or a
 CDN in front of AIDA that logs request paths, those logs record invitation tokens.** Protect such
 logs like credentials, or redact the `/invite/` path in them. A leaked token works only once and
