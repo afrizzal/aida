@@ -5,7 +5,7 @@ milestone_name: Helpdesk & Projects
 current_phase: 10
 current_phase_name: team
 status: Phase 8 Part A verified human_needed; Phase 8.1 waits for the owner; Phase 9 verified human_needed (6/6 host level); Phase 10 replanned to 17 plans and plan-checked, execution next; Phase 15 unparked, not executed; Phases 11, 12, 12.1, 12.2 and 14 verified human_needed
-stopped_at: Phase 10 step 6 complete (17/17 plans, gate in 10-GATE.md); next step 7, code review
+stopped_at: Phase 10 step 7, code review done; fix batch F1 next
 last_updated: "2026-11-13T01:50:00.000Z"
 last_activity: 2026-11-13
 last_activity_desc: Phase 10 replanned after the owner unparked it: pattern map with 43 drift items, CONTEXT update 2026-11-13 (V-01 to V-30, owner items O-4 to O-10 on safe defaults), one Codex brainstorm round, 17 plans with migration 20261115100000_team_foundation through a rule J dev database. Plan checker 0 blocker 0 warning; second pass traced D1 to D43 and the cycle 3 findings, passed.
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-11-07, v2.0 opened)
 
 ## Current Position
 
-Phase: 10 (Team), step 7 (code review) next; step 6 (execution) complete. Replanned 2026-11-13 after the owner unparked the phase (owner items 2, 11, 12 of 2026-11-11): 17 plans in 7 waves, decisions V-01 to V-30 and owner items O-4 to O-10 in `10-CONTEXT.md` ("Update 2026-11-13").
+Phase: 10 (Team), step 7: code review done (0 critical, 19 warning, 31 info; decisions K159 to K177 in 10-REVIEW.md), fix batches F1 to F5 next, then the Codex diff critique. Replanned 2026-11-13 after the owner unparked the phase (owner items 2, 11, 12 of 2026-11-11): 17 plans in 7 waves, decisions V-01 to V-30 and owner items O-4 to O-10 in `10-CONTEXT.md` ("Update 2026-11-13").
 Plan: 17 of 17 complete; Wave 1 done (10-01 `5e2200a`, 10-02 `c8a1547`, 10-15 `9deea46`); Wave 2 done: 10-03 `2836029`, 10-04 `04072e0`, 10-16 `4812ac0`, 10-17 `9eb2661`. Regression R10-1 (4 E2E failures after refused server actions, from the fresh session read writing the cookie cache) fixed in `0db72a9` by turning the cookie cache off; full E2E 261 passed, 0 failed. The auth-upgrade pinned migration list was completed (`fe34bb8`); full integration at `4a36102` exit 0 (124 files, 1707 tests). Wave 3 done: 10-05 `40ca902`, 10-06 `34ff08c` (full integration 127 files, 1781 tests), 10-07 `20d7d58`; full E2E at `a8fe666` 261 passed, 0 failed. Wave 4 done: 10-08 `07f8678`, 10-09 `f134d05`, 10-10 `cbca323`, 10-12 `dc0fff0`; full E2E at `324a80d` 260 passed, 1 stale Phase 9 tab-order test updated in `76a08ca`. Wave 5 done: 10-11 `2eecd60`. Wave 6 done: 10-13 `5593947` (E2E proofs; product fix `dd941e0` for the invitation Origin check under no-referrer; full E2E 292 passed, 0 failed). Wave 7 done: 10-14 `bf5365f` (gate at `2418e4c` in `10-GATE.md`: integration 1 timing-dependent failure, egress blocked (space), audit 10 high, E2E 292 passed; AIDA-45 and AIDA-46 each miss one proof). Plan checker: 0 blocker, 0 warning, 3 info; a second checker pass traced drift items D1 to D43 (`10-PATTERNS.md`) and the Codex cycle 3 findings, passed with info only.
 Status: Phase 8 Part A verified `human_needed`; Phase 8.1 waits for the owner. Phases 9, 11, 12, 12.1, 12.2 and 14 are verified `human_needed`. Phase 15 is unparked and not yet executed; 13, 16 and 17 are not planned. No phase is parked.
 Last activity: 2026-11-13 — Phase 10 replan and plan checks. v1.0.0 stays complete and archived (`milestones/v1.0.0-*`); the v1.0.0 safe-point candidate is `fc8078f` (owner decides).
@@ -127,7 +127,7 @@ Owner items, in the order of `run-loop/LAPORAN.md` section 3:
 ## Session Continuity
 
 **Last session:** 2026-11-13T01:50:00.000Z
-**Stopped at:** Phase 10 executed (17/17); step 7 code review next (2026-11-13)
+**Stopped at:** Phase 10 code review done; fix batch F1 next (2026-11-13)
 **Resume file:** .planning/run-loop/ANTREAN.md
 
 **Last action (2026-11-13):** Phase 10 replan (17 plans) and two plan checker passes. No tag, nothing pushed.
