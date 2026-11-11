@@ -68,21 +68,27 @@ export interface ReassignCounts {
 /**
  * reassignOpenTickets (10-03) for an actor already read by the calling action. A refusal
  * (NOT_ALLOWED, INVALID_REASSIGNEE) or an error before the first batch moved nothing, so every
- * open ticket still assigned to fromUserId counts as failed and a retry picks it up.
+ * open ticket still assigned to fromUserId counts as failed and a retry picks it up. That count is
+ * read only when `mayCount` says the actor was just proven to hold admin rights (the deactivation
+ * committed); otherwise a refusal returns null and an error reports `failed: null`, so no member
+ * can read another user's open-ticket count through this path (review b-IN-2).
  */
 async function runReassignment(
   orgId: string,
   actorUserId: string,
   fromUserId: string,
   toUserId: string,
-): Promise<ReassignCounts> {
+  mayCount: boolean,
+): Promise<ReassignCounts | null> {
   try {
     const result = await reassignOpenTickets({ orgId, actorUserId, fromUserId, toUserId });
     if (result.ok) {
       return { reassigned: result.reassigned, skipped: result.skipped, failed: result.failed };
     }
+    if (!mayCount) return null;
   } catch {
     // Falls through: nothing is known to have moved.
+    if (!mayCount) return { reassigned: 0, skipped: 0, failed: null };
   }
   const left = await countOpenAssignedTickets(orgId, fromUserId).catch(() => null);
   return { reassigned: 0, skipped: 0, failed: left };
@@ -128,8 +134,15 @@ export async function deactivateMemberAction(
   }
   revalidatePath(TEAM_PATH);
   if (reassignToUserId === null) return { ok: true, reassigned: 0, skipped: 0, failed: 0 };
-  const counts = await runReassignment(actor.orgId, actor.userId, targetUserId, reassignToUserId);
-  return { ok: true, ...counts };
+  // The deactivation just committed under the actor's admin check, so the count may be read.
+  const counts = await runReassignment(
+    actor.orgId,
+    actor.userId,
+    targetUserId,
+    reassignToUserId,
+    true,
+  );
+  return { ok: true, ...(counts ?? { reassigned: 0, skipped: 0, failed: null }) };
 }
 
 export type ReassignResult = ({ ok: true } & ReassignCounts) | { ok: false };
@@ -141,7 +154,9 @@ export async function reassignTicketsAction(
 ): Promise<ReassignResult> {
   if (typeof fromUserId !== "string" || typeof toUserId !== "string") return { ok: false };
   const actor = await getSessionActor();
-  const counts = await runReassignment(actor.orgId, actor.userId, fromUserId, toUserId);
+  const counts = await runReassignment(actor.orgId, actor.userId, fromUserId, toUserId, false);
+  // A refusal changed nothing: no count, and no re-render of the page (review b-IN-2).
+  if (counts === null) return { ok: false };
   revalidatePath(TEAM_PATH);
   return { ok: true, ...counts };
 }
