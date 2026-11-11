@@ -32,9 +32,11 @@ export const NO_REFERRER_PATH_PREFIXES = ["/status", "/api/public/status"] as co
  * own origin (K159, amends D-04). `same-origin` sends a Referer only to AIDA itself, which already
  * has the token, and never to another origin; and under it the browser sends the page's real
  * Origin on the card's own post, so the accept route can require an exact Origin match. Under
- * `no-referrer` the browser sends that post with `Origin: null`.
+ * `no-referrer` the browser sends that post with `Origin: null`. The prefix keeps its trailing
+ * slash (review b-IN-3): the page always has a token segment, and /invites or /invitations must
+ * not match.
  */
-export const SAME_ORIGIN_REFERRER_PATH_PREFIXES = ["/invite"] as const;
+export const SAME_ORIGIN_REFERRER_PATH_PREFIXES = ["/invite/"] as const;
 
 /**
  * sonner 2.0.7 injects one static <style> at module load (`__insertCSS` in dist/index.mjs) and

@@ -488,6 +488,15 @@ describe("proxy — 10-15 /invite entry point", () => {
     }
   });
 
+  it("Z8 (b-IN-3, a-IN-5): /invite is anchored on its token segment; /invites, /invitations, /invited and a bare /invite are not public", () => {
+    for (const path of ["/invite", "/invites", "/invitations", "/invited/abc", "/inviteX/abc"]) {
+      const response = proxy(new NextRequest(`http://localhost${path}`));
+      expect(response.status, path).toBe(307);
+      expect(new URL(response.headers.get("location") ?? "").pathname, path).toBe("/login");
+      expect(response.headers.get("referrer-policy"), path).toBe("strict-origin-when-cross-origin");
+    }
+  });
+
   it("Z7: a malformed /invite path gets the existing plain-text 400", async () => {
     await expectMalformedPathRejection(proxy(new NextRequest("http://localhost/invite/%E0%A4%A")));
     await expectMalformedPathRejection(

@@ -101,7 +101,8 @@ describe("securityHeadersFor (D-14)", () => {
     // K159 (amends D-04): /invite carries an invitation token in its path, and its card posts a
     // form to its own origin, so it gets same-origin: no Referer to any other origin, and the
     // browser sends the real Origin on the card's own post.
-    expect(SAME_ORIGIN_REFERRER_PATH_PREFIXES).toEqual(["/invite"]);
+    // b-IN-3, a-IN-5: anchored on the token segment, so /invites or /invitations is not matched.
+    expect(SAME_ORIGIN_REFERRER_PATH_PREFIXES).toEqual(["/invite/"]);
   });
 
   it("H: /status and /api/public/status paths get no-referrer", () => {
@@ -125,7 +126,17 @@ describe("securityHeadersFor (D-14)", () => {
   });
 
   it("I: other paths get strict-origin-when-cross-origin", () => {
-    for (const path of ["/", "/login", "/tickets", "/api/public/request", "/api/public/requests"]) {
+    for (const path of [
+      "/",
+      "/login",
+      "/tickets",
+      "/api/public/request",
+      "/api/public/requests",
+      "/invite",
+      "/invites",
+      "/invitations",
+      "/invited/abc",
+    ]) {
       expect(securityHeadersFor(path)["Referrer-Policy"]).toBe("strict-origin-when-cross-origin");
     }
   });
