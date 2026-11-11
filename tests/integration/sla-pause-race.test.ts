@@ -84,10 +84,20 @@ async function twoTickets(actor: Actor): Promise<[string, string]> {
 
 /**
  * Flags every other eligible ticket of the shared database at `now`, so a later run at the same
- * `now` locks only the tickets a case creates afterwards.
+ * `now` locks only the tickets a case creates afterwards. A run flips at most the row cap per
+ * organization (K167), so it repeats until a run locks nothing.
  */
 async function drain(now: Date): Promise<void> {
-  await slaFlagHandler(undefined, { now });
+  for (;;) {
+    let locked = 0;
+    await slaFlagHandler(undefined, {
+      now,
+      afterPassLock: (_tx, _pass, ids) => {
+        locked += ids.length;
+      },
+    });
+    if (locked === 0) return;
+  }
 }
 
 const isDeadlock = (reason: unknown): boolean => {
@@ -158,11 +168,9 @@ describe("sla-flag worker against a state transition (D-17)", () => {
         locks.push([pass, ids]);
       },
     });
-    // Settled while the resume still holds the row (release not yet resolved).
-    expect(locks).toEqual([
-      ["breach", []],
-      ["atRisk", []],
-    ]);
+    // Settled while the resume still holds the row (release not yet resolved). K167: a pass runs
+    // one transaction per organization with candidates; the at-risk pass has none, so it opens none.
+    expect(locks).toEqual([["breach", []]]);
     expect(workerPid).not.toBe(holder);
     const whileHeld = await row(id);
     expect(whileHeld.isBreached).toBe(false);
@@ -284,11 +292,9 @@ describe("sla-flag worker against a two-ticket bulk mutation (review C6)", () =>
         locks.push([pass, ids]);
       },
     });
-    // Settled while the mutation still holds both rows.
-    expect(locks).toEqual([
-      ["breach", []],
-      ["atRisk", []],
-    ]);
+    // Settled while the mutation still holds both rows. K167: a pass runs one transaction per
+    // organization with candidates; the at-risk pass has none, so it opens none.
+    expect(locks).toEqual([["breach", []]]);
     expect(workerPid).not.toBe(holder);
     expect(await row(t1)).toEqual(before[t1]);
     expect(await row(t2)).toEqual(before[t2]);

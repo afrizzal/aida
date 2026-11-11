@@ -9,6 +9,9 @@
 // assignee's member rows FOR SHARE (V-25), so a deactivation of that assignee waits for it, and an
 // assignment that starts behind a deactivation in flight waits and is refused.
 //
+// K167: the pass runs one transaction per organization, so each hook below acts on this case's
+// organization only.
+//
 // Race helpers per V-16: backendPid, deferred and waitForBlockedBy from tests/support/lock-wait.ts,
 // createObserverClient, settleAll and assertNoDeadlock from tests/support/project-race.ts. Every
 // PID is recorded from inside the run's own transaction through the services' seams. No sleeps.
@@ -101,7 +104,8 @@ describe("SLA pass against deactivation (V-25, V-28)", () => {
 
     const pass = slaFlagHandler(undefined, {
       now,
-      afterPassUpdate: (tx, p) => (p === "breach" ? hold.hook(tx) : undefined),
+      afterPassUpdate: (tx, p, org) =>
+        p === "breach" && org === orgId ? hold.hook(tx) : undefined,
     }).then(() => {
       passDone = true;
     });
@@ -157,7 +161,8 @@ describe("SLA pass against deactivation (V-25, V-28)", () => {
       const deactivationPid = await hold.pid;
       pass = slaFlagHandler(undefined, {
         now,
-        onPassTransaction: (tx, p) => (p === "breach" ? wait.hook(tx) : undefined),
+        onPassTransaction: (tx, p, org) =>
+          p === "breach" && org === orgId ? wait.hook(tx) : undefined,
       });
       pass.catch(() => {});
       const passPid = await wait.pid;
@@ -190,7 +195,8 @@ describe("SLA pass against deactivation (V-25, V-28)", () => {
 
     const pass = slaFlagHandler(undefined, {
       now,
-      afterPassUpdate: (tx, p) => (p === "breach" ? hold.hook(tx) : undefined),
+      afterPassUpdate: (tx, p, org) =>
+        p === "breach" && org === orgId ? hold.hook(tx) : undefined,
     });
     pass.catch(() => {});
     let deactivation: Promise<unknown> = Promise.resolve();

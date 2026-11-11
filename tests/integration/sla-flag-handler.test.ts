@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { describe, expect, it } from "vitest";
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { setUnassignedSetting } from "@/lib/notifications/preferences";
 import { runTicketMutation } from "@/lib/tickets/mutations";
-import { slaFlagHandler } from "@/lib/worker/jobs/sla-flag";
+import { SLA_PASS_ROW_CAP, type SlaFlagPass, slaFlagHandler } from "@/lib/worker/jobs/sla-flag";
 import {
   type LegacyStatusKey,
   type MemberRole,
@@ -581,5 +582,160 @@ describe("slaFlagHandler notifications (plan 10-06, V-09, V-30)", () => {
         where: { recipientUserId: { in: [a.users[1].id, b.users[1].id] } },
       }),
     ).toBe(2);
+  });
+});
+
+// K167 (c-WR-02): each pass is bounded. It discovers the organizations with candidates by a plain
+// read, then runs one transaction per organization, which locks at most the row cap of that
+// organization's candidates (id order, SKIP LOCKED), flips them and notifies exactly the flipped
+// rows inside the same transaction. The remainder waits for the next run. A failure in one
+// organization's transaction rolls back that organization only; the handler still rethrows it.
+describe("slaFlagHandler is bounded: one transaction per organization and a row cap (K167)", () => {
+  type LockCall = { pass: SlaFlagPass; orgId: string; ids: string[]; txid: string };
+
+  async function txid(tx: Prisma.TransactionClient): Promise<string> {
+    const [row] = await tx.$queryRaw<{ txid: string }[]>`SELECT txid_current()::text AS txid`;
+    return row?.txid ?? "";
+  }
+
+  async function overdueTickets(
+    orgId: string,
+    contactId: string,
+    count: number,
+    now: Date,
+    assigneeId: string,
+  ) {
+    const ids: string[] = [];
+    for (let n = 1; n <= count; n += 1) {
+      ids.push((await seedTicket(orgId, contactId, n, { ...overdue(now), assigneeId })).id);
+    }
+    return ids.sort();
+  }
+
+  async function breached(orgId: string) {
+    const rows = await prisma.ticket.findMany({
+      where: { organizationId: orgId, isBreached: true },
+      select: { id: true },
+    });
+    return rows.map((r) => r.id).sort();
+  }
+
+  it("a backlog above the cap: the first run flips the cap's lowest ids of each organization in its own transaction and notifies exactly those; the next run flips the rest; a third adds nothing", async () => {
+    const a = await seedOrgWithMembersAndContact(["owner", "member"]);
+    const b = await seedOrgWithMembersAndContact(["owner", "member"]);
+    const now = new Date(Date.now());
+    const idsA = await overdueTickets(a.orgId, a.contactId, 5, now, a.users[1].id);
+    const idsB = await overdueTickets(b.orgId, b.contactId, 2, now, b.users[1].id);
+    const ours = new Set([a.orgId, b.orgId]);
+
+    const locks: LockCall[] = [];
+    const inTx = new Map<string, number>();
+    await slaFlagHandler(undefined, {
+      now,
+      rowCap: 3,
+      afterPassLock: async (tx, pass, ids, orgId) => {
+        if (orgId && ours.has(orgId)) locks.push({ pass, orgId, ids, txid: await txid(tx) });
+      },
+      afterPassUpdate: async (tx, pass, orgId) => {
+        if (pass !== "breach" || !orgId || !ours.has(orgId)) return;
+        // Inside the organization's own transaction, before its commit.
+        inTx.set(orgId, await tx.notification.count({ where: { organizationId: orgId } }));
+      },
+    });
+
+    const breachLocks = locks.filter((l) => l.pass === "breach");
+    expect(breachLocks.map((l) => [l.orgId, l.ids])).toEqual(
+      [
+        [a.orgId, idsA.slice(0, 3)],
+        [b.orgId, idsB],
+      ].sort((x, y) => String(x[0]).localeCompare(String(y[0]))),
+    );
+    expect(new Set(breachLocks.map((l) => l.txid)).size).toBe(2);
+    expect(inTx.get(a.orgId)).toBe(3);
+    expect(inTx.get(b.orgId)).toBe(2);
+    expect(await breached(a.orgId)).toEqual(idsA.slice(0, 3));
+    expect(await breached(b.orgId)).toEqual(idsB);
+    const keys = (rows: { eventKey: string }[]) => rows.map((r) => r.eventKey).sort();
+    expect(keys(await slaNotifications(a.orgId))).toEqual(
+      idsA
+        .slice(0, 3)
+        .map((id) => `sla-breached:${id}:${now.toISOString()}`)
+        .sort(),
+    );
+    expect(await slaNotifications(b.orgId)).toHaveLength(2);
+
+    const next = new Date(now.getTime() + 1000);
+    await slaFlagHandler(undefined, { now: next, rowCap: 3 });
+    expect(await breached(a.orgId)).toEqual(idsA);
+    expect(keys(await slaNotifications(a.orgId))).toEqual(
+      [
+        ...idsA.slice(0, 3).map((id) => `sla-breached:${id}:${now.toISOString()}`),
+        ...idsA.slice(3).map((id) => `sla-breached:${id}:${next.toISOString()}`),
+      ].sort(),
+    );
+
+    await slaFlagHandler(undefined, { now: new Date(next.getTime() + 1000), rowCap: 3 });
+    expect(await slaNotifications(a.orgId)).toHaveLength(5);
+    expect(await slaNotifications(b.orgId)).toHaveLength(2);
+  });
+
+  it("the shipped cap: 501 overdue tickets of one organization flip 500 in the first run (500 notifications) and the last one in the next", async () => {
+    expect(SLA_PASS_ROW_CAP).toBe(500);
+    const { orgId, users, contactId } = await seedOrgWithMembersAndContact(["owner", "member"]);
+    const now = new Date(Date.now());
+    const stateId = await stateIdFor(orgId, "OPEN");
+    await prisma.ticket.createMany({
+      data: Array.from({ length: 501 }, (_, i) => ({
+        organizationId: orgId,
+        contactId,
+        number: i + 1,
+        statusToken: randomUUID(),
+        subject: `SLA cap test #${i + 1}`,
+        stateId,
+        priority: "NORMAL" as const,
+        firstResponseTargetMinutes: 60,
+        resolutionTargetMinutes: 480,
+        ...overdue(now),
+        assigneeId: users[1].id,
+      })),
+    });
+
+    const started = performance.now();
+    await slaFlagHandler(undefined, { now });
+    console.log(`[K167 cap] 501 overdue, first run ${(performance.now() - started).toFixed(1)} ms`);
+    expect(await breached(orgId)).toHaveLength(500);
+    expect(await slaNotifications(orgId)).toHaveLength(500);
+
+    await slaFlagHandler(undefined, { now: new Date(now.getTime() + 1000) });
+    expect(await breached(orgId)).toHaveLength(501);
+    expect(await slaNotifications(orgId)).toHaveLength(501);
+  });
+
+  it("a failure in one organization's transaction rolls back that organization only; the other commits its flags and notifications; the handler rethrows; the next run flags the first", async () => {
+    const a = await seedOrgWithMembersAndContact(["owner", "member"]);
+    const b = await seedOrgWithMembersAndContact(["owner", "member"]);
+    const now = new Date(Date.now());
+    const [ticketA] = await overdueTickets(a.orgId, a.contactId, 1, now, a.users[1].id);
+    const [ticketB] = await overdueTickets(b.orgId, b.contactId, 1, now, b.users[1].id);
+
+    await expect(
+      slaFlagHandler(undefined, {
+        now,
+        afterPassUpdate: (_tx, pass, orgId) => {
+          if (pass === "breach" && orgId === a.orgId) throw new Error("forced failure in org A");
+        },
+      }),
+    ).rejects.toThrow("forced failure in org A");
+    expect(await breached(b.orgId)).toEqual([ticketB]);
+    expect(await slaNotifications(b.orgId)).toHaveLength(1);
+    expect(await breached(a.orgId)).toEqual([]);
+    expect(await slaNotifications(a.orgId)).toEqual([]);
+    const rowA = await prisma.ticket.findUniqueOrThrow({ where: { id: ticketA } });
+    // Its at-risk pass is skipped in the same run, so the failed breach is not turned into at-risk.
+    expect(rowA.isAtRisk).toBe(false);
+
+    await slaFlagHandler(undefined, { now: new Date(now.getTime() + 1000) });
+    expect(await breached(a.orgId)).toEqual([ticketA]);
+    expect(await slaNotifications(a.orgId)).toHaveLength(1);
   });
 });
