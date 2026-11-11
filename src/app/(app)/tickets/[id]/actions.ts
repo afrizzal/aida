@@ -7,6 +7,7 @@ import type {
   TriageCategory,
   TriageSentiment,
 } from "@/generated/prisma/client";
+import { type MembershipEndedRefusal, membershipEnded, nullOnAccessDenied } from "@/lib/membership";
 import { getBoss } from "@/lib/queue/boss-client";
 import type { GenerateDraftResult } from "@/lib/rag/generate-draft";
 import { generateDraftReply as runGenerateDraft } from "@/lib/rag/generate-draft";
@@ -41,7 +42,8 @@ export async function changeState(
   ticketId: string,
   stateId: string,
 ): Promise<MutationActionResult> {
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return membershipEnded();
   const result = await runTicketMutation({
     actor,
     ticketIds: [ticketId],
@@ -61,7 +63,8 @@ export async function changePriority(
   ticketId: string,
   priority: TicketPriority,
 ): Promise<MutationActionResult> {
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return membershipEnded();
   const result = await runTicketMutation({
     actor,
     ticketIds: [ticketId],
@@ -75,8 +78,12 @@ export async function changePriority(
  * Re-enqueues a FAILED outbound public reply's SMTP send (D-21 "Retry" affordance). Verifies
  * the message exists in this org before touching it (scopedDb-scoped findFirst).
  */
-export async function retryOutboundSend(messageId: string): Promise<{ ok: boolean }> {
-  const { db } = await getScopedDb();
+export async function retryOutboundSend(
+  messageId: string,
+): Promise<{ ok: boolean } | MembershipEndedRefusal> {
+  const scope = await getScopedDb().catch(nullOnAccessDenied);
+  if (!scope) return membershipEnded();
+  const { db } = scope;
 
   const message = await db.message.findFirst({ where: { id: messageId } });
   if (!message) return { ok: false };
@@ -100,8 +107,12 @@ export async function retryOutboundSend(messageId: string): Promise<{ ok: boolea
  * switch before ever calling the LLM, so this is safe to call even if AI has since been
  * disabled (it will simply no-op in the worker).
  */
-export async function rerunTriage(ticketId: string): Promise<{ ok: boolean }> {
-  const { db } = await getScopedDb();
+export async function rerunTriage(
+  ticketId: string,
+): Promise<{ ok: boolean } | MembershipEndedRefusal> {
+  const scope = await getScopedDb().catch(nullOnAccessDenied);
+  if (!scope) return membershipEnded();
+  const { db } = scope;
 
   const ticket = await db.ticket.findFirst({ where: { id: ticketId } });
   if (!ticket) return { ok: false };
@@ -127,8 +138,10 @@ export async function rerunTriage(ticketId: string): Promise<{ ok: boolean }> {
  */
 export async function generateDraftReply(
   ticketId: string,
-): Promise<{ ok: boolean; draft?: GenerateDraftResult }> {
-  const { orgId } = await getScopedDb();
+): Promise<{ ok: boolean; draft?: GenerateDraftResult } | MembershipEndedRefusal> {
+  const scope = await getScopedDb().catch(nullOnAccessDenied);
+  if (!scope) return membershipEnded();
+  const { orgId } = scope;
 
   try {
     const draft = await runGenerateDraft(orgId, ticketId);
@@ -146,8 +159,10 @@ export async function generateDraftReply(
 export async function setTriageCategory(
   ticketId: string,
   category: TriageCategory,
-): Promise<{ ok: boolean }> {
-  const { db } = await getScopedDb();
+): Promise<{ ok: boolean } | MembershipEndedRefusal> {
+  const scope = await getScopedDb().catch(nullOnAccessDenied);
+  if (!scope) return membershipEnded();
+  const { db } = scope;
 
   await db.ticket.update({ where: { id: ticketId }, data: { triageCategory: category } });
 
@@ -159,8 +174,10 @@ export async function setTriageCategory(
 export async function setTriageSentiment(
   ticketId: string,
   sentiment: TriageSentiment,
-): Promise<{ ok: boolean }> {
-  const { db } = await getScopedDb();
+): Promise<{ ok: boolean } | MembershipEndedRefusal> {
+  const scope = await getScopedDb().catch(nullOnAccessDenied);
+  if (!scope) return membershipEnded();
+  const { db } = scope;
 
   await db.ticket.update({ where: { id: ticketId }, data: { triageSentiment: sentiment } });
 
@@ -175,8 +192,10 @@ export async function setTriageSentiment(
 export async function setTriageLanguage(
   ticketId: string,
   language: string,
-): Promise<{ ok: boolean }> {
-  const { db } = await getScopedDb();
+): Promise<{ ok: boolean } | MembershipEndedRefusal> {
+  const scope = await getScopedDb().catch(nullOnAccessDenied);
+  if (!scope) return membershipEnded();
+  const { db } = scope;
 
   const code = language.trim().toLowerCase().slice(0, 2);
   await db.ticket.update({ where: { id: ticketId }, data: { triageLanguage: code || null } });
@@ -194,7 +213,8 @@ export async function assignTicket(
   ticketId: string,
   assigneeId: string | null,
 ): Promise<MutationActionResult> {
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return membershipEnded();
   const result = await runTicketMutation({
     actor,
     ticketIds: [ticketId],
@@ -213,7 +233,8 @@ export async function assignTicket(
  * redirected before the name is trimmed or validated (tests/unit/add-tag-gate.test.ts).
  */
 export async function addTag(ticketId: string, name: string): Promise<MutationActionResult> {
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return membershipEnded();
   const result = await runTicketMutation({
     actor,
     ticketIds: [ticketId],
@@ -224,7 +245,8 @@ export async function addTag(ticketId: string, name: string): Promise<MutationAc
 }
 
 export async function removeTag(ticketId: string, tagId: string): Promise<MutationActionResult> {
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return membershipEnded();
   const result = await runTicketMutation({
     actor,
     ticketIds: [ticketId],
@@ -283,8 +305,10 @@ export async function setCustomFieldValue(
   ticketId: string,
   definitionId: string,
   value: CustomFieldWriteValue,
-): Promise<{ ok: boolean }> {
-  const { db, orgId } = await getScopedDb();
+): Promise<{ ok: boolean } | MembershipEndedRefusal> {
+  const scope = await getScopedDb().catch(nullOnAccessDenied);
+  if (!scope) return membershipEnded();
+  const { db, orgId } = scope;
 
   const definition = await db.customFieldDefinition.findFirst({ where: { id: definitionId } });
   if (!definition) return { ok: false };

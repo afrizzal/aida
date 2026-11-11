@@ -69,9 +69,11 @@ import type {
   TriageStatus,
 } from "@/generated/prisma/client";
 import type { Command as RegistryCommand } from "@/lib/commands/registry";
+import { isMembershipEnded } from "@/lib/membership";
 import type { TicketMutationErrorCode } from "@/lib/tickets/mutations";
 import {
   GROUP_LABELS,
+  MEMBERSHIP_ENDED,
   MERGED_SOURCE_REASON,
   STATE_GROUP_KEYS,
   STATUS_CHANGE_ERROR_MEMBERSHIP_ENDED,
@@ -83,6 +85,15 @@ import {
   STATUS_REFUSED_MERGED_SOURCE,
   type StateGroupKey,
 } from "@/lib/tickets/state-copy";
+
+/**
+ * The toast of a field change that did not succeed: the app's MEMBERSHIP_ENDED sentence when the
+ * action refused because the user's access ended (K164, a deactivation while this page was open),
+ * otherwise the field's own "Try again" line. A refusal never re-renders the page (R10-1).
+ */
+function fieldChangeError(result: unknown, fallback: string): string {
+  return isMembershipEnded(result) ? MEMBERSHIP_ENDED : fallback;
+}
 
 /** UI-SPEC 3a: the "Status change error" row for a returned refusal code. */
 function statusChangeErrorText(code: TicketMutationErrorCode | undefined): string {
@@ -321,21 +332,24 @@ export function TicketMetaHeader({
   function handlePriorityChange(priority: TicketPriority) {
     startTransition(async () => {
       const result = await changePriority(ticket.id, priority).catch(() => null);
-      if (!result?.ok) toast.error("Couldn't update priority. Try again.");
+      if (!result?.ok)
+        toast.error(fieldChangeError(result, "Couldn't update priority. Try again."));
     });
   }
 
   function handleCategoryChange(category: TriageCategory) {
     startTransition(async () => {
       const result = await setTriageCategory(ticket.id, category).catch(() => null);
-      if (!result?.ok) toast.error("Couldn't update category. Try again.");
+      if (!result?.ok)
+        toast.error(fieldChangeError(result, "Couldn't update category. Try again."));
     });
   }
 
   function handleSentimentChange(sentiment: TriageSentiment) {
     startTransition(async () => {
       const result = await setTriageSentiment(ticket.id, sentiment).catch(() => null);
-      if (!result?.ok) toast.error("Couldn't update sentiment. Try again.");
+      if (!result?.ok)
+        toast.error(fieldChangeError(result, "Couldn't update sentiment. Try again."));
     });
   }
 
@@ -343,7 +357,8 @@ export function TicketMetaHeader({
     setLanguagePopoverOpen(false);
     startTransition(async () => {
       const result = await setTriageLanguage(ticket.id, code).catch(() => null);
-      if (!result?.ok) toast.error("Couldn't update language. Try again.");
+      if (!result?.ok)
+        toast.error(fieldChangeError(result, "Couldn't update language. Try again."));
     });
   }
 
@@ -351,7 +366,8 @@ export function TicketMetaHeader({
     const assigneeId = value === UNASSIGNED_VALUE ? null : value;
     startTransition(async () => {
       const result = await assignTicket(ticket.id, assigneeId).catch(() => null);
-      if (!result?.ok) toast.error("Couldn't update assignee. Try again.");
+      if (!result?.ok)
+        toast.error(fieldChangeError(result, "Couldn't update assignee. Try again."));
     });
   }
 
@@ -359,14 +375,14 @@ export function TicketMetaHeader({
     setTagPopoverOpen(false);
     startTransition(async () => {
       const result = await addTag(ticket.id, name).catch(() => null);
-      if (!result?.ok) toast.error("Couldn't add tag. Try again.");
+      if (!result?.ok) toast.error(fieldChangeError(result, "Couldn't add tag. Try again."));
     });
   }
 
   function handleRemoveTag(tagId: string) {
     startTransition(async () => {
       const result = await removeTag(ticket.id, tagId).catch(() => null);
-      if (!result?.ok) toast.error("Couldn't remove tag. Try again.");
+      if (!result?.ok) toast.error(fieldChangeError(result, "Couldn't remove tag. Try again."));
     });
   }
 
@@ -375,7 +391,7 @@ export function TicketMetaHeader({
       const result = await setCustomFieldValue(ticket.id, definitionId, value ?? null).catch(
         () => null,
       );
-      if (!result?.ok) toast.error("Couldn't update field. Try again.");
+      if (!result?.ok) toast.error(fieldChangeError(result, "Couldn't update field. Try again."));
     });
   }
 

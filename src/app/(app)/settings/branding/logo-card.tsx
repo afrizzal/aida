@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { LOGO_MIME_TYPES } from "@/lib/branding/settings";
+import { MEMBERSHIP_ENDED } from "@/lib/tickets/state-copy";
 
 const LOGO_ROUTE = "/api/settings/branding/logo";
 
@@ -36,6 +37,8 @@ const ERROR_COPY = {
   unreadable:
     "This image could not be read. Check that the file opens on your computer, then try again.",
   not_allowed: "Only workspace admins can change the logo.",
+  // K164: the route's membership refusal; the app's one MEMBERSHIP_ENDED sentence, no new copy.
+  membership_ended: MEMBERSHIP_ENDED,
 } as const;
 
 /** Rate-limited, network and every unknown or unexpected answer. */

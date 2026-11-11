@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
+import { membershipEnded, nullOnAccessDenied } from "@/lib/membership";
 import { getSessionActor } from "@/lib/session";
 import { addRelation, type RelationErrorCode, removeRelation } from "@/lib/tickets/relations";
 
@@ -17,7 +18,8 @@ export async function addRelationAction(
   otherTicketId: string,
   choice: string,
 ): Promise<RelationActionResult> {
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return membershipEnded();
   const result = await addRelation(prisma, actor, { ticketId, otherTicketId, choice });
   if (!result.ok) return { ok: false, error: result.error };
   for (const id of result.ticketIds) revalidatePath(`/tickets/${id}`);
@@ -29,7 +31,8 @@ export async function removeRelationAction(
   ticketId: string,
   relationId: string,
 ): Promise<RelationActionResult> {
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return membershipEnded();
   const result = await removeRelation(prisma, actor, { ticketId, relationId });
   if (!result.ok) return { ok: false, error: result.error };
   for (const id of result.ticketIds) revalidatePath(`/tickets/${id}`);

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { localFileStorage } from "@/lib/attachments/local-file-storage";
+import { classifyGateFailure, gateFailureStatus } from "@/lib/http/gate-failure";
 import { AccessDeniedError } from "@/lib/membership";
 import { getScopedDb } from "@/lib/session";
 
@@ -16,7 +17,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     // D-08 (AIDA-43): no active organization or no member row answers exactly like a missing
     // attachment, so a removed member learns nothing about which ids exist.
     if (err instanceof AccessDeniedError) return NextResponse.json(NOT_FOUND, { status: 404 });
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    // a-IN-7: only the redirect to /login is a 401; a database failure in the gate is a 500.
+    const failure = classifyGateFailure("api/attachments", err);
+    return NextResponse.json({ error: failure }, { status: gateFailureStatus(failure) });
   }
   const { db, orgId } = scoped;
 

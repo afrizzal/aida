@@ -11,6 +11,7 @@ import {
 import { enqueueReembed } from "@/lib/kb/create-article";
 import { getLlmSettings, saveLlmSettings as persistLlmSettings } from "@/lib/llm/settings";
 import { testProviderConnection } from "@/lib/llm/test-connection";
+import { type MembershipEndedRefusal, membershipEnded, nullOnAccessDenied } from "@/lib/membership";
 import { testEmbeddingConnection as probeEmbeddingConnection } from "@/lib/rag/embed-test-connection";
 import {
   getEmbeddingSettings,
@@ -23,8 +24,12 @@ import {
  * constraints with compound unique indexes — scopedDb injects organizationId on all
  * domain model operations, so the Setting is always tenant-scoped. (D-15, D-18)
  */
-export async function setAiEnabled(enabled: boolean): Promise<{ ok: boolean }> {
-  const { db, orgId } = await requireOrgAdminScope();
+export async function setAiEnabled(
+  enabled: boolean,
+): Promise<{ ok: boolean } | MembershipEndedRefusal> {
+  const scope = await requireOrgAdminScope().catch(nullOnAccessDenied);
+  if (!scope) return membershipEnded();
+  const { db, orgId } = scope;
 
   const existing = await db.setting.findFirst({ where: { key: "aiEnabled" } });
 
@@ -59,8 +64,12 @@ export interface LlmSettingsInput {
  * on every mutating Settings Server Action). Blank apiKey is forwarded as-is — lib/llm/settings.ts
  * treats an empty/undefined key as "keep existing stored value" (mirrors saveEmailSettings).
  */
-export async function saveLlmSettings(input: LlmSettingsInput): Promise<{ ok: boolean }> {
-  const { db, orgId } = await requireOrgAdminScope();
+export async function saveLlmSettings(
+  input: LlmSettingsInput,
+): Promise<{ ok: boolean } | MembershipEndedRefusal> {
+  const scope = await requireOrgAdminScope().catch(nullOnAccessDenied);
+  if (!scope) return membershipEnded();
+  const { db, orgId } = scope;
 
   try {
     await persistLlmSettings(db, orgId, {
@@ -82,8 +91,12 @@ export async function saveLlmSettings(input: LlmSettingsInput): Promise<{ ok: bo
  * blank so an admin can Test without re-typing an already-saved key. A failure returns a fixed
  * category and a correlation ID (D-25, F-08); the failure text is never echoed or logged.
  */
-export async function testLlmConnection(input: LlmSettingsInput): Promise<ConnectionTestResult> {
-  const { db } = await requireOrgAdminScope();
+export async function testLlmConnection(
+  input: LlmSettingsInput,
+): Promise<ConnectionTestResult | MembershipEndedRefusal> {
+  const scope = await requireOrgAdminScope().catch(nullOnAccessDenied);
+  if (!scope) return membershipEnded();
+  const { db } = scope;
 
   const apiKey = input.apiKey || (await getLlmSettings(db)).apiKey;
 
@@ -128,8 +141,10 @@ export interface EmbeddingSettingsInput {
  */
 export async function saveEmbeddingSettings(
   input: EmbeddingSettingsInput,
-): Promise<{ ok: boolean }> {
-  const { db, orgId } = await requireOrgAdminScope();
+): Promise<{ ok: boolean } | MembershipEndedRefusal> {
+  const scope = await requireOrgAdminScope().catch(nullOnAccessDenied);
+  if (!scope) return membershipEnded();
+  const { db, orgId } = scope;
 
   try {
     await persistEmbeddingSettings(db, orgId, {
@@ -153,8 +168,10 @@ export async function saveEmbeddingSettings(
  */
 export async function testEmbeddingConnection(
   input: EmbeddingSettingsInput,
-): Promise<ConnectionTestResult> {
-  const { db } = await requireOrgAdminScope();
+): Promise<ConnectionTestResult | MembershipEndedRefusal> {
+  const scope = await requireOrgAdminScope().catch(nullOnAccessDenied);
+  if (!scope) return membershipEnded();
+  const { db } = scope;
 
   const apiKey = input.apiKey || (await getEmbeddingSettings(db)).apiKey;
 
@@ -186,8 +203,12 @@ export async function testEmbeddingConnection(
  * provider/model, since vectors from different models are not comparable (Pitfall 5: a partial
  * re-embed would leave the KB with mixed, non-comparable vector spaces). Admin-gated.
  */
-export async function reembedAllKb(): Promise<{ ok: boolean; count: number }> {
-  const { db, orgId } = await requireOrgAdminScope();
+export async function reembedAllKb(): Promise<
+  { ok: boolean; count: number } | (MembershipEndedRefusal & { count: 0 })
+> {
+  const scope = await requireOrgAdminScope().catch(nullOnAccessDenied);
+  if (!scope) return { ...membershipEnded(), count: 0 };
+  const { db, orgId } = scope;
 
   const articles = await db.kbArticle.findMany({ select: { id: true } });
   for (const article of articles) {

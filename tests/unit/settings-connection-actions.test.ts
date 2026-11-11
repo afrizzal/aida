@@ -115,7 +115,7 @@ describe("testLlmConnection (D-25, F-08)", () => {
     });
 
     expect(result.ok).toBe(false);
-    if (result.ok) throw new Error("unreachable");
+    if (result.ok || result.error === "MEMBERSHIP_ENDED") throw new Error("unreachable");
     expect(result.error).toBe("connection_failed");
     expect(result.correlationId).toMatch(UUID);
     expect(Object.keys(result).sort()).toEqual(["correlationId", "error", "ok"]);

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { TicketPriority } from "@/generated/prisma/client";
 import { requireOrgAdminScope } from "@/lib/authz";
 import { prisma } from "@/lib/db";
+import { type MembershipEndedRefusal, membershipEnded, nullOnAccessDenied } from "@/lib/membership";
 import { getSessionActor } from "@/lib/session";
 import { type AutoCloseSaveResult, saveAutoCloseDays } from "@/lib/tickets/auto-close-settings";
 
@@ -20,8 +21,12 @@ interface SlaTargetInput {
  * injects organizationId into the top-level `where`, which Prisma rejects for a
  * compound-unique-but-not-single-field where clause on upsert.
  */
-export async function saveSlaTargets(input: SlaTargetInput[]): Promise<{ ok: boolean }> {
-  const { db, orgId } = await requireOrgAdminScope();
+export async function saveSlaTargets(
+  input: SlaTargetInput[],
+): Promise<{ ok: boolean } | MembershipEndedRefusal> {
+  const scope = await requireOrgAdminScope().catch(nullOnAccessDenied);
+  if (!scope) return membershipEnded();
+  const { db, orgId } = scope;
 
   for (const { priority, firstResponseHours, resolutionHours } of input) {
     const firstResponseTargetMinutes = Math.round(firstResponseHours * 60);
@@ -57,7 +62,8 @@ export async function saveSlaTargets(input: SlaTargetInput[]): Promise<{ ok: boo
  * after a successful save.
  */
 export async function saveAutoCloseSetting(raw: unknown): Promise<AutoCloseSaveResult> {
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return membershipEnded();
   const result = await saveAutoCloseDays(prisma, actor, raw);
   if (result.ok) revalidatePath("/settings/sla");
   return result;

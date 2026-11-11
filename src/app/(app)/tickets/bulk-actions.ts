@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod/v4";
+import { membershipEnded, nullOnAccessDenied } from "@/lib/membership";
 import { getSessionActor } from "@/lib/session";
 import { runTicketMutation, type TicketMutationResult } from "@/lib/tickets/mutations";
 
@@ -36,7 +37,8 @@ export async function bulkUpdateTickets(input: BulkUpdateInput): Promise<TicketM
   const parsed = bulkInputSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "INVALID" };
 
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return membershipEnded();
   const result = await runTicketMutation({
     actor,
     ticketIds: parsed.data.ticketIds,

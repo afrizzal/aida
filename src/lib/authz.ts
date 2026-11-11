@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { findConservativeMembership, isAdminRole } from "@/lib/membership";
+import { AccessDeniedError, findConservativeMembership, isAdminRole } from "@/lib/membership";
 import { scopedDb } from "@/lib/scoped-db";
 import { requireSession } from "@/lib/session";
 
@@ -58,6 +58,10 @@ export async function getOrgRole(): Promise<string | null> {
  * admin check), and returns the scoped client for exactly that organization. Every mutating
  * Settings Server Action calls this first and writes only through the returned `db`/`orgId`
  * (SECURITY.md: server-side authz on every mutating route, not just hidden UI).
+ *
+ * No active organization or no member row throws AccessDeniedError (code MEMBERSHIP_ENDED, K164),
+ * which the actions turn into their MEMBERSHIP_ENDED refusal; a member without an admin role
+ * throws "Forbidden: admin role required", as before.
  */
 export async function requireOrgAdminScope(): Promise<{
   db: ReturnType<typeof scopedDb>;
@@ -66,7 +70,8 @@ export async function requireOrgAdminScope(): Promise<{
   role: string;
 }> {
   const { session, orgId, role } = await getActiveOrgAccess();
-  if (!orgId || !role || !isAdminRole(role)) throw new Error("Forbidden: admin role required");
+  if (!orgId || !role) throw new AccessDeniedError();
+  if (!isAdminRole(role)) throw new Error("Forbidden: admin role required");
   return { db: scopedDb(orgId), session, orgId, role };
 }
 

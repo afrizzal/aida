@@ -4,13 +4,16 @@
 // requireOrgAdmin gate, unlike Settings mutations). Mirrors rerunTriage/reembedAllKb's
 // enqueue-then-revalidate shape (06-RESEARCH.md lines 665-721, adopted verbatim).
 import { revalidatePath } from "next/cache";
+import { type MembershipEndedRefusal, membershipEnded, nullOnAccessDenied } from "@/lib/membership";
 import { getBoss } from "@/lib/queue/boss-client";
 import { getScopedDb } from "@/lib/session";
 
 export async function generateInsightRun(
   periodDays: 7 | 30 | 90,
-): Promise<{ ok: boolean; alreadyRunning?: boolean }> {
-  const { db, orgId } = await getScopedDb();
+): Promise<{ ok: boolean; alreadyRunning?: boolean } | MembershipEndedRefusal> {
+  const scope = await getScopedDb().catch(nullOnAccessDenied);
+  if (!scope) return membershipEnded();
+  const { db, orgId } = scope;
 
   // App-side guard (LOCKED): an existing PENDING/RUNNING run for this periodDays is returned
   // instead of enqueuing a duplicate. findFirst IS auto-scoped by scopedDb.

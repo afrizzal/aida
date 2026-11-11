@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
+import { membershipEnded, nullOnAccessDenied } from "@/lib/membership";
 import { getSessionActor } from "@/lib/session";
 import { type MergeErrorCode, mergeTickets } from "@/lib/tickets/merge";
 import type { RelationLabel } from "@/lib/tickets/relation-pairs";
@@ -23,7 +24,8 @@ export async function mergeTicketAction(
   targetTicketId: string,
   reviewedLinkLabel: RelationLabel | null,
 ): Promise<MergeActionResult> {
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return membershipEnded();
   const result = await mergeTickets(prisma, actor, {
     sourceTicketId,
     targetTicketId,

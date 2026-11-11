@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
+import { membershipEnded, nullOnAccessDenied } from "@/lib/membership";
 import { getSessionActor } from "@/lib/session";
 import {
   type AgentTicketInput,
@@ -17,7 +18,8 @@ import {
  * `{ ok: false, error: "MEMBERSHIP_ENDED" }`, which the dialog shows.
  */
 export async function createTicketAction(input: AgentTicketInput): Promise<AgentTicketResult> {
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return membershipEnded();
   const result = await createAgentTicket(prisma, actor, input);
   if (result.ok) revalidatePath("/tickets");
   return result;

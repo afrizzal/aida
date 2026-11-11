@@ -3,12 +3,14 @@ import { NextResponse } from "next/server";
 import { getActiveOrgAccess } from "@/lib/authz";
 import { removeLogo, replaceLogo } from "@/lib/branding/logo-store";
 import { LOGO_MAX_BYTES } from "@/lib/branding/logo-validate";
+import { classifyGateFailure, gateFailureStatus } from "@/lib/http/gate-failure";
 import { readBoundedFormData } from "@/lib/http/read-bounded-form-data";
 import { isAdminRole } from "@/lib/membership";
 
 // Logo upload, replace and remove (Phase 9 plan 09-05, AIDA-34, D-08). A route handler, not a
 // server action: Next's default server-action body limit (1 MB) is below a 1 MiB file plus the
-// multipart framing. Order: session (401), then the owner or admin role (403 not_allowed), and
+// multipart framing. Order: session (401), then a member row in the active organization (403
+// membership_ended, K164), then the owner or admin role (403 not_allowed), and
 // only then the body, bounded to one part; nothing is read or written for a refused caller. The
 // bytes are validated by logo-validate.ts (sniffed type, size, header dimensions); the declared
 // type and the file name are never used. Responses carry a code only, never raw error text.
@@ -44,17 +46,20 @@ type AdminGate = { ok: true; orgId: string } | { ok: false; response: Response }
 async function requireLogoAdmin(): Promise<AdminGate> {
   // One session read for both the organization and the role (K141): the role is the caller's role
   // in exactly the organization this request then writes. getActiveOrgAccess() redirects (a
-  // thrown redirect) without a session; this fetch endpoint answers 401 JSON instead, and also
-  // without an active organization.
+  // thrown redirect) without a session; this fetch endpoint answers 401 JSON instead. Any other
+  // throw is a failure of the gate, a 500, never "signed out" (a-IN-7).
   let access: Awaited<ReturnType<typeof getActiveOrgAccess>>;
   try {
     access = await getActiveOrgAccess();
-  } catch {
-    return { ok: false, response: codeResponse("unauthorized", 401) };
+  } catch (err) {
+    const failure = classifyGateFailure("branding-logo", err);
+    return { ok: false, response: codeResponse(failure, gateFailureStatus(failure)) };
   }
   const { orgId, role } = access;
-  if (!orgId) return { ok: false, response: codeResponse("unauthorized", 401) };
-  // Owner or admin of the active organization (one member row in it); a removed member has none.
+  // K164: no active organization (a deactivation in a one-organization install leaves it null,
+  // D-07) or no member row in it is the membership refusal, 403 membership_ended.
+  if (!orgId || !role) return { ok: false, response: codeResponse("membership_ended", 403) };
+  // Owner or admin of the active organization; a plain member is not allowed.
   if (!isAdminRole(role)) return { ok: false, response: codeResponse("not_allowed", 403) };
   return { ok: true, orgId };
 }

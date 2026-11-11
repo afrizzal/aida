@@ -18,6 +18,7 @@ import {
   classifyConnectionError,
   connectionErrorLogShape,
 } from "@/lib/connection-test/errors";
+import { type MembershipEndedRefusal, membershipEnded, nullOnAccessDenied } from "@/lib/membership";
 
 /** Mirrors the Email settings form fields — ports/booleans arrive as form-native strings/booleans. */
 export interface EmailSettingsInput {
@@ -39,8 +40,12 @@ export interface EmailSettingsInput {
  * on every mutating Settings Server Action). Blank passwords are forwarded as-is — plan 02's
  * saveEmailSettings treats an empty/undefined password as "keep existing stored value".
  */
-export async function saveEmailSettings(input: EmailSettingsInput): Promise<{ ok: boolean }> {
-  const { db, orgId } = await requireOrgAdminScope();
+export async function saveEmailSettings(
+  input: EmailSettingsInput,
+): Promise<{ ok: boolean } | MembershipEndedRefusal> {
+  const scope = await requireOrgAdminScope().catch(nullOnAccessDenied);
+  if (!scope) return membershipEnded();
+  const { db, orgId } = scope;
 
   try {
     await persistEmailSettings(db, orgId, {
@@ -64,8 +69,12 @@ export async function saveEmailSettings(input: EmailSettingsInput): Promise<{ ok
 }
 
 /** Toggles the whole channel on/off (D-26 — everything else keeps working with it off). */
-export async function setEmailChannelEnabled(enabled: boolean): Promise<{ ok: boolean }> {
-  const { db, orgId } = await requireOrgAdminScope();
+export async function setEmailChannelEnabled(
+  enabled: boolean,
+): Promise<{ ok: boolean } | MembershipEndedRefusal> {
+  const scope = await requireOrgAdminScope().catch(nullOnAccessDenied);
+  if (!scope) return membershipEnded();
+  const { db, orgId } = scope;
 
   try {
     await persistEmailSettings(db, orgId, { enabled });
@@ -104,8 +113,12 @@ function requireHost(host: unknown): string {
  * too. A failure returns a fixed category and a correlation ID (D-25, F-08); the failure text is
  * never echoed or logged.
  */
-export async function testImapConnection(input: EmailSettingsInput): Promise<ConnectionTestResult> {
-  const { db } = await requireOrgAdminScope();
+export async function testImapConnection(
+  input: EmailSettingsInput,
+): Promise<ConnectionTestResult | MembershipEndedRefusal> {
+  const scope = await requireOrgAdminScope().catch(nullOnAccessDenied);
+  if (!scope) return membershipEnded();
+  const { db } = scope;
 
   const imapPassword = input.imapPassword || (await getEmailSettings(db)).imapPassword;
 
@@ -140,8 +153,12 @@ export async function testImapConnection(input: EmailSettingsInput): Promise<Con
  * Real SMTP connectivity probe (D-24, Pitfall 5) — same 10s-timeout/stored-password-fallback,
  * validation-inside-try and categorized-failure contract as testImapConnection (D-25, F-08).
  */
-export async function testSmtpConnection(input: EmailSettingsInput): Promise<ConnectionTestResult> {
-  const { db } = await requireOrgAdminScope();
+export async function testSmtpConnection(
+  input: EmailSettingsInput,
+): Promise<ConnectionTestResult | MembershipEndedRefusal> {
+  const scope = await requireOrgAdminScope().catch(nullOnAccessDenied);
+  if (!scope) return membershipEnded();
+  const { db } = scope;
 
   const smtpPassword = input.smtpPassword || (await getEmailSettings(db)).smtpPassword;
 

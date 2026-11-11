@@ -33,10 +33,17 @@ const env = await vi.hoisted(async () => {
   return { uploadsDir, previous, requestHeaders: new Headers() };
 });
 
-/** The error the mocked redirect throws; `target` is the path redirect() was called with. */
+/**
+ * The error the mocked redirect throws; `target` is the path redirect() was called with. It carries
+ * the digest Next's own redirect error has, so the routes recognise it as the redirect to /login
+ * (a-IN-7: any other gate failure is a 500, not a 401).
+ */
 class RedirectSignal extends Error {
+  readonly digest: string;
+
   constructor(readonly target: string) {
     super(`NEXT_REDIRECT ${target}`);
+    this.digest = `NEXT_REDIRECT;replace;${target};307;`;
   }
 }
 
@@ -598,10 +605,11 @@ describe("authz gates keep their results through the fresh session read", () => 
     env.requestHeaders = headersFor(member.cookie);
     await expect(requireOrgAdminScope()).rejects.toThrow(/Forbidden/);
 
+    // K164: no member row is the membership refusal, typed, not the role refusal.
     env.requestHeaders = headersFor(admin.cookie);
     await prisma.member.deleteMany({
       where: { organizationId: admin.orgId, userId: admin.userId },
     });
-    await expect(requireOrgAdminScope()).rejects.toThrow(/Forbidden/);
+    await expect(requireOrgAdminScope()).rejects.toBeInstanceOf(AccessDeniedError);
   });
 });

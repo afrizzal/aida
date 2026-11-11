@@ -3,6 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { requireOrgAdminScope } from "@/lib/authz";
 import { MAX_WORKSPACE_NAME_LENGTH, saveBrandingSettings } from "@/lib/branding/settings";
+import {
+  type MembershipEndedNotice,
+  membershipEndedNotice,
+  nullOnAccessDenied,
+} from "@/lib/membership";
 
 /**
  * Persists the workspace display name. Admin-gated (SECURITY.md: server-side authz on every
@@ -11,8 +16,10 @@ import { MAX_WORKSPACE_NAME_LENGTH, saveBrandingSettings } from "@/lib/branding/
  */
 export async function saveBranding(input: {
   workspaceName: string;
-}): Promise<{ ok: boolean; error?: string }> {
-  const { db, orgId } = await requireOrgAdminScope();
+}): Promise<{ ok: boolean; error?: string } | MembershipEndedNotice> {
+  const scope = await requireOrgAdminScope().catch(nullOnAccessDenied);
+  if (!scope) return membershipEndedNotice();
+  const { db, orgId } = scope;
 
   const workspaceName = input.workspaceName.trim();
   if (workspaceName.length > MAX_WORKSPACE_NAME_LENGTH) {

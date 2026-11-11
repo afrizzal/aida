@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { classifyGateFailure, gateFailureStatus } from "@/lib/http/gate-failure";
 import { AccessDeniedError } from "@/lib/membership";
 import { mentionDisplayName } from "@/lib/mentions/mentions";
 import { getScopedDb } from "@/lib/session";
@@ -29,7 +30,12 @@ export async function GET() {
     if (err instanceof AccessDeniedError) {
       return NextResponse.json({ error: "membership_ended" }, { status: 403, headers: NO_STORE });
     }
-    return NextResponse.json({ error: "unauthorized" }, { status: 401, headers: NO_STORE });
+    // a-IN-7: only the redirect to /login is a 401; a database failure in the gate is a 500.
+    const failure = classifyGateFailure("api/members/mentionable", err);
+    return NextResponse.json(
+      { error: failure },
+      { status: gateFailureStatus(failure), headers: NO_STORE },
+    );
   }
   const { orgId, session } = scoped;
 

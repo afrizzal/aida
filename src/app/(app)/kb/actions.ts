@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireOrgAdminScope } from "@/lib/authz";
 import { createKbArticle, updateKbArticle } from "@/lib/kb/create-article";
+import { type MembershipEndedRefusal, membershipEnded, nullOnAccessDenied } from "@/lib/membership";
 
 /** Shared shape for the create/update Server Actions below (mirrors kb-article-form's fields). */
 export interface KbArticleActionInput {
@@ -16,8 +17,10 @@ export interface KbArticleActionInput {
  */
 export async function createKbArticleAction(
   input: KbArticleActionInput,
-): Promise<{ ok: boolean; id?: string }> {
-  const { orgId } = await requireOrgAdminScope();
+): Promise<{ ok: boolean; id?: string } | MembershipEndedRefusal> {
+  const scope = await requireOrgAdminScope().catch(nullOnAccessDenied);
+  if (!scope) return membershipEnded();
+  const { orgId } = scope;
 
   if (!input.title.trim()) {
     return { ok: false };
@@ -39,8 +42,10 @@ export async function createKbArticleAction(
 export async function updateKbArticleAction(
   articleId: string,
   input: KbArticleActionInput,
-): Promise<{ ok: boolean }> {
-  const { orgId } = await requireOrgAdminScope();
+): Promise<{ ok: boolean } | MembershipEndedRefusal> {
+  const scope = await requireOrgAdminScope().catch(nullOnAccessDenied);
+  if (!scope) return membershipEnded();
+  const { orgId } = scope;
 
   if (!input.title.trim()) {
     return { ok: false };

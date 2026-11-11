@@ -16,7 +16,8 @@
 // Review b-WR-01: getSessionActor() redirects an expired or missing session to /login by throwing
 // Next's redirect error, and a service may throw notFound(). Each catch first passes the error to
 // unstable_rethrow (next/navigation, Next 16), which rethrows Next's control-flow errors (also
-// when one is the cause of another error), so they are never mapped to UNKNOWN.
+// when one is the cause of another error), so they are never mapped to UNKNOWN. The gate's
+// AccessDeniedError (no active organization, K164) is mapped to MEMBERSHIP_ENDED.
 
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
@@ -37,10 +38,18 @@ import {
   type SaveProposalResult,
   saveProposalDraft,
 } from "@/lib/kb/proposal-review";
+import { AccessDeniedError } from "@/lib/membership";
 import { getSessionActor } from "@/lib/session";
 
 /** The result of an action whose session read or service threw (review C6, D-01). */
 export type ActionUnknown = { ok: false; code: typeof ACTION_UNKNOWN_CODE };
+
+/**
+ * K164 (review a-WR-1): getSessionActor throws AccessDeniedError when the session has no active
+ * organization (a deactivation in a one-organization install, D-07). That is the services' own
+ * MEMBERSHIP_ENDED refusal, not UNKNOWN; nothing ran and nothing is revalidated.
+ */
+const MEMBERSHIP_ENDED_RESULT = { ok: false, code: "MEMBERSHIP_ENDED" } as const;
 
 const PROPOSALS_PATH = "/kb/proposals";
 
@@ -81,6 +90,7 @@ export async function requestProposalAction(
     result = await requestProposal(await getSessionActor(), ticketIds);
   } catch (error) {
     unstable_rethrow(error);
+    if (error instanceof AccessDeniedError) return MEMBERSHIP_ENDED_RESULT;
     return unknownResult("request");
   }
   if (result.ok) {
@@ -97,6 +107,7 @@ export async function loadStartSelectionAction(
     return await loadStartSelection(await getSessionActor(), ticketIds);
   } catch (error) {
     unstable_rethrow(error);
+    if (error instanceof AccessDeniedError) return { kind: "MEMBERSHIP_ENDED" };
     return unknownResult("load start selection");
   }
 }
@@ -110,6 +121,7 @@ export async function saveProposalAction(
     result = await saveProposalDraft(await getSessionActor(), input);
   } catch (error) {
     unstable_rethrow(error);
+    if (error instanceof AccessDeniedError) return MEMBERSHIP_ENDED_RESULT;
     return unknownResult("save");
   }
   if (result.ok) {
@@ -127,6 +139,7 @@ export async function rejectProposalAction(
     result = await rejectProposal(await getSessionActor(), input);
   } catch (error) {
     unstable_rethrow(error);
+    if (error instanceof AccessDeniedError) return MEMBERSHIP_ENDED_RESULT;
     return unknownResult("reject");
   }
   if (result.ok) {
@@ -144,6 +157,7 @@ export async function publishProposalAction(
     result = await publishProposal(await getSessionActor(), input);
   } catch (error) {
     unstable_rethrow(error);
+    if (error instanceof AccessDeniedError) return MEMBERSHIP_ENDED_RESULT;
     return unknownResult("publish");
   }
   if (result.ok) {
@@ -161,6 +175,7 @@ export async function restartGenerationAction(
     result = await restartProposalGeneration(await getSessionActor(), input);
   } catch (error) {
     unstable_rethrow(error);
+    if (error instanceof AccessDeniedError) return MEMBERSHIP_ENDED_RESULT;
     return unknownResult("restart");
   }
   if (result.ok) {
@@ -178,6 +193,7 @@ export async function retryIndexingAction(input: {
     result = await retryProposalIndexing(await getSessionActor(), input);
   } catch (error) {
     unstable_rethrow(error);
+    if (error instanceof AccessDeniedError) return MEMBERSHIP_ENDED_RESULT;
     return unknownResult("retry indexing");
   }
   if (result.ok) {

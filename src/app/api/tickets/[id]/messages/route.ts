@@ -9,6 +9,7 @@ import {
 } from "@/lib/attachments/uncertain-commit";
 import { recordAuditEvent } from "@/lib/audit/record-audit-event";
 import { getEmailSettings } from "@/lib/channels/email/settings";
+import { classifyGateFailure, gateFailureStatus } from "@/lib/http/gate-failure";
 import { resolveActiveProvider } from "@/lib/llm/active-provider";
 import { renderMarkdown } from "@/lib/markdown/render";
 import { AccessDeniedError, findActiveMembership } from "@/lib/membership";
@@ -39,7 +40,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (err instanceof AccessDeniedError) {
       return NextResponse.json({ error: "membership_ended" }, { status: err.status });
     }
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    // a-IN-7: only the redirect to /login is a 401; a database failure in the gate is a 500.
+    const failure = classifyGateFailure("api/tickets/messages", err);
+    return NextResponse.json({ error: failure }, { status: gateFailureStatus(failure) });
   }
   const { db, orgId, session } = scoped;
 

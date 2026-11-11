@@ -4,6 +4,7 @@ import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { CONNECTION_TEST_ERROR_MESSAGES } from "@/lib/connection-test/errors";
+import { MEMBERSHIP_ENDED } from "@/lib/tickets/state-copy";
 import type { LlmSettingsInput } from "./actions";
 import { testLlmConnection } from "./actions";
 
@@ -45,10 +46,13 @@ export function LlmTestConnectionButton({ getValues }: LlmTestConnectionButtonPr
     } else {
       setFailure(
         result
-          ? {
-              message: CONNECTION_TEST_ERROR_MESSAGES[result.error],
-              correlationId: result.correlationId,
-            }
+          ? result.error === "MEMBERSHIP_ENDED"
+            ? // K164: the access ended; no probe ran, so there is no correlation ID.
+              { message: MEMBERSHIP_ENDED }
+            : {
+                message: CONNECTION_TEST_ERROR_MESSAGES[result.error],
+                correlationId: result.correlationId,
+              }
           : { message: "Unexpected error — please try again." },
       );
       setStatus("failure");

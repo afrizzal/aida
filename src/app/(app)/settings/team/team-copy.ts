@@ -4,6 +4,8 @@
 // nothing. The server actions map each service error code to exactly one of the error keys below,
 // and the client renders the key; raw error text never reaches the browser.
 
+import { MEMBERSHIP_ENDED } from "@/lib/tickets/state-copy";
+
 export type TeamRole = "owner" | "admin" | "member";
 
 /** "Role labels". */
@@ -64,11 +66,13 @@ export function roleChangedToast(name: string, role: TeamRole): string {
   return `${name} is now ${ROLE_LABELS[role].toLowerCase()}.`;
 }
 
-export type RoleErrorKey = "last_owner" | "not_allowed" | "unknown";
+export type RoleErrorKey = "last_owner" | "not_allowed" | "membership_ended" | "unknown";
 
 export const ROLE_ERRORS: Readonly<Record<RoleErrorKey, string>> = {
   last_owner: "A workspace needs at least one owner. Make someone else an owner first.",
   not_allowed: "You can't make this change with your role.",
+  // K164: the app's one MEMBERSHIP_ENDED sentence (src/lib/tickets/state-copy.ts), no new copy.
+  membership_ended: MEMBERSHIP_ENDED,
   unknown: "The role could not be changed. Wait a moment and try again.",
 };
 
@@ -110,7 +114,7 @@ export function reassignFailedText(name: string, k: number): string {
 /** Amendment A7: the retry button of the reassignment callout. */
 export const REASSIGN_RETRY = "Try again";
 
-export type DeactivateErrorKey = "last_owner" | "not_allowed" | "unknown";
+export type DeactivateErrorKey = "last_owner" | "not_allowed" | "membership_ended" | "unknown";
 
 /** `not_allowed` reuses the role-change refusal copy (K162): a permanent refusal, no "try again". */
 export function deactivateError(key: DeactivateErrorKey, name: string): string {
@@ -118,6 +122,7 @@ export function deactivateError(key: DeactivateErrorKey, name: string): string {
     return "This would leave the workspace without an owner or admin. Change another member's role first.";
   }
   if (key === "not_allowed") return ROLE_ERRORS.not_allowed;
+  if (key === "membership_ended") return MEMBERSHIP_ENDED;
   return `${name} could not be removed. Wait a moment and try again.`;
 }
 
@@ -157,6 +162,7 @@ export type InviteErrorKey =
   | "pending_exists"
   | "role_above_own"
   | "not_allowed"
+  | "membership_ended"
   | "unknown";
 
 export function inviteError(key: InviteErrorKey, email: string): string {
@@ -171,6 +177,8 @@ export function inviteError(key: InviteErrorKey, email: string): string {
       return "You can only invite people with a role up to your own.";
     case "not_allowed":
       return "Only workspace owners and admins can invite people.";
+    case "membership_ended":
+      return MEMBERSHIP_ENDED;
     default:
       return "The invitation could not be created. Wait a moment and try again.";
   }

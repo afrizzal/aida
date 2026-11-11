@@ -5,6 +5,8 @@
 //
 // Relative imports only and no framework import: the worker and plain services call it.
 
+import { MEMBERSHIP_ENDED } from "./tickets/state-copy";
+
 export interface ActiveMembership {
   id: string;
   role: string;
@@ -152,17 +154,62 @@ export function isAdminRole(role: string | null | undefined): boolean {
 }
 
 /**
- * Thrown by getScopedDb (src/lib/session.ts) when the session has no active organization or the
- * user holds no member row in it (Phase 10, D-08, AIDA-43). Server actions and API routes answer
- * 403 from `status`; /api/attachments/[id] answers its missing-attachment 404 instead, so it is no
- * existence oracle; pages redirect to /no-access through requirePageAccess (src/lib/page-access.ts)
- * before they could throw this.
+ * The one refusal of the session gates when the session has no active organization or the user
+ * holds no member row in it (Phase 10, D-08, AIDA-43; K164, review a-WR-1). Thrown by getScopedDb
+ * and getSessionActor (src/lib/session.ts) and by requireOrgAdminScope (src/lib/authz.ts), never a
+ * plain Error. Deactivation in a one-organization install leaves the session's organization null
+ * (D-07), so this is the common path after a deactivation, not an edge case.
+ *
+ * Server actions catch it with `.catch(nullOnAccessDenied)` and return their typed
+ * MEMBERSHIP_ENDED refusal (no revalidation, so the page keeps its client state, R10-1). API routes
+ * answer 403 from `status`; /api/attachments/[id] answers its missing-attachment 404 instead, so it
+ * is no existence oracle. Pages redirect to /no-access through requirePageAccess
+ * (src/lib/page-access.ts) before they could throw this.
  */
 export class AccessDeniedError extends Error {
   readonly status = 403;
+  readonly code = "MEMBERSHIP_ENDED";
 
   constructor(message = "Access denied: no membership in the active organization") {
     super(message);
     this.name = "AccessDeniedError";
   }
+}
+
+/**
+ * For `.catch()` on a session gate (K164): AccessDeniedError becomes null, so the caller returns its
+ * typed MEMBERSHIP_ENDED refusal; everything else, the gate's redirect to /login included, is
+ * thrown on unchanged.
+ */
+export function nullOnAccessDenied(err: unknown): null {
+  if (err instanceof AccessDeniedError) return null;
+  throw err;
+}
+
+/** The refusal shape of a server action whose result carries an `error` code (K164). */
+export type MembershipEndedRefusal = { ok: false; error: "MEMBERSHIP_ENDED" };
+
+/** A fresh MEMBERSHIP_ENDED refusal for a server action's result (K164). */
+export function membershipEnded(): MembershipEndedRefusal {
+  return { ok: false, error: "MEMBERSHIP_ENDED" };
+}
+
+/**
+ * The refusal of a v1 settings action whose `error` is the text its form shows (saveBranding,
+ * createCustomField, updateCustomField): the code, and the app's MEMBERSHIP_ENDED sentence
+ * (src/lib/tickets/state-copy.ts) in `error` (K164).
+ */
+export type MembershipEndedNotice = { ok: false; code: "MEMBERSHIP_ENDED"; error: string };
+
+export function membershipEndedNotice(): MembershipEndedNotice {
+  return { ok: false, code: "MEMBERSHIP_ENDED", error: MEMBERSHIP_ENDED };
+}
+
+/** True for a server action result that is the MEMBERSHIP_ENDED refusal; for client copy (K164). */
+export function isMembershipEnded(result: unknown): boolean {
+  return (
+    typeof result === "object" &&
+    result !== null &&
+    (result as { error?: unknown }).error === "MEMBERSHIP_ENDED"
+  );
 }

@@ -34,8 +34,9 @@ export async function requireSession() {
  * Reads the session once (K141; redirects to /login without one), then re-reads the user's member
  * rows in the session's active organization from the database on every call with the conservative
  * read (findConservativeMembership: every row in id order, admin only when every row is owner or
- * admin). Throws AccessDeniedError (status 403) when no organization is active or the user holds no
- * member row in it, so a removed member never gets a tenant client, whatever the cookie holds.
+ * admin). Throws AccessDeniedError (status 403, code MEMBERSHIP_ENDED) when no organization is
+ * active or the user holds no member row in it, so a removed member never gets a tenant client,
+ * whatever the cookie holds. A server action catches it with nullOnAccessDenied (K164).
  *
  * Returns: `{ db, session, orgId, role }`. `db` is the org-scoped client ready for domain queries
  * and `role` is the conservative role in exactly `orgId`.
@@ -59,8 +60,11 @@ export async function getScopedDb() {
  * The acting user and organization for a Phase 11 server action or route (D-01).
  *
  * Reads the session once (fresh, like getCurrentSession; same redirect when unauthenticated) and
- * its `activeOrganizationId` (an Error when no organization is active), and returns
- * `{ userId, orgId }`. It does NOT check membership, by contract: every caller passes the actor to
+ * its `activeOrganizationId`, and returns `{ userId, orgId }`. Throws AccessDeniedError (status
+ * 403, code MEMBERSHIP_ENDED) when no organization is active, as getScopedDb does (K164, review
+ * a-WR-1): a deactivation in a one-organization install sets the session's organization to null
+ * (D-07), and every caller catches this with nullOnAccessDenied and returns its typed
+ * MEMBERSHIP_ENDED refusal. It does NOT check membership, by contract: every caller passes the actor to
  * a service that checks the member row itself inside its own read or transaction (for example
  * runTicketMutation through findActiveMembership, src/lib/membership.ts). The membership
  * inventory (tests/unit/membership-inventory.test.ts, Rule A) accepts it as a gate only when the
@@ -69,6 +73,6 @@ export async function getScopedDb() {
 export async function getSessionActor(): Promise<{ userId: string; orgId: string }> {
   const session = await requireSession();
   const orgId = session.session.activeOrganizationId;
-  if (!orgId) throw new Error("No active organization on session — cannot scope queries");
+  if (!orgId) throw new AccessDeniedError("No active organization on session");
   return { userId: session.user.id, orgId };
 }

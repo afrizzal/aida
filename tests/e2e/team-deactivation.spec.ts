@@ -6,7 +6,8 @@
  * owner and member are never deactivated or demoted (T-10-48b).
  *
  * - An open session of a member who is deactivated loses everything on its next request: six page
- *   URLs land on /no-access, a server action from the already-open ticket page changes nothing,
+ *   URLs land on /no-access, a server action from the already-open ticket page changes nothing
+ *   and shows the access-ended sentence (K164),
  *   two API routes answer 403 and the attachment route 404. Each refusal is preceded by the same
  *   request succeeding while the member was still a member (presence before absence).
  * - The Better Auth organization and admin routes are closed over HTTP (C4, V-03, O-5): every
@@ -152,6 +153,14 @@ test.describe("AIDA-43: deactivating a member", () => {
     );
     await openPage.getByRole("menuitemradio", { name: owner.name }).click();
     await action;
+    // K164 (a-WR-1): the refusal is the typed MEMBERSHIP_ENDED result, so the open page shows the
+    // access-ended sentence (not "Try again"), stays where it is and keeps its header.
+    await expect(
+      openPage.getByText("Your access to this workspace has ended. Sign out, then sign in again."),
+    ).toBeVisible();
+    await expect(openPage.getByText("Couldn't update assignee. Try again.")).toHaveCount(0);
+    await expect(openPage).toHaveURL(new RegExp(`/tickets/${ticket.id}$`));
+    await expect(header.getByRole("button", { name: /Unassigned/ })).toBeVisible();
     await expect
       .poll(
         async () =>

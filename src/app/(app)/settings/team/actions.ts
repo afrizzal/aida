@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { nullOnAccessDenied } from "@/lib/membership";
 import { getSessionActor } from "@/lib/session";
 import { createInvitation, revokeInvitation } from "@/lib/workspace-members/invitations";
 import {
@@ -16,11 +17,17 @@ import type { DeactivateErrorKey, InviteErrorKey, RoleErrorKey, TeamRole } from 
 // input) and passes the untrusted input to a 10-03 or 10-05 service under
 // src/lib/workspace-members/, which re-reads the actor's rights inside its locked transaction: the
 // server decides every permission, whatever the browser showed (T-10-39, T-10-41). A refusal is
-// returned as one Copywriting key and never thrown; raw error text and codes do not reach the
-// browser. The page is revalidated only after a change, so a refusal does not re-render the route
+// returned as one Copywriting key and never thrown (a session with no active organization too,
+// K164: membership_ended); raw error text and codes do not reach the browser. The page is revalidated only after a change, so a refusal does not re-render the route
 // and the client keeps its state.
 
 const TEAM_PATH = "/settings/team";
+
+/**
+ * K164 (review a-WR-1): the session has no active organization (a deactivation in a
+ * one-organization install leaves it null, D-07). Nothing ran and nothing is revalidated.
+ */
+const MEMBERSHIP_ENDED = { ok: false, error: "membership_ended" } as const;
 
 export type ChangeRoleResult = { ok: true; role: TeamRole } | { ok: false; error: RoleErrorKey };
 
@@ -32,7 +39,8 @@ export async function changeRoleAction(
   if (typeof targetUserId !== "string" || typeof newRole !== "string") {
     return { ok: false, error: "unknown" };
   }
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return MEMBERSHIP_ENDED;
   const result = await changeMemberRole({
     orgId: actor.orgId,
     actorUserId: actor.userId,
@@ -114,7 +122,8 @@ export async function deactivateMemberAction(
   ) {
     return { ok: false, error: "unknown" };
   }
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return MEMBERSHIP_ENDED;
   const result = await deactivateMember({
     orgId: actor.orgId,
     actorUserId: actor.userId,
@@ -145,7 +154,9 @@ export async function deactivateMemberAction(
   return { ok: true, ...(counts ?? { reassigned: 0, skipped: 0, failed: null }) };
 }
 
-export type ReassignResult = ({ ok: true } & ReassignCounts) | { ok: false };
+export type ReassignResult =
+  | ({ ok: true } & ReassignCounts)
+  | { ok: false; error?: "membership_ended" };
 
 /** Retries the reassignment of a deactivated member's open tickets (amendment A7). */
 export async function reassignTicketsAction(
@@ -153,7 +164,8 @@ export async function reassignTicketsAction(
   toUserId: unknown,
 ): Promise<ReassignResult> {
   if (typeof fromUserId !== "string" || typeof toUserId !== "string") return { ok: false };
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return MEMBERSHIP_ENDED;
   const counts = await runReassignment(actor.orgId, actor.userId, fromUserId, toUserId, false);
   // A refusal changed nothing: no count, and no re-render of the page (review b-IN-2).
   if (counts === null) return { ok: false };
@@ -180,7 +192,8 @@ export async function inviteMemberAction(email: unknown, role: unknown): Promise
     return { ok: false, error: "invalid_email" };
   }
   if (typeof role !== "string") return { ok: false, error: "unknown" };
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return MEMBERSHIP_ENDED;
   let result: Awaited<ReturnType<typeof createInvitation>>;
   try {
     result = await createInvitation({
@@ -215,12 +228,13 @@ export async function inviteMemberAction(email: unknown, role: unknown): Promise
   return { ok: true, delivery: result.delivery, email: result.email, link: result.link };
 }
 
-export type RevokeResult = { ok: boolean };
+export type RevokeResult = { ok: true } | { ok: false; error?: "membership_ended" };
 
 /** Revokes a pending invitation of the actor's organization (revokeInvitation, 10-05). */
 export async function revokeInvitationAction(invitationId: unknown): Promise<RevokeResult> {
   if (typeof invitationId !== "string") return { ok: false };
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return MEMBERSHIP_ENDED;
   const result = await revokeInvitation({
     orgId: actor.orgId,
     actorUserId: actor.userId,

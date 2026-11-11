@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
+import { membershipEnded, nullOnAccessDenied } from "@/lib/membership";
 import {
   createSavedView,
   deleteSavedView,
@@ -19,7 +20,8 @@ import { getSessionActor } from "@/lib/session";
 
 /** Creates a view owned by the session user in the active organization. */
 export async function createSavedViewAction(input: SavedViewInput): Promise<SavedViewWriteResult> {
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return membershipEnded();
   const result = await createSavedView(prisma, actor, input);
   if (result.ok) revalidatePath("/", "layout");
   return result;
@@ -30,7 +32,8 @@ export async function updateSavedViewAction(
   id: string,
   input: SavedViewInput,
 ): Promise<SavedViewWriteResult> {
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return membershipEnded();
   const result = await updateSavedView(prisma, actor, id, input);
   if (result.ok) revalidatePath("/", "layout");
   return result;
@@ -38,7 +41,8 @@ export async function updateSavedViewAction(
 
 /** Deletes a view the session user may edit (D-04). */
 export async function deleteSavedViewAction(id: string): Promise<SavedViewDeleteResult> {
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return membershipEnded();
   const result = await deleteSavedView(prisma, actor, id);
   if (result.ok) revalidatePath("/", "layout");
   return result;

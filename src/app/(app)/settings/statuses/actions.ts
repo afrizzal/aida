@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
+import { membershipEnded, nullOnAccessDenied } from "@/lib/membership";
 import { getSessionActor } from "@/lib/session";
 import {
   createTicketState,
@@ -27,35 +28,40 @@ function revalidateStatusPaths(): void {
 }
 
 export async function createStatusAction(raw: unknown): Promise<TicketStateWriteResult> {
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return membershipEnded();
   const result = await createTicketState(prisma, actor, raw);
   if (result.ok) revalidateStatusPaths();
   return result;
 }
 
 export async function updateStatusAction(raw: unknown): Promise<TicketStateWriteResult> {
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return membershipEnded();
   const result = await updateTicketState(prisma, actor, raw);
   if (result.ok) revalidateStatusPaths();
   return result;
 }
 
 export async function moveStatusAction(raw: unknown): Promise<MoveTicketStateResult> {
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return membershipEnded();
   const result = await moveTicketState(prisma, actor, raw);
   if (result.ok) revalidateStatusPaths();
   return result;
 }
 
 export async function setDefaultStatusAction(raw: unknown): Promise<SetDefaultTicketStateResult> {
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return membershipEnded();
   const result = await setDefaultTicketState(prisma, actor, raw);
   if (result.ok) revalidateStatusPaths();
   return result;
 }
 
 export async function deleteStatusAction(raw: unknown): Promise<DeleteTicketStateResult> {
-  const actor = await getSessionActor();
+  const actor = await getSessionActor().catch(nullOnAccessDenied);
+  if (!actor) return membershipEnded();
   const result = await deleteTicketState(prisma, actor, raw);
   if (result.ok) revalidateStatusPaths();
   return result;

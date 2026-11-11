@@ -23,6 +23,7 @@ vi.mock("@/lib/session", () => ({
 
 import { getActiveOrgAccess, getOrgRole, requireOrgAdminScope } from "@/lib/authz";
 import { prisma } from "@/lib/db";
+import { AccessDeniedError } from "@/lib/membership";
 import { seedOrgWithMembers } from "../support/inbox-fixtures";
 
 type Role = "owner" | "admin" | "member";
@@ -92,6 +93,7 @@ describe("getActiveOrgAccess reads member rows conservatively (K151)", () => {
     sessionEnv.orgId = other.orgId;
     const access = await getActiveOrgAccess();
     expect(access.role).toBeNull();
-    await expect(requireOrgAdminScope()).rejects.toThrow("Forbidden: admin role required");
+    // K164: no member row is the typed membership refusal, not the role refusal.
+    await expect(requireOrgAdminScope()).rejects.toBeInstanceOf(AccessDeniedError);
   });
 });

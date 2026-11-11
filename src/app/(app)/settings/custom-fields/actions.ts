@@ -4,6 +4,13 @@ import { revalidatePath } from "next/cache";
 import type { CustomFieldType } from "@/generated/prisma/client";
 import { Prisma } from "@/generated/prisma/client";
 import { requireOrgAdminScope } from "@/lib/authz";
+import {
+  type MembershipEndedNotice,
+  type MembershipEndedRefusal,
+  membershipEnded,
+  membershipEndedNotice,
+  nullOnAccessDenied,
+} from "@/lib/membership";
 
 interface CustomFieldInput {
   label: string;
@@ -23,8 +30,10 @@ function normalizeOptions(input: CustomFieldInput) {
  */
 export async function createCustomField(
   input: CustomFieldInput,
-): Promise<{ ok: boolean; error?: string }> {
-  const { db, orgId } = await requireOrgAdminScope();
+): Promise<{ ok: boolean; error?: string } | MembershipEndedNotice> {
+  const scope = await requireOrgAdminScope().catch(nullOnAccessDenied);
+  if (!scope) return membershipEndedNotice();
+  const { db, orgId } = scope;
 
   const label = input.label.trim();
   if (!label) return { ok: false, error: "Label is required" };
@@ -53,8 +62,10 @@ export async function createCustomField(
 export async function updateCustomField(
   id: string,
   input: CustomFieldInput,
-): Promise<{ ok: boolean; error?: string }> {
-  const { db } = await requireOrgAdminScope();
+): Promise<{ ok: boolean; error?: string } | MembershipEndedNotice> {
+  const scope = await requireOrgAdminScope().catch(nullOnAccessDenied);
+  if (!scope) return membershipEndedNotice();
+  const { db } = scope;
 
   const label = input.label.trim();
   if (!label) return { ok: false, error: "Label is required" };
@@ -77,8 +88,12 @@ export async function updateCustomField(
  * Deletes a custom field definition. CustomFieldValue rows cascade via schema
  * onDelete: Cascade, permanently removing per-ticket values for this field.
  */
-export async function deleteCustomField(id: string): Promise<{ ok: boolean }> {
-  const { db } = await requireOrgAdminScope();
+export async function deleteCustomField(
+  id: string,
+): Promise<{ ok: boolean } | MembershipEndedRefusal> {
+  const scope = await requireOrgAdminScope().catch(nullOnAccessDenied);
+  if (!scope) return membershipEnded();
+  const { db } = scope;
 
   await db.customFieldDefinition.delete({ where: { id } });
 

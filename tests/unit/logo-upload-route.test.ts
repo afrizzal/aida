@@ -1,6 +1,7 @@
 // Phase 9 plan 09-05 (AIDA-34, D-08): the authenticated logo route's order and codes. The session,
 // the role and the store are replaced; the bounded body reader and isAdminRole are the real ones.
-// Order under test: session (401), then the owner or admin role (403 not_allowed), and only then
+// Order under test: session (401), then a member row (403 membership_ended, K164), then the owner
+// or admin role (403 not_allowed), and only then
 // the body; a refused caller's body is never read and nothing is written. The real session and
 // member paths through the UI are plan 09-07's E2E.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -81,9 +82,11 @@ describe("logo route gate", () => {
     expect(revalidatePath).not.toHaveBeenCalled();
   });
 
-  it("POST with no member row in the active organization (role null) answers 403 not_allowed", async () => {
+  it("POST with no member row in the active organization (role null) answers 403 membership_ended (K164)", async () => {
     signedInAs(null);
-    expect((await POST(upload({ file: pngFile() }))).status).toBe(403);
+    const response = await POST(upload({ file: pngFile() }));
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ code: "membership_ended" });
     expect(replaceLogo).not.toHaveBeenCalled();
   });
 
