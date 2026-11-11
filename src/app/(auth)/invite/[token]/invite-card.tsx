@@ -343,10 +343,16 @@ function WrongAccount({ currentEmail }: { currentEmail: string }) {
 
   async function handleSignOut() {
     setPending(true);
-    await authClient.signOut();
-    // The same link again, now signed out: the server renders the sign-in or create-account state.
-    router.refresh();
-    setPending(false);
+    try {
+      await authClient.signOut();
+      // The same link again, now signed out: the server renders the sign-in or create-account state.
+      router.refresh();
+    } catch {
+      // A network failure rejects (review b-IN-6): nothing changed, so the card stays and the
+      // button is usable again for another try.
+    } finally {
+      setPending(false);
+    }
   }
 
   return (

@@ -573,6 +573,39 @@ test.describe("AIDA-42: invitations in the browser", () => {
     await context.close();
   });
 
+  test("b-IN-6: when Sign out fails on the network, the mismatch card's button is usable again, and a second try signs out", async ({
+    browser,
+  }) => {
+    const org = await createOrg("Signout Workspace", [{ role: "owner", name: "Signout Owner" }]);
+    const other = await createOrg("Signout Home", [{ role: "owner", name: "Signout Visitor" }]);
+    const { token } = await insertInvitation({
+      orgId: org.orgId,
+      email: uniqueEmail("signout"),
+      role: "member",
+      inviterId: org.users[0].id,
+    });
+    const { context, page } = await signedInContext(browser, other.users[0].email);
+    await gotoWarm(page, invitePath(token));
+    await expect(page.getByRole("heading", { level: 1, name: MISMATCH_HEADING })).toBeVisible();
+    const signOut = page.getByRole("button", { name: "Sign out" });
+
+    // The sign-out request fails on the network once.
+    await page.route("**/api/auth/sign-out", (route) => route.abort("failed"));
+    const failed = page.waitForRequest((r) => r.url().endsWith("/api/auth/sign-out"));
+    await signOut.click();
+    await failed;
+    await expect(signOut).toBeEnabled({ timeout: 10_000 });
+    await expect(page.getByRole("heading", { level: 1, name: MISMATCH_HEADING })).toBeVisible();
+
+    // The network is back: the same button signs out, and the link shows its signed-out state.
+    await page.unroute("**/api/auth/sign-out");
+    await signOut.click();
+    await expect(page.getByRole("heading", { level: 1, name: `Join ${org.name}` })).toBeVisible({
+      timeout: 30_000,
+    });
+    await context.close();
+  });
+
   test("isolation: an invitation to organization B grants B only; neither side reaches the other's ticket", async ({
     browser,
   }) => {
