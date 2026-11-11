@@ -300,16 +300,24 @@ export interface MemberListEntry {
   name: string;
   email: string;
   image: string | null;
-  /** The conservative role over every row of the user (see conservativeRole). */
+  /** The conservative role over every row of the user (see conservativeRole): what they may do. */
   role: MemberRole;
+  /** The user holds at least one `owner` row: a protected target (V-26 (3), K162). */
+  hasOwnerRow: boolean;
+  /**
+   * The role the Team page shows: `owner` whenever hasOwnerRow, because such a target is treated
+   * as an owner (V-26 (3), K162); else the conservative role. Never used for the user's own rights.
+   */
+  displayRole: MemberRole;
   /** The earliest createdAt of the user's member rows in the organization. */
   joinedAt: Date;
 }
 
 /**
- * Every member of orgId, one entry per distinct user with the conservative role, ordered owners,
- * admins, members, then by name case-insensitively, then by userId. The caller gates access
- * (requirePageAccess or getScopedDb); this reads with the explicit organization term.
+ * Every member of orgId, one entry per distinct user with the conservative role and the displayed
+ * role, ordered by the displayed role (owners, admins, members), then by name case-insensitively,
+ * then by userId. The caller gates access (requirePageAccess or getScopedDb); this reads with the
+ * explicit organization term.
  */
 export async function listMembers(orgId: string): Promise<MemberListEntry[]> {
   if (!isNonEmptyString(orgId)) return [];
@@ -344,20 +352,26 @@ export async function listMembers(orgId: string): Promise<MemberListEntry[]> {
     }
   }
 
-  const list: MemberListEntry[] = [...byUser].map(([userId, e]) => ({
-    userId,
-    name: e.name,
-    email: e.email,
-    image: e.image,
-    role: conservativeRole({
+  const list: MemberListEntry[] = [...byUser].map(([userId, e]) => {
+    const role = conservativeRole({
       isOwner: e.roles.every((r) => r === "owner"),
       isAdmin: e.roles.every((r) => r === "owner" || r === "admin"),
-    }),
-    joinedAt: e.joinedAt,
-  }));
+    });
+    const hasOwnerRow = e.roles.includes("owner");
+    return {
+      userId,
+      name: e.name,
+      email: e.email,
+      image: e.image,
+      role,
+      hasOwnerRow,
+      displayRole: hasOwnerRow ? "owner" : role,
+      joinedAt: e.joinedAt,
+    };
+  });
 
   list.sort((a, b) => {
-    const byRole = ROLE_RANK[b.role] - ROLE_RANK[a.role];
+    const byRole = ROLE_RANK[b.displayRole] - ROLE_RANK[a.displayRole];
     if (byRole !== 0) return byRole;
     const an = a.name.toLowerCase();
     const bn = b.name.toLowerCase();

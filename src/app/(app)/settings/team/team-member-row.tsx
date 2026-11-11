@@ -20,7 +20,6 @@ import { DeactivateDialog } from "./deactivate-dialog";
 import {
   DEACTIVATE_TRIGGER,
   displayName,
-  grantableRoles,
   initialsOf,
   MEMBERS_ADMIN_ONLY,
   MEMBERS_HEADING,
@@ -34,43 +33,13 @@ import {
   type TeamRole,
   YOU_BADGE,
 } from "./team-copy";
+import { type RowRights, rowRights, type TeamMember } from "./team-rights";
 
 // UI-SPEC Surface 1, the Members card (E1): one row per member, sorted by the server (owners,
 // admins, members, then name). The role control and the actions follow the "Who may do what"
 // table; the table is a convenience only, because every change is re-checked by the service under
 // the organization lock (T-10-39). Nothing is optimistic: a role change disables its Select and
 // shows the new value until the action returns; the row updates through revalidatePath.
-
-/** One member as the page hands it over: no image (no remote avatar), no other organization. */
-export interface TeamMember {
-  userId: string;
-  name: string;
-  email: string;
-  role: TeamRole;
-  /** Open tickets assigned to the member (countOpenAssignedTickets); 0 for actors without rights. */
-  openTickets: number;
-}
-
-/** What the actor may do on a row (UI-SPEC "Who may do what"; the server is authoritative). */
-export interface RowRights {
-  /** Roles offered in the Select; empty means a Badge only. */
-  roleOptions: TeamRole[];
-  /** An admin actor looking at an owner row: Badge with the owner tooltip. */
-  ownerTooltip: boolean;
-  /** "Deactivate member" is shown. */
-  canDeactivate: boolean;
-}
-
-export function rowRights(actorUserId: string, actorRole: TeamRole, member: TeamMember): RowRights {
-  const own = member.userId === actorUserId;
-  if (own || actorRole === "member") {
-    return { roleOptions: [], ownerTooltip: false, canDeactivate: false };
-  }
-  if (actorRole === "admin" && member.role === "owner") {
-    return { roleOptions: [], ownerTooltip: true, canDeactivate: false };
-  }
-  return { roleOptions: grantableRoles(actorRole), ownerTooltip: false, canDeactivate: true };
-}
 
 const ERROR_CALLOUT =
   "rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-[13px] text-destructive";

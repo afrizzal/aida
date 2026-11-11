@@ -110,12 +110,15 @@ export function reassignFailedText(name: string, k: number): string {
 /** Amendment A7: the retry button of the reassignment callout. */
 export const REASSIGN_RETRY = "Try again";
 
-export type DeactivateErrorKey = "last_owner" | "unknown";
+export type DeactivateErrorKey = "last_owner" | "not_allowed" | "unknown";
 
+/** `not_allowed` reuses the role-change refusal copy (K162): a permanent refusal, no "try again". */
 export function deactivateError(key: DeactivateErrorKey, name: string): string {
-  return key === "last_owner"
-    ? "This would leave the workspace without an owner or admin. Change another member's role first."
-    : `${name} could not be removed. Wait a moment and try again.`;
+  if (key === "last_owner") {
+    return "This would leave the workspace without an owner or admin. Change another member's role first.";
+  }
+  if (key === "not_allowed") return ROLE_ERRORS.not_allowed;
+  return `${name} could not be removed. Wait a moment and try again.`;
 }
 
 // Invite --------------------------------------------------------------------------------------

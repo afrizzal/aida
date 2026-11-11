@@ -115,7 +115,16 @@ export async function deactivateMemberAction(
     targetUserId,
   });
   if (!result.ok) {
-    return { ok: false, error: result.error === "LAST_OWNER" ? "last_owner" : "unknown" };
+    switch (result.error) {
+      case "LAST_OWNER":
+        return { ok: false, error: "last_owner" };
+      // A permanent refusal is never phrased as "try again" (K162, b-WR-2).
+      case "NOT_ALLOWED":
+      case "SELF_CHANGE":
+        return { ok: false, error: "not_allowed" };
+      default:
+        return { ok: false, error: "unknown" };
+    }
   }
   revalidatePath(TEAM_PATH);
   if (reassignToUserId === null) return { ok: true, reassigned: 0, skipped: 0, failed: 0 };

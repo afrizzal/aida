@@ -10,7 +10,8 @@ import {
   TEAM_TITLE,
   type TeamRole,
 } from "./team-copy";
-import { type TeamMember, TeamMembersCard } from "./team-member-row";
+import { TeamMembersCard } from "./team-member-row";
+import type { TeamMember } from "./team-rights";
 
 // Settings -> Team (Phase 10, AIDA-43, AIDA-42 UI; UI-SPEC Surface 1 with amendments A2 and A7).
 // Every member sees the member list; owners and admins also get the controls the "Who may do what"
@@ -24,8 +25,9 @@ export default async function TeamSettingsPage() {
   const { orgId, session } = await requirePageAccess();
   const entries = await listMembers(orgId);
 
-  // The actor's rights from the same conservative read as every row (V-26): owner only when every
-  // row of the actor is `owner`, admin only when every row is `owner` or `admin`.
+  // The actor's rights from the conservative read (V-26 (1), (2)): owner only when every row of
+  // the actor is `owner`, admin only when every row is `owner` or `admin`. The rows show the
+  // displayed role instead: any owner row is shown as Owner and protected (V-26 (3), K162).
   const actorUserId = session.user.id;
   const actorRole: TeamRole = entries.find((m) => m.userId === actorUserId)?.role ?? "member";
 
@@ -38,7 +40,8 @@ export default async function TeamSettingsPage() {
       userId: m.userId,
       name: m.name,
       email: m.email,
-      role: m.role,
+      role: m.displayRole,
+      hasOwnerRow: m.hasOwnerRow,
       openTickets:
         canManage && m.userId !== actorUserId ? await countOpenAssignedTickets(orgId, m.userId) : 0,
     })),

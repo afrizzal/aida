@@ -38,7 +38,7 @@ import {
   reassignFailedText,
   reassignSkippedText,
 } from "./team-copy";
-import type { TeamMember } from "./team-member-row";
+import type { TeamMember } from "./team-rights";
 
 // UI-SPEC Surface 1, "Deactivate" (D-07, V-25, amendment A7). The member is removed first, in one
 // locked transaction (deactivateMember); reassigning their open tickets is an optional second step

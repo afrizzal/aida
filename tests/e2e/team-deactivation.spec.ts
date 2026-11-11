@@ -23,6 +23,7 @@ import type { APIRequestContext, BrowserContext, Page } from "@playwright/test";
 import { createTicket, prisma } from "./support/db";
 import { expect, test } from "./support/fixtures";
 import {
+  addMember,
   createOrg,
   gotoWarm,
   memberCount,
@@ -364,6 +365,50 @@ test.describe("AIDA-43: deactivating a member", () => {
     );
     await owned.context.close();
     await adminSession.context.close();
+  });
+
+  test("K162, V-26: a user with an owner row and another row is shown as Owner and protected for an admin; an owner still gets the controls", async ({
+    browser,
+  }) => {
+    const org = await createOrg("Mixed Workspace", [
+      { role: "owner", name: "Mixed Owner" },
+      { role: "admin", name: "Mixed Admin" },
+      { role: "owner", name: "Mixed Owner Admin" },
+      { role: "owner", name: "Mixed Owner Member" },
+    ]);
+    const [owner, admin, ownerAdmin, ownerMember] = org.users;
+    // Duplicate rows (O-4 default: no constraint), written the way only a migration or a bug would.
+    await addMember(org.orgId, ownerAdmin.id, "admin");
+    await addMember(org.orgId, ownerMember.id, "member");
+
+    const adminSession = await signedInContext(browser, admin.email);
+    await gotoWarm(adminSession.page, "/settings/team");
+    // Presence first: the admin has no control on these rows only because of the owner row.
+    for (const target of [ownerAdmin, ownerMember]) {
+      const row = teamRow(adminSession.page, target);
+      await expect(row.getByText("Owner", { exact: true }), target.name).toBeVisible();
+      await expect(row.getByRole("combobox"), target.name).toHaveCount(0);
+      await expect(row.getByRole("button", { name: "Deactivate member" }), target.name).toHaveCount(
+        0,
+      );
+    }
+    // The owner-row users are listed among the owners, before the admin.
+    const order = await adminSession.page.getByRole("listitem").allInnerTexts();
+    const index = (user: TeamUser) => order.findIndex((text) => text.includes(user.email));
+    expect(index(ownerMember)).toBeLessThan(index(admin));
+    expect(index(ownerAdmin)).toBeLessThan(index(admin));
+
+    // An owner whose every row is owner keeps the controls on those rows (the server allows it).
+    const ownerSession = await signedInContext(browser, owner.email);
+    await gotoWarm(ownerSession.page, "/settings/team");
+    await expect(
+      ownerSession.page.getByRole("combobox", { name: `Role for ${ownerAdmin.name}` }),
+    ).toBeVisible();
+    await expect(
+      teamRow(ownerSession.page, ownerMember).getByRole("button", { name: "Deactivate member" }),
+    ).toBeVisible();
+    await adminSession.context.close();
+    await ownerSession.context.close();
   });
 
   test("R2-4: with two owners on stale Team pages, A demotes B, then B's change to A is refused and exactly one owner remains", async ({

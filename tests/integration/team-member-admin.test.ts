@@ -177,8 +177,33 @@ describe("listMembers (V-26: one entry per user, conservative role)", () => {
         [mixedAdmin, "member"],
       ]),
     );
-    expect(list[0]?.userId).toBe(ids[0]);
+    // K162: any owner row displays as Owner, so both owner-row users sort among the owners.
+    expect(list.slice(0, 2).map((m) => m.userId)).toEqual(
+      expect.arrayContaining([ids[0], mixedOwner]),
+    );
     expect(list[2]?.userId).toBe(mixedAdmin);
+  });
+
+  // K162 (b-WR-2, V-26 (3)): the entry carries the protection bit and the role the Team page
+  // shows. `role` stays the conservative reading (what the user may do); `displayRole` is Owner
+  // whenever the user holds any owner row, because such a target is treated as an owner.
+  it("K162: hasOwnerRow and displayRole follow V-26 (3); role stays conservative", async () => {
+    const { orgId, ids } = await seed(["owner", "owner", "owner", "admin", "member"]);
+    const [pureOwner, ownerAdmin, ownerMember, admin, member] = ids;
+    await addRow(orgId, ownerAdmin, "admin");
+    await addRow(orgId, ownerMember, "member");
+    const byId = new Map((await listMembers(orgId)).map((m) => [m.userId, m]));
+    const view = (id: string) => {
+      const m = byId.get(id);
+      return m && { role: m.role, hasOwnerRow: m.hasOwnerRow, displayRole: m.displayRole };
+    };
+    expect(view(pureOwner)).toEqual({ role: "owner", hasOwnerRow: true, displayRole: "owner" });
+    expect(view(ownerAdmin)).toEqual({ role: "admin", hasOwnerRow: true, displayRole: "owner" });
+    expect(view(ownerMember)).toEqual({ role: "member", hasOwnerRow: true, displayRole: "owner" });
+    expect(view(admin)).toEqual({ role: "admin", hasOwnerRow: false, displayRole: "admin" });
+    expect(view(member)).toEqual({ role: "member", hasOwnerRow: false, displayRole: "member" });
+    const order = (await listMembers(orgId)).map((m) => m.displayRole);
+    expect(order).toEqual(["owner", "owner", "owner", "admin", "member"]);
   });
 
   it("an unknown role string is listed as member, never as admin or owner", async () => {
