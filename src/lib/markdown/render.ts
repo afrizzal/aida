@@ -49,11 +49,13 @@ function rehypeSafeLinks() {
 //   - it is made from text that already sits in the tree, never from raw HTML (remark-rehype runs
 //     without allowDangerousHtml, so a literal span in the Markdown never reaches the tree);
 //   - the sanitize schema of renderMarkdown allows span with exactly MENTION_CLASS_NAMES;
-//   - rehypeMentionSpanGuard runs right before and right after the sanitize pass: it keeps a span
-//     only when its class list is exactly those two classes and its children are text, drops
-//     every other property (the schema's global `id` and friends), and unwraps any other span to
-//     its children. Running it before the pass too means a span carrying an extra class is
-//     unwrapped, not trimmed by the sanitizer into the mention shape.
+//   - the span guard runs right before and right after the sanitize pass, as two distinct plugins
+//     (rehypeMentionSpanGuard, rehypeMentionSpanGuardAfterSanitize; run decision K171: unified
+//     keeps one entry per plugin function, so the same function attached twice runs once). It
+//     keeps a span only when its class list is exactly those two classes and its children are
+//     text, drops every other property (the schema's global `id` and friends), and unwraps any
+//     other span to its children. Running it before the pass too means a span carrying an extra
+//     class is unwrapped, not trimmed by the sanitizer into the mention shape.
 // The shared `schema` above stays unchanged, so inbound email HTML (sanitizeEmailHtml), the KB
 // preview and task content cannot carry the mention classes. A name that contains `@` is never
 // wrapped, so the markup never carries an email address.
@@ -184,6 +186,15 @@ export function rehypeMentionSpanGuard() {
   };
 }
 
+/**
+ * The same guard after the sanitize pass, as a plugin of its own (run decision K171, review
+ * d-WR-1): unified merges a second .use() of one function into its first entry, so attaching
+ * rehypeMentionSpanGuard twice would run it only before the pass.
+ */
+export function rehypeMentionSpanGuardAfterSanitize() {
+  return rehypeMentionSpanGuard();
+}
+
 const processor = unified()
   .use(remarkParse)
   .use(remarkGfm)
@@ -192,8 +203,17 @@ const processor = unified()
   .use(rehypeMentions)
   .use(rehypeMentionSpanGuard)
   .use(rehypeSanitize, renderSanitizeSchema)
-  .use(rehypeMentionSpanGuard)
+  .use(rehypeMentionSpanGuardAfterSanitize)
   .use(rehypeStringify);
+
+/**
+ * The plugins renderMarkdown's processor actually holds, in order (one entry per attacher, as
+ * unified keeps them). For the K171 unit test: it proves the guard is attached after the sanitize
+ * pass too, which a rendered string cannot show.
+ */
+export function renderMarkdownPlugins(): readonly unknown[] {
+  return processor.attachers.map(([plugin]) => plugin);
+}
 
 export interface RenderMarkdownOptions {
   /**

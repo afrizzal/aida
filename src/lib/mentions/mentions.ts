@@ -12,8 +12,9 @@
 //   - recordMentions writes one MessageMention per kept member and one MENTION notification each,
 //     in the same transaction (D-16).
 // Mention ids and names come from untrusted input. They are never rendered as HTML here: the
-// display names go to renderMarkdown's mention option, which only wraps text that already sits in
-// the sanitized tree (src/lib/markdown/render.ts). A display name never contains an email address.
+// display names go to renderMarkdown's mention option, which wraps text nodes of the Markdown tree
+// before the sanitize pass, whose schema allows exactly that span; the span guard runs before and
+// after that pass (src/lib/markdown/render.ts). A display name never contains an email address.
 //
 // Relative imports only and no framework import, like the notification modules it calls.
 import { type EmitTx, emitNotifications } from "../notifications/emit";

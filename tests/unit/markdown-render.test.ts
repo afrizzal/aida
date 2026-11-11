@@ -7,7 +7,9 @@ import {
   htmlLinkTargets,
   MENTION_CLASS_NAMES,
   rehypeMentionSpanGuard,
+  rehypeMentionSpanGuardAfterSanitize,
   renderMarkdown,
+  renderMarkdownPlugins,
   renderMarkdownPreview,
   renderSanitizeSchema,
   renderTaskMarkdown,
@@ -262,18 +264,65 @@ describe("renderMarkdown mentions (D-20)", () => {
     return counts;
   }
 
-  /** The stages renderMarkdown runs after its tree is built: guard, schema, guard. */
+  /**
+   * The stages renderMarkdown runs after its tree is built: guard, schema, guard. The two guards
+   * are two distinct plugins (K171): unified keeps one entry per plugin function, so the same
+   * function attached twice would run once.
+   */
   function sanitizeLikeRenderMarkdown(html: string): string {
     return String(
       unified()
         .use(rehypeParse, { fragment: true })
         .use(rehypeMentionSpanGuard)
         .use(rehypeSanitize, renderSanitizeSchema)
-        .use(rehypeMentionSpanGuard)
+        .use(rehypeMentionSpanGuardAfterSanitize)
         .use(rehypeStringify)
         .processSync(html),
     );
   }
+
+  // K171 (review d-WR-1): the guard after the sanitize pass really runs.
+  it("K171: renderMarkdown attaches the span guard before and after the sanitize pass, as two distinct plugins", () => {
+    const plugins = renderMarkdownPlugins();
+    const sanitize = plugins.indexOf(rehypeSanitize);
+    expect(sanitize).toBeGreaterThan(-1);
+    expect(plugins.filter((plugin) => plugin === rehypeSanitize)).toHaveLength(1);
+    // Right before the pass: the guard; right after it: the second guard; then stringify.
+    expect(plugins[sanitize - 1]).toBe(rehypeMentionSpanGuard);
+    expect(plugins[sanitize + 1]).toBe(rehypeMentionSpanGuardAfterSanitize);
+    expect(plugins[sanitize + 2]).toBe(rehypeStringify);
+    expect(rehypeMentionSpanGuardAfterSanitize).not.toBe(rehypeMentionSpanGuard);
+    // Each guard is held once, so neither was merged into the other.
+    expect(plugins.filter((plugin) => plugin === rehypeMentionSpanGuard)).toHaveLength(1);
+    expect(plugins.filter((plugin) => plugin === rehypeMentionSpanGuardAfterSanitize)).toHaveLength(
+      1,
+    );
+  });
+
+  it("K171: the after-sanitize guard removes what the sanitizer lets through on a mention-shaped span", () => {
+    const input =
+      '<span class="font-semibold text-primary-emphasis" id="m" title="t" lang="en">@Ana</span>';
+    // Control: the sanitize pass alone keeps the schema's global attributes on the span.
+    const sanitizedOnly = String(
+      unified()
+        .use(rehypeParse, { fragment: true })
+        .use(rehypeSanitize, renderSanitizeSchema)
+        .use(rehypeStringify)
+        .processSync(input),
+    );
+    expect(sanitizedOnly).toContain('id="user-content-m"');
+    expect(sanitizedOnly).toContain('title="t"');
+    // The pass followed by the after-sanitize guard keeps the two classes and nothing else.
+    const guarded = String(
+      unified()
+        .use(rehypeParse, { fragment: true })
+        .use(rehypeSanitize, renderSanitizeSchema)
+        .use(rehypeMentionSpanGuardAfterSanitize)
+        .use(rehypeStringify)
+        .processSync(input),
+    );
+    expect(guarded).toBe(`${SPAN}@Ana</span>`);
+  });
 
   it("renders no span without mentionNames", () => {
     const html = renderMarkdown("hi @Ana");
