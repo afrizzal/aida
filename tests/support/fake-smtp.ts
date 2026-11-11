@@ -13,6 +13,7 @@
 //
 // Fault modes, set at runtime with setMode:
 //   none                 every command succeeds;
+//   reject-auth          535 to AUTH (a rotated or wrong SMTP password);
 //   reject-rcpt          550 to every RCPT TO;
 //   reject-data-command  RCPT accepted, then 554 to the DATA command;
 //   reject-data          the whole message is read, then 554 after the terminator;
@@ -27,7 +28,8 @@
 //   starttls             EHLO advertises STARTTLS and the server answers 220 to it, then it
 //                        cannot complete a handshake: the first bytes after the 220 (the TLS
 //                        ClientHello) close the connection.
-// `delayMs` also applies to any other mode when given.
+// `delayMs` also applies to any other mode when given. `rejectCode` replaces the reply code of the
+// four reject modes, for example 450 or 451 for a transient (4xx) rejection (K170).
 //
 // Counters: `connections` counts accepted TCP connections and `startTlsCommands` counts STARTTLS
 // commands, so a test can prove that a client never connected or did try to upgrade.
@@ -37,6 +39,7 @@ import net from "node:net";
 
 export type FakeSmtpMode =
   | "none"
+  | "reject-auth"
   | "reject-rcpt"
   | "reject-data-command"
   | "reject-data"
@@ -48,6 +51,7 @@ export type FakeSmtpMode =
 
 export const FAKE_SMTP_MODES: readonly FakeSmtpMode[] = [
   "none",
+  "reject-auth",
   "reject-rcpt",
   "reject-data-command",
   "reject-data",
@@ -114,6 +118,7 @@ export class FakeSmtpServer {
   private mode: FakeSmtpMode = "none";
   private delayMs = 0;
   private tricklePauseMs = 200;
+  private rejectCode: number | null = null;
   private boundPort = 0;
   /** Every accepted message, in arrival order. */
   readonly messages: FakeSmtpMessage[] = [];
@@ -149,11 +154,24 @@ export class FakeSmtpServer {
   /** Changes the fault mode for every following command (open connections included). */
   setMode(
     mode: FakeSmtpMode,
-    { delayMs, tricklePauseMs }: { delayMs?: number; tricklePauseMs?: number } = {},
+    {
+      delayMs,
+      tricklePauseMs,
+      rejectCode,
+    }: { delayMs?: number; tricklePauseMs?: number; rejectCode?: number } = {},
   ): void {
     this.mode = mode;
     this.delayMs = delayMs ?? (mode === "delay-ms" ? 100 : 0);
     this.tricklePauseMs = tricklePauseMs ?? 200;
+    this.rejectCode = rejectCode ?? null;
+  }
+
+  /** The reply line of a reject mode: its own code and text, or `rejectCode` with a 4xx text. */
+  private rejection(defaultLine: string): string {
+    const code = this.rejectCode;
+    if (code === null) return defaultLine;
+    const enhanced = code >= 500 ? "5.0.0" : "4.0.0";
+    return `${code} ${enhanced} ${code >= 500 ? "Rejected" : "Try again later"}`;
   }
 
   /** Forgets every captured message and resets the mode to none. */
@@ -281,6 +299,10 @@ export class FakeSmtpServer {
         this.reply(session, `250 ${HOSTNAME}`);
         return;
       case "AUTH": {
+        if (this.mode === "reject-auth") {
+          this.reply(session, this.rejection("535 5.7.8 Authentication credentials invalid"));
+          return;
+        }
         const [mechanism, initial] = arg.trim().split(/\s+/);
         const mech = (mechanism ?? "").toUpperCase();
         if (mech === "PLAIN") {
@@ -314,7 +336,7 @@ export class FakeSmtpServer {
           return;
         }
         if (this.mode === "reject-rcpt") {
-          this.reply(session, "550 5.1.1 Recipient rejected");
+          this.reply(session, this.rejection("550 5.1.1 Recipient rejected"));
           return;
         }
         session.recipients.push(pathOf(arg.replace(/^TO:/i, "")));
@@ -327,7 +349,7 @@ export class FakeSmtpServer {
           return;
         }
         if (this.mode === "reject-data-command") {
-          this.reply(session, "554 5.5.1 Transaction failed");
+          this.reply(session, this.rejection("554 5.5.1 Transaction failed"));
           return;
         }
         if (this.mode === "drop-on-data") {
@@ -380,7 +402,7 @@ export class FakeSmtpServer {
     this.received.push(message);
 
     if (this.mode === "reject-data") {
-      this.reply(session, "554 5.6.0 Message rejected");
+      this.reply(session, this.rejection("554 5.6.0 Message rejected"));
       return;
     }
     if (this.mode === "drop-after-data-end") {

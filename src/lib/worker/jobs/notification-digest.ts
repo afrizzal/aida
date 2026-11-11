@@ -16,15 +16,17 @@
 // overlap left is the one pair in flight, which the per-pair advisory lock and the lease keep
 // apart from the next run (that pair reports `held` there).
 //
-// Logs counts only: never an address, an id or a ticket. Relative imports only: the worker
-// bundles this module.
+// Logs (K170): one summary line per run with the counts by outcome, and the error class of a run
+// that throws (which then fails the job); runDigests logs each failed send or pair. Never an
+// address, an id or a ticket. Relative imports only: the worker bundles this module.
 import type { Job } from "pg-boss";
-import { type RunDigestsResult, runDigests } from "../../notifications/digest";
+import { type RunDigestsDeps, type RunDigestsResult, runDigests } from "../../notifications/digest";
 import {
   digestCron,
   digestExpireSeconds,
   NOTIFICATION_DIGEST_QUEUE,
 } from "../../notifications/digest-config";
+import { digestErrorLabel, digestLog, digestRunSummary } from "../../notifications/digest-log";
 
 type Env = Record<string, string | undefined>;
 
@@ -71,14 +73,21 @@ export async function registerNotificationDigest(
   await boss.schedule(NOTIFICATION_DIGEST_QUEUE, digestCron(env), {});
 }
 
-/** The pg-boss handler; the scheduled payload is empty and is not read, the job's signal is. */
+/**
+ * The pg-boss handler; the scheduled payload is empty and is not read, the job's signal is.
+ * `deps` are test seams (timing, hooks); the worker passes none.
+ */
 export async function notificationDigestHandler(
   jobs?: readonly { signal?: AbortSignal }[],
+  deps: Omit<RunDigestsDeps, "signal"> = {},
 ): Promise<RunDigestsResult> {
-  const result = await runDigests({ signal: jobs?.[0]?.signal });
-  const failed = result.reports.filter((report) => report.outcome === "failed").length;
-  if (failed > 0) {
-    console.error(`[notification-digest] ${failed} of ${result.pairs} recipients failed`);
+  let result: RunDigestsResult;
+  try {
+    result = await runDigests({ ...deps, signal: jobs?.[0]?.signal });
+  } catch (err) {
+    digestLog(`run failed: ${digestErrorLabel(err)}`);
+    throw err;
   }
+  digestLog(`run: ${digestRunSummary(result)}`);
   return result;
 }

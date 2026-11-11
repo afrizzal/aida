@@ -28,11 +28,17 @@
 //       deadline plus the commit margin, else the claim is released and nothing connects. The
 //       deadline is min(SEND_DEADLINE_MS, remaining lease - COMMIT_MARGIN_MS).
 //   (f) Record (R2-5): accepted -> afterSend hook, then one transaction moves CLAIMED -> SENT and
-//       stamps exactly the sent ids; rejected -> CLAIMED -> RELEASED at once, nothing stamped (the
-//       next run sends it once); ambiguous -> left CLAIMED until its lease expires, nothing
-//       stamped. Every status change is conditional on the digest's own id and status CLAIMED:
+//       stamps exactly the sent ids; a transient rejection (4xx) -> CLAIMED -> RELEASED at once,
+//       nothing stamped (the next run sends it once); a permanent rejection (5xx, run decision
+//       K170) -> one transaction moves CLAIMED -> CANCELED and stamps the ids it tried to send, so
+//       they are never emailed and no later run writes another NotificationDigest row for them
+//       (they stay in the bell; a new notification starts a new batch); ambiguous -> left CLAIMED
+//       until its lease expires, nothing stamped. Every status change is conditional on the digest's own id and status CLAIMED:
 //       that is the fence. An ambiguous attempt can add one copy, so repeated ambiguous failures
 //       can deliver more than one duplicate; exactly-once is not claimed (docs/OPERATIONS.md).
+//
+// Logging (K170): every failed send and every pair that throws writes one line with the error
+// class and codes only (digest-log.ts); the job handler adds one summary line per run.
 //
 // Every notification read and write goes through ./store (C10); this module holds no query on
 // the notification table itself. Relative imports only: the worker bundles it.
@@ -42,6 +48,7 @@ import { prisma } from "../db";
 import { scopedDb } from "../scoped-db";
 import { readMemberRights } from "../workspace-members/member-rights";
 import { assertDigestTiming, DIGEST_TIMING, type DigestTiming } from "./digest-config";
+import { digestErrorLabel, digestLog } from "./digest-log";
 import { type DigestSendOutcome, sendDigestMail } from "./digest-sender";
 import { getPreferences, getUnassignedSetting } from "./preferences";
 import {
@@ -103,6 +110,7 @@ export type DigestPairOutcome =
   | "canceled"
   | "lease-short"
   | DigestSendOutcome
+  | "rejected-permanent"
   | "sent"
   | "fenced"
   | "failed";
@@ -347,18 +355,40 @@ async function processPair(
   );
 
   // (f) Record.
+  const sentIds = rows.map((row) => row.id);
+  // A rejected recipient of a resolved send has no error object, only its reply code, if any.
+  const label =
+    result.errorLabel ??
+    (result.responseCode !== undefined ? `reply=${result.responseCode}` : "no-error");
+  if (result.outcome === "rejected" && result.permanent) {
+    digestLog(`send rejected (permanent): ${label}`);
+    const closed = await prisma.$transaction(async (tx) => {
+      const moved = await tx.notificationDigest.updateMany({
+        where: { id: claim.digestId, status: "CLAIMED" },
+        data: { status: "CANCELED" },
+      });
+      if (moved.count !== 1) return false;
+      await stampDigested(tx, orgId, userId, sentIds, clock());
+      return true;
+    });
+    report.outcome = closed ? "rejected-permanent" : "fenced";
+    return;
+  }
   if (result.outcome === "rejected") {
+    digestLog(`send rejected (transient): ${label}`);
     await moveClaimed(claim.digestId, "RELEASED");
     report.outcome = "rejected";
     return;
   }
   if (result.outcome === "ambiguous") {
+    digestLog(
+      `send ambiguous: ${label}${result.deadlineReached ? " deadline=reached" : ""}`,
+    );
     report.outcome = "ambiguous";
     return;
   }
   report.outcome = "accepted";
   await hooks.afterSend?.(ctx);
-  const sentIds = rows.map((row) => row.id);
   const recorded = await prisma.$transaction(async (tx) => {
     const now = clock();
     const moved = await tx.notificationDigest.updateMany({
@@ -421,7 +451,8 @@ export async function runDigests(deps: RunDigestsDeps = {}): Promise<RunDigestsR
         hooks,
         report,
       );
-    } catch {
+    } catch (err) {
+      digestLog(`pair failed: ${digestErrorLabel(err)}`);
       report.outcome = "failed";
     }
   }

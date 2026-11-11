@@ -10,19 +10,34 @@
 //
 // Outcome (R2-5), decided only from the awaited sendMail:
 //   accepted   sendMail resolved with the recipient in info.accepted and info.rejected empty;
-//   rejected   a definitive SMTP reply: an error with a reply code 400 to 599 (RCPT, the DATA
-//              command or the final reply after the data), or the recipient in info.rejected;
+//   rejected   a definitive SMTP reply: an error with a reply code 400 to 599 (AUTH, RCPT, the
+//              DATA command or the final reply after the data), or the recipient in
+//              info.rejected. `permanent` (run decision K170) is true for a 5xx reply: the batch
+//              is then closed instead of sent again; a 4xx reply, or a rejected recipient with no
+//              code, is transient;
 //   ambiguous  everything else: the deadline, a dropped connection, a timeout, an error with no
 //              reply code. The server may have accepted the message.
 // A send cut off by the deadline is always ambiguous, even if a partial reply was read.
 //
-// Nothing here logs: errors can echo addresses. Relative imports only: the worker bundles it.
+// The message carries `Auto-Submitted: auto-generated` (RFC 3834; K170, review c-IN-06): an
+// auto-responder does not answer it, and AIDA's own inbound path treats such mail as automatic, so
+// it never opens or reopens a ticket (auto-generated.ts, D-13).
+//
+// Nothing here logs: errors can echo addresses. A failed send's error is handed back as
+// digestErrorLabel (class and codes only) for the caller's log line. Relative imports only: the
+// worker bundles it.
 import net from "node:net";
 import {
   createSmtpTransport,
   type SmtpConnectionConfig,
   type SmtpGetSocket,
 } from "../channels/email/smtp-client";
+import { digestErrorLabel } from "./digest-log";
+
+/** RFC 3834 headers of every digest. */
+export const DIGEST_MAIL_HEADERS: Readonly<Record<string, string>> = Object.freeze({
+  "Auto-Submitted": "auto-generated",
+});
 
 export type DigestSendOutcome = "accepted" | "rejected" | "ambiguous";
 
@@ -30,6 +45,10 @@ export interface DigestSendResult {
   outcome: DigestSendOutcome;
   /** The SMTP reply code of a failed send, when nodemailer reported one. */
   responseCode?: number;
+  /** For `rejected`: true for a 5xx reply (K170). */
+  permanent?: boolean;
+  /** For a failed send: digestErrorLabel of the error (class and codes only). */
+  errorLabel?: string;
   /** True when the deadline destroyed the socket. */
   deadlineReached: boolean;
   /** Milliseconds from the call to the settled sendMail. */
@@ -67,21 +86,33 @@ function normalise(address: unknown): string {
 export function classifySendResult(
   to: string,
   settled:
-    | { ok: true; info: { accepted?: unknown[]; rejected?: unknown[] } }
+    | {
+        ok: true;
+        info: { accepted?: unknown[]; rejected?: unknown[]; rejectedErrors?: unknown[] };
+      }
     | { ok: false; error: unknown },
-): { outcome: DigestSendOutcome; responseCode?: number } {
+): { outcome: DigestSendOutcome; responseCode?: number; permanent?: boolean } {
   const wanted = to.trim().toLowerCase();
   if (settled.ok) {
     const accepted = (settled.info.accepted ?? []).map(normalise);
     const rejected = (settled.info.rejected ?? []).map(normalise);
-    if (rejected.includes(wanted)) return { outcome: "rejected" };
+    if (rejected.includes(wanted)) {
+      const entry = (settled.info.rejectedErrors ?? []).find(
+        (e) => normalise((e as { recipient?: unknown } | null)?.recipient) === wanted,
+      ) as { responseCode?: unknown } | undefined;
+      const code = typeof entry?.responseCode === "number" ? entry.responseCode : undefined;
+      if (code !== undefined && code >= 400 && code <= 599) {
+        return { outcome: "rejected", responseCode: code, permanent: code >= 500 };
+      }
+      return { outcome: "rejected", permanent: false };
+    }
     if (accepted.includes(wanted) && rejected.length === 0) return { outcome: "accepted" };
     return { outcome: "ambiguous" };
   }
   const error = settled.error as { responseCode?: unknown } | null;
   const code = typeof error?.responseCode === "number" ? error.responseCode : undefined;
   if (code !== undefined && code >= 400 && code <= 599)
-    return { outcome: "rejected", responseCode: code };
+    return { outcome: "rejected", responseCode: code, permanent: code >= 500 };
   return code === undefined
     ? { outcome: "ambiguous" }
     : { outcome: "ambiguous", responseCode: code };
@@ -145,6 +176,7 @@ export async function sendDigestMail(
       to: mail.to,
       subject: mail.subject,
       text: mail.text,
+      headers: { ...DIGEST_MAIL_HEADERS },
     });
     settled = { ok: true, info };
   } catch (error) {
@@ -156,9 +188,12 @@ export async function sendDigestMail(
   }
 
   const elapsedMs = Date.now() - started;
+  const errorLabel = settled.ok ? undefined : digestErrorLabel(settled.error);
   if (deadlineReached && !settled.ok) {
-    return { outcome: "ambiguous", deadlineReached: true, elapsedMs };
+    return { outcome: "ambiguous", deadlineReached: true, elapsedMs, errorLabel };
   }
   const classified = classifySendResult(mail.to, settled);
-  return { ...classified, deadlineReached, elapsedMs };
+  return errorLabel === undefined
+    ? { ...classified, deadlineReached, elapsedMs }
+    : { ...classified, deadlineReached, elapsedMs, errorLabel };
 }
