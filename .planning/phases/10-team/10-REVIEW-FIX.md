@@ -385,3 +385,197 @@ Not run: the full `pnpm test:e2e`. Only the four refusal specs the dispatch name
 ### `.next` moves
 
 None. Global setup did not stall in either E2E run (the K164 red run and the final run).
+
+## F3
+
+**Date:** 2026-11-13. **Scope:** K166 to K170, for findings c-WR-01 to c-WR-05, plus the part c info items that touch the same files: c-IN-01, c-IN-04, c-IN-06 (the `Auto-Submitted` header, inside K170), c-IN-07 (the OPERATIONS.md wording) and c-IN-08. It also corrects the stale referrer sentence in `docs/OPERATIONS.md` (K159). The other part c info items are in `deferred-items.md`. **Where it ran:** the main checkout on `v2/run-loop`, no worktree (`workflow.use_worktrees` is `false`, and the dispatch named the branch). Runs used `AIDA_TEST_RUN_ID=mwefaccq-0e2003a50e1b59ac`. **Result:** 5 of 5 decisions fixed, 5 info items fixed, 11 commits. **Schema:** unchanged.
+
+**How red was shown.** Each new test was run and seen failing before its fix, except K168 and K169. For those two the code was already in place when the test first ran. The red run then put the old behaviour back by hand in the lines that carry it (marked `TEMP-RED`, never committed). The files were restored from a copy in the run's temporary directory right after. No `git checkout`, `git restore` or `git stash` was used.
+
+### c-WR-01 / K166: one rule for unassigned-fallback rows in the bell and in the digest
+
+**Change.**
+- **The rule.** It follows V-28 and the Settings copy ("Owners and admins get these, in the app and in the digest"). A fallback row is decided by two things only: the "Unassigned tickets" switch, and the recipient being an owner or admin. The per-type switches ("… on my tickets", "… assigned to you") apply to the recipient's own tickets only.
+- **The bell side.** The bell already followed this rule (`emitForTicket`).
+- `store.claimDigestCandidates`: it claims non-fallback rows by the type list, and fallback rows by `includeFallback` alone, whatever their type. An empty type list with `includeFallback` now claims the fallback rows.
+- `digest.recheck` applies the same split.
+- Comments are updated in `digest.ts`, `store.ts` and `emit.ts`.
+
+**Tests.** `notification-digest.test.ts`, new describe K166. The rows come from the real `emitForTicket`, and the bell is read through `listRecent` and `countUnread`.
+- With "Customer replies: in app" off (owner) or "digest" off (admin) and "Unassigned tickets" on, the reply on an unassigned ticket shows in both bells and in both digests, on the "On unassigned tickets" line.
+- Control: the same switches still govern assigned rows. The owner gets no row. The admin gets a bell row, which stays out of the digest and undigested.
+- With the switch off, the owner gets no new row, and an existing fallback row is not claimed. The admin still gets both.
+- `notifications-core.test.ts`: the claim case is updated to K166 (`[]` with `true` returns the fallback row).
+
+**Runs.** Red: exit 1, 1 failed and 1 passed. Both pairs reported `nothing`, where `sent` was expected. Green, with `notifications-core` and `notification-emitters`: exit 0, 78 passed. `tsc` exit 0.
+
+**Commit:** `ebffff8`
+
+### c-WR-02 / K167: the SLA pass is bounded
+
+**Change.** `src/lib/worker/jobs/sla-flag.ts`:
+- **Discovery.** Each pass first reads the organizations that have candidates. This is a plain read outside any transaction, with no lock.
+- **One transaction per organization**, in id order. It locks at most `SLA_PASS_ROW_CAP` = 500 of that organization's candidates: the lowest ids, with `LIMIT` before `FOR UPDATE OF t SKIP LOCKED`. It flips them and notifies exactly the flipped rows in the same transaction. The rest waits for the next run.
+- **The predicates are unchanged.** Discovery and the lock share one `Prisma.sql` fragment per pass. The UPDATE re-checks are unchanged.
+- **A failing organization rolls back alone.** It gets no at-risk pass in that run. The handler rethrows the first failure after both passes.
+- **Interpretation (flagged).** "A per-pass row cap" is applied per organization and per pass, so one tenant's backlog cannot starve the others.
+- **Unchanged:** SKIP LOCKED, the 30-second transaction timeout and the Phase 12.1 ticket-mutation lock order (step 4 of the `mutations.ts` header).
+- **Seams.** The hooks receive the organization id as their last argument. A new test seam is `rowCap`.
+
+**Tests.** `sla-flag-handler.test.ts`, new describe K167:
+- **Backlog above the cap** (`rowCap: 3`): 5 tickets in org A and 2 in org B. Run 1 locks A's 3 lowest ids and B's 2, in two transactions (two different `txid_current()`). Inside each transaction the notification count equals the flipped rows. Run 2 flips A's last 2, and run 3 adds nothing.
+- **The shipped cap:** 501 overdue tickets, then 500 flags and 500 notifications, then 501.
+- **A failure in org A's transaction:** org B commits, A has nothing and is not at risk, the handler rejects, and the next run flags A.
+
+Two existing suites are adjusted for one transaction per organization:
+- `sla-pause-race.test.ts`:
+  - orders 1 and A expect `[["breach", []]]`, because the at-risk pass has no candidate, so it opens no transaction;
+  - `drain` repeats until a run locks nothing.
+- `notification-race.test.ts`: the three hold and PID hooks act on the case's own organization.
+
+The proofs themselves did not change: the worker never waits on a held row, and the deactivation commits while the pass is parked.
+
+**Runs.**
+- Red: exit 1, 3 failed. The hooks got no organization, and there was no cap and no export.
+- First green run of the race suites: exit 1, 4 failed. Order 1 expected an at-risk entry. Its failure left the resume holding its rows, and that broke A, B and C after it. After the two expectation changes, the drain loop and the organization filter: exit 0.
+- The Phase 12.1 and SLA set: `sla-flag-handler`, `sla-pause-race`, `notification-race`, `sla-pause`, `sla-pause-migrated` and `snooze`. Exit 0, 59 passed.
+
+**Commit:** `201e4f9`
+
+### c-WR-03 / K168: privacy tests for the bell route and actions
+
+**Change.** Tests only: the new `tests/integration/notifications-privacy.test.ts`.
+- **Setup.** The route and the three actions run for real, with a real Better Auth sign-in. Only `next/headers` is replaced.
+- **What Y holds.** Member Y has the ids of X's row in the same organization, of Z's row in another organization where Y is also a member, and of Y's own row there. The session names the first organization.
+- **The route.** List and count return Y's two rows only. That holds even with `user=`, `recipientUserId=`, `userId=`, `organizationId=` and `orgId=` in the query.
+- **Read and archive** change Y's own row, and answer `changed: false` for the other three, which stay unread and not archived.
+- **Mark all** marks 2.
+- **No member row:** the route answers 403 `membership_ended`, the actions return `membership_ended`, and nothing changes.
+- **No session:** 401.
+
+**Runs.**
+- On the current code: exit 0, 5 passed. The first attempt failed in the test fixture itself: the sign-up session is a second session row, so the check now looks up the sign-in token.
+- Red, with `TEMP-RED` lines: the route read `?user=`; read and archive used the row's own organization and recipient; mark-all updated across organizations. Exit 1, 3 failed and 2 passed.
+- Restored: green.
+
+**Commit:** `570408b` (test)
+
+### c-WR-04 / K169: the digest through pg-boss; no overlap by design
+
+**Change.**
+- **One registration function.** `registerNotificationDigest(boss, env)` in `notification-digest.ts` is called by `worker/index.ts`. It creates the queue `{ policy: "singleton", retryLimit: 0, expireInSeconds }` and then `updateQueue`s the same options, which corrects an install whose queue had only `policy: "singleton"`. Then it registers the worker and the schedule.
+- **Expiry.** `digestExpireSeconds` is the interval, at most 23 h; pg-boss refuses an expiry of 24 h or more.
+- **The signal.** The handler passes the job's `AbortSignal` to `runDigests`, which stops before its next claim (`stopped: true`).
+- **Why that is enough.** An expired run is never retried, and it stops after the pair in flight. The per-pair lock and the lease keep that one pair apart from the next run.
+- **No ids stored.** The handler's result (which holds ids) is not returned to pg-boss, so it is never stored as job output.
+- **The wrong comments are corrected.**
+
+**Tests.** New `tests/integration/notification-digest-job.test.ts`. A real `PgBoss` keeps its tables in a database of its own on the same server, so the shared database gains no `pgboss` schema. The handler uses the app's client on the shared database.
+- **Queue options:** exact.
+- **Registration**, after a pre-K169 `createQueue`:
+  - `getQueue` shows singleton, `retryLimit` 0 and 14400 s;
+  - the schedule is `0 */4 * * *`;
+  - one `send` ends `completed`;
+  - the fake SMTP has one digest with the link, the row is SENT, and the job's output is null.
+- **An aborted signal** claims and sends nothing. A live one sends.
+- **Abort during a pair:** that pair is sent, and the next pair is not claimed.
+
+**Runs.** Red, with the pg-boss defaults (`retryLimit: 2`, 900 s) and the signal dropped (`TEMP-RED`): exit 1, 4 failed. Green: exit 0, 4 passed. With `notification-digest`: 31 passed. Unit `digest-config` and `app-url-boot`: 39 passed.
+
+**Commit:** `79b023e`
+
+### c-WR-05, c-IN-06 / K170: failures are logged by class and code; a 5xx closes the batch
+
+**Change.**
+- **Logging.** New `digest-log.ts`:
+  - each line is `class=<err.name>[ code=<identifier>][ reply=<smtp code>]`, and a value that is not a plain identifier is dropped;
+  - every failed send logs `send rejected (permanent|transient): …` or `send ambiguous: …`;
+  - every throwing pair logs `pair failed: …`;
+  - the handler logs one `run: pairs=… sent=… rejected=… rejectedPermanent=… ambiguous=… failed=… leaseShort=… stopped=…` line per run, and `run failed: class=…` before it rethrows.
+- **Classification.** `classifySendResult` marks a 5xx as `permanent`. That includes a recipient in `info.rejected`, through its `rejectedErrors` code.
+- **What a permanent rejection does.**
+  - It moves CLAIMED to CANCELED and stamps the rows it tried to send, in one transaction (outcome `rejected-permanent`).
+  - Later runs write no row for them, and they stay in the bell.
+  - A new notification starts a new batch.
+  - A 4xx keeps today's RELEASED.
+- **No schema change.** There is no FAILED state, and the reason is in `deferred-items.md`.
+- **The header.** The digest carries `Auto-Submitted: auto-generated`. The inbound path honours it: `isAutoGenerated` treats any value other than `no` as automatic, so such mail never opens and never reopens a ticket (D-13).
+- **The fake SMTP** gains a `reject-auth` mode (535) and a `rejectCode` option.
+
+**Tests.**
+- Unit, new `tests/unit/digest-send-classify.test.ts`: 4xx against 5xx, `rejectedErrors`, ambiguous, and the label (no address; a bad name or code is dropped).
+- Integration, `notification-digest.test.ts`:
+  - **4xx (450, 451, 452):** the three R2-5 cases now run as transient rejections, with unchanged assertions.
+  - **5xx (550 RCPT, 554 DATA, 554 after the data, 535 AUTH):** the outcome is `rejected-permanent` and the row is CANCELED with its rows stamped. Three more runs write no row and connect for nothing. The rows are still unread in the bell. A new notification is sent alone.
+  - **Logs:** the lines carry class, code and reply, and never an organization, user, notification or ticket id, an address, `@example.test`, the server's reply text, the error message or the subject.
+  - **The summary line:** exactly one per run, and `run failed: class=AppUrlError` before the rethrow.
+  - **The tracer:** it asserts `auto-submitted: auto-generated` and `isAutoGenerated(mail) === true` on the delivered digest.
+
+**Runs.** Red, unit: exit 1, the module was missing. Red, integration: exit 1, 7 failed and 26 passed (the header was missing, the 5xx cases gave `rejected`, the hooks were not passed). Green: unit exit 0, 6 passed. Integration (with the job file): exit 0, 37 passed.
+
+**Commit:** `985187d`
+
+### c-IN-01: an auto-reply threaded onto a ticket notifies nobody
+
+**Change.** `ingest-message.ts` skips `emitForTicket` when `isAuto`. The inbound path already detected auto mail and never reopened on it.
+
+**Test.** `notification-emitters.test.ts`, new case. A human reply notifies (presence). Then `Auto-Submitted: auto-replied`, `Auto-Submitted: auto-generated` and `Precedence: auto_reply`, each on an assigned and an unassigned ticket, are appended and add no row.
+
+**Runs.** Red: exit 1, 10 rows where 1 was expected. Green, with `email-ingest`: exit 0, 32 passed.
+
+**Commits:** `6ac545c`, plus `5678fbb` (a test typing fix found by `tsc`)
+
+### c-IN-04: a SENT digest records the ids it sent
+
+**Change.** The record transaction sets `notificationIds: sentIds`. A permanent close keeps the ids it tried. The `digest.ts` header is regrouped, because the K166 paragraph from `ebffff8` sat inside the step list.
+
+**Runs.** Red: exit 1, the row held 2 ids where 1 was expected. Green: exit 0, digest suites 37 passed.
+
+**Commit:** `4c7dbcb`
+
+### c-IN-08, c-IN-07, the referrer sentence and the docs
+
+- **c-IN-08:** the orphaned comment in `smtp-client.ts` is deleted. Comment only, so no test (`8baccdc`).
+- **`docs/OPERATIONS.md`** (`de15be8`):
+  - the 4xx and 5xx behaviour (K170);
+  - the worker log lines;
+  - slow runs (K169);
+  - c-IN-07: "on the first scheduled run after that lease";
+  - replies to a digest (c-IN-06, including the rest that is not fixed);
+  - the Unassigned tickets rule (K166);
+  - the invitation page "sends a referrer to AIDA itself only (`Referrer-Policy: same-origin`)" in place of "sends no referrer". The F2 deferred row is marked fixed.
+- **`deferred-items.md`:**
+  - c-IN-02 is closed by F2 (`1575ec4`);
+  - c-IN-03, c-IN-05, and the rest of c-IN-06 and c-IN-07 are deferred with reasons;
+  - the K170 limit: CANCELED, not FAILED, and a 535 closes every batch of that run.
+
+### Final checks
+
+Run at `5678fbb`. `colima status` exit 0 and `docker info` exit 0 before each Docker step.
+
+| Command | Exit | Counts |
+|---|---|---|
+| `pnpm typecheck` | 0 | 0 errors (the first final run found one test typing error, fixed in `5678fbb`) |
+| `pnpm lint` | 0 | 771 files, 1 warning, pre-existing and known: `tests/unit/container-config.test.ts:160` |
+| `pnpm test` | 0 | 115 files, 2107 tests passed |
+| Integration, touched suites plus the Phase 12.1 race and SLA suites (one process) | 0 | 22 files, 261 passed. The files: `notification-digest`, `notification-digest-job`, `notifications-core`, `notification-emitters`, `notifications-privacy`, `email-ingest`, `membership-ended-refusals`, `invitations`, `mentions`, `mention-mode-switch`, `email-outbound-merge`, `sla-flag-handler`, `sla-pause-race`, `notification-race`, `sla-pause`, `sla-pause-migrated`, `snooze`, `create-ticket-state-race`, `ticket-state-delete-race`, `reply-reopen-race`, `merge-reply-race`, `triage-priority-race` |
+| `pnpm test:integration` (full, once) | 0 | 134 files, 1870 tests passed, 472.6 s |
+| `pnpm test:e2e tests/e2e/notifications-bell.spec.ts` | 0 | 3 passed, 0 failed, 0 flaky |
+
+The unit run includes `membership-inventory.test.ts` and `page-access-inventory.test.ts`, and both passed.
+- The session cookie cache is still off (`src/lib/auth.ts:17`, `cookieCache: { enabled: false }`, from `0db72a9`).
+- `readFreshSession` stays the only session read.
+- F3 did not touch `auth.ts`, `fresh-session.ts`, `package.json`, the lockfile or the schema.
+- No real email was sent: only the loopback fake SMTP. No new egress.
+
+### Not done, and limits
+
+- **Manual items:** I made no visual or screen-reader check; F3 changed no UI.
+- **K167 timing:** the 501-ticket case asserts counts, not a duration. The time per pass against a real backlog is not measured.
+- **K169:** expiry is proven through the options and the signal (an aborted signal, and an abort during a pair). No test waits for pg-boss to expire a real job.
+- **K170:** the row says CANCELED; the failure is visible in the log only (`deferred-items.md`).
+- **Report:** this section is written and left uncommitted for the orchestrator.
+
+### `.next` moves
+
+None. Global setup did not stall in the E2E run.
