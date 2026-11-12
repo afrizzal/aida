@@ -232,6 +232,7 @@ Round 1 on this update: `run-loop/codex/fase10-replan-tanya.md`. The points mark
 ### Amendment during execution (2026-11-13): R10-1, session cookie cache off
 
 - **R10-1 (regression found after plan 10-17):** with the cookie cache on (300 s), every fresh read of V-23 (`disableCookieCache`) ended in better-auth 1.7.20 `setCookieCache`, so every server action set the `session_data` cookie and Next.js re-rendered the route; four E2E cases lost their refusal alert, selection or focus. Fix `0db72a9`: `cookieCache: { enabled: false }` in `src/lib/auth.ts`; `readFreshSession` stays the only session read and keeps `disableCookieCache`. Mentions of a 300 s cookie cache in D-08, V-07 and V-23 above describe the state before this fix. Effect: a valid read sets no cookie; sliding refresh after `updateAge` is unchanged; a deleted session is still refused and its cookies expired; Better Auth's own endpoints now read the session row too. Record: `.planning/debug/r10-1-action-session-cookie.md`.
+- **K178 (amends D-07, 2026-11-13, after the Codex diff critique round 1):** deactivation no longer moves the removed member's sessions to another membership; they get `activeOrganizationId = null`, so later actions get `MEMBERSHIP_ENDED` and pages land on `/no-access`; reaching another organization takes a new sign-in. The user-initiated switch at invitation accept (V-23) is unchanged. Fix `ca175f3`.
 ---
 
 *Phase: 10-team*

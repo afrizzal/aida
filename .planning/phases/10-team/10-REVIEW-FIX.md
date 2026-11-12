@@ -755,3 +755,154 @@ The full run also closes F4's gap: the last full run (at `36f13d9`) was red from
 ### `.next` moves
 
 None. No E2E run in F5.
+
+## F6
+
+**Date:** 2026-11-13. **Scope:** K178 to K182, the dispositions of the Codex diff critique round 1 (`10-REVIEW.md`, "Codex diff critique round 1 dispositions"; answer `.planning/run-loop/codex/fase10-diff-jawab.md`). **Where it ran:** the main checkout on `v2/run-loop`, no worktree (`workflow.use_worktrees` is `false`, and the dispatch named the branch). Runs used `AIDA_TEST_RUN_ID=mwejkoht-ba080e680e50c7bb`. **Result:** 5 of 5 decisions fixed, 6 commits. **Schema:** unchanged.
+
+**How red was shown.** Each new test was run and seen failing before its fix. Where the fix already existed when a further test was written (the K182 route test, the K178 updated tests, the K180 integration test), the red runs used a `TEMP-RED` copy of the old product file and restored the current file from a copy in the run's temporary directory after the run. Nothing `TEMP-RED` was committed. No `git checkout`, `git restore` or `git stash` was used.
+
+### D-07 amendment (K178)
+
+D-07 said deactivation moves the removed member's sessions on that organization to the organization of their oldest remaining membership, or to null. From F6 on, deactivation sets those sessions to `activeOrganizationId = null` in every case. This is the run's own decision (K178), not an owner's.
+
+- **Why:** a server action reads the session's active organization, not the organization the page was rendered for. After the move, a tab still open on A ran its next action in B. Before the fix, the test below saw a setting, an invitation and a member audit row written in B.
+- **What now happens:** every later action of that session is the typed `MEMBERSHIP_ENDED` refusal (K164), and every page goes to `/no-access`. The person reaches B again only by signing in again. Deactivation never switches an organization by itself.
+- **Unchanged:** the user-initiated switch at invitation accept (V-23).
+- **Not edited:** `10-CONTEXT.md` (D-07) still describes the move. That entry is left to the orchestrator (`deferred-items.md`).
+
+### K178 (HIGH): deactivation sets the removed member's sessions to null
+
+**Change.** In `deactivateMember`, the query for the oldest other membership is gone, and the session update writes `null`. The result field `sessionsMoved` is now `sessionsCleared`. The comments that described the move are updated in `member-admin.ts`, `membership.ts`, `session.ts`, `fresh-session.ts`, `page-access.ts`, the team and KB proposal actions and the logo route. `docs/OPERATIONS.md` ("Removing a member") says that a member of another workspace is not switched to it.
+
+**Tests.**
+- New case in `membership-ended-refusals.test.ts`. A member signs in for real while A is their only membership, then is made an admin of B. As a member, the session changes A's AI switch and invites into A. Then the real `deactivateMember` removes them from A. From the stale tab, `setAiEnabled` and `inviteMemberAction` answer `MEMBERSHIP_ENDED` and revalidate nothing. Nothing changes in A or in B (settings, invitations, member audit rows). The session names no organization, and the B membership stays.
+- Updated, because they pinned the old move: `team-member-admin.test.ts` (the sessions on this organization become null even with two other memberships; other sessions are untouched), `invitations.test.ts` (accept first, then deactivation: null with and without another membership) and `team-actions-refusals.test.ts` (the field name).
+
+**Runs.**
+- Red (product unchanged): exit 1, 1 failed, 2 passed. Received `{ settings: 1, invitations: 1, audit: 1 }` in B.
+- `TEMP-RED` (the old move put back by hand, after the fix): exit 1 over `team-member-admin`, `invitations` and `membership-ended-refusals`, 3 failed and 79 passed. Restored.
+- Green: those three plus `membership-gate`, exit 0, 109 passed. Unit `team-actions-refusals`: 7 passed.
+
+**Commit:** `ca175f3`
+
+### K179 (MEDIUM): SMTP login or configuration failures release the digest
+
+**Change.** `classifySendResult` (`digest-sender.ts`) adds a third kind of rejection, `configuration`. It is decided only from nodemailer's error code, the failed command and the reply code:
+- a failed login: `EAUTH` with a 5xx reply, or with no reply (nodemailer's own "Missing credentials" check included);
+- an authentication reply code (530, 534, 535, 538) at any command;
+- a server that does not accept mail: 521 or 556, or a 5xx greeting;
+- a 5xx reply to `MAIL FROM` (the from address).
+
+What happens then (`digest.ts`):
+- The claim moves CLAIMED -> RELEASED, and nothing is stamped.
+- One line is logged with the class and the codes: `send rejected (configuration): class=Error code=EAUTH reply=535 workspace=stopped-for-run`.
+- `runDigests` claims none of that workspace's other pairs in this run (outcome `config-stopped`).
+- The run line gains `rejectedConfig=` and `configStopped=`.
+
+A recipient's permanent 5xx (550 at RCPT, 554 at or after the data) keeps the K170 close. A 4xx stays transient, at AUTH too. `docs/OPERATIONS.md` describes both cases and the new log line.
+
+**Tests.**
+- Unit (`digest-send-classify`): each configuration code, command and `EAUTH` case. The recipient and message cases stay permanent, the 4xx cases stay transient, and a rejected recipient of a resolved send is never `configuration`. 535 left the "permanent" list.
+- Integration (`notification-digest`), with the fake SMTP's `reject-auth` (535):
+  - In the same run, another workspace's digest is sent.
+  - The broken workspace: one pair `rejected-config` (RELEASED), the other `config-stopped` with no digest row. Nothing is received or stamped, and exactly one configuration line is logged, with no id, address or password.
+  - After the fix, the next run sends each batch once and stamps every row.
+- A second case: a 550 for one recipient closes that batch (CANCELED), and the workspace's other recipient is sent in the same run. The `reject-auth` row left the K170 permanent cases. The summary-line regex includes the two new fields.
+
+**Runs.** Red: unit exit 1, 3 failed, 7 passed; integration exit 1, 2 failed, 32 passed (the 550 case passed, as it should before and after). Green: unit 10 passed; `notification-digest` and `notification-digest-job` 38 passed.
+
+**Commit:** `9fb1695`
+
+### K181 (MEDIUM): the digest re-checks right before the SMTP connection opens
+
+**Change.** In `processPair`, after the body is built and the `beforeConnect` hook runs, `recheck` runs again in the same claim, before the lease check and the connection:
+- No member row cancels the digest.
+- Rows that no longer pass are dropped, and the body is rebuilt from the ticket numbers already read, with no further query.
+- Nothing left cancels the digest.
+- Only the rows sent are stamped and kept on the row.
+
+`docs/OPERATIONS.md` states the bound: a digest whose transmission already started when a deactivation commits may still arrive, within the 45-second send deadline. That is the same bound as V-25 for an action.
+
+**Tests** (`notification-digest`, "changes between the claim and the send"):
+- The race: in `beforeConnect`, so after the first re-check and after the body was built, the real `deactivateMember` commits. The hooks are seen in the order `beforeSend`, `beforeConnect`. The outcome is `canceled`, the digest is CANCELED, the fake SMTP sees 0 connections, nothing is received and nothing is stamped.
+- A preference switched off at the same point: the mention line is absent, and that row stays undigested.
+
+**Runs.** Red: exit 1, 2 failed (received `sent` instead of `canceled`; the email contained `Mentions:`). Green: `notification-digest`, `notification-digest-job` and `notifications-privacy`, 45 passed.
+
+**Commit:** `aa2dfcf`
+
+### K180 (MEDIUM): the first public Send that still names a mentioned member is held
+
+**The C7 guarantee, as now stated in `composer-tokens.ts` and `composer.tsx`:**
+- **Guaranteed:** an inserted mention span never reaches a public send. The switch removes every span (and its boundary copies, K173), a public draft holds no span, and a public send carries no mention id (D-21; the server refuses one).
+- **Not guaranteed:** that a name written as free text never reaches the customer. For that, the guard holds the **first** public Send whenever the body contains `@` followed by the name of any member mentioned in this draft. The name counts as written or escaped (K174), in any case and wherever it stands: there is no boundary rule, so `(@Name)`, `**@Name**`, `/@Name/` and `orders@Name.example` all hold. The guard shows the switch note.
+- **Free text is never auto-stripped.** The guard no longer removes anything, so an address cannot be corrupted. The second Send goes out as written (human in the loop).
+
+**Change.**
+- New pure `containsMentionedName`.
+- New draft flag `publicSendHeld`. A mode switch, a loaded AI draft and a send clear it, so a new switch is a new review. An edit after the hold does not re-arm it.
+- `guardPublicSend` now holds and notes, and never edits the text.
+
+**Tests.**
+- Unit (`mention-tokens`):
+  - Six pasted forms (`(@Zeta)`, `**@Zeta**`, `@Zeta,`, `orders@Zeta.example`, `/@Zeta/`, lower-case `@zeta`): each first Send is held with the note and the text unchanged, and the second goes out as written.
+  - An escaped and an unescaped `Ana_Lee` are held alike.
+  - The name without `@`, another `@name` and a partial name do not hold.
+  - The guard does nothing in internal mode, without inserted names, or after a send; a switch re-arms it.
+- Integration (`mention-mode-switch`), through the real route and the outbound handler with the mocked transport:
+  - `(@Zeta Paste)`: held, and nothing posted. The agent removes it, and the stored body and the mail carry no name.
+  - `**@Zeta Paste**`: held once, then sent as written. There is no `mentions` field, no mention row, no MENTION notification and no mention class.
+
+**Runs.**
+- Red: unit exit 1, 8 failed, 35 passed.
+- Integration `TEMP-RED` (the pre-K180 `composer-tokens.ts` written in from `git show HEAD:`): exit 1, 2 failed, 2 passed. Restored and compared byte for byte.
+- Green: unit 43 passed; `mention-mode-switch` and `mentions` 19 passed.
+
+**Commit:** `78ed1f4`
+
+### K182 (LOW): trusted-origin entries that are not bare origins are ignored
+
+**Change.** `getTrustedAppOrigins` skips an entry with a path, a query (even an empty `?`), a fragment (even an empty `#`) or credentials, instead of reducing it to its origin. A trailing `/` is still bare. The rule is the one of K165 (`isBareOrigin`, now shared with `BETTER_AUTH_URL`). `.env.example` and the `docs/OPERATIONS.md` variable table say that every listed origin is trusted fully for invitation accepts, and that a non-bare entry is ignored there.
+
+**Tests.** Unit (`app-url`): nine entries, where only `https://ok.example.test/` is kept; the old case with a `/x` path now uses a bare entry with a port. Integration (`invite-onboarding`): entries with a path, a query and a fragment are refused at the real accept route, nothing joins, and the bare entry of the same list joins.
+
+**Runs.** Red: unit exit 1, 1 failed, 16 passed. Integration `TEMP-RED` (the skip removed): exit 1, 1 failed. Restored. Green: unit 17 passed, `invite-onboarding` 28 passed.
+
+**Commit:** `403f756`
+
+### Other commits
+
+- `908c17a` `deferred-items.md`: the D-07 context entry; K179 superseding the K170 row on login failures (no in-app alert); K180 reusing the switch note, whose "were removed" sentence does not describe a held body (needs a UI-SPEC A-item).
+
+### Final checks
+
+`colima status` exit 0 and `docker info` exit 0 before each Docker step.
+
+| Command | Exit | Counts |
+|---|---|---|
+| `pnpm typecheck` (at `908c17a`) | 0 | 0 errors |
+| `pnpm lint` (at `908c17a`) | 0 | 774 files, 1 warning, pre-existing and known: `tests/unit/container-config.test.ts:160` |
+| `pnpm test` (at `908c17a`) | 0 | 116 files, 2137 passed |
+| Touched integration suites, together: `invite-onboarding`, `membership-ended-refusals`, `team-member-admin`, `invitations`, `membership-gate`, `notification-digest`, `notification-digest-job`, `mention-mode-switch`, `mentions` | 0 | 9 files, 196 passed |
+| `pnpm test:integration` (full, once, at `908c17a`, 05:54:10Z to 06:02:15Z) | 0 | 135 files, 1887 passed, 0 failed (484.30 s) |
+| `pnpm test:e2e` (full, once, at `908c17a`, 06:02:55Z to 06:10:46Z; the first full run since `2418e4c`) | 0 | 296 passed, 1 skipped, 0 failed (7.8 min) |
+| `pnpm typecheck` after the E2E run | 0 | 0 errors |
+
+- The unit run includes `membership-inventory` and `page-access-inventory`, and both passed.
+- The session cookie cache is still off (`src/lib/auth.ts`, `0db72a9`).
+- `readFreshSession` stays the only session read.
+- No change to `auth.ts`, `package.json`, the lockfile or the schema. `fresh-session.ts` changed in its header comment only.
+- Fake SMTP and the mocked transport only; no real email or LLM.
+
+### Not done, and limits
+
+- **K178:** a stale tab of the old organization after the person deliberately accepted an invitation elsewhere (V-23) can still act in the new one. This is the known limit the orchestrator puts to Codex in round 2.
+- **K179:** a configuration failure that keeps recurring is retried on every run and shows only in the worker log.
+- **K181:** the re-check narrows the window and does not close it. A deactivation committed during transmission is not stopped (documented).
+- **K180:** the hold reuses the switch note copy (`deferred-items.md`). No visual or screen-reader check was made.
+- **Report:** this section is written and left uncommitted for the orchestrator.
+
+### `.next` moves
+
+None. Global setup did not stall.
