@@ -36,11 +36,11 @@
 # tar run under lib.sh `bounded`, so a hung one ends at the deadline and the run fails with
 # 'backup aborted: run deadline passed' and a recorded status. A step that timeout(1) ended there
 # counts as past the deadline even when the wall clock was stepped back meanwhile (K177). Every
-# libpq connect gives up after PGCONNECT_TIMEOUT seconds (lib.sh, default 10). The lease renewal stops when the main script is
-# gone, so a killed run's lease expires within one TTL; it also stops renewing
-# BACKUP_RUN_GRACE_SECONDS after the deadline (the run makes no progress) and signals the run. A
-# renewal error is retried every few seconds until a third of the TTL is left on the lease; only a
-# confirmed lost lease or running out of that margin aborts the run.
+# libpq connect gives up after PGCONNECT_TIMEOUT seconds (lib.sh, default 10). The lease renewal
+# stops when the main script is gone, so a killed run's lease expires within one TTL; it also
+# stops renewing BACKUP_RUN_GRACE_SECONDS after the deadline (the run makes no progress) and
+# signals the run. A renewal error is retried every few seconds until a third of the TTL is left
+# on the lease; only a confirmed lost lease or running out of that margin aborts the run.
 #
 # Restore lock (review Q3): fenced_action re-checks `.restore-lock` inside its locked session
 # immediately before publish, retention and the status write; on a lock the run exits 3 with
