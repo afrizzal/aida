@@ -195,6 +195,59 @@ describe("getTrustedAppOrigins", () => {
 // K165: the start-up check the app (src/instrumentation.ts) and the worker (src/lib/worker/index.ts)
 // both run before they serve. A value that is set must be a bare http(s) origin; an unset value is
 // left to the existing paths (invitations answer INVITE_CONFIG, the digest pass refuses).
+// Run decision K185 (Codex diff round 2): the URL parser normalises dot segments, so "/a/.." or
+// "/%2e" became the path "/" and passed as bare. The rule now also reads the raw text: after the
+// scheme and the authority only one optional trailing "/" may follow.
+describe("the bare-origin rule reads the raw text (K185)", () => {
+  const DOT_SEGMENTS = [
+    "/a/..",
+    "/a/../",
+    "/%2e",
+    "/%2E",
+    "/%2e%2e",
+    "/.",
+    "/./",
+    "/..",
+    "\\a\\..",
+  ];
+
+  it.each(
+    DOT_SEGMENTS,
+  )("BETTER_AUTH_URL with %s is refused (not_origin) by every reader", (suffix) => {
+    const value = `https://help.example.test${suffix}`;
+    // The parser alone would call it bare: the normalised path is "/".
+    expect(new URL(value).pathname).toBe("/");
+    expect(reasonOf(() => getAppBaseUrl({ BETTER_AUTH_URL: value }))).toBe("not_origin");
+    expect(reasonOf(() => getAppOrigin({ BETTER_AUTH_URL: value }))).toBe("not_origin");
+    expect(reasonOf(() => getTrustedAppOrigins({ BETTER_AUTH_URL: value }))).toBe("not_origin");
+    expect(reasonOf(() => assertAppUrlAtStart({ BETTER_AUTH_URL: value }))).toBe("not_origin");
+  });
+
+  it("a trusted-origin entry with a dot segment is ignored; bare entries, with a port or one trailing slash, stay", () => {
+    expect(
+      getTrustedAppOrigins({
+        BETTER_AUTH_URL: "https://help.example.test",
+        BETTER_AUTH_TRUSTED_ORIGINS: [
+          ...DOT_SEGMENTS.map((suffix, i) => `https://dot${i}.example.test${suffix}`),
+          "https://port.example.test:8443",
+          "HTTPS://Upper.Example.test/",
+        ].join(","),
+      }),
+    ).toEqual([
+      "https://help.example.test",
+      "https://port.example.test:8443",
+      "https://upper.example.test",
+    ]);
+  });
+
+  it("a bare BETTER_AUTH_URL still passes, with an optional single trailing slash", () => {
+    expect(getAppBaseUrl({ BETTER_AUTH_URL: "https://help.example.test/" })).toBe(
+      "https://help.example.test",
+    );
+    expect(getAppBaseUrl({ BETTER_AUTH_URL: "http://[::1]:3100" })).toBe("http://[::1]:3100");
+  });
+});
+
 describe("assertAppUrlAtStart", () => {
   it("passes for a bare origin, with or without a trailing slash, and for an unset value", () => {
     for (const env of [

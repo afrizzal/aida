@@ -64,13 +64,22 @@ function parseAppUrl(env: Env): URL {
 }
 
 /**
+ * The raw form of a bare origin (K185): an http(s) scheme, "//", an authority with no "/", "\\",
+ * "?", "#", "@" (credentials) or whitespace, then at most one "/" and nothing else.
+ */
+const BARE_ORIGIN_TEXT = /^https?:\/\/[^/\\?#@\s]+\/?$/i;
+
+/**
  * True when `raw` (parsed as `url`) is a bare origin: no path, query, fragment or credentials. The
- * URL parser gives a bare origin the path "/" whether or not a trailing slash was written; a "?"
- * or "#" with nothing after it still counts, so the raw text is checked too. One rule for
- * BETTER_AUTH_URL (K165) and for each BETTER_AUTH_TRUSTED_ORIGINS entry (K182).
+ * URL parser gives a bare origin the path "/" whether or not a trailing slash was written, but it
+ * also normalises dot segments ("/a/..", "/%2e" and "/." become "/") and drops an empty "?" or "#",
+ * so the raw text is checked too (K185): after the scheme and the authority only an optional single
+ * trailing "/" may follow. One rule for BETTER_AUTH_URL (K165) and for each
+ * BETTER_AUTH_TRUSTED_ORIGINS entry (K182).
  */
 function isBareOrigin(raw: string, url: URL): boolean {
   return (
+    BARE_ORIGIN_TEXT.test(raw) &&
     url.pathname === "/" &&
     url.search === "" &&
     url.hash === "" &&
