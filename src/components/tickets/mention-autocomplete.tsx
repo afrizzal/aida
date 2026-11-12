@@ -122,7 +122,7 @@ export function MentionAutocomplete({
             }}
           >
             {/* UI-SPEC amendment A9 (K176): rows are the size-8 avatar plus py-1 (40px), so the
-                list shows eight of them in 320px; the ninth is cut off as the scroll cue. */}
+                list shows exactly eight of them in 320px and scrolls for the rest. */}
             <CommandList ref={listRef} label="Members" className="max-h-[320px]">
               <CommandEmpty className="px-2 py-6 text-[13px] text-muted-foreground">
                 {`No member matches "${query}".`}
