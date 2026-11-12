@@ -80,6 +80,7 @@ import {
 } from "@/lib/mentions/composer-tokens";
 import { MAX_MENTIONS } from "@/lib/mentions/mentions";
 import { scopedDb } from "@/lib/scoped-db";
+import { setAgentMessageObserverForTests } from "@/lib/tickets/merge";
 import { loadStatusPageData } from "@/lib/tickets/status-page-data";
 import { emailOutboundSendHandler } from "@/lib/worker/jobs/email-outbound-send";
 import { seedTicket } from "../support/inbox-fixtures";
@@ -578,6 +579,54 @@ describe("only a mention the body shows is recorded (K172)", () => {
     expect(await mentionsOf(message.id)).toEqual([
       { organizationId: author.orgId, mentionedUserId: odd.id },
     ]);
+  });
+});
+
+// Review d-IN-5 and d-IN-8: the route's refusals are one spelling and a 400, never a 500.
+describe("the route's refusals (d-IN-5, d-IN-8)", () => {
+  it("d-IN-5: a membership that ends inside the transaction answers 403 membership_ended, like the gate", async () => {
+    const author = await signedInAuthor();
+    const ticket = await seedTicket(author.orgId);
+    setAgentMessageObserverForTests({
+      onTransactionStart: async () => {
+        // The removal commits after the gate and the pre-transaction check have passed.
+        await prisma.member.deleteMany({
+          where: { organizationId: author.orgId, userId: author.userId },
+        });
+      },
+    });
+    try {
+      const response = await post(ticket.id, { mode: "internal", body: "Ended mid-way" });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: "membership_ended" });
+    } finally {
+      setAgentMessageObserverForTests(null);
+    }
+    expect(await messageCount(ticket.id)).toBe(0);
+  });
+
+  it("d-IN-8: a body sent as a file part is 400 invalid_form_data and writes nothing", async () => {
+    const author = await signedInAuthor();
+    const ticket = await seedTicket(author.orgId);
+    // Presence first: the same request with a text body is accepted.
+    expect((await post(ticket.id, { mode: "internal", body: "Plain body" })).status).toBe(200);
+    const before = await messageCount(ticket.id);
+
+    const form = new FormData();
+    form.set("mode", "internal");
+    form.set("body", new Blob(["not text"], { type: "text/plain" }), "body.txt");
+    const result = await messagesPost(
+      new Request(`http://localhost/api/tickets/${ticket.id}/messages`, {
+        method: "POST",
+        body: form,
+      }),
+      { params: Promise.resolve({ id: ticket.id }) },
+    ).catch((err: unknown) => err);
+    expect(result).toBeInstanceOf(Response);
+    const response = result as Response;
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid_form_data" });
+    expect(await messageCount(ticket.id)).toBe(before);
   });
 });
 

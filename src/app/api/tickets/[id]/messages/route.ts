@@ -52,8 +52,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // pre-transaction guard. A removed member gets the same 403 for an existing id, a missing id
   // and an invalid body, so this route is no oracle for the former organization's ticket ids. The
   // check inside the transaction below stays: it covers a removal that commits after this read.
+  // Review d-IN-5: one spelling for this refusal on this route, the gate's `membership_ended`.
   if (!(await findActiveMembership(db, session.user.id, orgId))) {
-    return NextResponse.json({ error: "MEMBERSHIP_ENDED" }, { status: 403 });
+    return NextResponse.json({ error: "membership_ended" }, { status: 403 });
   }
 
   const { id: ticketId } = await params;
@@ -71,7 +72,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   const mode = form.get("mode") === "internal" ? "internal" : "public";
-  const body = (form.get("body") as string | null) ?? "";
+  // Review d-IN-8: a `body` sent as a file part is a malformed form (400), never a TypeError.
+  const rawBody = form.get("body");
+  if (rawBody !== null && typeof rawBody !== "string") {
+    return NextResponse.json({ error: "invalid_form_data" }, { status: 400 });
+  }
+  const body = rawBody ?? "";
   const fromDraft = form.get("fromDraft") === "true";
   const files = form.getAll("file").filter((f): f is File => f instanceof File && f.size > 0);
 
@@ -238,7 +244,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!outcome.ok) {
     await staged.discard();
     if (outcome.error === "MEMBERSHIP_ENDED") {
-      return NextResponse.json({ error: "MEMBERSHIP_ENDED" }, { status: 403 });
+      return NextResponse.json({ error: "membership_ended" }, { status: 403 });
     }
     if (outcome.error === "MERGED_SOURCE") {
       return NextResponse.json({ error: "MERGED_SOURCE" }, { status: 409 });
