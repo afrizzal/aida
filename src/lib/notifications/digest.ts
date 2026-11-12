@@ -21,14 +21,16 @@
 //   (d) The mail (D-24, UI-SPEC, amendment A4): the constant subject, per-type counts, ticket
 //       numbers and links, fallback rows on their own line. Only ticket number and id are read.
 //   (e) After the beforeConnect hook, the last re-check (K181), in the same claim: the same rules
-//       as (c) again, right before the connection opens, after the body was built. No member row
-//       cancels the digest; rows that no longer pass are left out, and the body is rebuilt from
-//       the rows already read (no further read); nothing left cancels it. Then the lease check
-//       (V-29): the remaining lease must exceed the send deadline plus the commit margin, else the
-//       claim is released and nothing connects. The deadline is min(SEND_DEADLINE_MS, remaining
-//       lease - COMMIT_MARGIN_MS). A deactivation that commits after this re-check, while the
-//       message is being transmitted, does not stop it: that digest may still arrive (the same
-//       bound V-25 sets for an action already past its check; docs/OPERATIONS.md).
+//       as (c) again, right before the connection opens, after the body was built. Its reads run
+//       rows, preferences, unassigned switch, member row (K184), so membership and the member's
+//       choices are the last things read. No member row cancels the digest; rows that no longer
+//       pass are left out, and the body is rebuilt from the rows already read (no further read);
+//       nothing left cancels it. Then the lease check (V-29), which reads only the clock: the
+//       remaining lease must exceed the send deadline plus the commit margin, else the claim is
+//       released and nothing connects. The deadline is min(SEND_DEADLINE_MS, remaining lease -
+//       COMMIT_MARGIN_MS). Nothing else is read before the connection opens. The bound (K184): a
+//       deactivation that commits after the last re-check may still let that one digest through
+//       (the same bound V-25 sets for an action already past its check; docs/OPERATIONS.md).
 //   (f) Record (R2-5):
 //       - accepted: the afterSend hook, then one transaction moves CLAIMED -> SENT, stamps exactly
 //         the sent ids and keeps only those ids on the digest row (review c-IN-04: the row says
@@ -118,6 +120,11 @@ export interface RunDigestsDeps {
     beforeSend?: (ctx: DigestHookContext) => Promise<void> | void;
     /** After the body was built, before the last re-check (K181) and the lease check. */
     beforeConnect?: (ctx: DigestHookContext) => Promise<void> | void;
+    /**
+     * After the last re-check and the lease check, right before the connection opens (K184): a
+     * change committed here is past the last re-check (the documented bound).
+     */
+    afterLastRecheck?: (ctx: DigestHookContext) => Promise<void> | void;
     afterSend?: (ctx: DigestHookContext) => Promise<void> | void;
   };
 }
@@ -246,13 +253,20 @@ async function moveClaimed(digestId: string, status: "RELEASED" | "CANCELED"): P
   return result.count === 1;
 }
 
-/** (c) The rows still to send after the re-check; null when the recipient is no longer a member. */
+/**
+ * (c), (e) The rows still to send after the re-check; null when the recipient is no longer a
+ * member. K184: the reads run in this order, so the member row and the member's choices are the
+ * last things read: the claimed rows (read, archived or digested since?), then the preferences
+ * and the unassigned switch, then the member row and its role. In (e) nothing else is read after
+ * this until the connection opens (only the clock, for the lease check).
+ */
 async function recheck(orgId: string, userId: string, ids: string[]): Promise<DigestRow[] | null> {
+  const rows = await readDigestRows(prisma, orgId, userId, ids);
+  const enabled = await enabledDigestTypes(orgId, userId);
+  const unassigned = await getUnassignedSetting(orgId, userId);
   const rights = await readMemberRights(prisma, orgId, userId);
   if (!rights.isMember) return null;
-  const enabled = await enabledDigestTypes(orgId, userId);
-  const fallbackAllowed = (await getUnassignedSetting(orgId, userId)) && rights.isAdmin;
-  const rows = await readDigestRows(prisma, orgId, userId, ids);
+  const fallbackAllowed = unassigned && rights.isAdmin;
   return rows.filter((row) => (row.unassignedFallback ? fallbackAllowed : enabled.has(row.type)));
 }
 
@@ -361,8 +375,10 @@ async function processPair(
   const tickets = await ticketNumbers(orgId, rows);
   let text = buildDigestBody(rows, tickets, baseUrl);
 
-  // (e) The last re-check (K181), right before the connection opens: a deactivation or a changed
-  // choice committed while the body was built is seen here. Only rows of the body can stay.
+  // (e) The last re-check (K181, K184), right before the connection opens: a deactivation or a
+  // changed choice committed while the body was built is seen here. Only rows of the body can stay.
+  // The member row and the member's choices are its last reads (recheck); from there to the
+  // connection only the clock is read (the lease check), and the body is rebuilt in memory.
   await hooks.beforeConnect?.(ctx);
   const still = await recheck(orgId, userId, claim.ids);
   const stillIds = new Set((still ?? []).map((row) => row.id));
@@ -382,6 +398,9 @@ async function processPair(
     return;
   }
   const deadlineMs = Math.min(timing.sendDeadlineMs, remaining - timing.commitMarginMs);
+  // K184: a deactivation committed from here on is past the last re-check; that one digest may
+  // still go out (docs/OPERATIONS.md, "The email digest").
+  await hooks.afterLastRecheck?.(ctx);
   const result = await sendDigestMail(
     settings,
     { from: settings.fromAddress, to, subject: DIGEST_EMAIL_SUBJECT, text },
