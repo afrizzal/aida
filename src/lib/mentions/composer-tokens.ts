@@ -18,6 +18,18 @@
 // span whatever follows it, then any copy of a name inserted since the last send (paste, undo) that
 // sits on the mention boundary of mention-syntax.ts (K173).
 //
+// C7, stated precisely (run decision K180, Codex diff round 1). What is guaranteed: an inserted
+// mention span never reaches a public send. The switch to public removes every span (and the
+// boundary copies above), a public draft holds no span, and a public send carries no mention id
+// (outgoingMentionIds, D-21; the server refuses one). What is not guaranteed: that a member's name
+// typed or pasted as free text never reaches the customer. For that the public send guard
+// (guardPublicSend, review d-IN-7) holds the FIRST public Send whenever the body contains "@"
+// followed by the name of any member mentioned in this draft (inserted since the last send), as
+// written or escaped (K174), in any case, wherever it stands: no boundary rule, so "(@Name)",
+// "**@Name**" and "orders@Name.example" all hold. It shows the switch note and never edits the
+// text, so an address or a word the agent wrote is never corrupted. The second Send goes through as
+// written: the agent has seen the note and decides (human in the loop).
+//
 // The server re-validates everything (src/lib/mentions/mentions.ts, plan 10-07): this module only
 // keeps the composer from offering or sending what the server would refuse.
 
@@ -340,6 +352,20 @@ export function stripMentionTokens(
 }
 
 /**
+ * K180: whether `text` contains "@" followed by one of `names`, as written or escaped for Markdown
+ * (K174), compared without case, anywhere in the text (no boundary rule). The public send guard
+ * holds the first Send on it; nothing is removed.
+ */
+export function containsMentionedName(text: string, names: readonly string[]): boolean {
+  const haystack = text.toLowerCase();
+  return names.some(
+    (name) =>
+      name !== "" &&
+      [name, escapeMentionName(name)].some((form) => haystack.includes(`@${form.toLowerCase()}`)),
+  );
+}
+
+/**
  * The ids a send carries: in internal mode the ids of the intact spans that sit on the mention
  * boundary of mention-syntax.ts (so "@Zetax" or "x@Zeta", which the renderer does not wrap and the
  * server does not record, K172, send nothing), each once in text order; in public mode none at all
@@ -380,6 +406,11 @@ export interface MentionDraftState {
   mode: MentionMode;
   /** The switch note under the textarea ("The mentioned names were removed from this reply."). */
   switchNote: boolean;
+  /**
+   * K180: the guard already held one public Send of this draft, so the next Send goes through as
+   * written. Cleared by a mode switch, a loaded AI draft and a send.
+   */
+  publicSendHeld: boolean;
   /** The body came from an inserted AI draft (AIDA-16): the send carries `fromDraft`. */
   fromDraft: boolean;
   caret: number | null;
@@ -391,6 +422,7 @@ export const initialMentionDraft: MentionDraftState = {
   insertedNames: [],
   mode: "public",
   switchNote: false,
+  publicSendHeld: false,
   fromDraft: false,
   caret: null,
 };
@@ -408,11 +440,11 @@ export type MentionDraftAction =
  * (D-21). setMode: internal to public replaces the text with stripMentionTokens, clears the spans
  * and turns the switch note on when something was removed; public to internal turns it off.
  * loadDraft: an AI draft replaces the body and forces public with no span and no inserted name.
- * guardPublicSend (review d-IN-7, C7 at the send): in public mode, with names inserted since the
- * last send, removes any copy of them that came back after the switch (a paste, an undo), on the
- * same boundary rule as the switch, and turns the switch note on; with nothing to remove it
- * returns the same state, which the composer then sends.
- * sent: clears text, spans, inserted names, the note and the draft flag.
+ * guardPublicSend (review d-IN-7, K180, C7 at the send): in public mode, with names inserted since
+ * the last send, when the body contains "@" plus one of them anywhere (containsMentionedName) and
+ * no Send of this draft was held yet, turns the switch note on and marks the hold, with the text
+ * unchanged; otherwise it returns the same state, which the composer then sends as written.
+ * sent: clears text, spans, inserted names, the note, the hold and the draft flag.
  * An insert of a member not yet mentioned changes nothing once mentionCapReached (d-IN-3).
  */
 export function mentionDraftReducer(
@@ -440,7 +472,7 @@ export function mentionDraftReducer(
     case "setMode": {
       if (action.mode === state.mode) return state;
       if (action.mode === "internal") {
-        return { ...state, mode: "internal", switchNote: false };
+        return { ...state, mode: "internal", switchNote: false, publicSendHeld: false };
       }
       const text = stripMentionTokens(state.text, state.spans, state.insertedNames);
       return {
@@ -448,6 +480,7 @@ export function mentionDraftReducer(
         mode: "public",
         text,
         spans: [],
+        publicSendHeld: false,
         switchNote: state.spans.length > 0 || text !== state.text,
         caret: text.length,
       };
@@ -460,14 +493,15 @@ export function mentionDraftReducer(
         insertedNames: [],
         mode: "public",
         switchNote: false,
+        publicSendHeld: false,
         fromDraft: true,
         caret: action.text.length,
       };
     case "guardPublicSend": {
       if (state.mode !== "public" || state.insertedNames.length === 0) return state;
-      const text = stripMentionTokens(state.text, [], state.insertedNames);
-      if (text === state.text) return state;
-      return { ...state, text, spans: [], switchNote: true, caret: text.length };
+      if (state.publicSendHeld) return state;
+      if (!containsMentionedName(state.text, state.insertedNames)) return state;
+      return { ...state, switchNote: true, publicSendHeld: true };
     }
     case "sent":
       return {
@@ -476,6 +510,7 @@ export function mentionDraftReducer(
         spans: [],
         insertedNames: [],
         switchNote: false,
+        publicSendHeld: false,
         fromDraft: false,
         caret: null,
       };

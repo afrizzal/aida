@@ -339,12 +339,13 @@ describe("a switch to public keeps an email address that contains an inserted na
   });
 });
 
-// Review d-IN-7 (C7 at the public send): a copy of an inserted name pasted back after the switch is
-// removed by the composer's send guard (mentionDraftReducer `guardPublicSend`, which the composer
-// dispatches before a public send while inserted names are known), so it never reaches the stored
-// PUBLIC body or the customer's email.
-describe("a name pasted back after the switch is removed before the public send (d-IN-7)", () => {
-  it("the guard removes the copy, shows the note, and the customer's email carries no inserted name", async () => {
+// Review d-IN-7 with run decision K180 (C7 at the public send): a copy of an inserted name pasted
+// back after the switch, wherever it stands ("(@Name)" too, which the boundary strip keeps), holds
+// the composer's first public Send (mentionDraftReducer `guardPublicSend`, which the composer
+// dispatches before a public send while inserted names are known) with the switch note and the
+// text unchanged. Nothing is stripped. The agent then edits the reply, or sends it as written.
+describe("a name pasted back after the switch holds the first public Send (d-IN-7, K180)", () => {
+  async function pastedAfterSwitch(paste: string) {
     const author = await signedInAuthor();
     const zeta = await member("Zeta Paste", author.orgId);
     await saveEmailSettings(scopedDb(author.orgId), author.orgId, {
@@ -364,34 +365,55 @@ describe("a name pasted back after the switch is removed before the public send 
     draft = mentionDraftReducer(draft, { type: "setMode", mode: "public" });
     expect(draft.text).toBe("Hi  ");
     // The agent pastes the name back after the switch (no span), and the note is gone.
-    draft = { ...typeText(draft, "our colleague @Zeta Paste will call you."), switchNote: false };
+    draft = { ...typeText(draft, paste), switchNote: false };
     expect(draft.text).toContain("@Zeta Paste");
+    return { author, zeta, contactEmail, ticket, draft };
+  }
 
-    // What the composer does on Send while it knows inserted names: the guard first.
-    const guarded = mentionDraftReducer(draft, { type: "guardPublicSend" });
-    expect(guarded).not.toBe(draft);
-    expect(guarded.switchNote).toBe(true);
-    expect(guarded.text).toBe("Hi  our colleague  will call you.");
-    // The next Send finds nothing to remove and sends.
-    expect(mentionDraftReducer(guarded, { type: "guardPublicSend" })).toBe(guarded);
-
+  async function post(ticketId: string, state: MentionDraftState) {
     const response = await messagesPost(
-      new Request(`http://localhost/api/tickets/${ticket.id}/messages`, {
+      new Request(`http://localhost/api/tickets/${ticketId}/messages`, {
         method: "POST",
-        body: composerForm(guarded),
+        body: composerForm(state),
       }),
-      { params: Promise.resolve({ id: ticket.id }) },
+      { params: Promise.resolve({ id: ticketId }) },
     );
     expect(response.status).toBe(200);
     const stored = await prisma.message.findFirstOrThrow({
-      where: { ticketId: ticket.id, direction: "OUTBOUND" },
+      where: { ticketId, direction: "OUTBOUND" },
       orderBy: { seq: "desc" },
       select: { visibility: true, bodyMarkdown: true, bodyHtml: true },
     });
     expect(queue.sent).toHaveLength(1);
     await emailOutboundSendHandler(queue.sent[0].data as { messageId: string });
     expect(transport.sent).toHaveLength(1);
-    const mail = transport.sent[0];
+    return { stored, mail: transport.sent[0] };
+  }
+
+  it("(@Zeta Paste): the first Send is held with the note and the text unchanged; the agent removes it and the email carries no inserted name", async () => {
+    const { zeta, contactEmail, ticket, draft } = await pastedAfterSwitch(
+      "our colleague (@Zeta Paste) will call you.",
+    );
+
+    // What the composer does on Send while it knows inserted names: the guard first.
+    const guarded = mentionDraftReducer(draft, { type: "guardPublicSend" });
+    expect(guarded).not.toBe(draft);
+    expect(guarded.switchNote).toBe(true);
+    expect(guarded.text).toBe(draft.text);
+    // The held Send posted nothing.
+    expect(
+      await prisma.message.count({ where: { ticketId: ticket.id, direction: "OUTBOUND" } }),
+    ).toBe(0);
+
+    // The agent reads the note and removes the copy, then sends.
+    const at = guarded.text.indexOf(" (@Zeta Paste)");
+    const edited = mentionDraftReducer(guarded, {
+      type: "edit",
+      text: guarded.text.slice(0, at) + guarded.text.slice(at + " (@Zeta Paste)".length),
+      caret: at,
+    });
+    expect(mentionDraftReducer(edited, { type: "guardPublicSend" })).toBe(edited);
+    const { stored, mail } = await post(ticket.id, edited);
 
     expect(stored.visibility).toBe("PUBLIC");
     expect(mail.to).toBe(contactEmail);
@@ -400,5 +422,29 @@ describe("a name pasted back after the switch is removed before the public send 
       expect(part).not.toContain("Zeta");
       expect(part).not.toContain(zeta.email);
     }
+  });
+
+  it("**@Zeta Paste**: held once; the second Send goes out as written, with no mention id, row or notification", async () => {
+    const { author, zeta, ticket, draft } = await pastedAfterSwitch(
+      "ask **@Zeta Paste** tomorrow.",
+    );
+    const held = mentionDraftReducer(draft, { type: "guardPublicSend" });
+    expect(held.switchNote).toBe(true);
+    expect(held.text).toBe(draft.text);
+    // The second Send: the guard lets it through unchanged.
+    expect(mentionDraftReducer(held, { type: "guardPublicSend" })).toBe(held);
+    expect(composerForm(held).get("mentions")).toBeNull();
+    const { stored, mail } = await post(ticket.id, held);
+
+    expect(stored.visibility).toBe("PUBLIC");
+    expect(stored.bodyMarkdown).toBe("Hi  ask **@Zeta Paste** tomorrow.");
+    expect(mail.text ?? "").toContain("@Zeta Paste");
+    expect(stored.bodyHtml).not.toContain("text-primary-emphasis");
+    expect(await prisma.messageMention.count({ where: { organizationId: author.orgId } })).toBe(0);
+    expect(
+      await prisma.notification.count({
+        where: { organizationId: author.orgId, recipientUserId: zeta.id, type: "MENTION" },
+      }),
+    ).toBe(0);
   });
 });

@@ -282,9 +282,11 @@ export function Composer({ ticketId, insertedText, onInsertedConsumed }: Compose
 
   async function handleSubmit() {
     if (!body.trim() && files.length === 0) return;
-    // C7 at the send (review d-IN-7): a public reply never carries a name inserted since the last
-    // send. When a copy came back after the switch (a paste, an undo), the guard removes it and
-    // shows the switch note instead of sending; the agent reads the reply and sends again.
+    // C7 at the send (review d-IN-7, K180): a public reply never carries an inserted mention span
+    // or a mention id. When the body still holds "@" plus the name of a member mentioned in this
+    // draft (a paste, an undo, typed by hand; anywhere, with no boundary rule), the guard holds this
+    // first Send and shows the switch note; it never edits the text. The agent reads the reply, and
+    // the next Send goes out as written (mentionDraftReducer `guardPublicSend`).
     if (mentionDraftReducer(draft, { type: "guardPublicSend" }) !== draft) {
       dispatch({ type: "guardPublicSend" });
       return;
@@ -364,8 +366,9 @@ export function Composer({ ticketId, insertedText, onInsertedConsumed }: Compose
         />
       </MentionAutocomplete>
 
-      {/* D-21, C7: shown after an internal-to-public switch removed inserted member names, until
-          the next switch back or the send (mentionDraftReducer clears it). */}
+      {/* D-21, C7: shown after an internal-to-public switch removed inserted member names, and
+          again when the public send guard holds a Send whose body still names a mentioned member
+          (K180), until the next switch back or the send (mentionDraftReducer clears it). */}
       {draft.switchNote && (
         <p role="status" className="mt-1 text-[12px] text-muted-foreground">
           Mentions only work in internal notes. The mentioned names were removed from this reply.

@@ -428,33 +428,90 @@ describe("the mention cap in the composer (d-IN-3)", () => {
   });
 });
 
-// Review d-IN-7 (C7 at the public send): a copy of an inserted name that came back after the
-// switch (a paste, an undo) is removed before a public reply is sent, and the switch note shows.
-describe("the public send guard (d-IN-7, C7)", () => {
-  it("guardPublicSend strips a copy pasted after the switch and turns the note on; a clean text is left as it is", () => {
-    const switched = mentionDraftReducer(mention(type(internal, "Hi "), ZETA, "Ze"), {
+// Review d-IN-7 with run decision K180 (C7 at the public send). The guarantee, precisely: an
+// inserted mention span never reaches a public send (the switch strips every span and the public
+// send carries no mention id). On top of that the guard holds the FIRST public Send whenever the
+// body contains "@" followed by the name of any member mentioned in this draft, wherever it stands
+// (no boundary rule: "(@Name)", "**@Name**" and "x@Name" count), and shows the switch note. It never
+// edits the text, so an address or a word the agent wrote is never corrupted. The second Send goes
+// through as written: the agent decides (human in the loop).
+describe("the public send guard (d-IN-7, K180, C7)", () => {
+  const switchedAfterZeta = () =>
+    mentionDraftReducer(mention(type(internal, "Hi "), ZETA, "Ze"), {
       type: "setMode",
       mode: "public",
     });
+
+  /** The composer's Send: held when the guard changes the state, else sent as the text stands. */
+  function send(state: MentionDraftState): { held: boolean; state: MentionDraftState } {
+    const next = mentionDraftReducer(state, { type: "guardPublicSend" });
+    return { held: next !== state, state: next };
+  }
+
+  it.each([
+    ["(@Zeta)", "call (@Zeta) tomorrow"],
+    ["**@Zeta**", "call **@Zeta** tomorrow"],
+    ["@Zeta,", "ask @Zeta, or @someone"],
+    ["x@Zeta", "write to orders@Zeta.example"],
+    ["/@Zeta/", "see /@Zeta/ there"],
+    ["@zeta (case)", "ask @zeta later"],
+  ])("%s: the first Send is held with the switch note and the text unchanged; the second goes as written", (_label, pasted) => {
+    const switched = switchedAfterZeta();
     expect(switched.text).toBe("Hi  ");
-    const pasted = { ...type(switched, "ask @Zeta, or @someone"), switchNote: false };
-    expect(pasted.text).toBe("Hi  ask @Zeta, or @someone");
-    const guarded = mentionDraftReducer(pasted, { type: "guardPublicSend" });
-    expect(guarded.text).toBe("Hi  ask , or @someone");
-    expect(guarded.switchNote).toBe(true);
-    expect(guarded.mode).toBe("public");
-    // Nothing left to remove: the same state, so the composer sends it.
-    expect(mentionDraftReducer(guarded, { type: "guardPublicSend" })).toBe(guarded);
-    // An email address that holds the name is not a mention (K173) and stays.
-    const address = type(switched, "write to orders@Zeta.example");
-    expect(mentionDraftReducer(address, { type: "guardPublicSend" })).toBe(address);
+    const draft = { ...type(switched, pasted), switchNote: false };
+    const first = send(draft);
+    expect(first.held).toBe(true);
+    expect(first.state.text).toBe(draft.text);
+    expect(first.state.switchNote).toBe(true);
+    expect(first.state.mode).toBe("public");
+    expect(first.state.spans).toEqual([]);
+    const second = send(first.state);
+    expect(second.held).toBe(false);
+    expect(second.state.text).toBe(`Hi  ${pasted}`);
   });
 
-  it("does nothing in internal mode or without inserted names", () => {
-    const note = type(mention(type(internal, "Hi "), ZETA, "Ze"), "and @Zeta");
-    expect(mentionDraftReducer(note, { type: "guardPublicSend" })).toBe(note);
-    const plain = type({ ...initialMentionDraft }, "@Zeta typed by hand");
-    expect(mentionDraftReducer(plain, { type: "guardPublicSend" })).toBe(plain);
+  it("a name escaped for Markdown (K174) or pasted unescaped is held alike", () => {
+    const ana: MentionMember = { userId: "u-ana", name: "Ana_Lee" };
+    const switched = run(mention(type(internal, "Hi "), ana, "An"), {
+      type: "setMode",
+      mode: "public",
+    });
+    expect(switched.text).not.toContain("Ana");
+    for (const pasted of ["(@Ana\\_Lee)", "**@Ana_Lee**"]) {
+      const draft = type(switched, pasted);
+      expect(send(draft).held, pasted).toBe(true);
+      expect(send(draft).state.text).toBe(draft.text);
+    }
+  });
+
+  it("a body without '@' plus a mentioned name is sent at once; the name alone or another @name does not hold", () => {
+    const switched = switchedAfterZeta();
+    for (const text of ["Zeta will call you", "ask @someone", "@Zet only", "mail zeta@ later"]) {
+      const draft = type(switched, text);
+      expect(send(draft).held, text).toBe(false);
+    }
+  });
+
+  it("does nothing in internal mode, without inserted names, or after the draft was sent; a switch re-arms it", () => {
+    const note = type(mention(type(internal, "Hi "), ZETA, "Ze"), "and (@Zeta)");
+    expect(send(note).held).toBe(false);
+    const plain = type({ ...initialMentionDraft }, "(@Zeta) typed by hand");
+    expect(send(plain).held).toBe(false);
+
+    const held = send(type(switchedAfterZeta(), "(@Zeta)")).state;
+    const sent = mentionDraftReducer(held, { type: "sent" });
+    expect(send(type(sent, "(@Zeta) again")).held).toBe(false);
+
+    // Back to internal and to public again: a new switch is a new review.
+    const again = run(
+      held,
+      { type: "setMode", mode: "internal" },
+      { type: "setMode", mode: "public" },
+    );
+    // The switch strip keeps "(@Zeta)" (off the boundary, K173); the guard holds it again.
+    expect(again.text).toBe(held.text);
+    const reheld = send(type(again, " (@Zeta)"));
+    expect(reheld.held).toBe(true);
   });
 });
 
