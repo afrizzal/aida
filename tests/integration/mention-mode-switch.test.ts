@@ -118,9 +118,9 @@ async function addMember(orgId: string, userId: string) {
 }
 
 /** A user row (no sign-in) who is a member of orgId. */
-async function member(name: string, orgId: string): Promise<Person> {
+async function member(name: string, orgId: string, emailLocal?: string): Promise<Person> {
   const id = randomUUID();
-  const email = `switch-${id}@example.test`;
+  const email = `${emailLocal ?? `switch-${id}`}@example.test`;
   const now = new Date();
   await prisma.user.create({
     data: { id, name, email, emailVerified: true, createdAt: now, updatedAt: now },
@@ -270,5 +270,71 @@ describe("a switch to public removes every inserted member name (C7, R2-1, R3-2,
     }
     expect(await prisma.messageMention.count({ where: { organizationId: author.orgId } })).toBe(0);
     expect(await prisma.notification.count({ where: { organizationId: author.orgId } })).toBe(0);
+  });
+});
+
+// K173 (review d-WR-3): the strip removes an inserted name only on the mention boundary, so an
+// email address that contains the name reaches the customer unchanged. The member has no display
+// name, so the composer inserts the local part of their email (mentionDisplayName), as in the
+// review's scenario.
+describe("a switch to public keeps an email address that contains an inserted name (K173)", () => {
+  it("the stored PUBLIC body and the customer's email keep orders@<name>-desk.example whole", async () => {
+    const author = await signedInAuthor();
+    const local = `sales${randomUUID().slice(0, 8)}`;
+    const nameless = await member("", author.orgId, local);
+    await saveEmailSettings(scopedDb(author.orgId), author.orgId, {
+      enabled: true,
+      fromAddress: "support@mention-switch.test",
+      smtpHost: "fake-smtp.invalid",
+      smtpPort: 2525,
+      smtpSecure: false,
+      smtpUser: "fake",
+    });
+    const contactEmail = `switch-contact-${randomUUID()}@example.test`;
+    const ticket = await seedContactTicket(author.orgId, { contactEmail });
+    const address = `orders@${local}-desk.example`;
+
+    let draft = mentionDraftReducer(initialMentionDraft, { type: "setMode", mode: "internal" });
+    draft = typeText(draft, "Hi ");
+    draft = pick(draft, { ...nameless, name: local });
+    expect(draft.text).toBe(`Hi @${local} `);
+    expect(outgoingMentionIds(draft)).toEqual([nameless.id]);
+    draft = typeText(draft, `please write to ${address}`);
+    draft = mentionDraftReducer(draft, { type: "setMode", mode: "public" });
+    expect(draft.switchNote).toBe(true);
+    expect(draft.text).toBe(`Hi  please write to ${address}`);
+
+    const form = composerForm(draft);
+    expect(form.has("mentions")).toBe(false);
+    const response = await messagesPost(
+      new Request(`http://localhost/api/tickets/${ticket.id}/messages`, {
+        method: "POST",
+        body: form,
+      }),
+      { params: Promise.resolve({ id: ticket.id }) },
+    );
+    expect(response.status).toBe(200);
+    const stored = await prisma.message.findFirstOrThrow({
+      where: { ticketId: ticket.id, direction: "OUTBOUND" },
+      orderBy: { seq: "desc" },
+      select: { visibility: true, bodyMarkdown: true, bodyHtml: true },
+    });
+    expect(queue.sent).toHaveLength(1);
+    await emailOutboundSendHandler(queue.sent[0].data as { messageId: string });
+    expect(transport.sent).toHaveLength(1);
+    const mail = transport.sent[0];
+
+    expect(stored.visibility).toBe("PUBLIC");
+    expect(mail.to).toBe(contactEmail);
+    for (const part of [stored.bodyMarkdown, stored.bodyHtml, mail.text ?? "", mail.html ?? ""]) {
+      expect(part).toContain(address);
+      // The inserted mention itself is gone: the name appears only inside the address (the HTML
+      // part also autolinks the address, so it may hold it twice, never after a space or a tag).
+      expect(part).not.toMatch(new RegExp(`(^|[\\s>])@${local}`));
+      expect(part).not.toContain(`Hi @`);
+      expect(part).not.toContain(nameless.email);
+      expect(part).not.toContain("text-primary-emphasis");
+    }
+    expect(await prisma.messageMention.count({ where: { organizationId: author.orgId } })).toBe(0);
   });
 });

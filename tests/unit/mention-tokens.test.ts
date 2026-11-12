@@ -268,6 +268,45 @@ describe("the strip safety net (R2-1)", () => {
   });
 });
 
+// K173 (review d-WR-3): a copy of an inserted name is removed only on the mention boundary of
+// mention-syntax.ts, so an email address, a URL path and a word keep their text.
+describe("the strip keeps text that is not a mention (K173)", () => {
+  const SALES: MentionMember = { userId: "u-sales", name: "sales" };
+
+  it("keeps an email address, a URL path and in-word copies of an inserted name", () => {
+    for (const kept of [
+      "Please write to orders@sales-desk.example",
+      "orders@sales",
+      "see https://host.example/@sales/ now",
+      "x@sales.",
+      "(@sales)",
+      "@sales_team",
+      "@salesforce",
+      "@sales\u0301",
+    ]) {
+      expect(stripMentionTokens(kept, [], ["sales"]), kept).toBe(kept);
+    }
+  });
+
+  it("still removes a copy on the boundary, whatever punctuation follows", () => {
+    expect(stripMentionTokens("ask @sales.", [], ["sales"])).toBe("ask .");
+    expect(stripMentionTokens("@sales, hi", [], ["sales"])).toBe(", hi");
+    expect(stripMentionTokens("hi\n@sales-desk", [], ["sales"])).toBe("hi\n-desk");
+    expect(stripMentionTokens("ask @sales", [], ["sales"])).toBe("ask ");
+  });
+
+  it("through the reducer: the switch removes the inserted name and keeps orders@sales-desk.example", () => {
+    let state = mention(type(internal, "Hi "), SALES, "sa");
+    expect(state.text).toBe("Hi @sales ");
+    state = type(state, "please write to orders@sales-desk.example");
+    const switched = mentionDraftReducer(state, { type: "setMode", mode: "public" });
+    expect(switched.mode).toBe("public");
+    expect(switched.switchNote).toBe(true);
+    expect(switched.text).toBe("Hi  please write to orders@sales-desk.example");
+    expect(outgoingMentionIds(switched)).toEqual([]);
+  });
+});
+
 describe("mentionDraftReducer", () => {
   it("setMode internal to public returns the stripped text, empty spans and the switch note on", () => {
     const state = type(backspace(mention(type(internal, "Hi "), ZETA_PRIME)), ", check");

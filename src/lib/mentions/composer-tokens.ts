@@ -14,12 +14,12 @@
 // One token rule, isIntactSpan, decides both what is sent and what a switch to public removes:
 // reconcileMentionIds sends the id of every intact span, and stripMentionTokens removes every intact
 // span whatever follows it, then any copy of a name inserted since the last send (paste, undo) that
-// is followed by the end or by a character that is not a letter or digit.
+// sits on the mention boundary of mention-syntax.ts (K173).
 //
 // The server re-validates everything (src/lib/mentions/mentions.ts, plan 10-07): this module only
 // keeps the composer from offering or sending what the server would refuse.
 
-import { isMentionStartBoundary } from "./mention-syntax";
+import { isMentionAt, isMentionStartBoundary } from "./mention-syntax";
 
 export type MentionMode = "public" | "internal";
 
@@ -56,13 +56,6 @@ export function isIntactSpan(text: string, span: MentionSpan): boolean {
 }
 
 const WHITESPACE = /\s/u;
-const LETTER_OR_DIGIT = /[\p{L}\p{M}\p{N}]/u;
-
-function isLetterOrDigitAt(text: string, index: number): boolean {
-  if (index >= text.length) return false;
-  const codePoint = text.codePointAt(index);
-  return codePoint !== undefined && LETTER_OR_DIGIT.test(String.fromCodePoint(codePoint));
-}
 
 /**
  * The query after an "@" before the caret, or null. The "@" must sit on the start boundary of
@@ -294,9 +287,11 @@ export function reconcileMentionIds(text: string, spans: readonly MentionSpan[])
 /**
  * The text with every inserted member name removed, for a switch to public (C7, R2-1): every intact
  * span goes whatever follows it (space, punctuation, a letter or the end), then every copy of a name
- * inserted since the last send that is followed by the end or by a character that is not a letter
- * or digit (a paste or an undo brought it back without a span). The longest name is tried first, so
- * names sharing a prefix never affect each other. Plain "@text" the agent typed stays.
+ * inserted since the last send that sits on the mention boundary of mention-syntax.ts (a paste or an
+ * undo brought it back without a span): whitespace or the start before the "@", and no letter,
+ * mark, digit or "_" after the name (run decision K173, review d-WR-3). So an email address such as
+ * "orders@sales-desk.example", a URL path or a word keeps its text. The longest name is tried
+ * first, so names sharing a prefix never affect each other. Plain "@text" the agent typed stays.
  */
 export function stripMentionTokens(
   text: string,
@@ -315,10 +310,8 @@ export function stripMentionTokens(
   let result = "";
   let i = 0;
   while (i < out.length) {
-    if (out[i] === "@") {
-      const hit = names.find(
-        (name) => out.startsWith(name, i + 1) && !isLetterOrDigitAt(out, i + 1 + name.length),
-      );
+    if (out[i] === "@" && isMentionStartBoundary(out, i)) {
+      const hit = names.find((name) => isMentionAt(out, i, name));
       if (hit !== undefined) {
         i += hit.length + 1;
         continue;
