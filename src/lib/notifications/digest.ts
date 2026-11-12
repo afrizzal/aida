@@ -1,4 +1,5 @@
-// The email digest (Phase 10, AIDA-46, D-23, D-24, D-25, C8, C10, R2-5, V-28, V-29, K166, K170).
+// The email digest (Phase 10, AIDA-46, D-23, D-24, D-25, C8, C10, R2-5, V-28, V-29, K166, K170,
+// K179).
 //
 // runDigests is the scheduled job's body. Per (organization, recipient) pair:
 //
@@ -28,10 +29,16 @@
 //         what the member received, not what was claimed);
 //       - a transient rejection (4xx): CLAIMED -> RELEASED at once, nothing stamped; the next run
 //         sends it once;
-//       - a permanent rejection (5xx, K170): one transaction moves CLAIMED -> CANCELED and stamps
-//         the ids it tried to send, which it keeps on the row. They are never emailed, and no
-//         later run writes another NotificationDigest row for them; they stay in the bell, and a
-//         new notification starts a new batch;
+//       - a configuration failure (K179: the SMTP login failed, or the server refused the
+//         workspace's setup rather than this recipient, digest-sender.ts): CLAIMED -> RELEASED at
+//         once, nothing stamped, one log line with the class and the codes; runDigests then
+//         claims none of that workspace's other pairs in this run (`config-stopped`), since they
+//         would fail the same way. Once the operator fixes the settings, the next run sends them;
+//       - a permanent rejection of this recipient or message (any other 5xx, K170): one
+//         transaction moves CLAIMED -> CANCELED and stamps the ids it tried to send, which it
+//         keeps on the row. They are never emailed, and no later run writes another
+//         NotificationDigest row for them; they stay in the bell, and a new notification starts a
+//         new batch;
 //       - ambiguous: left CLAIMED until its lease expires, nothing stamped.
 //       Every status change is conditional on the digest's own id and status CLAIMED: that is the
 //       fence. An ambiguous attempt can add one copy, so repeated ambiguous failures can deliver
@@ -116,6 +123,8 @@ export type DigestPairOutcome =
   | "lease-short"
   | DigestSendOutcome
   | "rejected-permanent"
+  | "rejected-config"
+  | "config-stopped"
   | "sent"
   | "fenced"
   | "failed";
@@ -365,6 +374,14 @@ async function processPair(
   const label =
     result.errorLabel ??
     (result.responseCode !== undefined ? `reply=${result.responseCode}` : "no-error");
+  if (result.outcome === "rejected" && result.configuration) {
+    // K179: the operator's to fix; released, never stamped, and logged once per workspace and run
+    // (runDigests attempts none of the workspace's other pairs after this one).
+    digestLog(`send rejected (configuration): ${label} workspace=stopped-for-run`);
+    await moveClaimed(claim.digestId, "RELEASED");
+    report.outcome = "rejected-config";
+    return;
+  }
   if (result.outcome === "rejected" && result.permanent) {
     digestLog(`send rejected (permanent): ${label}`);
     const closed = await prisma.$transaction(async (tx) => {
@@ -409,7 +426,8 @@ async function processPair(
  * Builds and sends every due digest once. Never throws for one pair: a pair that fails is
  * reported as `failed` and left as it stands (a CLAIMED digest waits for its lease). Throws only
  * when the timing overrides are invalid or BETTER_AUTH_URL is not usable, before any claim. An
- * aborted `signal` stops the run before the next pair (`stopped`).
+ * aborted `signal` stops the run before the next pair (`stopped`). After a configuration failure
+ * (K179) the workspace's remaining pairs are reported `config-stopped` and not claimed.
  */
 export async function runDigests(deps: RunDigestsDeps = {}): Promise<RunDigestsResult> {
   const timing: DigestTiming = { ...DIGEST_TIMING, ...deps.timing };
@@ -420,6 +438,8 @@ export async function runDigests(deps: RunDigestsDeps = {}): Promise<RunDigestsR
 
   const pairs = await listDigestPairs(prisma);
   const settingsByOrg = new Map<string, EmailSettings | null>();
+  // K179: workspaces whose SMTP setup was refused in this run; nothing more is attempted for them.
+  const configStopped = new Set<string>();
   const reports: DigestPairReport[] = [];
   let stopped = false;
 
@@ -435,6 +455,10 @@ export async function runDigests(deps: RunDigestsDeps = {}): Promise<RunDigestsR
       outcome: "nothing",
     };
     reports.push(report);
+    if (configStopped.has(pair.organizationId)) {
+      report.outcome = "config-stopped";
+      continue;
+    }
     try {
       if (!settingsByOrg.has(pair.organizationId)) {
         settingsByOrg.set(pair.organizationId, await usableEmailSettings(pair.organizationId));
@@ -454,6 +478,7 @@ export async function runDigests(deps: RunDigestsDeps = {}): Promise<RunDigestsR
         hooks,
         report,
       );
+      if (report.outcome === "rejected-config") configStopped.add(pair.organizationId);
     } catch (err) {
       digestLog(`pair failed: ${digestErrorLabel(err)}`);
       report.outcome = "failed";

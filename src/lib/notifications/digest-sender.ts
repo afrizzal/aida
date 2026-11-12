@@ -12,9 +12,19 @@
 //   accepted   sendMail resolved with the recipient in info.accepted and info.rejected empty;
 //   rejected   a definitive SMTP reply: an error with a reply code 400 to 599 (AUTH, RCPT, the
 //              DATA command or the final reply after the data), or the recipient in
-//              info.rejected. `permanent` (run decision K170) is true for a 5xx reply: the batch
-//              is then closed instead of sent again; a 4xx reply, or a rejected recipient with no
-//              code, is transient;
+//              info.rejected. Three kinds:
+//              - `configuration` (run decision K179): the server refused the workspace's SMTP
+//                setup, not this recipient, so the operator can fix it and nothing is lost: a
+//                failed login (nodemailer's EAUTH with a 5xx reply or with none, its own
+//                "Missing credentials" check included), an authentication reply code (530, 534,
+//                535, 538, RFC 4954) at any command, a server that does not accept mail (521 or
+//                556, RFC 7504, or a 5xx greeting), or a 5xx reply to MAIL FROM (the from
+//                address). The batch is released, and the caller stops that workspace's run;
+//              - `permanent` (run decision K170): any other 5xx reply, which concerns this
+//                recipient or this message (550 at RCPT, 554 after the data): the batch is then
+//                closed instead of sent again;
+//              - transient: a 4xx reply, or a rejected recipient with no code. A rejected
+//                recipient of a resolved send is never `configuration`;
 //   ambiguous  everything else: the deadline, a dropped connection, a timeout, an error with no
 //              reply code. The server may have accepted the message.
 // A send cut off by the deadline is always ambiguous, even if a partial reply was read.
@@ -45,8 +55,10 @@ export interface DigestSendResult {
   outcome: DigestSendOutcome;
   /** The SMTP reply code of a failed send, when nodemailer reported one. */
   responseCode?: number;
-  /** For `rejected`: true for a 5xx reply (K170). */
+  /** For `rejected`: true for a 5xx reply about this recipient or message (K170). */
   permanent?: boolean;
+  /** For `rejected`: true when the server refused the SMTP setup, not the recipient (K179). */
+  configuration?: boolean;
   /** For a failed send: digestErrorLabel of the error (class and codes only). */
   errorLabel?: string;
   /** True when the deadline destroyed the socket. */
@@ -79,9 +91,26 @@ function normalise(address: unknown): string {
   return value.trim().toLowerCase();
 }
 
+/** RFC 4954 authentication replies: 530 required, 534 mechanism too weak, 535 invalid, 538 TLS. */
+const AUTH_REPLY_CODES: ReadonlySet<number> = new Set([530, 534, 535, 538]);
+/** RFC 7504: 521 the host does not accept mail, 556 the domain does not accept mail. */
+const NOT_ACCEPTING_REPLY_CODES: ReadonlySet<number> = new Set([521, 556]);
+
 /**
- * Classifies a settled sendMail (R2-5). Exported so the TLS-equivalence tests apply the same
- * rule to createSmtpTransport's own sends.
+ * K179: whether a failed send's error is a refusal of the workspace's SMTP setup (see the header),
+ * from nodemailer's error code, the failed command and the reply code only.
+ */
+function isConfigurationFailure(error: unknown, code: number | undefined): boolean {
+  const { code: type, command } = (error ?? {}) as { code?: unknown; command?: unknown };
+  if (type === "EAUTH") return code === undefined || code >= 500;
+  if (code === undefined || code < 500) return false;
+  if (AUTH_REPLY_CODES.has(code) || NOT_ACCEPTING_REPLY_CODES.has(code)) return true;
+  return command === "CONN" || command === "MAIL FROM";
+}
+
+/**
+ * Classifies a settled sendMail (R2-5, K170, K179). Exported so the TLS-equivalence tests apply
+ * the same rule to createSmtpTransport's own sends.
  */
 export function classifySendResult(
   to: string,
@@ -91,7 +120,12 @@ export function classifySendResult(
         info: { accepted?: unknown[]; rejected?: unknown[]; rejectedErrors?: unknown[] };
       }
     | { ok: false; error: unknown },
-): { outcome: DigestSendOutcome; responseCode?: number; permanent?: boolean } {
+): {
+  outcome: DigestSendOutcome;
+  responseCode?: number;
+  permanent?: boolean;
+  configuration?: boolean;
+} {
   const wanted = to.trim().toLowerCase();
   if (settled.ok) {
     const accepted = (settled.info.accepted ?? []).map(normalise);
@@ -111,8 +145,14 @@ export function classifySendResult(
   }
   const error = settled.error as { responseCode?: unknown } | null;
   const code = typeof error?.responseCode === "number" ? error.responseCode : undefined;
-  if (code !== undefined && code >= 400 && code <= 599)
-    return { outcome: "rejected", responseCode: code, permanent: code >= 500 };
+  const reply = code !== undefined && code >= 400 && code <= 599 ? code : undefined;
+  if (isConfigurationFailure(settled.error, reply)) {
+    return reply === undefined
+      ? { outcome: "rejected", permanent: false, configuration: true }
+      : { outcome: "rejected", responseCode: reply, permanent: false, configuration: true };
+  }
+  if (reply !== undefined)
+    return { outcome: "rejected", responseCode: reply, permanent: reply >= 500 };
   return code === undefined
     ? { outcome: "ambiguous" }
     : { outcome: "ambiguous", responseCode: code };

@@ -18,7 +18,7 @@ function smtpError(responseCode: number | undefined, code = "EENVELOPE") {
 
 describe("classifySendResult (K170)", () => {
   it("5xx replies are permanent rejections", () => {
-    for (const code of [500, 535, 550, 554, 599]) {
+    for (const code of [500, 550, 554, 599]) {
       expect(classifySendResult(TO, { ok: false, error: smtpError(code) })).toEqual({
         outcome: "rejected",
         responseCode: code,
@@ -62,6 +62,98 @@ describe("classifySendResult (K170)", () => {
     expect(classifySendResult(TO, { ok: true, info: { accepted: [TO], rejected: [] } })).toEqual({
       outcome: "accepted",
     });
+  });
+});
+
+/** A nodemailer-shaped error: `code` (EAUTH, EENVELOPE, ...), reply code and the failed command. */
+function commandError(code: string, responseCode: number | undefined, command: string) {
+  return Object.assign(new Error(`failed: ${responseCode ?? ""} for ${TO}`), {
+    code,
+    responseCode,
+    command,
+  });
+}
+
+const CONFIGURATION = (responseCode?: number) =>
+  responseCode === undefined
+    ? { outcome: "rejected", permanent: false, configuration: true }
+    : { outcome: "rejected", responseCode, permanent: false, configuration: true };
+
+// K179 (Codex diff round 1): a failure of the SMTP login or of the server's willingness to take
+// mail at all is the operator's to fix (the password, the account, the from address), not this
+// recipient's. It is told apart from a recipient's permanent rejection by nodemailer's error code,
+// the failed command and the reply code; the digest then releases the batch instead of closing it.
+describe("classifySendResult: SMTP configuration failures (K179)", () => {
+  it("an authentication failure is a configuration failure, whatever its 5xx code or none", () => {
+    for (const code of [535, 530, 534, 538, 500, 554]) {
+      expect(
+        classifySendResult(TO, { ok: false, error: commandError("EAUTH", code, "AUTH PLAIN") }),
+        String(code),
+      ).toEqual(CONFIGURATION(code));
+    }
+    // nodemailer's own credential check (no reply): "Missing credentials".
+    expect(
+      classifySendResult(TO, { ok: false, error: commandError("EAUTH", undefined, "API") }),
+    ).toEqual(CONFIGURATION());
+  });
+
+  it("the authentication reply codes 530, 534, 535 and 538 are configuration failures at any command", () => {
+    for (const code of [530, 534, 535, 538]) {
+      for (const command of ["MAIL FROM", "RCPT TO", "DATA"]) {
+        expect(
+          classifySendResult(TO, { ok: false, error: commandError("EENVELOPE", code, command) }),
+          `${code} ${command}`,
+        ).toEqual(CONFIGURATION(code));
+      }
+    }
+  });
+
+  it("a server that does not accept mail (521, 556, a 5xx greeting) or refuses the from address (5xx to MAIL FROM) is a configuration failure", () => {
+    for (const code of [521, 556]) {
+      expect(
+        classifySendResult(TO, { ok: false, error: commandError("EENVELOPE", code, "RCPT TO") }),
+      ).toEqual(CONFIGURATION(code));
+    }
+    expect(
+      classifySendResult(TO, { ok: false, error: commandError("EPROTOCOL", 554, "CONN") }),
+    ).toEqual(CONFIGURATION(554));
+    for (const code of [550, 553, 554]) {
+      expect(
+        classifySendResult(TO, { ok: false, error: commandError("EENVELOPE", code, "MAIL FROM") }),
+      ).toEqual(CONFIGURATION(code));
+    }
+  });
+
+  it("a recipient's permanent rejection keeps the K170 close; 4xx stays transient, also at AUTH", () => {
+    for (const [code, command, type] of [
+      [550, "RCPT TO", "EENVELOPE"],
+      [551, "RCPT TO", "EENVELOPE"],
+      [553, "RCPT TO", "EENVELOPE"],
+      [554, "DATA", "EENVELOPE"],
+      [554, "DATA", "EMESSAGE"],
+      [552, "DATA", "EMESSAGE"],
+    ] as const) {
+      expect(
+        classifySendResult(TO, { ok: false, error: commandError(type, code, command) }),
+        `${code} ${command}`,
+      ).toEqual({ outcome: "rejected", responseCode: code, permanent: true });
+    }
+    for (const [code, command, type] of [
+      [454, "AUTH PLAIN", "EAUTH"],
+      [421, "CONN", "EPROTOCOL"],
+      [451, "MAIL FROM", "EENVELOPE"],
+      [450, "RCPT TO", "EENVELOPE"],
+    ] as const) {
+      expect(
+        classifySendResult(TO, { ok: false, error: commandError(type, code, command) }),
+        `${code} ${command}`,
+      ).toEqual({ outcome: "rejected", responseCode: code, permanent: false });
+    }
+    // A rejected recipient of a resolved send is the recipient's, whatever its code.
+    const rejectedErrors = [Object.assign(new Error("x"), { recipient: TO, responseCode: 550 })];
+    expect(
+      classifySendResult(TO, { ok: true, info: { accepted: [], rejected: [TO], rejectedErrors } }),
+    ).toEqual({ outcome: "rejected", responseCode: 550, permanent: true });
   });
 });
 

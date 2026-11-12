@@ -387,7 +387,6 @@ describe("permanent rejections (5xx) close the batch (K170)", () => {
     ["reject-rcpt", 550],
     ["reject-data-command", 554],
     ["reject-data", 554],
-    ["reject-auth", 535],
   ];
   for (const [mode, code] of cases) {
     it(`${mode} (${code}): rejected-permanent, CANCELED, rows marked; three more runs write no row and send nothing; the rows stay in the bell; a new notification is a new batch`, async () => {
@@ -421,6 +420,102 @@ describe("permanent rejections (5xx) close the batch (K170)", () => {
       await allStamped([n3]);
     });
   }
+});
+
+// K179 (Codex diff round 1): an SMTP login or configuration failure (535 here) is the operator's to
+// fix, not the recipient's. The batch is released without a stamp, the rest of the workspace's
+// digests are not attempted in this run, and one line with the class and the code is logged. A
+// recipient's permanent rejection (550) keeps the K170 close and stops nothing.
+describe("SMTP authentication or configuration failures are operator-recoverable (K179)", () => {
+  async function orgOfTwo() {
+    const { orgId, members } = await seedOrg({ roles: ["owner", "admin"] });
+    const [owner, admin] = members;
+    if (!owner || !admin) throw new Error("two members expected");
+    const t1 = await seedTicket(orgId);
+    const t2 = await seedTicket(orgId);
+    const ownerIds = [
+      await notify(orgId, owner.id, "ASSIGNED", t1.id),
+      await notify(orgId, owner.id, "MENTION", t2.id),
+    ];
+    const adminIds = [await notify(orgId, admin.id, "ASSIGNED", t2.id)];
+    return { orgId, owner, admin, t1, t2, ownerIds, adminIds };
+  }
+
+  it("reject-auth (535): the claim is released unstamped, the workspace's other pair is not claimed, one line is logged; after the fix the next run sends every batch once", async () => {
+    const broken = await orgOfTwo();
+    const healthy = await ownerWithTwoRows();
+    const spies = spyOnConsole();
+    let texts: string[] = [];
+    let result: Awaited<ReturnType<typeof runDigests>>;
+    try {
+      result = await runDigestsForLog({
+        [broken.orgId]: () => smtp.setMode("reject-auth"),
+        [healthy.orgId]: () => smtp.setMode("none"),
+      });
+      texts = loggedTexts(spies);
+    } finally {
+      restoreConsole(spies);
+    }
+    // Presence: the other workspace's digest of the same run went out.
+    expect(reportFor(result, healthy.orgId).map((r) => r.outcome)).toEqual(["sent"]);
+    expect(messagesTo(healthy.owner.email)).toHaveLength(1);
+
+    const outcomes = reportFor(result, broken.orgId).map((r) => r.outcome);
+    expect(outcomes.sort()).toEqual(["config-stopped", "rejected-config"]);
+    const stopped = reportFor(result, broken.orgId).find((r) => r.outcome === "config-stopped");
+    expect(stopped?.digestId).toBeNull();
+    const firstUser = reportFor(result, broken.orgId).find(
+      (r) => r.outcome === "rejected-config",
+    )?.recipientUserId;
+    const secondUser = stopped?.recipientUserId;
+    expect(await statuses(broken.orgId, firstUser ?? "")).toEqual(["RELEASED"]);
+    expect(await digestsOf(broken.orgId, secondUser ?? "")).toEqual([]);
+    expect(messagesTo(broken.owner.email, smtp.received)).toHaveLength(0);
+    expect(messagesTo(broken.admin.email, smtp.received)).toHaveLength(0);
+    await noneStamped([...broken.ownerIds, ...broken.adminIds]);
+
+    const config = texts.filter((t) => t.includes("(configuration)"));
+    expect(config).toEqual([
+      "[notification-digest] send rejected (configuration): class=Error code=EAUTH reply=535 workspace=stopped-for-run",
+    ]);
+    expect(texts.join("\n")).not.toContain("send rejected (permanent)");
+    for (const value of [broken.orgId, broken.owner.email, broken.admin.email, "fake-password"]) {
+      expect(texts.join("\n")).not.toContain(value);
+    }
+
+    // The operator fixes the password: the next run sends each batch exactly once.
+    smtp.setMode("none");
+    const next = await runDigests({ timing: FAST });
+    expect(reportFor(next, broken.orgId).map((r) => r.outcome)).toEqual(["sent", "sent"]);
+    expect(messagesTo(broken.owner.email)).toHaveLength(1);
+    expect(messagesTo(broken.admin.email)).toHaveLength(1);
+    const { text } = await parse(messagesTo(broken.owner.email)[0]?.raw ?? "");
+    expect(text).toContain(`Assigned to you: 1 (#${broken.t1.number} ${link(broken.t1.id)})`);
+    expect(text).toContain(`Mentions: 1 (#${broken.t2.number} ${link(broken.t2.id)})`);
+    await allStamped([...broken.ownerIds, ...broken.adminIds]);
+    expect(await statuses(broken.orgId, firstUser ?? "")).toEqual(["RELEASED", "SENT"]);
+    expect(await statuses(broken.orgId, secondUser ?? "")).toEqual(["SENT"]);
+  });
+
+  it("a recipient's 550 keeps the K170 close and stops nothing: the workspace's other recipient is sent in the same run", async () => {
+    const org = await orgOfTwo();
+    const result = await runDigests({
+      timing: FAST,
+      hooks: {
+        beforeConnect: (ctx) => {
+          if (ctx.organizationId !== org.orgId) return;
+          smtp.setMode(ctx.recipientUserId === org.owner.id ? "reject-rcpt" : "none");
+        },
+      },
+    });
+    const byUser = new Map(reportFor(result, org.orgId).map((r) => [r.recipientUserId, r.outcome]));
+    expect(byUser.get(org.owner.id)).toBe("rejected-permanent");
+    expect(byUser.get(org.admin.id)).toBe("sent");
+    expect(await statuses(org.orgId, org.owner.id)).toEqual(["CANCELED"]);
+    expect(messagesTo(org.admin.email)).toHaveLength(1);
+    expect(messagesTo(org.owner.email)).toHaveLength(0);
+    await allStamped([...org.ownerIds, ...org.adminIds]);
+  });
 });
 
 // K170: what an operator sees. One line per failed send or pair with the error class and codes
@@ -513,7 +608,7 @@ describe("digest failures are logged with error class and code only (K170)", () 
     const summary = texts.filter((t) => t.startsWith("[notification-digest] run: "));
     expect(summary).toHaveLength(1);
     expect(summary[0]).toMatch(
-      /^\[notification-digest\] run: pairs=\d+ sent=[1-9]\d* rejected=\d+ rejectedPermanent=[1-9]\d* ambiguous=\d+ failed=\d+ leaseShort=\d+ stopped=false$/,
+      /^\[notification-digest\] run: pairs=\d+ sent=[1-9]\d* rejected=\d+ rejectedPermanent=[1-9]\d* rejectedConfig=\d+ configStopped=\d+ ambiguous=\d+ failed=\d+ leaseShort=\d+ stopped=false$/,
     );
     expect(texts).toContain("[notification-digest] run failed: class=AppUrlError");
     const all = texts.join("\n");

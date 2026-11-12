@@ -36,6 +36,8 @@ export function digestRunSummary(result: {
     `sent=${count("sent")}`,
     `rejected=${count("rejected")}`,
     `rejectedPermanent=${count("rejected-permanent")}`,
+    `rejectedConfig=${count("rejected-config")}`,
+    `configStopped=${count("config-stopped")}`,
     `ambiguous=${count("ambiguous")}`,
     `failed=${count("failed")}`,
     `leaseShort=${count("lease-short")}`,

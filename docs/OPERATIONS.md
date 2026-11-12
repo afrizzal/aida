@@ -594,15 +594,21 @@ line that names the variable:
 **Delivery guarantee.** A digest is marked sent, and its notifications marked as emailed, only
 after the SMTP server accepted the whole message (its final reply after the data). When the
 server rejects it with an error reply (at login, at the recipient, at the data command or after
-the data), what happens depends on the reply code:
+the data), what happens depends on the reply code and on what was refused:
 
 - **A temporary rejection (a `4xx` code):** nothing is marked, and the next run sends the digest
   again. This rejection causes no duplicate.
-- **A permanent rejection (a `5xx` code)**, for example `550` (no such mailbox) or `535` (the SMTP
-  password is wrong): AIDA does not try that batch again. Its notifications stay in the member's
+- **A rejection of the workspace's SMTP settings**, for example `535` (the SMTP password is wrong):
+  a failed login (any `5xx` reply to it), the authentication codes `530`, `534`, `535` and `538`,
+  a server that does not accept mail (`521`, `556`, or a `5xx` greeting), or a `5xx` reply to the
+  from address. Nothing is marked and nothing is lost: AIDA stops sending that workspace's digests
+  for the rest of the run, logs one line, and tries them all again on the next run. Fix the SMTP
+  settings (Settings → Email), and the next run sends every waiting digest once.
+- **A permanent rejection of the member or the message (any other `5xx` code)**, for example `550`
+  (no such mailbox): AIDA does not try that batch again. Its notifications stay in the member's
   bell but are not emailed, and later runs write nothing more for them. The next notification
-  for that member starts a new digest. Fix the cause (the address, the SMTP settings), and the
-  following digests go out again.
+  for that member starts a new digest. Fix the cause (the member's address), and the following
+  digests go out again. The workspace's other members still get theirs in the same run.
 
 When the connection drops, or the 45-second send deadline cuts it off, with no reply, AIDA cannot
 tell whether the server accepted the message. It then keeps the batch for its five-minute lease
@@ -613,9 +619,12 @@ before the database recorded it can also resend it once on such a later run. AID
 exactly-once delivery.
 
 **What the worker log shows.** Each run writes one line with its counts, for example
-`[notification-digest] run: pairs=3 sent=2 rejected=0 rejectedPermanent=1 ambiguous=0 failed=0 leaseShort=0 stopped=false`.
+`[notification-digest] run: pairs=3 sent=2 rejected=0 rejectedPermanent=1 rejectedConfig=0 configStopped=0 ambiguous=0 failed=0 leaseShort=0 stopped=false`.
 Each failed send writes one line with the error class and its codes only, for example
-`[notification-digest] send rejected (permanent): class=Error code=EAUTH reply=535`. A run that
+`[notification-digest] send rejected (permanent): class=Error code=EENVELOPE reply=550`. A rejected
+login writes
+`[notification-digest] send rejected (configuration): class=Error code=EAUTH reply=535 workspace=stopped-for-run`
+once per workspace and run; `configStopped` counts that workspace's digests left for the next run. A run that
 fails as a whole (for example an unusable `BETTER_AUTH_URL`) writes
 `[notification-digest] run failed: class=…`. The log never names an address, a member, a ticket
 or the server's reply text.
