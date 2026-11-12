@@ -226,3 +226,18 @@ Answer: `.planning/run-loop/codex/fase10-diff-jawab.md` (log `model: gpt-6.1-ter
 | K182 | LOW: K159 trusted origins | A `BETTER_AUTH_TRUSTED_ORIGINS` entry that carries a path, query or fragment is ignored for the accept check (not trusted), consistent with K165; `.env.example` and `docs/OPERATIONS.md` state that every listed origin is trusted fully for invitation accepts. The same-origin Referer reaching the server's own logs was accepted in K159 (the token is already in the accept path). |
 
 Fix batch F6 = K178 to K182, then the full E2E (not run since `2418e4c`) and Codex round 2.
+
+## Codex diff critique round 2 dispositions (orchestrator, 2026-11-13)
+
+Answer: `.planning/run-loop/codex/fase10-diff-r2-jawab.md` (log `model: gpt-6.1-terra`, `reasoning effort: xhigh`): no new HIGH; 2 MEDIUM, 2 LOW; K178 closed on the traced path; V-23 acceptable as a written limit while v1 ships one workspace per install, to be raised to HIGH before multi-workspace support. Claims checked in code by the orchestrator: `composer.tsx:372` (the hold shows "The mentioned names were removed from this reply." though nothing was removed), `app-url.ts:72-81` (`isBareOrigin` checks the normalised `pathname`, so `/a/..` or `/%2e` pass), `digest.ts:395-400` (a configuration rejection releases the claim; nothing prunes RELEASED rows). All accepted:
+
+| Decision | Codex finding | Decision |
+|---|---|---|
+| K183 | MEDIUM: K180 hold shows a false sentence; an edit after the hold does not re-arm the guard | The hold gets its own copy asking the agent to review the reply because it still names a mentioned member (UI-SPEC amendment A10); the switch note keeps its sentence only after a real strip. Any edit of the body after a hold re-arms the guard. The unbounded match (and its false positives such as an address containing `@Name`) stays, explained by the copy. Tests. |
+| K184 | MEDIUM: K181's bound is wider than written | Move the last membership and preference re-check to immediately before the connection, with no other reads in between; document the bound exactly: a deactivation that commits after the last re-check may still let that one digest through. Test the ordering just after the re-check. |
+| K185 | LOW: K182 accepts dot-segment paths after URL normalisation | The bare-origin rule checks the raw text: after the scheme and authority only an optional single trailing `/` may follow (no `.`/`%2e` segments, `?`, `#`, credentials), for `BETTER_AUTH_URL` and every trusted-origin entry. Tests with `/a/..`, `/%2e`, `/.`. |
+| K186 | LOW: K179 keeps digests but adds a RELEASED row every run while SMTP stays broken | Retention: each digest run deletes RELEASED and CANCELED digest rows older than 7 days in a bounded batch (notifications are untouched); operators see the configuration failure in the existing log line and `docs/OPERATIONS.md` says so. Test. |
+| (limit) | V-23 stale tab after a deliberate invitation accept | Accepted as a written limit for v1 (one workspace per install in the UI). Documented in `docs/OPERATIONS.md` and in the Phase 10 gate's known limits, with the note that it becomes HIGH before multi-workspace support (bind every server action to the rendered organization). Recorded for the owner in LAPORAN. |
+| (info) | K178 recovery path not explained | The `/no-access` page adds one sentence: signing out and in again opens another workspace the person still belongs to (UI-SPEC amendment A11). |
+
+Fix batch F7 = K183 to K186 plus the two rows above, then Codex round 3 (the last).
