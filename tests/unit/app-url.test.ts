@@ -140,14 +140,36 @@ describe("getTrustedAppOrigins", () => {
     ]);
   });
 
-  it("adds each listed origin once, as an origin (no path, no trailing slash)", () => {
+  it("adds each listed bare origin once, as an origin (a trailing slash is still bare)", () => {
     expect(
       getTrustedAppOrigins({
         BETTER_AUTH_URL: "http://localhost",
         BETTER_AUTH_TRUSTED_ORIGINS:
-          " http://localhost, https://localhost/ ,https://help.example.test/x",
+          " http://localhost, https://localhost/ ,https://help.example.test:8443",
       }),
-    ).toEqual(["http://localhost", "https://localhost", "https://help.example.test"]);
+    ).toEqual(["http://localhost", "https://localhost", "https://help.example.test:8443"]);
+  });
+
+  // K182 (Codex diff round 1, LOW): an entry that carries a path, a query, a fragment or
+  // credentials is not a bare origin (the K165 rule for BETTER_AUTH_URL), so it is ignored for the
+  // accept check instead of being reduced to its origin and trusted fully.
+  it("ignores an entry with a path, a query, a fragment or credentials (K182)", () => {
+    expect(
+      getTrustedAppOrigins({
+        BETTER_AUTH_URL: "https://help.example.test",
+        BETTER_AUTH_TRUSTED_ORIGINS: [
+          "https://path.example.test/x",
+          "https://deep.example.test/a/b/",
+          "https://query.example.test/?a=1",
+          "https://emptyquery.example.test?",
+          "https://fragment.example.test/#top",
+          "https://emptyfragment.example.test#",
+          "https://user:pw@creds.example.test",
+          "https://user@user.example.test",
+          "https://ok.example.test/",
+        ].join(","),
+      }),
+    ).toEqual(["https://help.example.test", "https://ok.example.test"]);
   });
 
   it("skips entries that are not exact http(s) origins: wildcards, other schemes, garbage, null", () => {

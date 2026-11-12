@@ -59,18 +59,26 @@ function parseAppUrl(env: Env): URL {
     throw new AppUrlError("invalid");
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new AppUrlError("scheme");
-  // The URL parser gives a bare origin the path "/" whether or not a trailing slash was written; a
-  // "?" or "#" with nothing after it still counts, so the raw text is checked too.
-  const bare =
+  if (!isBareOrigin(raw, url)) throw new AppUrlError("not_origin");
+  return url;
+}
+
+/**
+ * True when `raw` (parsed as `url`) is a bare origin: no path, query, fragment or credentials. The
+ * URL parser gives a bare origin the path "/" whether or not a trailing slash was written; a "?"
+ * or "#" with nothing after it still counts, so the raw text is checked too. One rule for
+ * BETTER_AUTH_URL (K165) and for each BETTER_AUTH_TRUSTED_ORIGINS entry (K182).
+ */
+function isBareOrigin(raw: string, url: URL): boolean {
+  return (
     url.pathname === "/" &&
     url.search === "" &&
     url.hash === "" &&
     url.username === "" &&
     url.password === "" &&
     !raw.includes("?") &&
-    !raw.includes("#");
-  if (!bare) throw new AppUrlError("not_origin");
-  return url;
+    !raw.includes("#")
+  );
 }
 
 /**
@@ -101,10 +109,12 @@ export function getAppOrigin(env: Env = process.env): string {
 /**
  * The origins a same-origin form post of this application may carry (K159): the origin of
  * BETTER_AUTH_URL first, then each entry of BETTER_AUTH_TRUSTED_ORIGINS (comma-separated, the
- * list Better Auth already trusts for its own CSRF checks) that is an exact http(s) origin,
- * reduced to its origin, each once. Wildcard patterns, other schemes and unparsable entries are
- * skipped: the caller compares the Origin header for exact equality only. Throws AppUrlError like
- * getAppOrigin when BETTER_AUTH_URL is missing or invalid.
+ * list Better Auth already trusts for its own CSRF checks) that is a bare http(s) origin (a
+ * trailing slash is allowed), each once. Wildcard patterns, other schemes, unparsable entries and
+ * entries with a path, a query, a fragment or credentials (K182, the K165 rule) are skipped, never
+ * reduced to their origin: the caller compares the Origin header for exact equality only. Every
+ * origin returned is trusted fully for invitation accepts (docs/OPERATIONS.md). Throws AppUrlError
+ * like getAppOrigin when BETTER_AUTH_URL is missing or invalid.
  */
 export function getTrustedAppOrigins(env: Env = process.env): string[] {
   const origins = [getAppOrigin(env)];
@@ -118,6 +128,7 @@ export function getTrustedAppOrigins(env: Env = process.env): string[] {
       continue;
     }
     if (url.protocol !== "http:" && url.protocol !== "https:") continue;
+    if (!isBareOrigin(entry, url)) continue;
     if (!origins.includes(url.origin)) origins.push(url.origin);
   }
   return origins;

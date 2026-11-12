@@ -672,6 +672,37 @@ describe("the accept route (V-24): Origin, rate limit, validation, 303", () => {
     }
   });
 
+  // K182 (Codex diff round 1, LOW): a listed entry with a path, a query or a fragment is not a
+  // bare origin and is ignored for the accept check; its origin is never trusted through it.
+  it("K182: an entry of BETTER_AUTH_TRUSTED_ORIGINS with a path, a query or a fragment trusts nothing", async () => {
+    const pathHost = "https://path.invite-onboarding.example.test";
+    const queryHost = "https://query.invite-onboarding.example.test";
+    const fragmentHost = "https://fragment.invite-onboarding.example.test";
+    const bareHost = "https://bare.invite-onboarding.example.test";
+    const before = process.env.BETTER_AUTH_TRUSTED_ORIGINS;
+    process.env.BETTER_AUTH_TRUSTED_ORIGINS = `${pathHost}/app,${queryHost}/?x=1,${fragmentHost}/#a,${bareHost}`;
+    try {
+      const user = await signedInMemberOfOtherOrg();
+      const { orgId: orgB, token } = await invite(user.email);
+      for (const origin of [pathHost, queryHost, fragmentHost]) {
+        const refused = await post(token, { intent: "accept" }, { cookie: user.cookie, origin });
+        await expectRefusal(refused, token, "origin");
+      }
+      expect(await memberRows(orgB, user.userId)).toEqual([]);
+      // Presence: the bare entry of the same list is admitted.
+      const response = await post(
+        token,
+        { intent: "accept" },
+        { cookie: user.cookie, origin: bareHost },
+      );
+      expect(response.status).toBe(303);
+      expect(await memberRows(orgB, user.userId)).toHaveLength(1);
+    } finally {
+      if (before === undefined) delete process.env.BETTER_AUTH_TRUSTED_ORIGINS;
+      else process.env.BETTER_AUTH_TRUSTED_ORIGINS = before;
+    }
+  });
+
   // K161 (a-WR-3, b-WR-3): 60 posts per hour per client address, so a team behind one address can
   // join, plus 10 per hour per invitation token, so password guessing through one link stays
   // capped whatever the address. Both are consumed before the token lookup and the body.
