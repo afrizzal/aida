@@ -28,6 +28,7 @@ import { type NotificationTypeName, TICKET_ENTITY } from "@/lib/notifications/ty
 import { scopedDb } from "@/lib/scoped-db";
 import { createTicket } from "@/lib/tickets/create-ticket";
 import { notificationDigestHandler } from "@/lib/worker/jobs/notification-digest";
+import { deactivateMember } from "@/lib/workspace-members/member-admin";
 import { loggedTexts, restoreConsole, spyOnConsole } from "../support/console-capture";
 import { type FakeSmtpMode, type FakeSmtpServer, startFakeSmtp } from "../support/fake-smtp";
 import { type MemberRole, seedOrgWithMembers, seedTicket } from "../support/inbox-fixtures";
@@ -870,6 +871,69 @@ describe("changes between the claim and the send (C8, D-25, V-28)", () => {
     expect(text).toContain(`Mentions: 1 (#${t2.number} ${link(t2.id)})`);
     await allStamped(ids);
     expect(await statuses(orgId, owner.id)).toEqual(["SENT"]);
+  });
+
+  // K181 (Codex diff round 1): membership and the member's choices are checked again right before
+  // the SMTP connection opens, after the body was built, in the same claim. beforeConnect runs
+  // after the first re-check and after the body was built, so a deactivation committed there is
+  // the ordering the second check closes.
+  it("K181: a deactivation committed after the body was built and before the connection: no connection, no email, the digest is CANCELED", async () => {
+    const { orgId, members } = await seedOrg({ roles: ["owner", "member"] });
+    const [owner, member] = members;
+    if (!owner || !member) throw new Error("two members expected");
+    const t1 = await seedTicket(orgId);
+    const nMember = await notify(orgId, member.id, "ASSIGNED", t1.id);
+    const seen: string[] = [];
+    const result = await runDigests({
+      timing: FAST,
+      hooks: {
+        beforeSend: (ctx) => {
+          if (ctx.organizationId === orgId) seen.push("beforeSend");
+        },
+        beforeConnect: async (ctx) => {
+          if (ctx.organizationId !== orgId) return;
+          seen.push("beforeConnect");
+          // The real deactivation service, committed before this hook returns.
+          const removed = await deactivateMember({
+            orgId,
+            actorUserId: owner.id,
+            targetUserId: member.id,
+          });
+          expect(removed).toMatchObject({ ok: true });
+        },
+      },
+    });
+    // Presence: the pair was claimed and reached the point right before connecting.
+    expect(seen).toEqual(["beforeSend", "beforeConnect"]);
+    expect(reportFor(result, orgId).map((r) => r.outcome)).toEqual(["canceled"]);
+    expect(await statuses(orgId, member.id)).toEqual(["CANCELED"]);
+    expect(smtp.connections).toBe(0);
+    expect(messagesTo(member.email, smtp.received)).toHaveLength(0);
+    await noneStamped([nMember]);
+  });
+
+  it("K181: a preference change after the body was built: beforeConnect turns the digest off for MENTION; the email lacks the mention line and that row stays undigested", async () => {
+    const { orgId, owner, t1, t2, ids } = await ownerWithTwoRows();
+    const [assignedId, mentionId] = ids as [string, string];
+    await runDigests({
+      timing: FAST,
+      hooks: {
+        beforeConnect: async () => {
+          await setPreference(orgId, owner.id, "MENTION", { digest: false });
+        },
+      },
+    });
+    const delivered = messagesTo(owner.email);
+    expect(delivered).toHaveLength(1);
+    const { text } = await parse(delivered[0]?.raw ?? "");
+    expect(text).toContain(`Assigned to you: 1 (#${t1.number} ${link(t1.id)})`);
+    expect(text).not.toContain("Mentions:");
+    expect(text).not.toContain(link(t2.id));
+    await allStamped([assignedId]);
+    await noneStamped([mentionId]);
+    expect((await digestsOf(orgId, owner.id)).map((d) => [...d.notificationIds])).toEqual([
+      [assignedId],
+    ]);
   });
 
   it("a deactivation mid-batch: beforeSend deletes the member rows; no email, the digest is CANCELED", async () => {

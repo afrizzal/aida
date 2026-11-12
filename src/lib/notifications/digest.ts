@@ -20,9 +20,15 @@
 //       cancels the digest.
 //   (d) The mail (D-24, UI-SPEC, amendment A4): the constant subject, per-type counts, ticket
 //       numbers and links, fallback rows on their own line. Only ticket number and id are read.
-//   (e) Lease check (V-29): right before connecting, the remaining lease must exceed the send
-//       deadline plus the commit margin, else the claim is released and nothing connects. The
-//       deadline is min(SEND_DEADLINE_MS, remaining lease - COMMIT_MARGIN_MS).
+//   (e) After the beforeConnect hook, the last re-check (K181), in the same claim: the same rules
+//       as (c) again, right before the connection opens, after the body was built. No member row
+//       cancels the digest; rows that no longer pass are left out, and the body is rebuilt from
+//       the rows already read (no further read); nothing left cancels it. Then the lease check
+//       (V-29): the remaining lease must exceed the send deadline plus the commit margin, else the
+//       claim is released and nothing connects. The deadline is min(SEND_DEADLINE_MS, remaining
+//       lease - COMMIT_MARGIN_MS). A deactivation that commits after this re-check, while the
+//       message is being transmitted, does not stop it: that digest may still arrive (the same
+//       bound V-25 sets for an action already past its check; docs/OPERATIONS.md).
 //   (f) Record (R2-5):
 //       - accepted: the afterSend hook, then one transaction moves CLAIMED -> SENT, stamps exactly
 //         the sent ids and keeps only those ids on the digest row (review c-IN-04: the row says
@@ -110,6 +116,7 @@ export interface RunDigestsDeps {
   /** Test seams, awaited in this order around one digest. */
   hooks?: {
     beforeSend?: (ctx: DigestHookContext) => Promise<void> | void;
+    /** After the body was built, before the last re-check (K181) and the lease check. */
     beforeConnect?: (ctx: DigestHookContext) => Promise<void> | void;
     afterSend?: (ctx: DigestHookContext) => Promise<void> | void;
   };
@@ -351,10 +358,23 @@ async function processPair(
   }
 
   // (d) The mail.
-  const text = buildDigestBody(rows, await ticketNumbers(orgId, rows), baseUrl);
+  const tickets = await ticketNumbers(orgId, rows);
+  let text = buildDigestBody(rows, tickets, baseUrl);
 
-  // (e) Lease check, right before connecting.
+  // (e) The last re-check (K181), right before the connection opens: a deactivation or a changed
+  // choice committed while the body was built is seen here. Only rows of the body can stay.
   await hooks.beforeConnect?.(ctx);
+  const still = await recheck(orgId, userId, claim.ids);
+  const stillIds = new Set((still ?? []).map((row) => row.id));
+  const sendRows = rows.filter((row) => stillIds.has(row.id));
+  if (sendRows.length === 0) {
+    await moveClaimed(claim.digestId, "CANCELED");
+    report.outcome = "canceled";
+    return;
+  }
+  if (sendRows.length !== rows.length) text = buildDigestBody(sendRows, tickets, baseUrl);
+
+  // Lease check, the last step before connecting.
   const remaining = claim.leaseExpiresAt.getTime() - clock().getTime();
   if (remaining <= timing.sendDeadlineMs + timing.commitMarginMs) {
     await moveClaimed(claim.digestId, "RELEASED");
@@ -369,7 +389,7 @@ async function processPair(
   );
 
   // (f) Record.
-  const sentIds = rows.map((row) => row.id);
+  const sentIds = sendRows.map((row) => row.id);
   // A rejected recipient of a resolved send has no error object, only its reply code, if any.
   const label =
     result.errorLabel ??

@@ -635,7 +635,10 @@ sending and then stops; the next run picks up the rest. Two runs never send the 
 batch at once.
 
 A member removed from the workspace gets no digest: membership, the member's choices and
-owner or admin rights are checked again right before each send.
+owner or admin rights are checked again after the digest is written and right before AIDA opens
+the connection to the SMTP server. One limit remains: a digest whose transmission has already
+started when the removal is saved is not stopped, and may still arrive (within the 45-second send
+deadline). This is the same bound as for an action already under way when a member is removed.
 
 ### Unassigned tickets
 
