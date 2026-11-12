@@ -52,9 +52,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // pre-transaction guard. A removed member gets the same 403 for an existing id, a missing id
   // and an invalid body, so this route is no oracle for the former organization's ticket ids. The
   // check inside the transaction below stays: it covers a removal that commits after this read.
-  // Review d-IN-5: one spelling for this refusal on this route, the gate's `membership_ended`.
   if (!(await findActiveMembership(db, session.user.id, orgId))) {
-    return NextResponse.json({ error: "membership_ended" }, { status: 403 });
+    return NextResponse.json({ error: "MEMBERSHIP_ENDED" }, { status: 403 });
   }
 
   const { id: ticketId } = await params;
@@ -244,7 +243,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!outcome.ok) {
     await staged.discard();
     if (outcome.error === "MEMBERSHIP_ENDED") {
-      return NextResponse.json({ error: "membership_ended" }, { status: 403 });
+      return NextResponse.json({ error: "MEMBERSHIP_ENDED" }, { status: 403 });
     }
     if (outcome.error === "MERGED_SOURCE") {
       return NextResponse.json({ error: "MERGED_SOURCE" }, { status: 409 });

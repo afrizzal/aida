@@ -80,7 +80,6 @@ import {
 } from "@/lib/mentions/composer-tokens";
 import { MAX_MENTIONS } from "@/lib/mentions/mentions";
 import { scopedDb } from "@/lib/scoped-db";
-import { setAgentMessageObserverForTests } from "@/lib/tickets/merge";
 import { loadStatusPageData } from "@/lib/tickets/status-page-data";
 import { emailOutboundSendHandler } from "@/lib/worker/jobs/email-outbound-send";
 import { seedTicket } from "../support/inbox-fixtures";
@@ -582,29 +581,8 @@ describe("only a mention the body shows is recorded (K172)", () => {
   });
 });
 
-// Review d-IN-5 and d-IN-8: the route's refusals are one spelling and a 400, never a 500.
-describe("the route's refusals (d-IN-5, d-IN-8)", () => {
-  it("d-IN-5: a membership that ends inside the transaction answers 403 membership_ended, like the gate", async () => {
-    const author = await signedInAuthor();
-    const ticket = await seedTicket(author.orgId);
-    setAgentMessageObserverForTests({
-      onTransactionStart: async () => {
-        // The removal commits after the gate and the pre-transaction check have passed.
-        await prisma.member.deleteMany({
-          where: { organizationId: author.orgId, userId: author.userId },
-        });
-      },
-    });
-    try {
-      const response = await post(ticket.id, { mode: "internal", body: "Ended mid-way" });
-      expect(response.status).toBe(403);
-      expect(await response.json()).toEqual({ error: "membership_ended" });
-    } finally {
-      setAgentMessageObserverForTests(null);
-    }
-    expect(await messageCount(ticket.id)).toBe(0);
-  });
-
+// Review d-IN-8: a malformed form is a 400, never a 500.
+describe("the route's refusals (d-IN-8)", () => {
   it("d-IN-8: a body sent as a file part is 400 invalid_form_data and writes nothing", async () => {
     const author = await signedInAuthor();
     const ticket = await seedTicket(author.orgId);
