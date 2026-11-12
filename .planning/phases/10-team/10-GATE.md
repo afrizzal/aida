@@ -83,6 +83,7 @@ UI-SPEC stays approved and binding; `10-UI-SPEC.md` was not edited. Each amendme
 | A6 | The throttled invitation view ("Something went wrong while joining." / "Wait a moment and try again." with "Go to sign in") and the server-side field refusal callout | 10-08 |
 | A7 | Deactivation with reassignment: the skipped-ticket count in the toast, the warning callout for tickets that could not be reassigned, and "Try again" | 10-10 |
 | A8 | The bell sits between the Search button and `ThemeToggle` (UI-SPEC said "before ThemeToggle"; Search was added since) | 10-11 |
+| A9 | Mention autocomplete rows use on-scale `py-1` (4px; was the off-scale `py-0.5`), so a row is the `size-8` avatar plus 2 × 4px = 40px, and the list height for eight visible rows is `max-h-[320px]` (UI-SPEC Surface 4 said `max-h-[288px]`, which no on-scale padding meets). `max-h-[320px]` is a size, not spacing. Run decision K176, review d-WR-6; `mention-autocomplete.tsx:126`, `:137`. Re-run of the gate's off-scale spacing grep on that file after the change: exit 1 (no hit); pinned by `tests/unit/mention-autocomplete-spacing.test.ts`. | code-review fix batch F4 (`563b6dc`, `3d77f43`) |
 
 ## Requirement evidence
 
