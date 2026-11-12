@@ -71,6 +71,13 @@ import { POST as messagesPost } from "@/app/api/tickets/[id]/messages/route";
 import { auth } from "@/lib/auth";
 import { saveEmailSettings } from "@/lib/channels/email/settings";
 import { prisma } from "@/lib/db";
+import {
+  findMentionQuery,
+  initialMentionDraft,
+  type MentionDraftState,
+  mentionDraftReducer,
+  outgoingMentionIds,
+} from "@/lib/mentions/composer-tokens";
 import { MAX_MENTIONS } from "@/lib/mentions/mentions";
 import { scopedDb } from "@/lib/scoped-db";
 import { loadStatusPageData } from "@/lib/tickets/status-page-data";
@@ -423,6 +430,153 @@ describe("who is recorded and notified (D-16, D-20, V-26, T-10-27)", () => {
     expect(await mentionsOf(second.id)).toEqual([]);
     expect(await mentionNotifications(author.orgId)).toEqual([
       expect.objectContaining({ recipientUserId: lea.id, eventKey: `mention:${first.id}` }),
+    ]);
+  });
+});
+
+// The composer's actions, as in mention-mode-switch.test.ts: a keystroke is an `edit` with the
+// caret after the typed text, a Backspace an `edit` one to the left, a pick an `insert`.
+function typeText(state: MentionDraftState, chars: string, at = state.caret ?? state.text.length) {
+  const text = state.text.slice(0, at) + chars + state.text.slice(at);
+  return mentionDraftReducer(state, { type: "edit", text, caret: at + chars.length });
+}
+
+function backspace(state: MentionDraftState): MentionDraftState {
+  const at = state.caret ?? state.text.length;
+  const text = state.text.slice(0, at - 1) + state.text.slice(at);
+  return mentionDraftReducer(state, { type: "edit", text, caret: at - 1 });
+}
+
+function pick(state: MentionDraftState, who: Person): MentionDraftState {
+  const typed = typeText(state, "@");
+  const query = findMentionQuery(typed.text, typed.caret ?? typed.text.length, typed.spans);
+  if (query === null) throw new Error(`no trigger in ${JSON.stringify(typed.text)}`);
+  return mentionDraftReducer(typed, {
+    type: "insert",
+    query,
+    member: { userId: who.id, name: who.name },
+  });
+}
+
+const internalDraft = mentionDraftReducer(initialMentionDraft, {
+  type: "setMode",
+  mode: "internal",
+});
+
+// K172 (review d-WR-2): the route keeps a mentioned id only when the member's current display name
+// is rendered as a mention span in the body (the boundary rule of mention-syntax.ts). Any other id
+// is dropped: no MessageMention, no notification.
+describe("only a mention the body shows is recorded (K172)", () => {
+  it("direct HTTP: an id whose name is not in the body records and notifies nobody", async () => {
+    const author = await signedInAuthor();
+    const mira = await person("Mira Hidden", author.orgId);
+    const ticket = await seedTicket(author.orgId);
+
+    for (const body of ["hi", "hi Mira Hidden", "hi @Mira", "mail x@Mira Hidden now"]) {
+      const response = await post(ticket.id, {
+        mode: "internal",
+        body,
+        mentions: JSON.stringify([mira.id]),
+      });
+      expect(response.status, body).toBe(200);
+      const message = await latestMessage(ticket.id);
+      expect(message.bodyMarkdown).toBe(body);
+      expect(message.bodyHtml, body).not.toContain("<span");
+      expect(await mentionsOf(message.id), body).toEqual([]);
+    }
+    expect(await mentionNotifications(author.orgId)).toEqual([]);
+    expect(await prisma.notification.count({ where: { recipientUserId: mira.id } })).toBe(0);
+  });
+
+  it("insert, Backspace, type: '@Zetax' and 'x@Zeta' are no mention; the composer sends no id and the route records none", async () => {
+    const author = await signedInAuthor();
+    const zeta = await person("Zeta", author.orgId);
+    const ana = await person("Ana Shown", author.orgId);
+    const ticket = await seedTicket(author.orgId);
+
+    // The review's sequence: insert "@Zeta ", Backspace removes the space, then type "x".
+    let draft = pick(typeText(internalDraft, "Hi "), zeta);
+    expect(draft.text).toBe("Hi @Zeta ");
+    draft = typeText(backspace(draft), "x");
+    expect(draft.text).toBe("Hi @Zetax");
+    expect(outgoingMentionIds(draft)).toEqual([]);
+    // A letter typed right before the "@" of an inserted name.
+    let before = pick(typeText(internalDraft, "Hi "), zeta);
+    before = typeText(before, "x", 3);
+    expect(before.text).toBe("Hi x@Zeta ");
+    expect(outgoingMentionIds(before)).toEqual([]);
+
+    // An older composer, or a direct post, still sends the id: the route drops it. Ana is shown
+    // in the same note, so the note does record a mention (presence first).
+    for (const body of ["Hi @Zetax and @Ana Shown", "Hi x@Zeta and @Ana Shown"]) {
+      const response = await post(ticket.id, {
+        mode: "internal",
+        body,
+        mentions: JSON.stringify([zeta.id, ana.id]),
+      });
+      expect(response.status, body).toBe(200);
+      const message = await latestMessage(ticket.id);
+      expect(message.bodyHtml, body).toContain(`${MENTION_SPAN_OPEN}@Ana Shown</span>`);
+      expect(message.bodyHtml.match(/<span\b/g), body).toHaveLength(1);
+      expect(await mentionsOf(message.id), body).toEqual([
+        { organizationId: author.orgId, mentionedUserId: ana.id },
+      ]);
+    }
+    expect(await prisma.notification.count({ where: { recipientUserId: zeta.id } })).toBe(0);
+    expect(await prisma.notification.count({ where: { recipientUserId: ana.id } })).toBe(2);
+  });
+
+  it("rename: a member renamed after the composer loaded the list is not recorded under the old name", async () => {
+    const author = await signedInAuthor();
+    const rita = await person("Rita Before", author.orgId);
+    const ana = await person("Ana Stays", author.orgId);
+    const ticket = await seedTicket(author.orgId);
+
+    // The composer inserted both names from the list it loaded.
+    let draft = pick(typeText(internalDraft, "Ping "), rita);
+    draft = pick(typeText(draft, "and "), ana);
+    expect(draft.text).toBe("Ping @Rita Before and @Ana Stays ");
+    expect(outgoingMentionIds(draft)).toEqual([rita.id, ana.id]);
+    // Rita renames herself before the note is saved.
+    await prisma.user.update({ where: { id: rita.id }, data: { name: "Rita After" } });
+
+    const response = await post(ticket.id, {
+      mode: "internal",
+      body: draft.text,
+      mentions: JSON.stringify(outgoingMentionIds(draft)),
+    });
+    expect(response.status).toBe(200);
+    const message = await latestMessage(ticket.id);
+    expect(message.bodyHtml).toContain(`${MENTION_SPAN_OPEN}@Ana Stays</span>`);
+    expect(message.bodyHtml).not.toContain(`${MENTION_SPAN_OPEN}@Rita`);
+    expect(message.bodyHtml).not.toContain("Rita After");
+    expect(await mentionsOf(message.id)).toEqual([
+      { organizationId: author.orgId, mentionedUserId: ana.id },
+    ]);
+    expect(await prisma.notification.count({ where: { recipientUserId: rita.id } })).toBe(0);
+    expect(await prisma.notification.count({ where: { recipientUserId: ana.id } })).toBe(1);
+  });
+
+  it("K174: a name holding Markdown is inserted escaped, rendered as one span with no link, and recorded", async () => {
+    const author = await signedInAuthor();
+    const odd = await person("Zeta [docs](https://example.invalid) *star*", author.orgId);
+    const ticket = await seedTicket(author.orgId);
+
+    const draft = typeText(pick(typeText(internalDraft, "Hi "), odd), "please check");
+    expect(draft.text).not.toContain(`@${odd.name}`);
+    expect(outgoingMentionIds(draft)).toEqual([odd.id]);
+    const response = await post(ticket.id, {
+      mode: "internal",
+      body: draft.text,
+      mentions: JSON.stringify(outgoingMentionIds(draft)),
+    });
+    expect(response.status).toBe(200);
+    const message = await latestMessage(ticket.id);
+    expect(message.bodyHtml).toBe(`<p>Hi ${MENTION_SPAN_OPEN}@${odd.name}</span> please check</p>`);
+    expect(message.bodyHtml).not.toContain("<a");
+    expect(message.bodyHtml).not.toContain("<em");
+    expect(await mentionsOf(message.id)).toEqual([
+      { organizationId: author.orgId, mentionedUserId: odd.id },
     ]);
   });
 });

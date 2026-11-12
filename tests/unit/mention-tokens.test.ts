@@ -163,6 +163,29 @@ describe("punctuation and letters right after an inserted name (R2-1)", () => {
   });
 });
 
+// K172: an intact span is sent only on the mention boundary the renderer and the server use.
+describe("outgoingMentionIds follows the boundary rule (K172)", () => {
+  it("',' and '.' after the name still send the id; a letter after it or before the '@' does not", () => {
+    for (const ch of [",", "."]) {
+      const state = type(backspace(mention(type(internal, "Hi "), OMEGA)), ch);
+      expect(outgoingMentionIds(state), ch).toEqual(["u-omega"]);
+    }
+    const letterAfter = type(backspace(mention(type(internal, "Hi "), OMEGA)), "s");
+    expect(letterAfter.text).toBe("Hi @Omega Probes");
+    expect(ids(letterAfter)).toEqual(["u-omega"]);
+    expect(outgoingMentionIds(letterAfter)).toEqual([]);
+    const letterBefore = type(mention(type(internal, "Hi "), ZETA, "Ze"), "x", 3);
+    expect(letterBefore.text).toBe("Hi x@Zeta ");
+    expect(outgoingMentionIds(letterBefore)).toEqual([]);
+    // The strip still removes both inserted names (C7).
+    for (const state of [letterAfter, letterBefore]) {
+      const switched = mentionDraftReducer(state, { type: "setMode", mode: "public" });
+      expect(switched.text).not.toContain("Omega");
+      expect(switched.text).not.toContain("Zeta");
+    }
+  });
+});
+
 describe("partial deletion inside an inserted name (R2-1)", () => {
   it("a character typed inside the name removes the whole name, keeps the typed character and drops the id", () => {
     const inserted = mention(type(internal, "Hi "), OMEGA);

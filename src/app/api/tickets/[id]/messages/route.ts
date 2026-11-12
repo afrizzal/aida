@@ -11,7 +11,7 @@ import { recordAuditEvent } from "@/lib/audit/record-audit-event";
 import { getEmailSettings } from "@/lib/channels/email/settings";
 import { classifyGateFailure, gateFailureStatus } from "@/lib/http/gate-failure";
 import { resolveActiveProvider } from "@/lib/llm/active-provider";
-import { renderMarkdown } from "@/lib/markdown/render";
+import { renderMarkdownWithMentions } from "@/lib/markdown/render";
 import { AccessDeniedError, findActiveMembership } from "@/lib/membership";
 import {
   MentionError,
@@ -163,10 +163,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       // message.create rather than after it, because bodyHtml is computed at create time and
       // needs the validated names; the writes below still follow the create in this transaction.
       // Internal notes only (D-21; parseMentionField already refused ids on a public reply).
-      const mentioned: MentionedMember[] =
+      const resolved: MentionedMember[] =
         mode === "internal" && mentionIds.length > 0
           ? await resolveMentionedMembers(tx, orgId, session.user.id, mentionIds)
           : [];
+      // Run decision K172 (review d-WR-2): a member is recorded and notified only when the body
+      // shows their current display name as a mention, on the boundary rule of
+      // src/lib/mentions/mention-syntax.ts; the renderer reports the names it wrapped. Any other
+      // id (a body without the name, "@Namex", a member renamed since the composer loaded the
+      // list) is dropped and notifies nobody.
+      const rendered = renderMarkdownWithMentions(body, {
+        mentionNames: resolved.map((m) => m.displayName),
+      });
+      const mentioned = resolved.filter((m) => rendered.mentionedNames.includes(m.displayName));
 
       const message = await tx.message.create({
         data: {
@@ -176,7 +185,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           visibility: mode === "internal" ? "INTERNAL" : "PUBLIC",
           authorUserId: session.user.id,
           bodyMarkdown: body,
-          bodyHtml: renderMarkdown(body, { mentionNames: mentioned.map((m) => m.displayName) }),
+          bodyHtml: rendered.html,
           deliveryStatus: shouldQueue ? "QUEUED" : undefined,
         },
       });
