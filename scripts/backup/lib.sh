@@ -87,8 +87,15 @@ valid_lease_holder() {
 PGCONNECT_TIMEOUT=${PGCONNECT_TIMEOUT:-10}
 export PGCONNECT_TIMEOUT
 
-# True once BACKUP_RUN_DEADLINE (UTC epoch seconds, set by aida-backup.sh) has passed.
+# True once BACKUP_RUN_DEADLINE (UTC epoch seconds, set by aida-backup.sh) has passed, or once
+# `bounded` recorded that timeout(1) ended a command at it (BACKUP_DEADLINE_MARK exists, K177).
+# The mark comes first: timeout(1) counts on the monotonic clock, while the wall clock read here
+# can be stepped back by the host's or a VM's time sync. A command ended a few milliseconds past
+# the deadline then read as ended before it, and the run reported the step's own failure.
 deadline_passed() {
+  if [ -n "${BACKUP_DEADLINE_MARK:-}" ] && [ -e "$BACKUP_DEADLINE_MARK" ]; then
+    return 0
+  fi
   is_uint "${BACKUP_RUN_DEADLINE:-}" || return 1
   [ "$(date -u +%s)" -ge "$BACKUP_RUN_DEADLINE" ]
 }
@@ -96,11 +103,19 @@ deadline_passed() {
 # bounded <command...>: runs the command. While BACKUP_RUN_DEADLINE is set and timeout(1)
 # exists, the command gets TERM at the deadline (at least 1 s from now) and KILL 10 s later,
 # so a hung psql, pg_dump, pg_restore, find or tar cannot hold a run past its deadline (K143).
+# Exit 124 is timeout(1)'s own status for a command it ended with TERM (none of these tools
+# exits 124 itself); bounded then creates BACKUP_DEADLINE_MARK when it is set (K177). Returns
+# the command's status (124 when timed out), as before.
 bounded() {
   if is_uint "${BACKUP_RUN_DEADLINE:-}" && command -v timeout >/dev/null 2>&1; then
     _bd_left=$((BACKUP_RUN_DEADLINE - $(date -u +%s)))
     [ "$_bd_left" -ge 1 ] || _bd_left=1
-    timeout -k 10 "$_bd_left" "$@"
+    _bd_rc=0
+    timeout -k 10 "$_bd_left" "$@" || _bd_rc=$?
+    if [ "$_bd_rc" = 124 ] && [ -n "${BACKUP_DEADLINE_MARK:-}" ]; then
+      (: >"$BACKUP_DEADLINE_MARK") 2>/dev/null || :
+    fi
+    return "$_bd_rc"
   else
     "$@"
   fi

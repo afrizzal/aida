@@ -385,6 +385,84 @@ async function runWithAttachmentLocked(
   );
 }
 
+/** True while a session named aida-backup (the run's pg_dump) waits for a lock on "Attachment". */
+async function dumpWaitsOnAttachment(): Promise<boolean> {
+  const rows = await prisma.$queryRaw<{ n: bigint }[]>`
+    SELECT count(*) AS n FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+    WHERE a.application_name = 'aida-backup' AND a.datname = current_database()
+      AND l.locktype = 'relation' AND l.relation = '"Attachment"'::regclass AND NOT l.granted`;
+  return Number(rows[0]?.n ?? 0) > 0;
+}
+
+/**
+ * Like runWithAttachmentLocked, and watches the database while the run lasts: `dumpWaited` is true
+ * once the run's pg_dump was seen waiting on the held lock (K177: the deadline then stops a dump
+ * that really waits, not an earlier step). `onDumpWaiting` runs once at that moment.
+ */
+async function runWithAttachmentLockedWatched(
+  c: Case,
+  env: Record<string, string>,
+  onDumpWaiting?: () => Promise<void>,
+): Promise<{ result: RunResult; dumpWaited: boolean }> {
+  let dumpWaited = false;
+  const result = await prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRawUnsafe('LOCK TABLE "Attachment" IN ACCESS EXCLUSIVE MODE');
+      const { done } = runIn(c, { env: { BACKUP_DUMP_LOCK_TIMEOUT: "2s", ...env } });
+      let finished = false;
+      void done.then(
+        () => {
+          finished = true;
+        },
+        () => {
+          finished = true;
+        },
+      );
+      while (!finished) {
+        if (await dumpWaitsOnAttachment()) {
+          dumpWaited = true;
+          await onDumpWaiting?.();
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return done;
+    },
+    { timeout: 120_000, maxWait: 10_000 },
+  );
+  return { result, dumpWaited };
+}
+
+/**
+ * K177: a `date` for the runner that reads 2 s behind the real wall clock once `stepBack()` ran,
+ * as a VM's time sync stepping the guest clock back (a step of -0.1 s was measured in the test
+ * VM). The VM's own clock is never touched. Only `date -u +%s` (the deadline arithmetic) is
+ * shifted; every other form passes through. Returns the PATH that puts it first.
+ */
+async function steppedBackClock(): Promise<{ path: string; stepBack(): Promise<void> }> {
+  const dir = await makeTestDir(pauseRoot, "clock-");
+  const inRunner = `/pause/${path.basename(dir)}`;
+  await writeFile(
+    path.join(dir, "date"),
+    `#!/bin/sh
+if [ "$#" = 2 ] && [ "$1" = -u ] && [ "$2" = +%s ] && [ -e ${inRunner}/stepped-back ]; then
+  printf '%s\\n' "$(($(/bin/date -u +%s) - 2))"
+  exit 0
+fi
+exec /bin/date "$@"
+`,
+  );
+  await chmod(path.join(dir, "date"), 0o755);
+  const probe = await activeRunner().exec(["sh", "-c", 'printf "%s" "$PATH"']);
+  expect(probe.exitCode).toBe(0);
+  return {
+    path: `${inRunner}:${probe.stdout}`,
+    async stepBack() {
+      await writeFile(path.join(dir, "stepped-back"), "");
+    },
+  };
+}
+
 /** Output that names no password and no path beyond the set id (D-04, T-09-19a). */
 function expectPrivateOutput(c: Case, result: RunResult): void {
   const text = `${result.stdout}\n${result.stderr}`;
@@ -450,15 +528,52 @@ describe("failure categories with real causes (P11)", () => {
     async () => {
       const c = await newCase();
       const t0 = Date.now();
-      const result = await runWithAttachmentLocked(c, {
+      const { result, dumpWaited } = await runWithAttachmentLockedWatched(c, {
         BACKUP_DUMP_LOCK_TIMEOUT: "300s",
         BACKUP_MAX_RUN_SECONDS: "8",
       });
       const seconds = (Date.now() - t0) / 1000;
+      expect(dumpWaited, result.stdout).toBe(true);
       expect(seconds, result.stdout).toBeLessThan(45);
       expect(result.exitCode, result.stdout).toBe(2);
       expect(result.stdout).toContain("[backup] backup aborted: run deadline passed");
       expect(result.stdout).toContain("[backup] backup failed: unknown");
+      expect(await lastRun()).toEqual({
+        finishedAt: expect.stringMatching(FINISHED_AT),
+        result: "failed",
+        setId: null,
+        category: "unknown",
+      });
+      expect(await unrecordedFiles(c)).toEqual([]);
+      expect(unrecordedLines(result)).toEqual([]);
+      expect(result.stderr).toBe("");
+      expect(await publishedSets(c)).toEqual([]);
+      expect(await tmpDirs(c)).toEqual([]);
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    "run deadline (K177): when the wall clock steps back 2 s while the dump waits on the held lock, the deadline that timeout(1) enforced still wins: the run logs the deadline, exits 2 and records failed, category unknown",
+    async () => {
+      // The full-suite failure of the K143 case: timeout(1) ends the dump at the deadline on the
+      // monotonic clock, and the wall clock read afterwards, stepped back by the VM's time sync,
+      // was still before the deadline, so the run reported "backup failed: dump".
+      const c = await newCase();
+      const clock = await steppedBackClock();
+      const t0 = Date.now();
+      const { result, dumpWaited } = await runWithAttachmentLockedWatched(
+        c,
+        { BACKUP_DUMP_LOCK_TIMEOUT: "300s", BACKUP_MAX_RUN_SECONDS: "8", PATH: clock.path },
+        clock.stepBack,
+      );
+      const seconds = (Date.now() - t0) / 1000;
+      expect(dumpWaited, result.stdout).toBe(true);
+      expect(seconds, result.stdout).toBeLessThan(45);
+      expect(result.exitCode, result.stdout).toBe(2);
+      expect(result.stdout).toContain("[backup] backup aborted: run deadline passed");
+      expect(result.stdout).toContain("[backup] backup failed: unknown");
+      expect(result.stdout).not.toContain("[backup] backup failed: dump");
       expect(await lastRun()).toEqual({
         finishedAt: expect.stringMatching(FINISHED_AT),
         result: "failed",

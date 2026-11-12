@@ -34,8 +34,9 @@
 #
 # Run deadline (K143): a run may take BACKUP_MAX_RUN_SECONDS. psql, pg_dump, pg_restore, find and
 # tar run under lib.sh `bounded`, so a hung one ends at the deadline and the run fails with
-# 'backup aborted: run deadline passed' and a recorded status. Every libpq connect gives up after
-# PGCONNECT_TIMEOUT seconds (lib.sh, default 10). The lease renewal stops when the main script is
+# 'backup aborted: run deadline passed' and a recorded status. A step that timeout(1) ended there
+# counts as past the deadline even when the wall clock was stepped back meanwhile (K177). Every
+# libpq connect gives up after PGCONNECT_TIMEOUT seconds (lib.sh, default 10). The lease renewal stops when the main script is
 # gone, so a killed run's lease expires within one TTL; it also stops renewing
 # BACKUP_RUN_GRACE_SECONDS after the deadline (the run makes no progress) and signals the run. A
 # renewal error is retried every few seconds until a third of the TTL is left on the lease; only a
@@ -85,6 +86,9 @@ BACKUP_MAX_RUN_SECONDS=${BACKUP_MAX_RUN_SECONDS:-21600}
 BACKUP_CLEANUP_SECONDS=60
 BACKUP_RUN_GRACE_SECONDS=120
 BACKUP_RUN_DEADLINE=''
+# lib.sh bounded creates this file when timeout(1) ended a command at the deadline (K177); set
+# once the run's own temporary directory exists, never taken from the environment.
+BACKUP_DEADLINE_MARK=''
 
 RUN_TMP=''
 SET_ID=''
@@ -391,6 +395,8 @@ printf '%s\n' "$BACKUP_DUMP_LOCK_TIMEOUT" | grep -Eqx '[0-9]{1,6}(ms|s|min)?' ||
 }
 
 RUN_TMP=$(mktemp -d) || fail unknown
+BACKUP_DEADLINE_MARK="$RUN_TMP/deadline.reached"
+export BACKUP_DEADLINE_MARK
 BACKUP_ERRLOG="$RUN_TMP/errors.log"
 : >"$BACKUP_ERRLOG"
 export BACKUP_ERRLOG
