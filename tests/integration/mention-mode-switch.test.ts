@@ -338,3 +338,67 @@ describe("a switch to public keeps an email address that contains an inserted na
     expect(await prisma.messageMention.count({ where: { organizationId: author.orgId } })).toBe(0);
   });
 });
+
+// Review d-IN-7 (C7 at the public send): a copy of an inserted name pasted back after the switch is
+// removed by the composer's send guard (mentionDraftReducer `guardPublicSend`, which the composer
+// dispatches before a public send while inserted names are known), so it never reaches the stored
+// PUBLIC body or the customer's email.
+describe("a name pasted back after the switch is removed before the public send (d-IN-7)", () => {
+  it("the guard removes the copy, shows the note, and the customer's email carries no inserted name", async () => {
+    const author = await signedInAuthor();
+    const zeta = await member("Zeta Paste", author.orgId);
+    await saveEmailSettings(scopedDb(author.orgId), author.orgId, {
+      enabled: true,
+      fromAddress: "support@mention-switch.test",
+      smtpHost: "fake-smtp.invalid",
+      smtpPort: 2525,
+      smtpSecure: false,
+      smtpUser: "fake",
+    });
+    const contactEmail = `switch-contact-${randomUUID()}@example.test`;
+    const ticket = await seedContactTicket(author.orgId, { contactEmail });
+
+    let draft = mentionDraftReducer(initialMentionDraft, { type: "setMode", mode: "internal" });
+    draft = typeText(draft, "Hi ");
+    draft = pick(draft, zeta);
+    draft = mentionDraftReducer(draft, { type: "setMode", mode: "public" });
+    expect(draft.text).toBe("Hi  ");
+    // The agent pastes the name back after the switch (no span), and the note is gone.
+    draft = { ...typeText(draft, "our colleague @Zeta Paste will call you."), switchNote: false };
+    expect(draft.text).toContain("@Zeta Paste");
+
+    // What the composer does on Send while it knows inserted names: the guard first.
+    const guarded = mentionDraftReducer(draft, { type: "guardPublicSend" });
+    expect(guarded).not.toBe(draft);
+    expect(guarded.switchNote).toBe(true);
+    expect(guarded.text).toBe("Hi  our colleague  will call you.");
+    // The next Send finds nothing to remove and sends.
+    expect(mentionDraftReducer(guarded, { type: "guardPublicSend" })).toBe(guarded);
+
+    const response = await messagesPost(
+      new Request(`http://localhost/api/tickets/${ticket.id}/messages`, {
+        method: "POST",
+        body: composerForm(guarded),
+      }),
+      { params: Promise.resolve({ id: ticket.id }) },
+    );
+    expect(response.status).toBe(200);
+    const stored = await prisma.message.findFirstOrThrow({
+      where: { ticketId: ticket.id, direction: "OUTBOUND" },
+      orderBy: { seq: "desc" },
+      select: { visibility: true, bodyMarkdown: true, bodyHtml: true },
+    });
+    expect(queue.sent).toHaveLength(1);
+    await emailOutboundSendHandler(queue.sent[0].data as { messageId: string });
+    expect(transport.sent).toHaveLength(1);
+    const mail = transport.sent[0];
+
+    expect(stored.visibility).toBe("PUBLIC");
+    expect(mail.to).toBe(contactEmail);
+    for (const part of [stored.bodyMarkdown, stored.bodyHtml, mail.text ?? "", mail.html ?? ""]) {
+      expect(part).toContain("will call you.");
+      expect(part).not.toContain("Zeta");
+      expect(part).not.toContain(zeta.email);
+    }
+  });
+});

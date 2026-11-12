@@ -428,6 +428,36 @@ describe("the mention cap in the composer (d-IN-3)", () => {
   });
 });
 
+// Review d-IN-7 (C7 at the public send): a copy of an inserted name that came back after the
+// switch (a paste, an undo) is removed before a public reply is sent, and the switch note shows.
+describe("the public send guard (d-IN-7, C7)", () => {
+  it("guardPublicSend strips a copy pasted after the switch and turns the note on; a clean text is left as it is", () => {
+    const switched = mentionDraftReducer(mention(type(internal, "Hi "), ZETA, "Ze"), {
+      type: "setMode",
+      mode: "public",
+    });
+    expect(switched.text).toBe("Hi  ");
+    const pasted = { ...type(switched, "ask @Zeta, or @someone"), switchNote: false };
+    expect(pasted.text).toBe("Hi  ask @Zeta, or @someone");
+    const guarded = mentionDraftReducer(pasted, { type: "guardPublicSend" });
+    expect(guarded.text).toBe("Hi  ask , or @someone");
+    expect(guarded.switchNote).toBe(true);
+    expect(guarded.mode).toBe("public");
+    // Nothing left to remove: the same state, so the composer sends it.
+    expect(mentionDraftReducer(guarded, { type: "guardPublicSend" })).toBe(guarded);
+    // An email address that holds the name is not a mention (K173) and stays.
+    const address = type(switched, "write to orders@Zeta.example");
+    expect(mentionDraftReducer(address, { type: "guardPublicSend" })).toBe(address);
+  });
+
+  it("does nothing in internal mode or without inserted names", () => {
+    const note = type(mention(type(internal, "Hi "), ZETA, "Ze"), "and @Zeta");
+    expect(mentionDraftReducer(note, { type: "guardPublicSend" })).toBe(note);
+    const plain = type({ ...initialMentionDraft }, "@Zeta typed by hand");
+    expect(mentionDraftReducer(plain, { type: "guardPublicSend" })).toBe(plain);
+  });
+});
+
 describe("mentionDraftReducer", () => {
   it("setMode internal to public returns the stripped text, empty spans and the switch note on", () => {
     const state = type(backspace(mention(type(internal, "Hi "), ZETA_PRIME)), ", check");

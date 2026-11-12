@@ -282,6 +282,13 @@ export function Composer({ ticketId, insertedText, onInsertedConsumed }: Compose
 
   async function handleSubmit() {
     if (!body.trim() && files.length === 0) return;
+    // C7 at the send (review d-IN-7): a public reply never carries a name inserted since the last
+    // send. When a copy came back after the switch (a paste, an undo), the guard removes it and
+    // shows the switch note instead of sending; the agent reads the reply and sends again.
+    if (mentionDraftReducer(draft, { type: "guardPublicSend" }) !== draft) {
+      dispatch({ type: "guardPublicSend" });
+      return;
+    }
     setIsSending(true);
 
     const form = new FormData();

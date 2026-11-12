@@ -400,6 +400,7 @@ export type MentionDraftAction =
   | { type: "insert"; query: MentionQuery; member: MentionMember }
   | { type: "setMode"; mode: MentionMode }
   | { type: "loadDraft"; text: string }
+  | { type: "guardPublicSend" }
   | { type: "sent" };
 
 /**
@@ -407,6 +408,10 @@ export type MentionDraftAction =
  * (D-21). setMode: internal to public replaces the text with stripMentionTokens, clears the spans
  * and turns the switch note on when something was removed; public to internal turns it off.
  * loadDraft: an AI draft replaces the body and forces public with no span and no inserted name.
+ * guardPublicSend (review d-IN-7, C7 at the send): in public mode, with names inserted since the
+ * last send, removes any copy of them that came back after the switch (a paste, an undo), on the
+ * same boundary rule as the switch, and turns the switch note on; with nothing to remove it
+ * returns the same state, which the composer then sends.
  * sent: clears text, spans, inserted names, the note and the draft flag.
  * An insert of a member not yet mentioned changes nothing once mentionCapReached (d-IN-3).
  */
@@ -458,6 +463,12 @@ export function mentionDraftReducer(
         fromDraft: true,
         caret: action.text.length,
       };
+    case "guardPublicSend": {
+      if (state.mode !== "public" || state.insertedNames.length === 0) return state;
+      const text = stripMentionTokens(state.text, [], state.insertedNames);
+      if (text === state.text) return state;
+      return { ...state, text, spans: [], switchNote: true, caret: text.length };
+    }
     case "sent":
       return {
         ...state,
