@@ -1,4 +1,4 @@
-import type { Element, ElementContent, Root } from "hast";
+import type { Element, ElementContent, Root, Text } from "hast";
 import type { Schema } from "hast-util-sanitize";
 import rehypeParse from "rehype-parse";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
@@ -8,6 +8,7 @@ import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import { visit } from "unist-util-visit";
+import { isMentionEndBoundary, isMentionStartBoundary } from "../mentions/mention-syntax";
 
 // Single shared sanitization schema: github-style defaultSchema plus safe
 // rel/target attributes on links. Ticket text (agent + requester) is
@@ -73,9 +74,6 @@ export const renderSanitizeSchema: Schema = {
 };
 
 const MENTION_SKIP_TAGS = new Set(["a", "code", "pre"]);
-const NAME_CHAR_BEFORE = /[\p{L}\p{N}_]$/u;
-const NAME_CHAR_AFTER = /^[\p{L}\p{N}_]/u;
-
 function mentionSpan(name: string): Element {
   return {
     type: "element",
@@ -86,32 +84,61 @@ function mentionSpan(name: string): Element {
 }
 
 /**
- * Splits one text value at every `@name` occurrence (names sorted longest first). An occurrence
- * counts only at a word boundary: no letter, digit or `_` right before the `@` or right after the
- * name, so "@Anabel" is not "@Ana". Returns null when nothing matched.
+ * Whether the edges of a text node are mention boundaries, read on the Markdown source (review
+ * d-IN-1): the source character right before the node and right after it. So "**@Ana**" is no
+ * mention ("*" before the "@"), while "**bold** @Ana" is. A node without a source position has no
+ * boundary at its edges (fail closed: no span).
  */
-function splitMentions(value: string, names: readonly string[]): ElementContent[] | null {
+interface TextEdges {
+  start: boolean;
+  end: boolean;
+}
+
+function textEdges(node: Text, source: string): TextEdges {
+  const start = node.position?.start.offset;
+  const end = node.position?.end.offset;
+  return {
+    start: start !== undefined && isMentionStartBoundary(source, start),
+    end: end !== undefined && isMentionEndBoundary(source, end),
+  };
+}
+
+/**
+ * Splits one text value at every `@name` occurrence (names sorted longest first). An occurrence
+ * counts only on the boundary rule of src/lib/mentions/mention-syntax.ts: whitespace or the start
+ * before the `@`, and no letter, combining mark, digit or `_` after the name, so "@Anabel" is not
+ * "@Ana". At the node's own edges the source decides (textEdges). Every wrapped name is added to
+ * `matched`. Returns null when nothing matched.
+ */
+function splitMentions(
+  value: string,
+  names: readonly string[],
+  edges: TextEdges,
+  matched: Set<string>,
+): ElementContent[] | null {
   const out: ElementContent[] = [];
   let last = 0;
   let at = value.indexOf("@");
   while (at !== -1) {
-    let matched: string | undefined;
-    if (!NAME_CHAR_BEFORE.test(value.slice(Math.max(0, at - 2), at))) {
+    let hit: string | undefined;
+    if (at === 0 ? edges.start : isMentionStartBoundary(value, at)) {
       for (const name of names) {
         const end = at + 1 + name.length;
-        if (value.startsWith(name, at + 1) && !NAME_CHAR_AFTER.test(value.slice(end, end + 2))) {
-          matched = name;
+        if (!value.startsWith(name, at + 1)) continue;
+        if (end === value.length ? edges.end : isMentionEndBoundary(value, end)) {
+          hit = name;
           break;
         }
       }
     }
-    if (matched === undefined) {
+    if (hit === undefined) {
       at = value.indexOf("@", at + 1);
       continue;
     }
     if (at > last) out.push({ type: "text", value: value.slice(last, at) });
-    out.push(mentionSpan(matched));
-    last = at + 1 + matched.length;
+    out.push(mentionSpan(hit));
+    matched.add(hit);
+    last = at + 1 + hit.length;
     at = value.indexOf("@", last);
   }
   if (out.length === 0) return null;
@@ -119,15 +146,20 @@ function splitMentions(value: string, names: readonly string[]): ElementContent[
   return out;
 }
 
-function wrapMentions(parent: Root | Element, names: readonly string[]): void {
+function wrapMentions(
+  parent: Root | Element,
+  names: readonly string[],
+  source: string,
+  matched: Set<string>,
+): void {
   const next: (typeof parent.children)[number][] = [];
   let changed = false;
   for (const child of parent.children) {
     if (child.type === "element") {
-      if (!MENTION_SKIP_TAGS.has(child.tagName)) wrapMentions(child, names);
+      if (!MENTION_SKIP_TAGS.has(child.tagName)) wrapMentions(child, names, source, matched);
       next.push(child);
     } else if (child.type === "text") {
-      const parts = splitMentions(child.value, names);
+      const parts = splitMentions(child.value, names, textEdges(child, source), matched);
       if (parts) {
         next.push(...parts);
         changed = true;
@@ -143,16 +175,21 @@ function wrapMentions(parent: Root | Element, names: readonly string[]): void {
 
 interface MentionFileData {
   mentionNames?: readonly string[];
+  /** Written by rehypeMentions: the names it wrapped in a span. */
+  mentionMatched?: Set<string>;
 }
 
 /** Before the sanitize pass: wraps the validated names (passed in the file's data) in spans. */
 function rehypeMentions() {
-  return (tree: Root, file: { data: unknown }) => {
-    const raw = (file.data as MentionFileData).mentionNames ?? [];
+  return (tree: Root, file: { data: unknown; value: unknown }) => {
+    const data = file.data as MentionFileData;
+    const raw = data.mentionNames ?? [];
     const names = [...new Set(raw)]
       .filter((name) => typeof name === "string" && name.trim() !== "" && !name.includes("@"))
       .sort((a, b) => b.length - a.length);
-    if (names.length > 0) wrapMentions(tree, names);
+    const matched = new Set<string>();
+    if (names.length > 0) wrapMentions(tree, names, String(file.value ?? ""), matched);
+    data.mentionMatched = matched;
   };
 }
 

@@ -15,6 +15,7 @@ import {
   renderTaskMarkdown,
   sanitizeEmailHtml,
 } from "@/lib/markdown/render";
+import { isMentionAt } from "@/lib/mentions/mention-syntax";
 
 describe("renderMarkdown", () => {
   it("renders bold markdown to <strong>", () => {
@@ -365,8 +366,11 @@ describe("renderMarkdown mentions (D-20)", () => {
     const markdown = 'Hi <span class="font-semibold text-primary-emphasis">@Ana</span> there';
     expect(spanCount(renderMarkdown(markdown))).toBe(0);
     expect(renderMarkdown(markdown)).not.toContain("text-primary-emphasis");
-    // With names, only the text node becomes a span: still exactly one.
-    expect(spanCount(renderMarkdown(markdown, { mentionNames: ["Ana"] }))).toBe(1);
+    // With names, only a text node can become a span. Here "@Ana" follows ">" in the source, so
+    // it is no mention under the boundary rule (d-IN-1); after a space it is exactly one span.
+    expect(spanCount(renderMarkdown(markdown, { mentionNames: ["Ana"] }))).toBe(0);
+    const spaced = 'Hi <span class="font-semibold text-primary-emphasis"> @Ana</span> there';
+    expect(spanCount(renderMarkdown(spaced, { mentionNames: ["Ana"] }))).toBe(1);
   });
 
   it("never lets another class or attribute on a span survive sanitization", () => {
@@ -408,6 +412,58 @@ describe("renderMarkdown mentions (D-20)", () => {
     expect(spanCount(html)).toBe(1);
     const withEmail = renderMarkdown("hi @bo@example.test", { mentionNames: ["bo@example.test"] });
     expect(spanCount(withEmail)).toBe(0);
+  });
+
+  // Review d-IN-1: the renderer follows the one boundary rule of mention-syntax.ts, read on the
+  // Markdown source: whitespace or the start before the "@", no letter, mark, digit or "_" after.
+  it("d-IN-1: wraps only on the boundary rule, read on the Markdown source around each text node", () => {
+    const names = { mentionNames: ["Ana"] };
+    for (const refused of [
+      "ask (@Ana) now",
+      "**@Ana**",
+      "x **@Ana** y",
+      "see /@Ana/ path",
+      "hi @Ana\u0301 there",
+      "hi @Ana_b",
+      "mail x@Ana now",
+    ]) {
+      expect(spanCount(renderMarkdown(refused, names)), refused).toBe(0);
+    }
+    for (const wrapped of [
+      "**bold** @Ana",
+      "- @Ana",
+      "> @Ana",
+      "hi\n@Ana",
+      "line  \n@Ana",
+      "@Ana**!**",
+      "@Ana, @Ana.",
+      "| a |\n| --- |\n| @Ana |",
+    ]) {
+      expect(spanCount(renderMarkdown(wrapped, names)), wrapped).toBeGreaterThan(0);
+    }
+  });
+
+  it("d-IN-1: on plain text the renderer wraps exactly where isMentionAt finds the token", () => {
+    const samples = [
+      "@Ana",
+      "hi @Ana",
+      "hi @Ana, ok",
+      "hi @Anabel",
+      "hi @Ana1",
+      "hi @Ana_",
+      "hi @Ana\u0301",
+      "hi x@Ana",
+      "hi (@Ana)",
+      "hi /@Ana/",
+      "hi @Ana @Ana.",
+      "hi\t@Ana",
+      "orders@Ana-desk.example",
+    ];
+    for (const text of samples) {
+      let expected = 0;
+      for (let at = 0; at < text.length; at++) if (isMentionAt(text, at, "Ana")) expected++;
+      expect(spanCount(renderMarkdown(text, { mentionNames: ["Ana"] })), text).toBe(expected);
+    }
   });
 
   it("keeps the mention classes out of inbound email HTML (shared schema unchanged)", () => {

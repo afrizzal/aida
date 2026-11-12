@@ -19,6 +19,8 @@
 // The server re-validates everything (src/lib/mentions/mentions.ts, plan 10-07): this module only
 // keeps the composer from offering or sending what the server would refuse.
 
+import { isMentionStartBoundary } from "./mention-syntax";
+
 export type MentionMode = "public" | "internal";
 
 /** One inserted mention: text.slice(start, end) === "@" + name while it is intact. */
@@ -63,8 +65,9 @@ function isLetterOrDigitAt(text: string, index: number): boolean {
 }
 
 /**
- * The query after an "@" before the caret, or null. The "@" must sit at the start of the text or
- * after whitespace ("a@b" is not a trigger), must not belong to a span, and the query may hold
+ * The query after an "@" before the caret, or null. The "@" must sit on the start boundary of
+ * mention-syntax.ts, the start of the text or after whitespace ("a@b" is not a trigger), must not
+ * belong to a span, and the query may hold
  * single spaces (names have them) but no line break, no second "@", no leading space and no double
  * space.
  */
@@ -80,7 +83,7 @@ export function findMentionQuery(
     const ch = text[i];
     if (ch === "\n" || ch === "\r" || ch === "\t") return null;
     if (ch !== "@") continue;
-    if (i > 0 && !WHITESPACE.test(text[i - 1])) return null;
+    if (!isMentionStartBoundary(text, i)) return null;
     if (spans.some((span) => span.start <= i && i < span.end)) return null;
     const query = text.slice(i + 1, caret);
     if (query.startsWith(" ") || query.includes("  ")) return null;
