@@ -3,6 +3,7 @@
 // text edits carry the caret the textarea reports after the change, as the composer's change
 // handler does.
 import { describe, expect, it } from "vitest";
+import { renderMarkdown } from "@/lib/markdown/render";
 import {
   applyTextEdit,
   filterMentionCandidates,
@@ -304,6 +305,64 @@ describe("the strip keeps text that is not a mention (K173)", () => {
     expect(switched.switchNote).toBe(true);
     expect(switched.text).toBe("Hi  please write to orders@sales-desk.example");
     expect(outgoingMentionIds(switched)).toEqual([]);
+  });
+});
+
+// K174 (review d-WR-4): a member name is inserted escaped for Markdown, so the parsed text holds
+// the name verbatim and the renderer wraps it; nothing in the name becomes markup.
+describe("inserted names are escaped for Markdown (K174)", () => {
+  const SPAN_OPEN = '<span class="font-semibold text-primary-emphasis">';
+  const htmlText = (name: string) => name.replaceAll("&", "&#x26;").replaceAll("<", "&#x3C;");
+  const NAMES = [
+    "*Star*",
+    "**Bold** Bea",
+    "_Under_",
+    "snake_case_sam",
+    "Zeta [x](https://example.invalid)",
+    "Zeta [docs](https://example.invalid) more",
+    "`Code` Cy",
+    "~Tilde~ Ty",
+    "<b>Bo</b>",
+    "Amp &amp; Al",
+    "Back\\slash",
+    "www.example.com",
+    "Pipe | Pia",
+  ];
+
+  it("insertMention writes the escaped token, the span stays intact and its id is sent", () => {
+    for (const name of NAMES) {
+      const member: MentionMember = { userId: `u-${name}`, name };
+      const state = mention(type(internal, "Hi "), member, "");
+      expect(state.text, name).not.toBe(`Hi @${name} `);
+      expect(state.text.startsWith("Hi @"), name).toBe(true);
+      expect(state.text.endsWith(" "), name).toBe(true);
+      expect(state.spans, name).toHaveLength(1);
+      expect(isIntactSpan(state.text, state.spans[0]), name).toBe(true);
+      expect(outgoingMentionIds(state), name).toEqual([member.userId]);
+    }
+  });
+
+  it("the renderer wraps the inserted name as one span, with no link, emphasis, code or tag from the name", () => {
+    for (const name of NAMES) {
+      const member: MentionMember = { userId: `u-${name}`, name };
+      const state = type(mention(type(internal, "Hi "), member, ""), "please check");
+      const html = renderMarkdown(state.text, { mentionNames: [name] });
+      expect(html.match(/<span\b/g), name).toHaveLength(1);
+      expect(html, name).toContain(`${SPAN_OPEN}@${htmlText(name)}</span> please check`);
+      for (const tag of ["<a", "<em", "<strong", "<code", "<del", "<b>", "<table"]) {
+        expect(html, `${name} ${tag}`).not.toContain(tag);
+      }
+    }
+  });
+
+  it("an unescaped copy of such a name is not a mention, and the strip removes escaped and unescaped copies", () => {
+    expect(renderMarkdown("Hi @*Star* ok", { mentionNames: ["*Star*"] })).not.toContain("<span");
+    const member: MentionMember = { userId: "u-star", name: "*Star*" };
+    const state = mention(type(internal, "Hi "), member, "");
+    const typed = type(state, "and @*Star*, and @\\*Star\\*.");
+    expect(typed.text).toBe("Hi @\\*Star\\* and @*Star*, and @\\*Star\\*.");
+    const switched = mentionDraftReducer(typed, { type: "setMode", mode: "public" });
+    expect(switched.text).not.toContain("Star");
   });
 });
 

@@ -1,5 +1,5 @@
-// The one syntax of an `@` mention (Phase 10, AIDA-45, D-20; review d-IN-1, run decisions K172 and
-// K173). Pure and without imports, so the client composer (composer-tokens.ts), the renderer
+// The one syntax of an `@` mention (Phase 10, AIDA-45, D-20; review d-IN-1, run decisions K172 to
+// K174). Pure and without imports, so the client composer (composer-tokens.ts), the renderer
 // (src/lib/markdown/render.ts) and the server (mentions.ts) share it.
 //
 // The boundary rule. "@" + name is a mention in a text only when
@@ -18,6 +18,10 @@
 //   - the renderer: it wraps a name only on both boundaries, read on the Markdown source around
 //     each text node (so "**@Zeta**" is no mention either), and the names it wrapped are the only
 //     mentions the server records (K172).
+//
+// The token (K174). A name is inserted as mentionToken(name) = "@" + escapeMentionName(name): every
+// character that Markdown could turn into markup is backslash-escaped, so the parsed text node holds
+// the name verbatim and the renderer, which matches names on parsed text, finds it.
 
 const WHITESPACE = /\s/u;
 const NAME_CHAR = /[\p{L}\p{M}\p{N}_]/u;
@@ -48,4 +52,23 @@ export function isMentionAt(text: string, at: number, body: string): boolean {
     isMentionStartBoundary(text, at) &&
     isMentionEndBoundary(text, at + 1 + body.length)
   );
+}
+
+// The characters Markdown (CommonMark plus GFM) can turn into markup inside a line that does not
+// start with them: escapes, code, emphasis, strikethrough, links, images and footnotes (through
+// "["), autolinks and raw HTML, character references, table cells, and the "scheme:" of an autolink
+// literal. Escaping any ASCII punctuation is valid CommonMark, so over-escaping never shows.
+const MARKDOWN_SIGNIFICANT = /[\\`*_[\]<>~&|:]/g;
+
+/**
+ * The name as Markdown source whose parsed text is the name again (K174): every Markdown-significant
+ * character is backslash-escaped, and the "." of a "www." so GFM does not turn it into a link.
+ */
+export function escapeMentionName(name: string): string {
+  return name.replace(MARKDOWN_SIGNIFICANT, "\\$&").replace(/(www)\./giu, "$1\\.");
+}
+
+/** The text an insertion writes for a member: "@" plus the escaped name. */
+export function mentionToken(name: string): string {
+  return `@${escapeMentionName(name)}`;
 }

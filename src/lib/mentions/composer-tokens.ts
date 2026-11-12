@@ -3,8 +3,10 @@
 // composer (src/components/tickets/composer.tsx) holds its whole draft in mentionDraftReducer.
 //
 // The model. The draft is the text plus one span per inserted mention, { userId, name, start, end },
-// where text.slice(start, end) is exactly "@" + name. Inserting a member replaces the typed "@query"
-// with "@{name} " and records a span over "@{name}" only, never the trailing space. Every later text
+// where text.slice(start, end) is exactly mentionToken(name): "@" plus the name escaped for Markdown
+// (run decision K174, mention-syntax.ts), so a name holding "*", "_" or "[x](url)" is never parsed
+// as markup and the renderer finds it. Inserting a member replaces the typed "@query" with the token
+// and a space, and records a span over the token only, never the trailing space. Every later text
 // change goes through applyTextEdit: spans outside the edited range are kept or shifted, and a span
 // the edit touches inside loses its remaining characters and its id, so a fragment of a member name
 // never stays behind. That gives the R3-2 two-step Backspace: the first Backspace after an insertion
@@ -19,11 +21,19 @@
 // The server re-validates everything (src/lib/mentions/mentions.ts, plan 10-07): this module only
 // keeps the composer from offering or sending what the server would refuse.
 
-import { isMentionAt, isMentionStartBoundary } from "./mention-syntax";
+import {
+  escapeMentionName,
+  isMentionAt,
+  isMentionStartBoundary,
+  mentionToken,
+} from "./mention-syntax";
 
 export type MentionMode = "public" | "internal";
 
-/** One inserted mention: text.slice(start, end) === "@" + name while it is intact. */
+/**
+ * One inserted mention: text.slice(start, end) === mentionToken(name) while it is intact. `name` is
+ * the member's display name as the server renders it, unescaped.
+ */
 export interface MentionSpan {
   userId: string;
   name: string;
@@ -47,12 +57,13 @@ export interface MentionQuery {
 /** The longest query after "@" that still counts as a trigger. */
 export const MAX_MENTION_QUERY_LENGTH = 64;
 
-/** The single token rule: the span's range holds exactly "@" + name. */
+/** The single token rule: the span's range holds exactly mentionToken(name). */
 export function isIntactSpan(text: string, span: MentionSpan): boolean {
   if (span.name === "") return false;
   if (span.start < 0 || span.end > text.length) return false;
-  if (span.end - span.start !== span.name.length + 1) return false;
-  return text.slice(span.start, span.end) === `@${span.name}`;
+  const token = mentionToken(span.name);
+  if (span.end - span.start !== token.length) return false;
+  return text.slice(span.start, span.end) === token;
 }
 
 const WHITESPACE = /\s/u;
@@ -153,7 +164,8 @@ function sortSpans(spans: MentionSpan[]): MentionSpan[] {
 }
 
 /**
- * Replaces the trigger "@query" with "@{name} ", records a span over "@{name}" (not the space),
+ * Replaces the trigger "@query" with mentionToken(name) and a space (the name escaped for Markdown,
+ * K174), records a span over the token (not the space),
  * shifts later spans and returns the caret after the space. A query that no longer matches the
  * text, or an empty name, changes nothing.
  */
@@ -168,7 +180,7 @@ export function insertMention(
   if (query.start < 0 || query.end > text.length || query.start >= query.end) return unchanged;
   if (text.slice(query.start, query.end) !== `@${query.query}`) return unchanged;
 
-  const token = `@${member.name}`;
+  const token = mentionToken(member.name);
   const replacement = `${token} `;
   const delta = replacement.length - (query.end - query.start);
   const spans: MentionSpan[] = [];
@@ -302,16 +314,18 @@ export function stripMentionTokens(
   const intact = spans.filter((span) => isIntactSpan(text, span)).sort((a, b) => b.start - a.start);
   for (const span of intact) out = out.slice(0, span.start) + out.slice(span.end);
 
+  // Each name as the composer writes it (escaped, K174) and as it would be pasted unescaped.
   const names = [...new Set([...insertedNames, ...spans.map((span) => span.name)])]
     .filter((name) => name !== "")
-    .sort((a, b) => b.length - a.length);
-  if (names.length === 0) return out;
+    .flatMap((name) => [escapeMentionName(name), name]);
+  const bodies = [...new Set(names)].sort((a, b) => b.length - a.length);
+  if (bodies.length === 0) return out;
 
   let result = "";
   let i = 0;
   while (i < out.length) {
     if (out[i] === "@" && isMentionStartBoundary(out, i)) {
-      const hit = names.find((name) => isMentionAt(out, i, name));
+      const hit = bodies.find((body) => isMentionAt(out, i, body));
       if (hit !== undefined) {
         i += hit.length + 1;
         continue;

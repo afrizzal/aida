@@ -1,12 +1,18 @@
-import type { Element, ElementContent, Root, Text } from "hast";
+import type { Element, ElementContent, Root } from "hast";
 import type { Schema } from "hast-util-sanitize";
+import type {
+  Parent as MdastParent,
+  Root as MdastRoot,
+  RootContent as MdastRootContent,
+  Text as MdastText,
+} from "mdast";
 import rehypeParse from "rehype-parse";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeStringify from "rehype-stringify";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
-import { unified } from "unified";
+import { type Processor, unified } from "unified";
 import { visit } from "unist-util-visit";
 import { isMentionEndBoundary, isMentionStartBoundary } from "../mentions/mention-syntax";
 
@@ -47,8 +53,13 @@ function rehypeSafeLinks() {
 // display names of the members it validated inside the message transaction
 // (src/lib/mentions/mentions.ts); only then does an exact `@` plus one of those names in a text
 // node become a mention span. The span is the only addition to sanitized output:
-//   - it is made from text that already sits in the tree, never from raw HTML (remark-rehype runs
-//     without allowDangerousHtml, so a literal span in the Markdown never reaches the tree);
+//   - it is made from text that already sits in the Markdown tree, never from raw HTML
+//     (remark-rehype runs without allowDangerousHtml, so a literal span in the Markdown never
+//     reaches the tree). The wrap runs while the Markdown is parsed, right before GFM's autolink
+//     literal pass (run decision K174): a member name escaped for Markdown (mention-syntax.ts)
+//     parses back to the name, and wrapping it first means a URL or "www." inside a name never
+//     becomes a link. It follows the one boundary rule of mention-syntax.ts (review d-IN-1), and
+//     the names it wrapped are what renderMarkdownWithMentions reports (K172);
 //   - the sanitize schema of renderMarkdown allows span with exactly MENTION_CLASS_NAMES;
 //   - the span guard runs right before and right after the sanitize pass, as two distinct plugins
 //     (rehypeMentionSpanGuard, rehypeMentionSpanGuardAfterSanitize; run decision K171: unified
@@ -73,14 +84,31 @@ export const renderSanitizeSchema: Schema = {
   },
 };
 
-const MENTION_SKIP_TAGS = new Set(["a", "code", "pre"]);
-function mentionSpan(name: string): Element {
-  return {
-    type: "element",
-    tagName: "span",
-    properties: { className: [...MENTION_CLASS_NAMES] },
-    children: [{ type: "text", value: `@${name}` }],
+/** One render with mention names: the names, the Markdown source, and the names it wrapped. */
+interface MentionRender {
+  names: readonly string[];
+  source: string;
+  matched: Set<string>;
+}
+
+/** Markdown nodes whose text is never a mention: link text (code has no text children). */
+const MENTION_SKIP_NODES = new Set(["link", "linkReference"]);
+
+/**
+ * A mention in the Markdown tree: remark-rehype turns it into the span (hName, hProperties,
+ * hChildren). It has no text children, so GFM's autolink literal pass, which reads text nodes,
+ * never looks inside it.
+ */
+function mentionNode(name: string): MdastRootContent {
+  const node = {
+    type: "mention",
+    data: {
+      hName: "span",
+      hProperties: { className: [...MENTION_CLASS_NAMES] },
+      hChildren: [{ type: "text", value: `@${name}` }],
+    },
   };
+  return node as unknown as MdastRootContent;
 }
 
 /**
@@ -94,7 +122,7 @@ interface TextEdges {
   end: boolean;
 }
 
-function textEdges(node: Text, source: string): TextEdges {
+function textEdges(node: MdastText, source: string): TextEdges {
   const start = node.position?.start.offset;
   const end = node.position?.end.offset;
   return {
@@ -115,8 +143,8 @@ function splitMentions(
   names: readonly string[],
   edges: TextEdges,
   matched: Set<string>,
-): ElementContent[] | null {
-  const out: ElementContent[] = [];
+): MdastRootContent[] | null {
+  const out: MdastRootContent[] = [];
   let last = 0;
   let at = value.indexOf("@");
   while (at !== -1) {
@@ -136,7 +164,7 @@ function splitMentions(
       continue;
     }
     if (at > last) out.push({ type: "text", value: value.slice(last, at) });
-    out.push(mentionSpan(hit));
+    out.push(mentionNode(hit));
     matched.add(hit);
     last = at + 1 + hit.length;
     at = value.indexOf("@", last);
@@ -146,51 +174,46 @@ function splitMentions(
   return out;
 }
 
-function wrapMentions(
-  parent: Root | Element,
-  names: readonly string[],
-  source: string,
-  matched: Set<string>,
-): void {
-  const next: (typeof parent.children)[number][] = [];
+function wrapMentions(parent: MdastParent, render: MentionRender): void {
+  const next: MdastRootContent[] = [];
   let changed = false;
-  for (const child of parent.children) {
-    if (child.type === "element") {
-      if (!MENTION_SKIP_TAGS.has(child.tagName)) wrapMentions(child, names, source, matched);
-      next.push(child);
-    } else if (child.type === "text") {
-      const parts = splitMentions(child.value, names, textEdges(child, source), matched);
+  for (const child of parent.children as MdastRootContent[]) {
+    if (child.type === "text") {
+      const parts = splitMentions(
+        child.value,
+        render.names,
+        textEdges(child, render.source),
+        render.matched,
+      );
       if (parts) {
         next.push(...parts);
         changed = true;
-      } else {
-        next.push(child);
+        continue;
       }
-    } else {
-      next.push(child);
+    } else if ("children" in child && !MENTION_SKIP_NODES.has(child.type)) {
+      wrapMentions(child, render);
     }
+    next.push(child);
   }
   if (changed) parent.children = next as typeof parent.children;
 }
 
-interface MentionFileData {
-  mentionNames?: readonly string[];
-  /** Written by rehypeMentions: the names it wrapped in a span. */
-  mentionMatched?: Set<string>;
-}
-
-/** Before the sanitize pass: wraps the validated names (passed in the file's data) in spans. */
-function rehypeMentions() {
-  return (tree: Root, file: { data: unknown; value: unknown }) => {
-    const data = file.data as MentionFileData;
-    const raw = data.mentionNames ?? [];
-    const names = [...new Set(raw)]
-      .filter((name) => typeof name === "string" && name.trim() !== "" && !name.includes("@"))
-      .sort((a, b) => b.length - a.length);
-    const matched = new Set<string>();
-    if (names.length > 0) wrapMentions(tree, names, String(file.value ?? ""), matched);
-    data.mentionMatched = matched;
-  };
+/**
+ * Registers the mention wrap as a transform of the Markdown parser, attached before remark-gfm so
+ * it runs before GFM's autolink literal transform (K174). Without names it adds nothing.
+ */
+function remarkMentions(this: Processor, render?: MentionRender) {
+  if (!render || render.names.length === 0) return;
+  const data = this.data();
+  const extensions = data.fromMarkdownExtensions ?? [];
+  data.fromMarkdownExtensions = extensions;
+  extensions.push({
+    transforms: [
+      (tree: MdastRoot) => {
+        wrapMentions(tree, render);
+      },
+    ],
+  });
 }
 
 function isMentionSpan(node: Element): boolean {
@@ -232,16 +255,24 @@ export function rehypeMentionSpanGuardAfterSanitize() {
   return rehypeMentionSpanGuard();
 }
 
-const processor = unified()
-  .use(remarkParse)
-  .use(remarkGfm)
-  .use(remarkRehype)
-  .use(rehypeSafeLinks)
-  .use(rehypeMentions)
-  .use(rehypeMentionSpanGuard)
-  .use(rehypeSanitize, renderSanitizeSchema)
-  .use(rehypeMentionSpanGuardAfterSanitize)
-  .use(rehypeStringify);
+/**
+ * The one renderMarkdown pipeline. A render with mention names gets a processor of its own, built
+ * by this same function, because the names reach the parser's transform through the attacher.
+ */
+function createRenderProcessor(render?: MentionRender) {
+  return unified()
+    .use(remarkParse)
+    .use(remarkMentions, render)
+    .use(remarkGfm)
+    .use(remarkRehype)
+    .use(rehypeSafeLinks)
+    .use(rehypeMentionSpanGuard)
+    .use(rehypeSanitize, renderSanitizeSchema)
+    .use(rehypeMentionSpanGuardAfterSanitize)
+    .use(rehypeStringify);
+}
+
+const processor = createRenderProcessor();
 
 /**
  * The plugins renderMarkdown's processor actually holds, in order (one entry per attacher, as
@@ -260,10 +291,33 @@ export interface RenderMarkdownOptions {
   mentionNames?: readonly string[];
 }
 
+export interface RenderedMarkdown {
+  html: string;
+  /** The given mention names that the body really shows as a mention span, each once. */
+  mentionedNames: string[];
+}
+
+/**
+ * renderMarkdown plus the names it wrapped in a mention span (run decision K172): the messages
+ * route records a mention only for a member whose name is among them.
+ */
+export function renderMarkdownWithMentions(
+  markdown: string,
+  options: RenderMarkdownOptions = {},
+): RenderedMarkdown {
+  const names = [...new Set(options.mentionNames ?? [])]
+    .filter((name) => typeof name === "string" && name.trim() !== "" && !name.includes("@"))
+    .sort((a, b) => b.length - a.length);
+  if (names.length === 0) {
+    return { html: String(processor.processSync(markdown)), mentionedNames: [] };
+  }
+  const render: MentionRender = { names, source: markdown, matched: new Set() };
+  const html = String(createRenderProcessor(render).processSync(markdown));
+  return { html, mentionedNames: names.filter((name) => render.matched.has(name)) };
+}
+
 export function renderMarkdown(markdown: string, options: RenderMarkdownOptions = {}): string {
-  const mentionData: MentionFileData = { mentionNames: options.mentionNames ?? [] };
-  const data: Record<string, unknown> = { ...mentionData };
-  return String(processor.processSync({ value: markdown, data }));
+  return renderMarkdownWithMentions(markdown, options).html;
 }
 
 // Phase 12.2, run decision K54 (review a2-CR-01): the KB proposal review page previews a body the
