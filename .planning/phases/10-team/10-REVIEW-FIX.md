@@ -700,3 +700,58 @@ Plus a K174 case through the route: the name renders as one span, with no link, 
 ### `.next` moves
 
 None. Global setup did not stall.
+
+## F5
+
+**Date:** 2026-11-13. **Scope:** K177, the gate row for `tests/integration/backup-failures.test.ts` "run deadline (K143)". In the full run it failed with "backup failed: dump" after 7161 ms; alone it passed. **Where it ran:** the main checkout on `v2/run-loop`, no worktree (`workflow.use_worktrees` is `false`, and the dispatch named the branch). Every Docker step ran against this run's own test containers only. Runs used `AIDA_TEST_RUN_ID=mweibo42-740fa2855dbbc798`. **Result:** 1 of 1 decision fixed, as a product fix with a test. 2 commits. **Schema:** unchanged.
+
+**How red was shown.** Diagnostics were added by hand, marked `TEMP-RED` and never committed, then restored from copies in the run's temporary directory. They covered the script and the test: wall-clock times at start, before and after the dump, timeout's exit status, the error log, and a 12-run loop of the case under 12 CPU burners. A perl sampler compared `CLOCK_REALTIME` with `CLOCK_MONOTONIC` inside the runner container during that loop. No `git checkout`, `git restore` or `git stash` was used.
+
+### Root cause: the deadline was judged by a wall clock that can step back
+
+- `bounded` arms `timeout -k 10 <D - now>`. Linux runs a relative timer on the monotonic clock, so TERM comes at the deadline D plus the fraction of the second in which `bounded` read the clock. After the dump fails, `step_failed` asks `deadline_passed`, which reads `date -u +%s` again.
+- When the steps before the dump cross a second boundary, the dump gets about 7 s instead of 8 s. In the loop, 5 of 12 runs ended after 7.37 to 7.62 s, and the 7161 ms of the gate is one of these. TERM then lands only milliseconds past D: 62 ms in one diagnostic run.
+- The sampler saw the guest wall clock step **back by 100.9 ms** against the monotonic clock once in about 100 s of the loop. A step like that between the TERM and the check makes `date` read before D. The run then reports the dump's own failure (`fail dump`) instead of the deadline. This is a product bug, not a test bug.
+- Ruled out: the dump never failed on its own. Every diagnostic run showed timeout's status 124 and "pg_dump: terminated by user". The lock holder, `BACKUP_DUMP_LOCK_TIMEOUT` (300 s) and `PGCONNECT_TIMEOUT` (10 s) play no part.
+
+### The fix (K177)
+
+**Change.**
+- `lib.sh bounded` keeps the command's status and returns it as before. On timeout's own status 124 (none of the bounded tools exits 124 itself), it creates `BACKUP_DEADLINE_MARK`.
+- `deadline_passed` returns true when that mark exists, then falls back to the wall clock as before.
+- `aida-backup.sh` clears the variable at start, so the environment cannot set it, and points it at `$RUN_TMP/deadline.reached`. The exit trap removes that file with the directory.
+- The deadline line is still printed only after timeout really ended a step at the deadline. Nothing else changes.
+
+**Tests** (`backup-failures.test.ts`):
+- New case "run deadline (K177)": a test-only `date` earlier in the runner's PATH reads `date -u +%s` 2 s back. The step is switched on once the run's `aida-backup` session is seen waiting on the held lock on `"Attachment"` (in `pg_locks`), after `bounded` armed its timer. The VM clock is never touched. The case expects the deadline line, exit 2, `failed`/`unknown`, no "backup failed: dump", an empty stderr, no unrecorded file, no set and no temporary directory.
+- The K143 case keeps every assertion. It now also asserts that the dump was seen waiting on the lock, so it proves a waiting dump was stopped, and not an earlier step.
+
+**Runs.**
+- Red (product unchanged): exit 1, 1 failed (K177: received "[backup] backup failed: dump"), 1 passed (K143).
+- Green: exit 0, 2 passed.
+
+**Commits:** `3f903e3` (fix and tests), `897687b` (header comment rewrapped, comment only).
+
+### Final checks
+
+`colima status` exit 0 and `docker info` exit 0 before each Docker step.
+
+| Command | Exit | Counts |
+|---|---|---|
+| `pnpm typecheck` (at `3f903e3`) | 0 | 0 errors |
+| `pnpm lint` (at `3f903e3`) | 0 | 774 files, 1 warning, pre-existing and known: `tests/unit/container-config.test.ts:160` |
+| `pnpm test` (at `3f903e3`) | 0 | 116 files, 2125 passed |
+| `pnpm test:integration` (full, once, at `897687b`, 05:17:04Z to 05:25:08Z) | 0 | 135 files passed, 1881 tests passed, 0 failed (483.95 s) |
+
+The full run also closes F4's gap: the last full run (at `36f13d9`) was red from the d-IN-5 change that `b917fc6` reverted, and this run at `897687b` includes that revert.
+
+### Not done, and limits
+
+- **The natural failure was not reproduced end to end.** It needs a backward clock step inside a window of a few milliseconds. The cause was shown in parts: the 7-second runs, the 62 ms margin and the measured -100.9 ms step. The exact mechanism was shown with the test clock.
+- **What sets the guest clock** (the VM's time sync) was not investigated: nothing in `~/.colima` was read, and the VM was not entered.
+- **A TERM that does not end the command** within 10 s exits 137 after KILL. That case is still judged by the wall clock, which is by then at least 10 s past the deadline.
+- **Report:** this section is written and left uncommitted for the orchestrator.
+
+### `.next` moves
+
+None. No E2E run in F5.
