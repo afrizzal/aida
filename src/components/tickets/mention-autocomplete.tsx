@@ -121,7 +121,9 @@ export function MentionAutocomplete({
               if (value !== "") onActiveChange(value);
             }}
           >
-            <CommandList ref={listRef} label="Members" className="max-h-[288px]">
+            {/* UI-SPEC amendment A9 (K176): rows are the size-8 avatar plus py-1 (40px), so the
+                list shows eight of them in 320px; the ninth is cut off as the scroll cue. */}
+            <CommandList ref={listRef} label="Members" className="max-h-[320px]">
               <CommandEmpty className="px-2 py-6 text-[13px] text-muted-foreground">
                 {`No member matches "${query}".`}
               </CommandEmpty>
@@ -132,7 +134,7 @@ export function MentionAutocomplete({
                     key={option.id}
                     value={option.id}
                     onSelect={() => onPick(option)}
-                    className="gap-2 py-0.5 text-[13px] data-selected:bg-accent data-selected:text-accent-foreground"
+                    className="gap-2 py-1 text-[13px] data-selected:bg-accent data-selected:text-accent-foreground"
                   >
                     <Avatar className="size-8">
                       <AvatarFallback className="bg-primary/10 text-[12px] text-primary-emphasis">
