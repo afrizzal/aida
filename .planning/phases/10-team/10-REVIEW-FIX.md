@@ -579,3 +579,124 @@ The unit run includes `membership-inventory.test.ts` and `page-access-inventory.
 ### `.next` moves
 
 None. Global setup did not stall in the E2E run.
+
+## F4
+
+**Date:** 2026-11-13. **Scope:** K171 to K176, for findings d-WR-1 to d-WR-6, plus the part d info items that touch the same files: d-IN-1 (one boundary rule), d-IN-2 (comments), d-IN-3 (the cap in the composer), d-IN-7 (C7 at the public send) and d-IN-8 (a file-part body). d-IN-5 was fixed and then restored (see below). d-IN-4 and d-IN-6 are in `deferred-items.md`. **Where it ran:** the main checkout on `v2/run-loop`, no worktree (`workflow.use_worktrees` is `false`, and the dispatch named the branch). Runs used `AIDA_TEST_RUN_ID=mwegr1ot-e1b97e2aed73c552`. **Result:** 6 of 6 decisions fixed, 5 info items fixed, 1 restored, 14 commits. **Schema:** unchanged.
+
+**How red was shown.** Each new test was run and seen failing before its fix, except K175. For K175 the route already existed, so the red runs put old or wrong lines back by hand (marked `TEMP-RED`, never committed) and restored the file from a copy in the run's temporary directory after each run. No `git checkout`, `git restore` or `git stash` was used.
+
+### The one `@` boundary rule (d-IN-1)
+
+New `src/lib/mentions/mention-syntax.ts`, with no imports. "@" + name is a mention only when:
+- the character before the "@" is whitespace, or the "@" starts the text; and
+- the character after the name is not a letter, combining mark, digit or `_`, or the name ends the text.
+
+The trigger (`findMentionQuery`), the ids the composer sends (`outgoingMentionIds`), the strip (`stripMentionTokens`) and the renderer all use it. Through the renderer, the server's K172 check uses it too. The renderer reads the edges of each text node on the Markdown source, so `**@Ana**` is no mention there either.
+
+**Tests.** In `markdown-render.test.ts`: `(@Ana)`, `**@Ana**`, `/@Ana/`, `@Ana` followed by a combining mark, `@Ana_b` and `x@Ana` are not wrapped. List items, quotes, line breaks, table cells and `**bold** @Ana` are wrapped. On plain text, the span count equals the number of hits of `isMentionAt`. The literal-span case now expects no span for `@Ana` right after `>`, and one span after a space. **Runs.** Red: exit 1, 2 failed. Green: 46 passed. **Commit:** `826b79e`
+
+### d-WR-1, d-IN-2 / K171: the guard runs after the sanitize pass too
+
+**Change.** The pass after sanitize is now `rehypeMentionSpanGuardAfterSanitize`, a distinct plugin. `renderMarkdownPlugins()` exposes the processor's attachers. The headers of `render.ts` and `mentions.ts` describe the real order (d-IN-2).
+
+**Tests.** The attacher order is guard, sanitize, after-guard, stringify, and each guard is held once. Control: sanitize alone keeps `id="user-content-m"` and `title`. Sanitize followed by the after-guard leaves exactly the two classes. **Runs.** Red: exit 1, 2 failed (the plugin after sanitize was `rehypeStringify`). Green: 44 passed. **Commit:** `4c5402a`
+
+### d-WR-3 / K173: the strip keeps text that is not a mention
+
+**Change.** The second pass of `stripMentionTokens` (copies without a span) now applies the boundary rule. Intact inserted spans are still removed, whatever stands around them (C7). That interpretation is recorded in `deferred-items.md`.
+
+**Tests.**
+- Unit: `orders@sales-desk.example`, a URL path, `(@sales)`, `@sales_team`, `@salesforce` and a combining mark are kept. `@sales.` and `@sales,` are still removed. Through the reducer, the switch removes the inserted `@sales` and keeps the address.
+- Integration (`mention-mode-switch`): a member without a display name, so the inserted name is the email's local part. The reducer, the route and the outbound handler keep `orders@<local>-desk.example` whole in the stored body, the HTML and the mail.
+
+**Runs.** Red: unit exit 1, 2 failed; integration exit 1, 1 failed (`orders-desk.example`). Green: unit 28 passed, integration 2 passed. **Commit:** `8ffc5d3`
+
+### d-WR-4 / K174: inserted names are escaped for Markdown
+
+**Change.**
+- `insertMention` writes `mentionToken(name)`. Every one of `` \ ` * _ [ ] < > ~ & | : `` is backslash-escaped, and so is the dot of `www.`.
+- `isIntactSpan` and the strip compare against that token. The strip also removes an unescaped copy.
+- GFM's autolink literal pass runs on parsed text, so escaping alone did not stop it. The renderer therefore now wraps mentions while the Markdown is parsed, right before that pass. A mention node has no text children, so a URL inside a name never becomes a link.
+
+**Tests.** Thirteen names: `*Star*`, `**Bold**`, `_Under_`, `snake_case`, `[x](https://…)`, `[docs](https://…)`, backticks, tildes, `<b>`, `&amp;`, a backslash, `www.example.com` and a pipe. For each one:
+- the name is inserted as an intact span and its id is sent;
+- it renders as exactly one span, with no `<a`, `<em`, `<strong`, `<code`, `<del`, `<b>` or `<table`.
+
+An unescaped copy is no mention. **Runs.** Red: exit 1, 3 failed. Green: 77 passed. **Commit:** `2f6cc5d`
+
+### d-WR-2 / K172: only a mention the body shows is recorded
+
+**Change.**
+- The route renders with `renderMarkdownWithMentions` before `message.create`. It keeps a resolved member only when the member's current display name was wrapped. Every other id writes no row and sends no notification.
+- `outgoingMentionIds` sends an intact span's id only on the boundary.
+
+**Tests** (`mentions.test.ts`), for the three ways in:
+- **A direct post**, with the bodies `hi`, `hi Mira Hidden`, `hi @Mira` and `x@Mira Hidden`.
+- **Insert, Backspace, type:** `@Zetax`, and a letter typed before the `@`. The composer sends no id, and a post that still carries the id records only the other member in the note.
+- **A rename** after the list was loaded.
+
+Plus a K174 case through the route: the name renders as one span, with no link, and is recorded. **Runs.** Red: exit 1, 3 failed. Green (with `mention-mode-switch`): 16 passed. **Commit:** `eda10d8`
+
+### d-WR-5 / K175: integration test for `GET /api/members/mentionable`
+
+**Change.** Tests only: the new `tests/integration/mentionable-route.test.ts`.
+
+**Tests.**
+- The exact sorted array of `{ id, name, email }` objects. A member with two rows appears once. The fallback name is the email's local part, and no name contains `@`.
+- The caller, a removed member, an org-B-only user and a user without a member row are all absent.
+- `no-store` on every answer.
+- 403 `membership_ended` for a removed member and for a session without an active organization; 401 without a session.
+
+**Runs.**
+- On the current code: exit 0, 3 passed.
+- `TEMP-RED` runs, each exit 1 with 1 failed: no `no-store`; the caller kept; every organization listed; the full email as the name; the 401 path for a removed member.
+- Restored: 3 passed.
+
+**Commit:** `af6cba3`
+
+### d-WR-6 / K176: amendment A9
+
+**Change.** `py-1` rows and `max-h-[320px]`: eight rows of 40 px, each the 32 px avatar plus 2 × 4 px. Recorded as A9 in `10-GATE.md`. The gate's off-scale spacing grep on the file now exits 1 (no hit).
+
+**Test.** The new `mention-autocomplete-spacing.test.ts` reads the component and checks three things: `py-1` is the row's only vertical padding, the list height equals 8 × (avatar + padding), and the off-scale grep is empty.
+
+**Runs.** Red: exit 1, 3 failed. Green: 3 passed. **Commits:** `563b6dc`, `3d77f43` (a comment correction)
+
+### Info items
+
+- **d-IN-3:** `MAX_MENTIONS` moves to `mention-syntax.ts`, which is safe for the client bundle. At 50 ids the composer opens no list, and an insert of a new member changes nothing. Red: exit 1, 2 failed. Green: 34 passed. `2a83c63`
+- **d-IN-7:** `guardPublicSend`. Before a public send, a copy of an inserted name that came back after the switch is removed and the switch note shows; the next Send goes out. Unit test, plus integration through the route and the mail. Red: exit 1 (unit 1 failed, integration 1 failed). Green: 36 unit, 22 integration. `36f13d9`. The send-time strip needs a UI-SPEC A-item (`deferred-items.md`).
+- **d-IN-8:** a `body` sent as a file part is 400 `invalid_form_data`. Red: a TypeError and a 500. Green. `99c0850`
+- **d-IN-5:** `99c0850` also changed the route's own two refusals to `membership_ended`. The full integration run then failed 6 cases in `ticket-merge.test.ts` (WR-03, Codex D2) and `file-delete-inventory.test.ts`, which pin `MEMBERSHIP_ENDED` on exactly these paths. Restored in `b917fc6`, with the d-IN-5 test removed; deferred (`470cbb5`).
+- **`deferred-items.md`** (`4fc5f5b`, `470cbb5`): d-IN-4, d-IN-5, d-IN-6 and the F4 limits.
+
+### Final checks
+
+`colima status` exit 0 and `docker info` exit 0 before each Docker step.
+
+| Command | Exit | Counts |
+|---|---|---|
+| `pnpm typecheck` (at `470cbb5`) | 0 | 0 errors |
+| `pnpm lint` (at `470cbb5`) | 0 | 774 files, 1 warning, pre-existing and known: `tests/unit/container-config.test.ts:160` |
+| `pnpm test` (at `470cbb5`) | 0 | 116 files, 2125 passed |
+| `pnpm test:integration` (full, once, at `36f13d9`) | 1 | 135 files, 6 failed and 1875 passed: the d-IN-5 spelling, restored below |
+| Integration rerun at `b917fc6`: `ticket-merge`, `file-delete-inventory`, `mentions`, `mention-mode-switch`, `mentionable-route`, `membership-gate`, `membership-ended-refusals` | 0 | 7 files, 125 passed |
+| `pnpm test:e2e` for `mentions-leak`, `keyboard`, `attachments`, `phase5-rag`, `reading-pane`, `ticket-merge` and `activity-feed` (at `470cbb5`) | 0 | 55 passed, 0 failed |
+
+- The unit run includes `membership-inventory` and `page-access-inventory`, and both passed.
+- The session cookie cache is still off (`src/lib/auth.ts:17`).
+- `readFreshSession` stays the only session read.
+- No change to `auth.ts`, `fresh-session.ts`, `package.json`, the lockfile or the schema.
+- No real email or LLM.
+
+### Not done, and limits
+
+- **No full integration rerun after `b917fc6`.** That commit only restores the two pre-F4 lines, and the 7 suites that cover them pass.
+- **Manual items:** no visual or screen-reader check was made of the A9 rows.
+- **The renderer with names** builds a processor per call (only for notes that carry mentions).
+- **Report:** this section is written and left uncommitted for the orchestrator.
+
+### `.next` moves
+
+None. Global setup did not stall.
