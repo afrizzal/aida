@@ -73,8 +73,10 @@ import { auth } from "@/lib/auth";
 import { saveEmailSettings } from "@/lib/channels/email/settings";
 import { prisma } from "@/lib/db";
 import {
+  composerNote,
   findMentionQuery,
   initialMentionDraft,
+  MENTION_HOLD_NOTE,
   type MentionDraftState,
   type MentionMember,
   mentionDraftReducer,
@@ -398,7 +400,9 @@ describe("a name pasted back after the switch holds the first public Send (d-IN-
     // What the composer does on Send while it knows inserted names: the guard first.
     const guarded = mentionDraftReducer(draft, { type: "guardPublicSend" });
     expect(guarded).not.toBe(draft);
-    expect(guarded.switchNote).toBe(true);
+    // K183: the hold note, never the "names were removed" switch note.
+    expect(guarded.publicSendHeld).toBe(true);
+    expect(composerNote(guarded)).toBe(MENTION_HOLD_NOTE);
     expect(guarded.text).toBe(draft.text);
     // The held Send posted nothing.
     expect(
@@ -412,6 +416,7 @@ describe("a name pasted back after the switch holds the first public Send (d-IN-
       text: guarded.text.slice(0, at) + guarded.text.slice(at + " (@Zeta Paste)".length),
       caret: at,
     });
+    expect(edited.publicSendHeld).toBe(false);
     expect(mentionDraftReducer(edited, { type: "guardPublicSend" })).toBe(edited);
     const { stored, mail } = await post(ticket.id, edited);
 
@@ -429,7 +434,9 @@ describe("a name pasted back after the switch holds the first public Send (d-IN-
       "ask **@Zeta Paste** tomorrow.",
     );
     const held = mentionDraftReducer(draft, { type: "guardPublicSend" });
-    expect(held.switchNote).toBe(true);
+    expect(held.publicSendHeld).toBe(true);
+    expect(held.switchNote).toBe(false);
+    expect(composerNote(held)).toBe(MENTION_HOLD_NOTE);
     expect(held.text).toBe(draft.text);
     // The second Send: the guard lets it through unchanged.
     expect(mentionDraftReducer(held, { type: "guardPublicSend" })).toBe(held);

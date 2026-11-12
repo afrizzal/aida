@@ -22,6 +22,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ALLOWED_MIME, MAX_BYTES } from "@/lib/attachments/constants";
 import type { Command } from "@/lib/commands/registry";
 import {
+  composerNote,
   filterMentionCandidates,
   findMentionQuery,
   initialMentionDraft,
@@ -285,8 +286,9 @@ export function Composer({ ticketId, insertedText, onInsertedConsumed }: Compose
     // C7 at the send (review d-IN-7, K180): a public reply never carries an inserted mention span
     // or a mention id. When the body still holds "@" plus the name of a member mentioned in this
     // draft (a paste, an undo, typed by hand; anywhere, with no boundary rule), the guard holds this
-    // first Send and shows the switch note; it never edits the text. The agent reads the reply, and
-    // the next Send goes out as written (mentionDraftReducer `guardPublicSend`).
+    // Send and shows the hold note (K183, amendment A10); it never edits the text. The agent reads
+    // the reply, and the next Send goes out as written; any edit of the body first arms the guard
+    // again (mentionDraftReducer `guardPublicSend`, `edit`).
     if (mentionDraftReducer(draft, { type: "guardPublicSend" }) !== draft) {
       dispatch({ type: "guardPublicSend" });
       return;
@@ -366,12 +368,13 @@ export function Composer({ ticketId, insertedText, onInsertedConsumed }: Compose
         />
       </MentionAutocomplete>
 
-      {/* D-21, C7: shown after an internal-to-public switch removed inserted member names, and
-          again when the public send guard holds a Send whose body still names a mentioned member
-          (K180), until the next switch back or the send (mentionDraftReducer clears it). */}
-      {draft.switchNote && (
+      {/* D-21, C7, K183: the switch note after an internal-to-public switch really removed inserted
+          member names, or the hold note (amendment A10) while the public send guard holds a Send
+          whose body still names a mentioned member (K180); composerNote picks one. The hold note
+          goes with the next edit, the send or a switch (mentionDraftReducer). */}
+      {composerNote(draft) !== null && (
         <p role="status" className="mt-1 text-[12px] text-muted-foreground">
-          Mentions only work in internal notes. The mentioned names were removed from this reply.
+          {composerNote(draft)}
         </p>
       )}
 

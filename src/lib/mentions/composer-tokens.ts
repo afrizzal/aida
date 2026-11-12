@@ -26,9 +26,13 @@
 // (guardPublicSend, review d-IN-7) holds the FIRST public Send whenever the body contains "@"
 // followed by the name of any member mentioned in this draft (inserted since the last send), as
 // written or escaped (K174), in any case, wherever it stands: no boundary rule, so "(@Name)",
-// "**@Name**" and "orders@Name.example" all hold. It shows the switch note and never edits the
-// text, so an address or a word the agent wrote is never corrupted. The second Send goes through as
-// written: the agent has seen the note and decides (human in the loop).
+// "**@Name**" and "orders@Name.example" all hold. It shows its own note (MENTION_HOLD_NOTE, K183,
+// UI-SPEC amendment A10), which asks the agent to review the reply and says that an address can
+// match too, and never edits the text, so an address or a word the agent wrote is never corrupted.
+// The next Send goes through as written: the agent has seen the note and decides (human in the
+// loop). Any edit of the body after a hold re-arms the guard (K183), so a name added after the hold
+// is held again. The switch note ("The mentioned names were removed from this reply.") shows only
+// after a switch really removed something.
 //
 // The server re-validates everything (src/lib/mentions/mentions.ts, plan 10-07): this module only
 // keeps the composer from offering or sending what the server would refuse.
@@ -397,6 +401,30 @@ export function mentionCapReached(state: {
   return outgoingMentionIds(state).length >= MAX_MENTIONS;
 }
 
+/** The note after an internal-to-public switch that removed inserted names or spans (D-21). */
+export const MENTION_SWITCH_NOTE =
+  "Mentions only work in internal notes. The mentioned names were removed from this reply.";
+
+/**
+ * The note of a held public Send (K183, UI-SPEC amendment A10): nothing was removed, the agent is
+ * asked to review the reply, and the copy says why an address can match too (no boundary rule).
+ */
+export const MENTION_HOLD_NOTE =
+  'Mentions only work in internal notes. This reply was not sent because it still contains "@" followed by the name of a member you mentioned (an email address can match too). Review it, then select Send Reply again to send it as written.';
+
+/**
+ * The one note under the composer, or null: the hold note while a Send is held, else the switch
+ * note after a real strip (K183). The hold note never says that anything was removed.
+ */
+export function composerNote(state: {
+  switchNote: boolean;
+  publicSendHeld: boolean;
+}): string | null {
+  if (state.publicSendHeld) return MENTION_HOLD_NOTE;
+  if (state.switchNote) return MENTION_SWITCH_NOTE;
+  return null;
+}
+
 /** The composer's whole draft. `caret` is where the textarea's caret goes after the next render. */
 export interface MentionDraftState {
   text: string;
@@ -404,11 +432,15 @@ export interface MentionDraftState {
   /** Names inserted since the last send: the safety net of stripMentionTokens. */
   insertedNames: string[];
   mode: MentionMode;
-  /** The switch note under the textarea ("The mentioned names were removed from this reply."). */
+  /**
+   * The switch note under the textarea (MENTION_SWITCH_NOTE): on only after a switch to public
+   * really removed something; never set by the send guard (K183).
+   */
   switchNote: boolean;
   /**
-   * K180: the guard already held one public Send of this draft, so the next Send goes through as
-   * written. Cleared by a mode switch, a loaded AI draft and a send.
+   * K180: the guard held a public Send of this draft and shows MENTION_HOLD_NOTE, so the next Send
+   * goes through as written. Cleared by any edit that changes the body (K183: the guard is armed
+   * again), a mode switch, a loaded AI draft and a send.
    */
   publicSendHeld: boolean;
   /** The body came from an inserted AI draft (AIDA-16): the send carries `fromDraft`. */
@@ -442,8 +474,9 @@ export type MentionDraftAction =
  * loadDraft: an AI draft replaces the body and forces public with no span and no inserted name.
  * guardPublicSend (review d-IN-7, K180, C7 at the send): in public mode, with names inserted since
  * the last send, when the body contains "@" plus one of them anywhere (containsMentionedName) and
- * no Send of this draft was held yet, turns the switch note on and marks the hold, with the text
- * unchanged; otherwise it returns the same state, which the composer then sends as written.
+ * the guard is armed (no hold since the last edit), marks the hold (MENTION_HOLD_NOTE) and turns
+ * the switch note off, with the text unchanged; otherwise it returns the same state, which the
+ * composer then sends as written. An edit that changes the body clears the hold (K183).
  * sent: clears text, spans, inserted names, the note, the hold and the draft flag.
  * An insert of a member not yet mentioned changes nothing once mentionCapReached (d-IN-3).
  */
@@ -455,7 +488,14 @@ export function mentionDraftReducer(
     case "edit": {
       if (action.text === state.text) return state;
       const next = applyTextEdit(state, action.text, action.caret);
-      return { ...state, text: next.text, spans: next.spans, caret: next.caret };
+      // K183: a changed body is a new review, so the guard is armed again.
+      return {
+        ...state,
+        text: next.text,
+        spans: next.spans,
+        caret: next.caret,
+        publicSendHeld: false,
+      };
     }
     case "insert": {
       if (state.mode !== "internal") return state;
@@ -501,7 +541,7 @@ export function mentionDraftReducer(
       if (state.mode !== "public" || state.insertedNames.length === 0) return state;
       if (state.publicSendHeld) return state;
       if (!containsMentionedName(state.text, state.insertedNames)) return state;
-      return { ...state, switchNote: true, publicSendHeld: true };
+      return { ...state, switchNote: false, publicSendHeld: true };
     }
     case "sent":
       return {

@@ -6,11 +6,14 @@ import { describe, expect, it } from "vitest";
 import { renderMarkdown } from "@/lib/markdown/render";
 import {
   applyTextEdit,
+  composerNote,
   filterMentionCandidates,
   findMentionQuery,
   initialMentionDraft,
   insertMention,
   isIntactSpan,
+  MENTION_HOLD_NOTE,
+  MENTION_SWITCH_NOTE,
   type MentionDraftAction,
   type MentionDraftState,
   type MentionMember,
@@ -455,14 +458,17 @@ describe("the public send guard (d-IN-7, K180, C7)", () => {
     ["x@Zeta", "write to orders@Zeta.example"],
     ["/@Zeta/", "see /@Zeta/ there"],
     ["@zeta (case)", "ask @zeta later"],
-  ])("%s: the first Send is held with the switch note and the text unchanged; the second goes as written", (_label, pasted) => {
+  ])("%s: the first Send is held with the hold note and the text unchanged; the second goes as written", (_label, pasted) => {
     const switched = switchedAfterZeta();
     expect(switched.text).toBe("Hi  ");
     const draft = { ...type(switched, pasted), switchNote: false };
     const first = send(draft);
     expect(first.held).toBe(true);
     expect(first.state.text).toBe(draft.text);
-    expect(first.state.switchNote).toBe(true);
+    // K183: the hold shows its own copy, never "The mentioned names were removed".
+    expect(first.state.publicSendHeld).toBe(true);
+    expect(first.state.switchNote).toBe(false);
+    expect(composerNote(first.state)).toBe(MENTION_HOLD_NOTE);
     expect(first.state.mode).toBe("public");
     expect(first.state.spans).toEqual([]);
     const second = send(first.state);
@@ -512,6 +518,70 @@ describe("the public send guard (d-IN-7, K180, C7)", () => {
     expect(again.text).toBe(held.text);
     const reheld = send(type(again, " (@Zeta)"));
     expect(reheld.held).toBe(true);
+  });
+});
+
+// Run decision K183 (Codex diff round 2): the hold has its own copy, which asks the agent to
+// review the reply because it still names a mentioned member, and says why an address can match.
+// "The mentioned names were removed from this reply." shows only after a switch really removed
+// something. Any edit of the body after a hold re-arms the guard, so a name added after the hold
+// is held again before it can go out.
+describe("the hold copy and the re-armed guard (K183)", () => {
+  const switchedAfterZeta = () =>
+    mentionDraftReducer(mention(type(internal, "Hi "), ZETA, "Ze"), {
+      type: "setMode",
+      mode: "public",
+    });
+  const guard = (state: MentionDraftState) =>
+    mentionDraftReducer(state, { type: "guardPublicSend" });
+
+  it("the strip sentence shows only after a real strip; a switch that removed nothing shows no note", () => {
+    const switched = switchedAfterZeta();
+    expect(composerNote(switched)).toBe(MENTION_SWITCH_NOTE);
+    const nothing = run(type(internal, "plain note"), { type: "setMode", mode: "public" });
+    expect(nothing.switchNote).toBe(false);
+    expect(composerNote(nothing)).toBeNull();
+    expect(composerNote(initialMentionDraft)).toBeNull();
+  });
+
+  it("a hold replaces the strip sentence with the review copy, even right after a real strip", () => {
+    const held = guard(type(switchedAfterZeta(), "(@Zeta)"));
+    expect(held.publicSendHeld).toBe(true);
+    const note = composerNote(held);
+    expect(note).toBe(MENTION_HOLD_NOTE);
+    expect(note).not.toContain("removed");
+    expect(MENTION_HOLD_NOTE).toContain("still contains");
+    expect(MENTION_HOLD_NOTE).toContain("email address");
+    expect(MENTION_SWITCH_NOTE).toBe(
+      "Mentions only work in internal notes. The mentioned names were removed from this reply.",
+    );
+  });
+
+  it("an edit after a hold re-arms the guard: a name added after the hold is held again", () => {
+    const held = guard(type(switchedAfterZeta(), "(@Zeta)"));
+    const edited = type(held, " and orders@zeta.example");
+    expect(edited.publicSendHeld).toBe(false);
+    expect(composerNote(edited)).toBeNull();
+    const again = guard(edited);
+    expect(again).not.toBe(edited);
+    expect(again.publicSendHeld).toBe(true);
+    expect(again.text).toBe(edited.text);
+    // Held once more, the next Send goes as written.
+    expect(guard(again)).toBe(again);
+  });
+
+  it("an edit that removes every mentioned name re-arms and then sends at once", () => {
+    const held = guard(type(switchedAfterZeta(), "(@Zeta)"));
+    const cleaned = mentionDraftReducer(held, { type: "edit", text: "Hi  (soon)", caret: 10 });
+    expect(cleaned.publicSendHeld).toBe(false);
+    expect(guard(cleaned)).toBe(cleaned);
+  });
+
+  it("an edit that leaves the text as it is keeps the hold, so the next Send goes as written", () => {
+    const held = guard(type(switchedAfterZeta(), "(@Zeta)"));
+    const same = mentionDraftReducer(held, { type: "edit", text: held.text, caret: 0 });
+    expect(same).toBe(held);
+    expect(guard(same)).toBe(same);
   });
 });
 
