@@ -24,8 +24,8 @@ import type { DeactivateErrorKey, InviteErrorKey, RoleErrorKey, TeamRole } from 
 const TEAM_PATH = "/settings/team";
 
 /**
- * K164 (review a-WR-1): the session has no active organization (a deactivation in a
- * one-organization install leaves it null, D-07). Nothing ran and nothing is revalidated.
+ * K164 (review a-WR-1): the session has no active organization (a deactivation leaves it null,
+ * D-07 as amended by K178). Nothing ran and nothing is revalidated.
  */
 const MEMBERSHIP_ENDED = { ok: false, error: "membership_ended" } as const;
 

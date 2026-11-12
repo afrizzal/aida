@@ -10,9 +10,9 @@ import { getCurrentSession } from "@/lib/session";
  *
  * Reads the session once, fresh (getCurrentSession, never the cookie cache, V-23), then the user's
  * member rows in the active organization with the conservative read. Redirects to /login without
- * a session and to /no-access when the session has no active organization (D-07 may set it to null)
- * or the user holds no member row in it. Returns `{ session, orgId, role, db }`, with `db` scoped to
- * exactly `orgId`.
+ * a session and to /no-access when the session has no active organization (a deactivation sets
+ * it to null, D-07 as amended by K178) or the user holds no member row in it. Returns
+ * `{ session, orgId, role, db }`, with `db` scoped to exactly `orgId`.
  *
  * Call it FIRST in a layout, a page or a server component that reads tenant data itself, and
  * OUTSIDE any try: redirect() works by throwing, and a catch would swallow it. The (app) layout and

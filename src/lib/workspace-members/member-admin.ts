@@ -18,8 +18,8 @@
 //      the revocation of the target's pending invitations when the change lowers their rights,
 //      and one MemberAuditEvent row per change (D-12);
 //      deactivation (V-25 order): one delete of EVERY member row of the target in this
-//      organization, then the target's sessions on this organization moved to their oldest
-//      remaining membership or to null (D-07), then the pending invitations the target sent and
+//      organization, then the target's sessions on this organization set to no active
+//      organization (D-07, amended by K178), then the pending invitations the target sent and
 //      those addressed to the target's email canceled (D-10), then MEMBER_DEACTIVATED; commit.
 //
 // Deactivation locks no ticket and writes no ticket. The assignment path share-locks the
@@ -388,17 +388,19 @@ export interface DeactivateMemberInput {
 }
 
 export type DeactivateMemberSuccess = MemberAdminSuccess & {
-  /** Sessions of the target whose active organization was this one, now moved (D-07). */
-  sessionsMoved: number;
+  /**
+   * Sessions of the target whose active organization was this one, now set to no organization
+   * (D-07 as amended by K178).
+   */
+  sessionsCleared: number;
   /** Pending invitations canceled: sent by the target, or addressed to the target's email. */
   invitationsRevoked: number;
 };
 
 /**
  * Removes targetUserId from orgId (D-07): deletes every member row of the target in this
- * organization in one statement, moves the target's sessions on this organization to the
- * organization of their oldest remaining member row (createdAt, then id) or to null, cancels the
- * pending invitations the target sent and those addressed to the target's email in this
+ * organization in one statement, sets the target's sessions on this organization to no active
+ * organization (activeOrganizationId null, K178), cancels the pending invitations the target sent and those addressed to the target's email in this
  * organization (D-10), and writes MEMBER_DEACTIVATED with the old conservative role; all in one
  * transaction under the organization lock, with the rules of the header. The user row and the
  * target's other memberships stay. Assigned tickets keep their assignee; reassignOpenTickets is the
@@ -429,16 +431,17 @@ export async function deactivateMember(
     if (count === 0) throw new MemberAdminError("NOT_A_MEMBER");
     await hooks?.afterDelete?.(tx);
 
-    // D-07: every row of this organization is gone, so the oldest remaining row is another
-    // organization's.
-    const next = await tx.member.findFirst({
-      where: { userId: targetUserId },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      select: { organizationId: true },
-    });
-    const { count: sessionsMoved } = await tx.session.updateMany({
+    // D-07 as amended by K178 (Codex diff round 1, HIGH): the target's sessions on this
+    // organization name no organization afterwards, even when the target is a member elsewhere.
+    // Moving them to another membership let a tab still open on this organization run its next
+    // server action in the other one (the action reads the session's active organization, not the
+    // one the page was rendered for). With null, every later action is the typed MEMBERSHIP_ENDED
+    // refusal (K164) and every page goes to /no-access; the person reaches another organization
+    // only by signing in again. Deactivation never switches an organization by itself; the only
+    // switch left is the one the person makes by accepting an invitation (V-23).
+    const { count: sessionsCleared } = await tx.session.updateMany({
       where: { userId: targetUserId, activeOrganizationId: orgId },
-      data: { activeOrganizationId: next?.organizationId ?? null },
+      data: { activeOrganizationId: null },
     });
 
     const targetUser = await tx.user.findUnique({
@@ -461,7 +464,7 @@ export async function deactivateMember(
       ok: true as const,
       owners: await countOwners(tx, orgId),
       admins: await countPlainAdmins(tx, orgId),
-      sessionsMoved,
+      sessionsCleared,
       invitationsRevoked,
     };
   });

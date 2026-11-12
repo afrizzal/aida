@@ -46,7 +46,7 @@ export type ActionUnknown = { ok: false; code: typeof ACTION_UNKNOWN_CODE };
 
 /**
  * K164 (review a-WR-1): getSessionActor throws AccessDeniedError when the session has no active
- * organization (a deactivation in a one-organization install, D-07). That is the services' own
+ * organization (a deactivation sets it to null, D-07 as amended by K178). That is the services' own
  * MEMBERSHIP_ENDED refusal, not UNKNOWN; nothing ran and nothing is revalidated.
  */
 const MEMBERSHIP_ENDED_RESULT = { ok: false, code: "MEMBERSHIP_ENDED" } as const;

@@ -1,7 +1,8 @@
 // K164 (review a-WR-1): a session with no active organization, or with no member row in it, gets
 // the typed MEMBERSHIP_ENDED refusal from every server action and a 403 from every gated API route,
-// never a thrown plain Error. Deactivation in a one-organization install leaves the session's
-// organization null (D-07), so this is what a removed member's open tab meets on its next action.
+// never a thrown plain Error. Deactivation leaves the session's organization null (D-07 as amended
+// by K178, whatever other memberships remain), so this is what a removed member's open tab meets
+// on its next action.
 //
 // The real gates run (src/lib/session.ts, src/lib/authz.ts, src/lib/fresh-session.ts) and the real
 // server actions and routes. Only the lowest layers are replaced: Better Auth's getSession, the

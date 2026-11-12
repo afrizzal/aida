@@ -56,8 +56,8 @@ async function requireLogoAdmin(): Promise<AdminGate> {
     return { ok: false, response: codeResponse(failure, gateFailureStatus(failure)) };
   }
   const { orgId, role } = access;
-  // K164: no active organization (a deactivation in a one-organization install leaves it null,
-  // D-07) or no member row in it is the membership refusal, 403 membership_ended.
+  // K164: no active organization (a deactivation leaves it null, D-07 as amended by K178) or no
+  // member row in it is the membership refusal, 403 membership_ended.
   if (!orgId || !role) return { ok: false, response: codeResponse("membership_ended", 403) };
   // Owner or admin of the active organization; a plain member is not allowed.
   if (!isAdminRole(role)) return { ok: false, response: codeResponse("not_allowed", 403) };

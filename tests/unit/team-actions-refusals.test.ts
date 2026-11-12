@@ -113,7 +113,7 @@ describe("reassignTicketsAction refusals (b-IN-2)", () => {
   it("after a committed deactivation, a refused reassignment still counts what is left (the actor was just checked as admin)", async () => {
     vi.mocked(deactivateMember).mockResolvedValueOnce({
       ok: true,
-      sessionsMoved: 0,
+      sessionsCleared: 0,
       invitationsRevoked: 0,
     } as Awaited<ReturnType<typeof deactivateMember>>);
     vi.mocked(reassignOpenTickets).mockResolvedValueOnce({

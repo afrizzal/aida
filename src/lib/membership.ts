@@ -157,8 +157,9 @@ export function isAdminRole(role: string | null | undefined): boolean {
  * The one refusal of the session gates when the session has no active organization or the user
  * holds no member row in it (Phase 10, D-08, AIDA-43; K164, review a-WR-1). Thrown by getScopedDb
  * and getSessionActor (src/lib/session.ts) and by requireOrgAdminScope (src/lib/authz.ts), never a
- * plain Error. Deactivation in a one-organization install leaves the session's organization null
- * (D-07), so this is the common path after a deactivation, not an edge case.
+ * plain Error. Deactivation leaves the removed member's sessions on that organization with no
+ * active organization (D-07 as amended by K178, whatever other memberships they hold), so this is
+ * the common path after a deactivation, not an edge case.
  *
  * Server actions catch it with `.catch(nullOnAccessDenied)` and return their typed
  * MEMBERSHIP_ENDED refusal (no revalidation, so the page keeps its client state, R10-1). API routes

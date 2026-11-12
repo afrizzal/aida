@@ -657,7 +657,9 @@ may have leaked.
 
 Removing (deactivating) a member ends their access to every page and to the API at once: their
 next request is refused, whatever session they still hold. Their account and their ticket history
-stay. The dialog offers to reassign their open tickets. Removal does not change project access
+stay. A member who also belongs to another workspace is not switched to it: their open sessions
+then name no workspace, each page shows the no-access page and every action is refused, until
+they sign in again (or accept an invitation, which opens the workspace it is for). The dialog offers to reassign their open tickets. Removal does not change project access
 rules: a **private project** whose only manager is removed is left with no manager, and nobody
 else can then reach it (owner item 14-o1). Before removing someone, check the private projects
 they manage.

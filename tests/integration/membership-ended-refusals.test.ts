@@ -1,7 +1,7 @@
 // K164 (review a-WR-1) on a real Postgres through Testcontainers, with a real Better Auth sign-in
-// and the real deactivation service. In a one-organization install deactivateMember moves the
-// removed member's sessions to null (D-07): the open session is still signed in but names no
-// organization. Every server action and route of a representative set then answers the typed
+// and the real deactivation service. deactivateMember sets the removed member's sessions on that
+// organization to null (D-07 as amended by K178, also for a member of another organization): the
+// open session is still signed in but names no organization. Every server action and route of a representative set then answers the typed
 // MEMBERSHIP_ENDED refusal (403 in the routes; the attachment keeps its missing-attachment 404),
 // changes nothing in the database and revalidates nothing, so the page keeps its client state
 // (R10-1). The same holds when the session still names the organization but the member row is
@@ -34,7 +34,7 @@ import { setAiEnabled } from "@/app/(app)/settings/actions";
 import { saveAutoCloseSetting } from "@/app/(app)/settings/sla/actions";
 import { createStatusAction } from "@/app/(app)/settings/statuses/actions";
 import { renameTag } from "@/app/(app)/settings/tags/actions";
-import { changeRoleAction } from "@/app/(app)/settings/team/actions";
+import { changeRoleAction, inviteMemberAction } from "@/app/(app)/settings/team/actions";
 import {
   addTag,
   assignTicket,
@@ -322,5 +322,92 @@ describe("K164: the session still names the organization but the member row is g
     asMember(s);
     await expectRoutesRefuse(s);
     expect(await snapshot(s)).toEqual(before);
+  });
+});
+
+// K178 (Codex diff round 1, HIGH; amends D-07): a member of organizations A and B is removed from
+// A while a tab of A is still open. Deactivation no longer moves the session to B: it sets the
+// session's active organization to null, so the stale tab's next server action is the typed
+// MEMBERSHIP_ENDED refusal and writes nothing in A or in B. The person reaches B again only by
+// signing in again (or by accepting an invitation, the user-initiated switch of V-23).
+describe("K178: a member of A and B removed from A; a stale tab of A writes nothing in B", () => {
+  it("the session is not switched to B; setAiEnabled and inviteMemberAction answer MEMBERSHIP_ENDED and write nothing in A or B", async () => {
+    const savedUrl = process.env.BETTER_AUTH_URL;
+    process.env.BETTER_AUTH_URL = "http://k178.example.test";
+    try {
+      const s = await install("admin");
+      // The session was created while A was the member's only membership, so it names A.
+      const orgB = randomUUID();
+      await prisma.organization.create({
+        data: { id: orgB, name: "K178 Org B", slug: `k178-${orgB}`, createdAt: new Date() },
+      });
+      await prisma.member.create({
+        data: {
+          id: randomUUID(),
+          organizationId: orgB,
+          userId: s.memberId,
+          role: "admin",
+          createdAt: new Date(),
+        },
+      });
+      const named = await prisma.session.findUniqueOrThrow({ where: { token: s.token } });
+      expect(named.activeOrganizationId).toBe(s.orgId);
+
+      // Presence: while a member of A, the same session changes A's AI switch and invites into A.
+      asMember(s);
+      expect(await setAiEnabled(false)).toEqual({ ok: true });
+      asMember(s);
+      const invitedInA = await inviteMemberAction(`k178-a-${randomUUID()}@example.test`, "member");
+      expect(invitedInA).toMatchObject({ ok: true });
+      const inA = async () => ({
+        settings: await prisma.setting.findMany({
+          where: { organizationId: s.orgId },
+          select: { key: true, value: true },
+          orderBy: { key: "asc" },
+        }),
+        invitations: await prisma.invitation.count({ where: { organizationId: s.orgId } }),
+      });
+      const inB = async () => ({
+        settings: await prisma.setting.count({ where: { organizationId: orgB } }),
+        invitations: await prisma.invitation.count({ where: { organizationId: orgB } }),
+        audit: await prisma.memberAuditEvent.count({ where: { organizationId: orgB } }),
+      });
+      expect(await inB()).toEqual({ settings: 0, invitations: 0, audit: 0 });
+
+      const beforeA = await inA();
+      const removed = await deactivateMember({
+        orgId: s.orgId,
+        actorUserId: s.ownerId,
+        targetUserId: s.memberId,
+      });
+      expect(removed).toMatchObject({ ok: true });
+      vi.mocked(revalidatePath).mockClear();
+
+      // The stale tab of A: the same two actions, as they were meant for A.
+      asMember(s);
+      const aiResult = await setAiEnabled(true);
+      asMember(s);
+      const inviteResult = await inviteMemberAction(
+        `k178-b-${randomUUID()}@example.test`,
+        "member",
+      );
+
+      // Nothing was written in B (the harm the old move to B allowed), nor in A.
+      expect(await inB()).toEqual({ settings: 0, invitations: 0, audit: 0 });
+      expect(await inA()).toEqual(beforeA);
+      expect(aiResult).toEqual(ENDED);
+      expect(inviteResult).toEqual({ ok: false, error: "membership_ended" });
+      expect(revalidatePath).not.toHaveBeenCalled();
+      // Not switched to B: the session names no organization, and B's membership stays.
+      const after = await prisma.session.findUniqueOrThrow({ where: { token: s.token } });
+      expect(after.activeOrganizationId).toBeNull();
+      expect(
+        await prisma.member.count({ where: { organizationId: orgB, userId: s.memberId } }),
+      ).toBe(1);
+      expect(removed).toMatchObject({ ok: true, sessionsCleared: 1 });
+    } finally {
+      if (savedUrl === undefined) delete process.env.BETTER_AUTH_URL;
+      else process.env.BETTER_AUTH_URL = savedUrl;
+    }
   });
 });

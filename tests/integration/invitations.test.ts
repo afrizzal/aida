@@ -982,20 +982,22 @@ describe("races: accept against deactivation of the new member, both commit orde
       (holderPid, waiterPid) => waitForBlockedBy(observer.client, holderPid, [waiterPid]),
     );
     expect(settledValue(accept)).toEqual({ ok: true, orgId, role: "member", retried: false });
-    expect(settledValue(deactivate)).toMatchObject({ ok: true, sessionsMoved: 1 });
+    expect(settledValue(deactivate)).toMatchObject({ ok: true, sessionsCleared: 1 });
 
     expect(await memberRows(orgId, user.id)).toEqual([]);
-    expect(await sessionOrg(session.id)).toBe(otherOrgId);
+    // K178 (amends D-07): never moved to the other organization, with or without one.
+    expect(await sessionOrg(session.id)).toBeNull();
+    if (otherOrgId !== null) expect(await memberRows(otherOrgId, user.id)).toHaveLength(1);
     const actions = (await memberAudit(orgId)).map((a) => a.action);
     expect(actions).toEqual(["INVITATION_CREATED", "INVITATION_ACCEPTED", "MEMBER_DEACTIVATED"]);
     expect(await invitationStatus(inv.invitationId)).toBe("accepted");
   }
 
-  it("accept first (parked in afterLock), deactivation proven blocked: the activated session is moved to null", async () => {
+  it("accept first (parked in afterLock), deactivation proven blocked: the activated session is set to null", async () => {
     await acceptFirst(false);
   });
 
-  it("accept first, variant: the user's other organization becomes the session's active one (D-07)", async () => {
+  it("accept first, variant with another membership: the session is still set to null, never to the other organization (K178)", async () => {
     await acceptFirst(true);
   });
 

@@ -62,8 +62,8 @@ export async function getScopedDb() {
  * Reads the session once (fresh, like getCurrentSession; same redirect when unauthenticated) and
  * its `activeOrganizationId`, and returns `{ userId, orgId }`. Throws AccessDeniedError (status
  * 403, code MEMBERSHIP_ENDED) when no organization is active, as getScopedDb does (K164, review
- * a-WR-1): a deactivation in a one-organization install sets the session's organization to null
- * (D-07), and every caller catches this with nullOnAccessDenied and returns its typed
+ * a-WR-1): a deactivation sets the removed member's sessions on that organization to null (D-07
+ * as amended by K178), and every caller catches this with nullOnAccessDenied and returns its typed
  * MEMBERSHIP_ENDED refusal. It does NOT check membership, by contract: every caller passes the actor to
  * a service that checks the member row itself inside its own read or transaction (for example
  * runTicketMutation through findActiveMembership, src/lib/membership.ts). The membership

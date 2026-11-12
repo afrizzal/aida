@@ -353,37 +353,38 @@ describe("deactivateMember (D-07, D-09, D-10, V-26 (5))", () => {
     });
   });
 
-  it("moves the target's sessions on this organization to the oldest remaining membership (createdAt, then id)", async () => {
+  // K178 amends D-07: the sessions on this organization are set to null even when the target is a
+  // member elsewhere; they are never moved to another membership.
+  it("sets the target's sessions on this organization to null, whatever other memberships remain; other sessions are untouched (K178)", async () => {
     const { orgId, ids } = await seed(["owner", "member"]);
     const [owner, member] = ids;
-    const t0 = new Date("2026-01-01T00:00:00.000Z");
     const later = await addOtherMembership(member, new Date("2026-06-01T00:00:00.000Z"));
-    // Two memberships with the same createdAt: the smaller member id decides.
-    const tieA = await addOtherMembership(member, t0, `a-${randomUUID()}`);
-    const tieB = await addOtherMembership(member, t0, `b-${randomUUID()}`);
+    const older = await addOtherMembership(member, new Date("2026-01-01T00:00:00.000Z"));
     const onThis1 = await addSession(member, orgId);
     const onThis2 = await addSession(member, orgId);
     const onOther = await addSession(member, later);
     const ownerSession = await addSession(owner, orgId);
 
     const result = await deactivateMember({ orgId, actorUserId: owner, targetUserId: member });
-    expect(result).toMatchObject({ ok: true, sessionsMoved: 2 });
+    expect(result).toMatchObject({ ok: true, sessionsCleared: 2 });
     const read = (id: string) => prisma.session.findUniqueOrThrow({ where: { id } });
-    expect((await read(onThis1)).activeOrganizationId).toBe(tieA);
-    expect((await read(onThis2)).activeOrganizationId).toBe(tieA);
+    expect((await read(onThis1)).activeOrganizationId).toBeNull();
+    expect((await read(onThis2)).activeOrganizationId).toBeNull();
     expect((await read(onOther)).activeOrganizationId).toBe(later);
     expect((await read(ownerSession)).activeOrganizationId).toBe(orgId);
-    expect(tieB).not.toBe(tieA);
+    // Both other memberships stay; neither became a session's organization.
+    expect(await rowsOf(older, member)).toHaveLength(1);
+    expect(await rowsOf(later, member)).toHaveLength(1);
   });
 
-  it("sets the moved sessions to null when the user has no other membership", async () => {
+  it("sets the sessions to null when the user has no other membership", async () => {
     const { orgId, ids } = await seed(["owner", "member"]);
     const [owner, member] = ids;
     const s = await addSession(member, orgId);
     const none = await addSession(member, null);
     expect(
       await deactivateMember({ orgId, actorUserId: owner, targetUserId: member }),
-    ).toMatchObject({ ok: true, sessionsMoved: 1 });
+    ).toMatchObject({ ok: true, sessionsCleared: 1 });
     expect(
       (await prisma.session.findUniqueOrThrow({ where: { id: s } })).activeOrganizationId,
     ).toBe(null);
