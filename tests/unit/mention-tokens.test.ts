@@ -15,6 +15,7 @@ import {
   type MentionDraftState,
   type MentionMember,
   type MentionQuery,
+  mentionCapReached,
   mentionDraftReducer,
   mentionOptionLabel,
   outgoingMentionIds,
@@ -386,6 +387,44 @@ describe("inserted names are escaped for Markdown (K174)", () => {
     expect(typed.text).toBe("Hi @\\*Star\\* and @*Star*, and @\\*Star\\*.");
     const switched = mentionDraftReducer(typed, { type: "setMode", mode: "public" });
     expect(switched.text).not.toContain("Star");
+  });
+});
+
+// Review d-IN-3: the composer never sends more ids than the server accepts (MAX_MENTIONS, V-12).
+describe("the mention cap in the composer (d-IN-3)", () => {
+  function fiftyMentions(): MentionDraftState {
+    let state = internal;
+    for (let i = 0; i < 50; i++) {
+      const member: MentionMember = {
+        userId: `u-${i}`,
+        name: `Member ${String(i).padStart(2, "0")}`,
+      };
+      state = mention(type(state, i === 0 ? "Heads up " : ", "), member, "Me");
+    }
+    return state;
+  }
+
+  it("a 51st distinct member is not inserted; the text and the 50 ids stay", () => {
+    const full = fiftyMentions();
+    expect(outgoingMentionIds(full)).toHaveLength(50);
+    const typed = type(full, " and @Om");
+    const query = queryAt(typed.text, typed.caret ?? 0, typed.spans);
+    const refused = mentionDraftReducer(typed, { type: "insert", query, member: OMEGA });
+    expect(refused).toBe(typed);
+    expect(refused.text.endsWith(" and @Om")).toBe(true);
+    expect(outgoingMentionIds(refused)).toHaveLength(50);
+    expect(outgoingMentionIds(refused)).not.toContain("u-omega");
+  });
+
+  it("an already mentioned member can still be inserted at the cap, and mentionCapReached says when to stop offering", () => {
+    const full = fiftyMentions();
+    expect(mentionCapReached(full)).toBe(true);
+    const again = mention(type(full, " "), { userId: "u-7", name: "Member 07" }, "Me");
+    expect(again.text.endsWith("@Member 07 ")).toBe(true);
+    expect(outgoingMentionIds(again)).toHaveLength(50);
+    expect(mentionCapReached(mention(type(internal, "Hi "), OMEGA))).toBe(false);
+    // Public mode sends no id, so it is never at the cap.
+    expect(mentionCapReached({ ...full, mode: "public" })).toBe(false);
   });
 });
 

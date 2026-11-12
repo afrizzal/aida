@@ -23,6 +23,12 @@
 // character that Markdown could turn into markup is backslash-escaped, so the parsed text node holds
 // the name verbatim and the renderer, which matches names on parsed text, finds it.
 
+/**
+ * At most this many mentioned ids per message (V-12, T-10-29): the server refuses more with a 400,
+ * and the composer stops offering the list at this many (review d-IN-3).
+ */
+export const MAX_MENTIONS = 50;
+
 const WHITESPACE = /\s/u;
 const NAME_CHAR = /[\p{L}\p{M}\p{N}_]/u;
 

@@ -26,6 +26,7 @@ import {
   isMentionAt,
   isMentionEndBoundary,
   isMentionStartBoundary,
+  MAX_MENTIONS,
   mentionToken,
 } from "./mention-syntax";
 
@@ -357,6 +358,19 @@ export function outgoingMentionIds(state: {
   return reconcileMentionIds(state.text, onBoundary);
 }
 
+/**
+ * Whether a send already carries MAX_MENTIONS ids (review d-IN-3): the composer then stops offering
+ * the list, and an insert of a member not yet among them changes nothing, so a note is never
+ * refused by the server for its mention count.
+ */
+export function mentionCapReached(state: {
+  mode: MentionMode;
+  text: string;
+  spans: readonly MentionSpan[];
+}): boolean {
+  return outgoingMentionIds(state).length >= MAX_MENTIONS;
+}
+
 /** The composer's whole draft. `caret` is where the textarea's caret goes after the next render. */
 export interface MentionDraftState {
   text: string;
@@ -394,6 +408,7 @@ export type MentionDraftAction =
  * and turns the switch note on when something was removed; public to internal turns it off.
  * loadDraft: an AI draft replaces the body and forces public with no span and no inserted name.
  * sent: clears text, spans, inserted names, the note and the draft flag.
+ * An insert of a member not yet mentioned changes nothing once mentionCapReached (d-IN-3).
  */
 export function mentionDraftReducer(
   state: MentionDraftState,
@@ -407,6 +422,9 @@ export function mentionDraftReducer(
     }
     case "insert": {
       if (state.mode !== "internal") return state;
+      if (mentionCapReached(state) && !outgoingMentionIds(state).includes(action.member.userId)) {
+        return state;
+      }
       const next = insertMention(state, action.query, action.member);
       if (next.text === state.text) return state;
       const insertedNames = state.insertedNames.includes(action.member.name)

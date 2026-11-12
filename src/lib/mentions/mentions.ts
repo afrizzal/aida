@@ -19,9 +19,11 @@
 // Relative imports only and no framework import, like the notification modules it calls.
 import { type EmitTx, emitNotifications } from "../notifications/emit";
 import { type NotificationItem, TICKET_ENTITY } from "../notifications/types";
+import { MAX_MENTIONS } from "./mention-syntax";
 
-/** At most this many mentioned ids per message (V-12, T-10-29); more is a 400. */
-export const MAX_MENTIONS = 50;
+/** At most this many mentioned ids per message (V-12, T-10-29); more is a 400. Defined in
+ * mention-syntax.ts, which the client composer imports too. */
+export { MAX_MENTIONS };
 
 /** The longest id accepted in the field; user ids are far shorter. */
 export const MAX_MENTION_ID_LENGTH = 128;

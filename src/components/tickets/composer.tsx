@@ -26,6 +26,7 @@ import {
   findMentionQuery,
   initialMentionDraft,
   type MentionCandidate,
+  mentionCapReached,
   mentionDraftReducer,
   outgoingMentionIds,
   shouldOfferMentions,
@@ -173,9 +174,10 @@ export function Composer({ ticketId, insertedText, onInsertedConsumed }: Compose
     setCursor(caret);
   }, [draft]);
 
-  // Public mode never opens the list (D-21), and neither does a failed member list.
+  // Public mode never opens the list (D-21), and neither does a failed member list, nor a note
+  // that already mentions MAX_MENTIONS members (review d-IN-3: the server would refuse more).
   const mentionQuery =
-    isInternal && members.status !== "failed" && cursor !== null
+    isInternal && members.status !== "failed" && cursor !== null && !mentionCapReached(draft)
       ? findMentionQuery(body, cursor, draft.spans)
       : null;
   const membersLoading = members.status === "loading";
