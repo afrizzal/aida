@@ -63,3 +63,33 @@ Answer: `.planning/run-loop/codex/fase15-plan-r3-jawab.md`. Verdict: not ready; 
 | CX3-3 | MEDIUM | The date dialogs (15-16 decision 23, 15-17 decision 26) close when the task prop is null after `onReload()` resolves, but the runner's promise also resolves when the read fails; a failed explicit Reload after a background reload already made the prop null can discard the input without a successful read proving the task is gone. | Open: phase parked. |
 
 **Outcome:** three plan-review cycles are exhausted with HIGH findings left, so by the charter's decision table ("3 siklus review plan habis dengan temuan HIGH tersisa: Parkir fase") Phase 15 is parked. Nothing was revised after cycle 3. Suggested fixes for the owner, from Codex: CX3-1, on returning to an identity whose earlier save is still in flight, hold the controls until it completes and re-read (or keep that save as the base and serialize the new choice after it), with an A to B to A E2E while X is pending; CX3-2, update the K100 example to pass the identity and expect the full key; CX3-3, give `onReload()` a success or failure result and keep the dialog, input and retry on failure, tested for both dialogs and the workspace pages.
+
+### Owner decision 15-o2 (2026-11-11) and revision 4 (2026-11-13)
+
+Source: `.planning/run-loop/ANTREAN.md` row `15` (verbatim in `15-CONTEXT.md`, "Revision 2026-11-13"): option c, simplify K100, with two conditions (fix the date dialog, CX3-3; the last pending change is sent when the page is left, `fetch` with `keepalive: true`), then one Codex review of the changed parts only.
+
+| ID | Disposition in revision 4 |
+|----|---------------------------|
+| CX3-1 | Resolved by removing the registry: one saver per mount, nothing of an earlier mount used as a base, each request carries its saver's identity and the route refuses another session's (404, nothing written). Returning before an earlier save commits is stated limitation (1), accepted by option c. E2E "A to B to A" in 15-12. |
+| CX3-2 | Resolved by removal: `viewStateSaverKey` no longer exists; saver tests pass `I_A` and check `expected` on every request. |
+| CX3-3 | Fixed: `createCoalescedReload` resolves a `ReloadResult`; both dialogs close only after a successful read with the task gone and keep dialog, snapshot, input and refusal on a failed or discarded read; tests in 15-16, 15-17 and both 15-22 pages. |
+| Owner condition 2 | Every view-state save uses one keepalive transport to `POST /api/projects/view-state`; on unmount the queued state follows the save in flight, on `pagehide` or hidden visibility it is sent at once; failures after leaving show one generic toast, failures after the document is gone are not shown and the next visit reads the stored row. |
+
+Applied as binding "Revision 4" sections at the end of 15-01, 15-08, 15-09, 15-10, 15-11, 15-12, 15-14, 15-15, 15-16, 15-17, 15-18, 15-20, 15-21, 15-22, 15-24 and 15-25 (their earlier text, truths and greps naming the withdrawn identifiers are superseded there; folding them inline is open work for the reviser of the Codex round).
+
+Drift items fixed (code changed after planning at `7718899`):
+1. Docker test commands (97 sites, 16 preconditions): `AIDA_TEST_RUN_ID` and `DOCKER_HOST` from `docker context inspect` (rule J, executor brief).
+2. Cookie cache off (R10-1): `renewSessionCookieCache` (49 sites) became `expectSessionReadSetsNoCookie` (no set-cookie), 15-05 helper text and prose fixed.
+3. Migration `20261114100000_work_views` collided in time with `20261114100000_project_file_cleanup_upload_xact_id` and sorted before Phase 13's reserved name: now `20261118100000_work_views` (33 sites); 15-02 generates it in a rule J disposable container (not `aida-dev-db`), counts migrations from disk and appends it to `UPGRADE_MIGRATIONS` of `tests/integration/auth-upgrade.test.ts`.
+4. Rule A of `tests/unit/membership-inventory.test.ts` follows gate calls only into src/app helpers: `action-support.ts` moved to `src/app/(app)/projects/` (59 sites; 15-24's per-root example now `paths.ts`).
+5. K164: actions map AccessDeniedError to MEMBERSHIP_ENDED (15-05 helper, tests, greps; 15-01 18.1); routes answer 403, and 401/500 through `gate-failure.ts` (15-01, 15-21, the new route).
+6. Rule B: every Phase 15 page and tenant-reaching layout starts with `requirePageAccess()` (15-09 to 15-12, 15-14 to 15-18, 15-20 to 15-22); 15-09's `loadSessionActor` redirects AccessDeniedError to `/no-access`.
+7. `tests/unit/single-h1-route-list.test.ts`: every new page joins `APP_PAGE_ROUTES` in `tests/e2e/single-h1.spec.ts` with a rendering case (same plans; the drawer route in 15-18).
+8. 15-18: the `(app)` layout has no "No workspace found" return any more; the edit keeps requirePageAccess first and the JoinWelcomeToast block.
+9. 15-10: top-bar titles moved to `src/lib/navigation/page-title.ts` and the top bar renders a `<p>` (AIDA-36, K147); sidebar `navItems` `:26-32`, active test `:59`.
+10. 15-21 and 15-01: the upload route reuses `readBoundedFormData` (Phase 8, D-24); Caddy and `proxyClientMaxBodySize` are now 32 MiB (`PROXY_BODY_LIMIT_BYTES`), so the pinned comparisons change.
+11. 15-25: `tests/e2e/support/worker.ts` (`stopWorker`) is gone; `stopProcessTree` and `assertTreeStopped` of `tests/e2e/support/process-tree.ts` replace it; test:egress under rule J.
+12. Line references updated: session.ts `:49`/`:73` (15-01, 15-05), proposals actions.ts lines (15-05), kb-proposals and ticket-statuses spec lines (15-05, 15-09), proposals page (15-09), render.ts `:460-480` (15-09, 15-18), schema SavedView `:683-700`, Project `:1032`, organization `:107`, Task `:1168` (15-01, 15-02, 15-07), scoped-db DOMAIN_MODELS `:14-66` (15-02), (app) layout `:39`/`:49` (15-02, 15-10), projects/attachments.ts `:222-231`, `:55-134` (15-01, 15-18); 15-CONTEXT carries the rest in its revision section.
+13. Checked, no change needed: no plan adds a settings tab (order pinned in `tests/e2e/backups-status.spec.ts`); Phase 14 services other than attachments.ts and file-cleanup.ts are unchanged since planning, so their line references stand.
+
+Not done in revision 4 (for the next reviser): folding the Revision 4 sections into the task bodies, truths and greps of the named plans; recounting 15-24's manifest; the inline 15-12 test texts.
