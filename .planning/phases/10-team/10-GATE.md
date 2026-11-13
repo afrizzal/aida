@@ -268,3 +268,101 @@ Applied, because every AIDA-42 acceptance row (42.1 to 42.7) passed in this gate
 
 - No visual, dark-mode, screen-reader or UAT result is recorded here.
 - `REQUIREMENTS.md`, `docs/SECURITY.md`, `STATE.md`, `ROADMAP.md` and `.planning/run-loop/` were not edited by this plan.
+
+## Gate rerun after review fixes (2026-11-13)
+
+Charter step 8, after the fix batches F1 to F7 (`10-REVIEW-FIX.md`) and the Codex diff critique (round 3, no HIGH).
+
+Tested commit: b96263d880982d41d00e0b2cb32a2fedfcf9f4b9
+Date: 2026-11-13, 06:52Z to 07:12Z
+Run id: mwembrij-481acd6a6ef2f64f
+Evidence dir: /var/folders/_f/5lfgy3_s4q1515bbcm9z70jh0000gn/T/aida-gate10r.2nUAIR (removed after this section quoted it)
+Tree state: clean, apart from the untracked `.planning/state.json`, which is not part of the gate
+
+Every row below ran at the tested commit, in the charter's order, one process at a time. Nothing was committed between the first row and this section. Each command wrote its own log, and each exit code was written to its own `.exit` file and read without a pipe. No product code or config was changed.
+
+### Results
+
+| Command | Exit code | Result | Note | Commit |
+| --- | --- | --- | --- | --- |
+| pnpm lint | 0 | passed | lint.log, 06:52:19Z. "Checked 774 files", 0 errors, 1 warning (`tests/unit/container-config.test.ts:160`, `noTemplateCurlyInString`, the old known one) | b96263d |
+| pnpm typecheck | 0 | passed | typecheck.log, 06:52:20Z to 06:52:22Z; no output from `tsc --noEmit` | b96263d |
+| pnpm test | 0 | passed | test.log, 06:52:22Z to 06:52:48Z (25.5 s). Files 116 passed of 116; tests 2153 passed, 0 failed, 0 skipped (first gate: 110 files, 1967 tests) | b96263d |
+| pnpm test:integration | 0 | passed | integration.log, 06:53:21Z to 07:01:24Z (482.7 s). Files 135 passed of 135; tests 1891 passed, 0 failed (first gate: 130 of 131 files, 1838 of 1839 tests). 135 is `tests/integration/*.test.ts` (136) minus `egress-isolation.test.ts` (`vitest.integration.config.ts:8`), so the new `mentionable-route.test.ts` (F4) and `notification-digest-job.test.ts` (F3) ran and passed; the reporter lists no file names on success. The K143 case of `backup-failures.test.ts` that failed in the first gate passed in this full run. | b96263d |
+| pnpm test:egress | 1 | blocked (space) | egress.log, 07:02:22Z to 07:02:23Z. The rule J preflight stopped it before any build: "DockerPreflightError: Free space on the Docker VM is 13.2 GiB, below the 20.0 GiB rule J requires before an image build. Stopped; report to the owner." Measured at 07:02:09Z, just before the run: host 47 GiB available (`df -h /System/Volumes/Data`; the host check runs first in `runBuildPreflight` and passed), VM 14G available of 40G (`colima ssh -- df -h /var/lib/docker`, read only). Counts: tests 1 passed (the stack-free installer egress inventory), 4 skipped; files 1 failed (the beforeAll stop). No image was built or pulled. | b96263d |
+| pnpm test:e2e (run 1) | 1 | failed (global setup stalled on `/setup`) | e2e.log, 07:02:34Z to 07:03:13Z. `TimeoutError: locator.click: Timeout 30000ms exceeded`, waiting for the "Create workspace" button, at `tests/e2e/global-setup.ts:173` (the click before `waitForURL` at `:174`). No test ran. The 570 dev-server lines (prefix `[e2e-server]`) were copied to e2e-server-run1.log before the move: "Next.js 16.4.6 (Turbopack)", "Ready in 202ms", then 319 `GET /setup 200` lines alternating with "Compiled in 0ms/1ms", and no `POST /setup`. Owner item next-o1, not fixed here. | b96263d |
+| `.next` move | - | done | 2026-11-13T07:03:36Z, after run 1: `mv .next ~/.Trash/aida-next-1794553416` (exit 0). Never removed. | - |
+| pnpm test:e2e (run 2, the one rerun) | 0 | passed | e2e2.log, 07:03:36Z to 07:11:35Z (8.0 min). "Running 297 tests using 1 worker"; 296 passed, 0 failed, 0 flaky, 1 skipped (first gate: 292 passed of 293). Phase 10 specs: team-invitations 17 passed, team-deactivation 5, notifications-bell 3, mentions-leak 7, csp 14, single-h1 9; none failed. | b96263d |
+| pnpm build | 0 | passed | build.log, 07:11:49Z to 07:12:04Z. "Turbopack build encountered 5 warnings", each "Dynamic filesystem access causes tracing of the whole project" (the known Phase 02 deferred item). No Google Fonts host in the log (0 matches). | b96263d |
+| pnpm audit --prod | 1 | failed | audit.log, 07:12:04Z. "48 vulnerabilities found", "Severity: 3 low \| 35 moderate \| 10 high", the same counts as the first gate (AIDA-25, owner item 08-o3). `git diff --stat 2418e4c HEAD -- package.json pnpm-lock.yaml` is empty. | b96263d |
+| pnpm typecheck (after E2E and build) | 0 | passed | typecheck-post.log, 07:12:05Z to 07:12:15Z; no output from `tsc --noEmit`. No second `.next` move was needed. | b96263d |
+
+Docker: `colima status` and `docker info` both exited 0 before `pnpm test:integration` (06:53Z), before `pnpm test:egress` (07:02Z), before E2E run 1 and again before run 2. Every Docker-using command ran with `AIDA_TEST_RUN_ID=mwembrij-481acd6a6ef2f64f`, `DOCKER_HOST` from the docker context and `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`. No `docker compose` command ran, and no image was built or pulled. `pnpm test:docker-cleanup` was not run. After the last Docker-using run, `docker ps -a`, `docker images`, `docker volume ls` and `docker network ls`, each filtered on `label=aida.test.run=mwembrij-481acd6a6ef2f64f`, listed nothing, and no container name held the run id. Host disk stayed at 45 to 47 GiB available throughout.
+
+### Design-system checklist (§9), files changed by F1 to F7
+
+Mechanical checks only. The UI files are the 13 `.tsx` files in `git diff --name-only 2418e4c..HEAD -- 'src/**/*.tsx' 'src/**/*.css'`: `settings/branding/logo-card.tsx`, `settings/email/test-connection-button.tsx`, `settings/embedding-test-connection-button.tsx`, `settings/llm-test-connection-button.tsx`, `settings/team/deactivate-dialog.tsx`, `settings/team/page.tsx`, `settings/team/team-member-row.tsx` (all under `src/app/(app)/`), `src/app/(auth)/invite/[token]/invite-card.tsx`, `src/app/(auth)/invite/[token]/page.tsx`, `src/app/(auth)/no-access/page.tsx`, `src/components/tickets/composer.tsx`, `src/components/tickets/mention-autocomplete.tsx`, `src/components/tickets/ticket-meta-header.tsx` (112 insertions, 73 deletions). No `.css` file and not `src/app/globals.css`.
+
+| Item | Result | Evidence |
+| --- | --- | --- |
+| 1 new tokens live in `globals.css`, not hardcoded | passed | grep for `oklch(`, `#hex` (3 to 8 digits), `rgb(`, `rgba(`, `hsl(` over the 13 whole files: exit 1; grep for Tailwind palette colours (`bg-`, `text-`, `border-`, `ring-`, `fill-`, `stroke-`, `outline-`, `divide-`, `shadow-` and gradient stops with red, blue, gray, slate, white, black and the like): exit 1 |
+| 2 empty state uses halo and icon box | not applicable | `src/components/empty-state.tsx` unchanged (`git diff --quiet 2418e4c..HEAD` exit 0) and none of the 13 files renders `EmptyState` (grep exit 1) |
+| 3 sidebar uses `sidebar-*` tokens | not applicable | `src/components/sidebar.tsx` unchanged since 2418e4c |
+| 4 top bar is sticky with backdrop blur | passed (unchanged) | `src/components/top-bar.tsx` unchanged since 2418e4c. `ticket-meta-header.tsx:400` (the ticket header, changed by F-batches elsewhere in the file) keeps `sticky top-0 z-10 … backdrop-blur-sm` |
+| 5 auth page does not wrap itself | passed | grep for `min-h-screen` and `<main` over `(auth)/no-access/page.tsx`, `(auth)/invite/[token]/page.tsx` and `invite-card.tsx`: exit 1; the changes are copy (A11) and the K159 to K161 refusal paths, not wrappers |
+| 6 typography uses explicit `text-[Npx]` | passed | grep for `text-(xs\|sm\|base\|lg\|xl\|2xl…9xl)` over the 13 files: exit 1 |
+| 7 dark mode tested | open (human) | the changed surfaces: the A10 hold note in the composer, the A11 `/no-access` sentence, the K161 refusal states of the invitation card, the Team page owner-row change (K162), the A9 autocomplete rows, the test-connection result lines. Not tested here; no result is recorded. |
+| 8 `tsc --noEmit` clean | passed | `pnpm typecheck` exit 0, before and after E2E and build |
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| No inline script | passed | grep for `<script` and `dangerouslySetInnerHTML` over the 13 files: exit 1. `csp.spec.ts` 14 passed in E2E run 2. |
+| Spacing on the declared scale (4, 8, 16, 24, 32) | passed for the F1 to F7 lines | grep for off-scale padding, margin, gap, space and inset steps (`0.5`, `1.5`, `2.5`, `3`, `3.5`, `5`, `7`, `9` to `12`) over the lines added since 2418e4c (`git diff -U0`): exit 1. The first gate's finding `mention-autocomplete.tsx` `py-0.5` is gone (A9, `py-1`). The same grep over the whole 13 files finds lines F1 to F7 did not touch: `gap-1.5` and `mt-0.5` in the three test-connection buttons (`:84` to `:98`), `composer.tsx:382` `gap-1.5`, `logo-card.tsx:236` `p-3`, and `ticket-meta-header.tsx:400`, `:432`, `:491`, `:591`, `:653`. They predate this phase's fixes; recorded, not judged here. |
+
+Visual, dark-mode, 360px and screen-reader checks stay manual.
+
+### Requirement matrix (re-derived)
+
+Same acceptance rows as the "Requirement evidence" section above. Only the rows whose evidence changed are listed; every other row keeps its evidence, and its command row passed again here (integration exit 0, E2E run 2 exit 0, unit exit 0).
+
+| # | Change since the first gate | Command row | State |
+| --- | --- | --- | --- |
+| 42.1 to 42.7 | F1 (K159 to K163): the accept route now needs an exact Origin and `/invite` sends `same-origin` (replacing the `dd941e0` `Origin: null` rule); relative redirects; refusals land on the card; per-address and per-token limits; one-address validation. team-invitations 17 of 17 passed | integration; E2E | passed |
+| ↳ V-24 (42) | the `dd941e0` rule was replaced by K159 and went through the code review and the Codex diff critique (round 3, no HIGH) | integration; E2E | passed; no longer awaiting critique |
+| 43.3 | F2 (K164) and F6 (K178): no active organization or no member row is the typed MEMBERSHIP_ENDED refusal; deactivation sets the removed member's sessions to no workspace. team-deactivation 5 of 5 passed | integration; unit; E2E | passed |
+| 43.5 | F6 (K181), F7 (K184): the digest re-checks the membership row as the last read before the SMTP connection | integration | passed |
+| 44.1 to 44.7 | F3 (K166 to K168, c-IN-01): one fallback rule for bell and digest, a bounded SLA pass, privacy tests for the bell route | integration; E2E | passed |
+| 45.1 | **new direct evidence** (F4, K175, `af6cba3`): `tests/integration/mentionable-route.test.ts` "lists the current members of the active organization only, once each, without the caller" (exact sorted `{ id, name, email }`; the caller, a removed member, an org-B-only user and a user without a member row absent; `no-store`), "answers 403 membership_ended for a removed member, and for a session without an active organization", "answers 401 without a session" | integration | passed (was not proven) |
+| 45.2 to 45.4 | F4 (K171 to K174), F6 (K180), F7 (K183): the guard after the sanitize pass, the strip keeps non-mention text, escaped names, only a shown mention is recorded, the held public Send. mentions-leak 7 of 7 passed | unit; integration; E2E | passed |
+| 46.2 | **new evidence** (F3, K169, `79b023e`): `tests/integration/notification-digest-job.test.ts` "registered like the worker does, one sent job runs the handler: one digest at the fake SMTP, the job ends completed, the queue and the schedule carry the options", with a real `PgBoss`, registered by `registerNotificationDigest`, the function `src/lib/worker/index.ts:179` calls; plus the queue-options and the two abort-signal cases. Batching cases unchanged. The egress stack's flow 7 is still not run (blocked (space)). | integration | passed (was partly proven) |
+| 46.4, 46.5 | F3 (K170), F6 (K179): a 5xx or an SMTP login or configuration failure releases or closes the batch | integration | passed |
+| ↳ 46 | F7 (K186): retention of released and canceled digest rows | integration | passed |
+
+### Requirement status (re-derived)
+
+| Requirement | Evidence complete | Closable on evidence | Holding it open |
+| --- | --- | --- | --- |
+| AIDA-42 | yes | the seven acceptance rows, yes | real-email test (human); visual, dark mode, 360px, screen reader of the invitation page (human); the V-23 limit is accepted for v1 and documented, not a test item |
+| AIDA-43 | yes (O-10 reading) | yes under the O-10 default reading | O-10 (owner); visual, dark mode, 360px, screen reader (human); K184 written bound (a removal saved after the last re-check) |
+| AIDA-44 | yes | yes | O-7 (owner); visual, dark mode, 360px, screen reader of the bell (human); O-9 keeps `REQUIREMENTS.md` the owner's (the owner item 11 widening is not in its text) |
+| AIDA-45 | **yes** (45.1 now direct) | yes | visual, dark mode, 50-mention layout, screen reader (human); the AI-draft path is proven in the reducer only (no paid LLM) |
+| AIDA-46 | **yes** (46.2 now run through pg-boss) | yes | real-email digest and its look in a mail client (human); visual, dark mode, 360px, screen reader of Settings → Notifications (human); egress flow 7 blocked (space); K184 and K187 written bounds |
+
+Every acceptance row of AIDA-42 to AIDA-46 has passed evidence at b96263d; AIDA-45 and AIDA-46 moved from "no" to "yes". None of the five is closed by this gate: each still has open human items, and closing, like any change to `REQUIREMENTS.md`, stays with the orchestrator and the owner (O-9). 08-o4 still holds the two `docs/SECURITY.md` lines: `git diff --quiet 2418e4c HEAD -- docs/SECURITY.md` exit 0, and `git diff --quiet 2418e4c HEAD -- .planning/REQUIREMENTS.md` exit 0.
+
+### Manual and owner items, rerun
+
+The first gate's lists stand, with these changes:
+
+- Removed from "for the phase code review": `dd941e0` (replaced by K159, critiqued), the `py-0.5` spacing finding (A9), and the flaky K143 case (it passed in this full run; one pass does not prove the timing is fixed).
+- Removed from "Evidence still missing": 45.1 and 46.2.
+- Human, added by F1 to F7: visual, dark-mode and screen-reader check of the A10 hold note, the A11 `/no-access` sentence and the K161 refusal states of the invitation card.
+- Owner: Docker VM space (rule J), still 13.2 GiB by the preflight and 14G by `df` in the VM; `pnpm audit --prod` 48 (10 high, 08-o3); next-o1, run 1 of E2E stalled again in global setup, one `.next` move and one rerun passed; O-4, O-5, O-7, O-8, O-10, 08-o4 and O-9 unchanged.
+- Known limits (accepted for v1): V-23, K184 and K187 unchanged.
+
+### Notes, rerun
+
+- `.next` moves: one, `~/.Trash/aida-next-1794553416` (07:03:36Z, after E2E run 1). Never removed.
+- One test process at a time; every exit code from its own `.exit` file, read without a pipe.
+- No visual, dark-mode, screen-reader or UAT result is recorded here.
+- Only this file was edited; `REQUIREMENTS.md`, `STATE.md`, `ROADMAP.md`, `docs/SECURITY.md` and `.planning/run-loop/` were not.
