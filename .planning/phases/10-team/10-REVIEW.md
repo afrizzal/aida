@@ -241,3 +241,15 @@ Answer: `.planning/run-loop/codex/fase10-diff-r2-jawab.md` (log `model: gpt-6.1-
 | (info) | K178 recovery path not explained | The `/no-access` page adds one sentence: signing out and in again opens another workspace the person still belongs to (UI-SPEC amendment A11). |
 
 Fix batch F7 = K183 to K186 plus the two rows above, then Codex round 3 (the last).
+
+## Codex diff critique round 3 dispositions (orchestrator, 2026-11-13; last round)
+
+Answer: `.planning/run-loop/codex/fase10-diff-r3-jawab.md` (log `model: gpt-6.1-terra`, `reasoning effort: xhigh`): no HIGH; 1 MEDIUM, 1 LOW, both about documentation precision; Codex: K183, K185 and K186 hold on the traced paths, K184 closes the removal bound, and Phase 10 is ready for the gate rerun and the verifier once the MEDIUM is fixed or its bound accepted in writing. Both checked against `digest.ts:265` (three separate reads) and `digest.ts:541` (a configuration failure stops the workspace's other pairs) and accepted as written bounds (no code change):
+
+| Decision | Codex finding | Decision |
+|---|---|---|
+| K187 | MEDIUM: the documented K184 bound is too narrow for preference changes | `docs/OPERATIONS.md` and `10-GATE.md` now state the bound per read: the re-check is three separate reads (digest choices, the unassigned-tickets choice, then the membership row); a choice changed after its own read, or a removal saved after the membership read, may still let that one digest through. Accepted as a written bound; merging the reads into one statement is not required by any decision. |
+| K188 | LOW: the retention note overstated attempts during an SMTP configuration failure | `docs/OPERATIONS.md` now says one new attempt per workspace per run while the SMTP settings stay broken. |
+
+The three-round Codex cycle for the Phase 10 diff ends with no HIGH left; the V-23 limit is written down (`10-GATE.md`, "Known limits (accepted for v1)"). Next: the gate rerun (step 8), then the verifier (step 9).
+

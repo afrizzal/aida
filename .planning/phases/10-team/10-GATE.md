@@ -258,7 +258,7 @@ Blocked or failed gate rows: `pnpm test:integration` failed (one timing-dependen
 ## Known limits (accepted for v1)
 
 - **V-23, a stale tab after a deliberate invitation accept.** Accepting an invitation to another workspace switches the session to it; a tab still open on the previous workspace then acts in the new one (its next server action runs in the organization the session names, where the person has the right). Accepted as a written limit while v1 ships one workspace per install (`docs/OPERATIONS.md`, "Accepting an invitation to another workspace"). It becomes HIGH before multi-workspace support: bind every server action to the organization the page was rendered for. Codex diff critique round 2.
-- **K184, the digest after a removal.** A removal or a changed choice saved after the digest's last re-check (the last reads before the SMTP connection) may still let that one digest through (`docs/OPERATIONS.md`, "The email digest").
+- **K184 and K187, the digest after a removal or a changed choice.** The re-check is three separate reads (digest choices, then the unassigned-tickets choice, then the membership row, the last read before the SMTP connection); a choice changed after its own read, or a removal saved after the membership read, may still let that one digest through (`docs/OPERATIONS.md`, "The email digest").
 
 ## README correction (D-26)
 

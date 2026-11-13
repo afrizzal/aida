@@ -634,17 +634,19 @@ most after 23 hours). An expired run, or one the worker is stopping, finishes th
 sending and then stops; the next run picks up the rest. Two runs never send the same member's
 batch at once.
 
-A member removed from the workspace gets no digest: membership, the member's choices and
-owner or admin rights are checked again after the digest is written, as the last reads before AIDA
-opens the connection to the SMTP server. Between that last check and the connection AIDA reads
-nothing else (only the clock). The exact limit: a removal, or a changed choice, saved after that
-last check may still let that one digest through. This is the same bound as for an action already
-under way when a member is removed.
+A member removed from the workspace gets no digest: after the digest is written, AIDA reads again,
+in this order, the member's digest choices, the unassigned-tickets choice, and then the membership
+with owner or admin rights, as the last reads before it opens the connection to the SMTP server.
+Between the membership read and the connection AIDA reads nothing else (only the clock). These are
+separate reads, so each has its own limit: a choice changed after AIDA read that choice, or a
+removal saved after the membership read, may still let that one digest through. This is the same
+kind of bound as for an action already under way when a member is removed.
 
 **Old digest records.** AIDA keeps one record per digest attempt. Each run deletes records of
 attempts that were released (to be tried again) or canceled more than 7 days ago, at most 500 per
 run; notifications are never deleted by this, and sent digests are kept. While the SMTP settings
-stay broken, every run releases a new attempt for each waiting member; the run line's
+stay broken, every run releases one new attempt per workspace (the first member tried; the
+workspace's other members are not tried again in that run); the run line's
 `rejectedConfig` and `configStopped` counts and the `send rejected (configuration)` line above
 show it, on every run, until the settings are fixed. AIDA shows no alert for it in the app.
 
