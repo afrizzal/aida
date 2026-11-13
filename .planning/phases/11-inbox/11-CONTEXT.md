@@ -168,6 +168,97 @@ Lessons from the three parked phases, binding here:
 - Dilarang mengisi hasil UAT, visual pass, atau penilaian manusia rekaan. Kosong tetap kosong.
 - Dilarang menulis backslash ke `last_activity_desc` di `STATE.md`.
 
+## Update 2026-11-13: owner item O-2 decided (auto-close customer notice)
+
+Written by hand under `run-loop/PIAGAM.md` (not `/gsd-discuss-phase`) as input for a follow-up plan of Phase 11. Facts checked against the code at `4def908` (branch `v2/run-loop`). Codex brainstorm: `run-loop/codex/fase11-o2-tanya.md` (answer pending). Candidate decisions below are labelled `W-NN`; none is final until the Codex answer is folded in and the planner applies them.
+
+### The owner decision (verbatim, binding)
+
+Source: `.planning/run-loop/ANTREAN.md`, row `11-o2`:
+
+> "Owner 2026-11-11: butir 10: opsi a, "ya" tegas dari owner. Template tetap yang ditulis admin, mati secara default, dinyalakan admin per workspace. Kerjakan sesudah Fase 10 sebagai plan susulan Fase 11."
+
+Reading: a fixed template written by an admin, off by default, switched on per workspace by an admin, may be sent automatically to the customer when a ticket auto-closes, without per-message human approval. This is an owner decision and is not reopened here. It satisfies the charter's "anything that reaches a customer passes a human" through the admin who writes and enables the fixed text, and it stays inside AIDA-51's acceptance (`.planning/REQUIREMENTS.md:47`: "any customer notice is a fixed template, off by default, with no AI text").
+
+### What it supersedes
+
+- **D-19** ("No customer notice in this phase. Nothing is sent to the customer when a ticket auto-closes, and there is no toggle for it") is superseded for the follow-up plan: a notice may be sent when the workspace switch is on. D-19's source reasoning (conservative reading of the charter) is replaced by the owner decision above.
+- Owner item **O-2** is closed by that decision. The deferred idea "A customer notice on auto-close" is now in scope for the follow-up plan only.
+- The job header ("Nothing is sent to anyone (D-19, owner item O-2)", `src/lib/worker/jobs/auto-close.ts:33-35`), the 11-04 threat T-11-21 ("there is no notice code path", `11-04-SUMMARY.md:116`), the UI-SPEC scope item (6) that cites D-19 (`11-UI-SPEC.md:17`) and the AIDA-51 traceability text (`REQUIREMENTS.md:173`) become stale and are updated by the follow-up plan, the last one only at step 10 on evidence.
+- Not superseded: D-15 to D-18 (settings, quiet period, race safety, daily job, 100 per organization per run), D-20 (no AI call, no inline script, audit holds ids and enums only) and the Human boundary section.
+- The Phase Boundary text above ("Phases 8, 9 and 10 are parked … there is no CSP, no membership helper, no notification model") is out of date: Phase 8 part A, Phase 9 and Phase 10 are executed (ANTREAN rows 08 and 10). The facts below replace it for the follow-up plan.
+
+### Facts checked in the current code
+
+Auto-close today:
+
+- The job: `closeResolvedTicketIfQuiet` (`src/lib/worker/jobs/auto-close.ts:98-152`) runs inside one transaction per ticket (`:289-299`, options `maxWait` 10 s, `timeout` 30 s at `:63`). Lock order: `Setting` days row `FOR SHARE` (`lockAutoCloseSettings`, `src/lib/tickets/auto-close-settings.ts:100-125`), state config and target state `FOR SHARE` (`auto-close.ts:111-117`), then the ticket row (`:119`); one conditional raw `UPDATE … RETURNING` (`:125-140`); the `AUTO_CLOSED` audit row (`actorType` `SYSTEM`, state snapshot only) only when a row changed (`:141-150`).
+- Per-run cap `MAX_AUTO_CLOSE_PER_ORG = 100` (`auto-close.ts:60`, query `:276-286`). An error in one organization is logged by code only and the run throws `AutoCloseRunError` at the end so pg-boss retries (`:189-197`, `:237-248`); the log never carries an error message (`:199-212`).
+- Scheduling: `boss.schedule("auto-close", "15 2 * * *")`; the worker calls `autoCloseHandler(job.data)` with no pg-boss handle (`src/lib/worker/index.ts:72-76`). No worker job enqueues another job today: every `boss.send("email-outbound-send", …)` is in the app (`src/app/api/tickets/[id]/messages/route.ts:255-259`, `src/app/(app)/tickets/[id]/actions.ts:95`).
+- Settings: keys `autoCloseResolvedAfterDays` and `autoCloseEnabledAt` (`auto-close-settings.ts:28-29`) in the key-value `Setting` model (`prisma/schema.prisma:208-219`, `value String`, unique per organization and key). The save holds `FOR UPDATE` on the days row for its whole transaction (`auto-close-settings.ts:177-228`).
+- Save gate: `saveAutoCloseDays` uses `findActiveMembership` plus `isAdminRole` (`auto-close-settings.ts:168-170`), the single unordered row read, not the conservative read that Phase 12.2 and Phase 10 use for role decisions (`findConservativeMembership`, `src/lib/membership.ts:81`; `shareLockActiveMembership`, `:126`; `isAdminRole`, `:151`). The server action is `saveAutoCloseSetting` (`src/app/(app)/settings/sla/actions.ts:64-70`).
+- Settings page: `src/app/(app)/settings/sla/page.tsx` awaits `requirePageAccess()` first (`:15`), reads the settings unlocked (`:31`) and decides `canEdit` from `getOrgRole()`, display only (`:32-33`). The card is `src/app/(app)/settings/sla/auto-close-form.tsx` (`Card className="border-border/70 p-4 shadow-sm"` at `:103`, `<h2>` 15px at `:106`).
+- Thread copy of the close: `AUTO_CLOSED` → "Closed automatically by the auto-close setting." (`src/lib/tickets/activity-copy.ts:241-244`).
+
+Outbound email:
+
+- `emailOutboundSendHandler` (`src/lib/worker/jobs/email-outbound-send.ts:62-172`) sends only an `OUTBOUND` `PUBLIC` `Message` (`:70`) to the origin ticket's contact (`:75-79`); it returns silently when the email channel is off (`:81-82`), leaving a `QUEUED` row as is; on an SMTP error it sets `FAILED` and rethrows for the queue's retries (`:162-169`; queue `retryLimit` 2, `src/lib/worker/index.ts:103-110`). Subject `Re: {ticket subject} [#{number}]` (`:155`), from name = branding workspace name (`:148-153`).
+- `composeMail` takes no extra headers (`src/lib/channels/email/compose-outbound.ts:28-55`), so a reply today carries no `Auto-Submitted` header, and the send has no total deadline (plain `createSmtpTransport`, `email-outbound-send.ts:150`).
+- Phase 10 digest: `sendDigestMail` (`src/lib/notifications/digest-sender.ts:162`) owns its socket and enforces a total deadline (`:1-9`), classifies the outcome as `accepted`, `rejected` (with `configuration` and `permanent` kinds) or `ambiguous` (`:11-30`), and sends `Auto-Submitted: auto-generated` (`DIGEST_MAIL_HEADERS`, `:32-34`, `:48-50`).
+- Inbound: any `Auto-Submitted` other than `no` marks mail automatic (`src/lib/channels/email/auto-generated.ts:9-10`, used at `ingest-message.ts:97`), and automatic mail never reopens. A real customer reply reopens a ticket in group `RESOLVED` or `CLOSED` (`src/lib/tickets/reopen-on-reply.ts:8`, `:273`). Threading falls back to the `[#number]` subject token (`src/lib/channels/email/thread-match.ts:3-7`) when header matching misses.
+- A public reply writes a `Message` with `authorUserId` set, `deliveryStatus` `QUEUED` only when the channel is on and a contact is linked (`messages/route.ts:134`, `:185-196`), enqueued after commit (`:255-259`).
+- `Message` has no kind or system marker (`prisma/schema.prisma:380-409`; `MessageDeliveryStatus` is `QUEUED`, `SENT`, `FAILED`, `:249-253`). An `OUTBOUND` message with no author renders as "Agent" (`src/components/tickets/thread-message.tsx:53-55`), and every `PUBLIC` message is shown on the public status page (`src/lib/tickets/status-visibility.ts:56-59`).
+- No template or canned-response model exists (no match in `prisma/schema.prisma`; no `canned` or `macro` module under `src/lib`).
+- `TicketAuditAction` has no notice value (`prisma/schema.prisma:663-673`).
+- Public intake creates a ticket and a contact for any submitted email address, rate limited by IP (`src/app/api/public/intake/route.ts:21`, `:61-71`, `:103-108`). `Ticket.statusToken` is stored in plain text (`prisma/schema.prisma:306`) and is the bearer credential of the status page.
+- `src/lib/rate-limit/*` is IP-keyed for public endpoints (`check-rate-limit.ts:45`); no settings action uses it.
+
+Phase 10 and later changes this plan must respect:
+
+- Rule B (`tests/unit/page-access-inventory.test.ts`): every `(app)` page awaits `requirePageAccess` as its first statement, outside any `try`, and never calls `getScopedDb`.
+- Rules A, C2 and D (`tests/unit/membership-inventory.test.ts:7-37`): every new server action calls a membership gate, reads the session at most once, and the worker imports no `next/*`, writes `DOMAIN_MODELS` rows with `organizationId` in the literal, and each raw `INSERT`, `UPDATE` or `DELETE` needs a per-function allowlist entry with a reason (the auto-close one is at `:341-346`).
+- A new model goes into `DOMAIN_MODELS` (`src/lib/scoped-db.ts:14`) with unmocked isolation tests.
+- The last migration is `20261115100000_team_foundation`; every new migration is pinned in `UPGRADE_MIGRATIONS` (`tests/integration/auth-upgrade.test.ts:38-48`), or that test fails.
+- Phase 10 adds `CUSTOMER_REPLY` notifications on customer replies, so a customer who answers the notice reopens the ticket and notifies as any reply does; no new notification type is needed.
+
+### Candidate technical decisions
+
+- **W-01 Template storage and validation.** (a) Recommended: no new table; `Setting` keys `autoCloseNotice:enabled` (`"true"` or absent) and `autoCloseNotice:body`, written in the auto-close save transaction under the same days-row `FOR UPDATE`. Body: trimmed plain text with Markdown rendered by the existing sanitizing renderer for the HTML part, 1 to 2000 characters, no raw HTML, no links other than plain text, refused when empty. (b) A dedicated org-scoped model. Open for Codex: the length limit and whether Markdown is allowed at all.
+- **W-02 Per-workspace switch, default off.** An absent key is off. Enabling requires a valid body. The switch is stored independently of the days value; with days 0 it is inert and the card says so. The close transaction reads the switch and the body under the days-row `FOR SHARE` it already takes, so a save waits for a close and a close sees one consistent pair. The body is snapshotted into the notice record at close time, so a later edit never changes a notice already recorded.
+- **W-03 Who may edit.** Owners and admins only, decided with `findConservativeMembership` plus `isAdminRole` inside the save, through the existing server action (one session read, Rule C2). Members see the card read-only. Open for Codex: whether this plan also moves `saveAutoCloseDays` (`auto-close-settings.ts:168-170`) to the conservative read, since the notice save shares its transaction.
+- **W-04 Placeholders and untrusted data.** (a) Recommended: a closed whitelist of system values only, `{ticketNumber}` and `{workspaceName}`; any other `{…}` is refused at save. Never the contact name, the ticket subject, message text, tags or custom fields: they are customer-controlled and the intake path takes any address. (b) No placeholders at all. Subject: (a) `Re: {subject} [#{number}]` as replies, which threads in the customer's client but echoes untrusted subject text from an automatic sender; (b) a fixed system subject that still carries `[#{number}]`. Never a status-page link placeholder (the token is a bearer credential in plain text). Open for Codex.
+- **W-05 When the notice is sent.** Never inside the close transaction: SMTP inside a 30 s transaction would hold the Setting, state and ticket locks on a network call. The close transaction writes a notice record (outbox) only when the conditional `UPDATE` changed a row and the switch read under the lock is on. After commit, options: (a) the auto-close job sends each recorded notice itself with a deadline-bounded sender in the `sendDigestMail` pattern; (b) a new on-demand queue enqueued after commit, which needs the pg-boss handle passed into the handler, plus a sweep of orphaned records; (c) reuse `email-outbound-send`, which lacks the deadline and the header. Recommended: (a). Open for Codex.
+- **W-06 Idempotency.** At most one notice per auto-close event, enforced by a unique constraint on the notice record per close, not by application checks. Open for Codex: per event (a ticket closed, reopened by a reply, resolved and closed again gets a second notice) or per ticket ever. Delivery rule recommended: at most once; an `ambiguous` outcome is not retried, a permanent or configuration rejection is not retried, a transient 4xx is retried a bounded number of times.
+- **W-07 Record in the ticket thread and audit.** (a) A `Message` row (`OUTBOUND`, `PUBLIC`, no author): today it would render as "Agent" and appear on the status page with no marker, and it would join merge and threading rules written for human replies; needs a marker column. (b) Recommended: a new org-scoped model (ticket id, the close's audit row id or close time, status `PENDING`, `SENT`, `FAILED`, `SKIPPED` with a reason enum, body snapshot, `emailMessageId`, timestamps) plus new `TicketAuditAction` values for sent, failed and skipped, carrying ids and enums only; the thread shows a system event row from `activity-copy.ts`. (c) Booleans in the `AUTO_CLOSED` `after` snapshot only, no schema change, but no delivery outcome. (a) and (b) are schema changes. Open for Codex, including whether a customer reply to the notice must thread by header (then the `emailMessageId` must be found by ingest) or by the `[#number]` subject token.
+- **W-08 Channel.** Email only, to the ticket contact's address; tickets have no other outbound channel. A contact without an address gets a `SKIPPED` record. Open for Codex: whether the notice also appears on the public status page.
+- **W-09 Headers.** `Auto-Submitted: auto-generated` (RFC 3834), the same constant as the digest, so auto-responders stay silent and AIDA's own ingest never treats an echo as a customer reply. `composeMail` gains an optional headers field or the notice uses its own composer. `In-Reply-To` and `References` follow the ticket's thread or are omitted, decided with W-07.
+- **W-10 SMTP off or failing.** Channel off or SMTP not configured at close time: the ticket still closes and the notice is recorded `SKIPPED` (reason channel off), never sent later. A failed send is recorded `FAILED` with the error code only (no address, no body, no message text in logs) and never rolls back or blocks the close. Open for Codex: whether a notice failure makes the run throw `AutoCloseRunError` (pg-boss retries the whole run) or is only logged. The card warns when the switch is on and the email channel is off.
+- **W-11 Privacy.** The notice body is the admin's template plus whitelisted system values only: no internal notes, no member or assignee names, no AI draft, no quoted history, no other messages. From name is the branding workspace name, as replies use. Logs carry ids, counts and codes.
+- **W-12 Abuse bound.** The 100-per-organization run cap bounds volume. Because intake accepts any address, the notice could reach an address that never wrote in once an agent resolves a spam ticket. Open for Codex: send only when the ticket has at least one inbound email or one sent public reply (proof the address took part), or accept the risk because a human resolved the ticket.
+- **W-13 Settings UI.** On the SLA page, inside the auto-close card or as a second card under it: a switch, a textarea with a character count, the allowed placeholders, a plain-text preview, and the copy that the notice is sent automatically without per-message approval. Tokens only, `text-[Npx]` sizes, Card `border-border/70 p-4 shadow-sm`, warnings in the `warning` token pattern, read-only for members, one `<h1>` per page. A UI-SPEC addendum to `11-UI-SPEC.md` (scope item 6) comes before planning, and the §9 checklist of `.planning/DESIGN-SYSTEM.md` runs after execution.
+- **W-14 Tests.** Unit: the template parser and placeholder whitelist, rendering with hostile values. Integration (Testcontainers): close and notice record commit together or not at all; switch off under the lock writes no record; a save racing a close; two concurrent runs give one notice; channel off gives `SKIPPED`; a fake SMTP server on `node:net` with the digest's fault cases gives `FAILED` or `ambiguous` and no retry; org A never reads org B's records; new audit values stay append-only. Inventory: the membership and page-access inventories pass, with an allowlist entry and reason for any new raw SQL in the worker. E2E through the real UI: an admin enables the notice and writes the template on the SLA page; a member sees it read-only; the job runs against fixture tickets; the thread shows the notice event; the mail is captured by a fake transport. No compose stack, no real mail.
+- **W-15 Docs and plan shape.** User docs gain a short note on the notice. `docs/SECURITY.md` is not edited (owner item 08-o4 blocks it); no new egress exists to record, the configured SMTP being the existing one. One or two plans of at most three tasks each, numbered after 11-09.
+
+### Limits for the planner (charter)
+
+- No `checkpoint:human-verify` tasks. Visual approval of the new card, dark mode, 360px and any real-mail check are manual items in the plan and the SUMMARY, left open.
+- The full "Larangan" list of `.planning/run-loop/PIAGAM.md` (section "Larangan") applies, including its current line that rule J narrows the container item; the copy above in this file predates that line.
+- No schema change unless W-06 or W-07 requires it. If it does: a rule J disposable dev database as plan 10-01 Task 1 did (procedure of `08-02-PLAN.md`; never `aida-dev-db`, never `prisma db push`, `.env` untouched), a folder that sorts after `20261115100000_team_foundation`, hand-reviewed SQL, the name added to `UPGRADE_MIGRATIONS` in `tests/integration/auth-upgrade.test.ts`, the model added to `DOMAIN_MODELS`, and isolation tests.
+- No new egress beyond the workspace's configured SMTP; tests use fakes and a local fake server only. No AI call and nothing from `lib/llm/` in the notice path.
+- `docs/SECURITY.md` stays blocked by owner item 08-o4.
+- Every executor dispatch includes the charter's "Aturan eksekutor"; one test process at a time; long commands write to a log and exit codes are read without a pipe.
+
+### Open questions for Codex
+
+1. W-05: send in the job after each commit, a new queue, or the existing send job; how orphaned records are swept.
+2. W-06: one notice per close event or per ticket; at-most-once on `ambiguous`.
+3. W-07: a `Message` with a marker or a separate record; is a schema change justified; how a reply to the notice threads.
+4. W-04: subject with the customer's subject or a fixed one; the placeholder set.
+5. W-12: require proof that the address took part before sending.
+6. W-02 and W-03: is the days-row lock enough for the template pair; move the existing save to the conservative read in this plan or leave it.
+7. W-10: does a notice failure fail the run.
+8. W-08: show the notice on the status page or not.
+
 ---
 
 *Phase: 11-inbox*
