@@ -32,7 +32,7 @@ Coverage: 23/23 MVP requirements validated (AIDA-18 stretch → backlog). Closeo
 - [ ] **Phase 8: Security Hardening** — Dependency audit to zero critical and high, non-root containers, CSP, trusted client IP, public-route abuse controls
 - [ ] **Phase 8.1: Docker test tooling and runtime proofs** — Split from Phase 8 after plan review cycle 4 (owner decision 2026-11-11): container harness, runtime proofs, full gate, CI egress job; waits for owner (`08-SPLIT.md`)
 - [ ] **Phase 9: Operations** (executed, verified human_needed 2026-11-12) — Backup schedule, logo upload, password encoding, single `<h1>`, seed guard, permanent regression tests, repo health
-- [ ] **Phase 10: Team** (replanned 2026-11-13, 17 plans executed; code review next) — Invitations and roles, notifications and mentions
+- [ ] **Phase 10: Team** (executed and verified human_needed 2026-11-13, 5/5) — Invitations and roles, notifications and mentions
 - [ ] **Phase 11: Inbox** — Saved views, bulk actions, command palette, keyboard inbox, auto-close
 - [ ] **Phase 12: Ticket Lifecycle** — Relations, merge, snooze and the activity feed (split K32)
 - [ ] **Phase 12.1: Ticket Lifecycle** — Custom states with SLA pause
@@ -560,12 +560,12 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 |---|---|---|---|---|
 | 8. Security Hardening | v2.0 | 18/18 (Part A) | Part A verified: human_needed (2026-11-12); Part B moved to Phase 8.1, waits for owner | - |
 | 9. Operations | v2.0 | 13/13 | Verified: human_needed (stack proofs SP-1 to SP-3 and human checks open) | - |
-| 10. Team | v2.0 | 17/17 | Executed; code review next (gate in 10-GATE.md) | - |
+| 10. Team | v2.0 | 17/17 | Verified: human_needed (5/5; visual, dark mode, screen reader and real-email checks open; owner items 10-o7, 10-o9, 10-o10) | - |
 | 11. Inbox | v2.0 | 9/9 | Verified: human_needed (visual, dark mode, 360px and screen-reader checks open) | - |
 | 12. Ticket Lifecycle (relations, merge, snooze, activity) | v2.0 | 10/10 | Verified: human_needed (visual, dark mode, layout widths and screen-reader checks open; AIDA-53 closed by owner decision 12-o1 on 2026-11-11) | - |
 | 12.1. Ticket Lifecycle (custom states, SLA pause) | v2.0 | 17/17 | Verified: human_needed (visual, dark mode, contrast by eye, screen reader and UAT open; K47 deferred) | - |
 | 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 12/12 | Verified: human_needed (visual, dark mode, screen reader, UI-SPEC amendments A1 to A8 and UAT open; owner items 12.2-o1 to 12.2-o4) | - |
-| 13. Integrations | v2.0 | 0/0 | Not started (runs after Phase 10) | - |
+| 13. Integrations | v2.0 | 0/0 | Not started (Phase 10 verified human_needed; next) | - |
 | 14. Projects Foundation | v2.0 | 13/13 | Verified: human_needed (owner items 14-o1, 14-o2, 14-o3; O-1 suites blocked) | - |
 | 15. Work Views | v2.0 | 0/0 | Not started | - |
 | 16. Workspace | v2.0 | 0/0 | Not started (needs Phases 10, 14 and 15) | - |
