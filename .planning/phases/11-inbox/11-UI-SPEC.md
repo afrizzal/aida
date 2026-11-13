@@ -703,6 +703,8 @@ Two Copywriting rows of Surface 6 change, because the D-19 sentence is no longer
 
 ### Addendum copywriting (verbatim, English, written for AIDA)
 
+> Amended 2026-11-13 after the Codex plan review of queue row 11-o2 (finding C1-2): the rows "Notice scope: recipients", "Notice scope: not ownership" and "Notice reason: NO_PRIOR_REPLY" no longer suggest that the notice goes to the address the team wrote to; the message record stores no recipient, and the notice uses the contact's current address.
+
 `{…}` in the right column are runtime values rendered as escaped text, except where the literal tokens `{ticketNumber}` and `{workspaceName}` are meant (shown as such).
 
 | Element | Copy |
@@ -724,8 +726,8 @@ Two Copywriting rows of Surface 6 change, because the D-19 sentence is no longer
 | Placeholders heading / intro | Placeholders / AIDA replaces these with real values when it sends the notice. No other placeholder is accepted. |
 | Placeholder rows | `{ticketNumber}` — The ticket's number, for example 1042. / `{workspaceName}` — Your workspace name, as set in Settings → Branding. |
 | Preview heading / intro / captions | Preview / How the notice reads with sample values. Your changes show here before you save. / Subject / Message |
-| Notice scope: recipients | The notice goes only to the customer on tickets where someone on your team already emailed them. |
-| Notice scope: not ownership | That rule limits who gets an automatic email. It does not prove that the address belongs to the customer. |
+| Notice scope: recipients | The notice goes to the contact's current email address, and only on tickets where someone on your team has already sent an email reply. |
+| Notice scope: not ownership | That rule limits who gets an automatic email. It does not prove that the address belongs to the customer, or that it is the address your team wrote to. |
 | Notice scope: once | At most one notice is sent each time a ticket closes automatically. A notice that fails is not sent again. |
 | Notice scope: timing | A notice that cannot go out within an hour of the closing is skipped. |
 | Notice scope: status page | The notice is not shown on the customer's status page. Agents see it in the ticket's activity. |
@@ -754,7 +756,7 @@ Two Copywriting rows of Surface 6 change, because the D-19 sentence is no longer
 | Notice row: ambiguous | The closing notice may not have been delivered: the connection ended before the mail server confirmed it. It is not sent again. |
 | Notice reason: CHANNEL_OFF | email was not set up for this workspace. |
 | Notice reason: NOTICE_OFF | the notice was turned off before it went out. |
-| Notice reason: NO_PRIOR_REPLY | no one on the team had emailed the customer on this ticket. |
+| Notice reason: NO_PRIOR_REPLY | no one on the team had sent an email reply on this ticket. |
 | Notice reason: INVALID_ADDRESS | the customer's email address cannot receive mail. |
 | Notice reason: TICKET_CHANGED | the ticket changed after it closed. |
 | Notice reason: EXPIRED | it could not go out within an hour of the closing. |
