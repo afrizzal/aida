@@ -153,6 +153,8 @@ export interface DigestPairReport {
 export interface RunDigestsResult {
   pairs: number;
   reports: DigestPairReport[];
+  /** K186: RELEASED and CANCELED digest rows deleted by the retention step of this run. */
+  pruned: number;
   /** True when the signal stopped the run before every pair was processed. */
   stopped: boolean;
 }
@@ -461,12 +463,47 @@ async function processPair(
   report.outcome = recorded ? "sent" : "fenced";
 }
 
+/** K186: RELEASED and CANCELED digest rows whose last change is older than this are deleted. */
+export const DIGEST_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+/** K186: at most this many digest rows are deleted per run. */
+export const DIGEST_PRUNE_BATCH = 500;
+
+/**
+ * The retention step (K186): deletes at most DIGEST_PRUNE_BATCH NotificationDigest rows with
+ * status RELEASED or CANCELED whose last change (updatedAt) is older than DIGEST_RETENTION_MS,
+ * oldest first. A configuration failure that is never fixed releases a new claim on every run
+ * (K179); this keeps those rows from growing without end. Notifications are never touched: a
+ * released batch is claimed again by a later run, and a canceled batch stays stamped. SENT and
+ * CLAIMED rows stay. Like listDigestPairs, it acts across organizations, on digest rows only, and
+ * reads ids only.
+ */
+async function pruneDigestRows(now: Date): Promise<number> {
+  const cutoff = new Date(now.getTime() - DIGEST_RETENTION_MS);
+  const where = {
+    status: { in: ["RELEASED" as const, "CANCELED" as const] },
+    updatedAt: { lt: cutoff },
+  };
+  const old = await prisma.notificationDigest.findMany({
+    where,
+    select: { id: true },
+    orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+    take: DIGEST_PRUNE_BATCH,
+  });
+  if (old.length === 0) return 0;
+  const { count } = await prisma.notificationDigest.deleteMany({
+    where: { ...where, id: { in: old.map((row) => row.id) } },
+  });
+  return count;
+}
+
 /**
  * Builds and sends every due digest once. Never throws for one pair: a pair that fails is
  * reported as `failed` and left as it stands (a CLAIMED digest waits for its lease). Throws only
  * when the timing overrides are invalid or BETTER_AUTH_URL is not usable, before any claim. An
  * aborted `signal` stops the run before the next pair (`stopped`). After a configuration failure
- * (K179) the workspace's remaining pairs are reported `config-stopped` and not claimed.
+ * (K179) the workspace's remaining pairs are reported `config-stopped` and not claimed. Before
+ * the pairs, the retention step (K186) deletes old RELEASED and CANCELED digest rows in one
+ * bounded batch; a failure there is logged and the run goes on.
  */
 export async function runDigests(deps: RunDigestsDeps = {}): Promise<RunDigestsResult> {
   const timing: DigestTiming = { ...DIGEST_TIMING, ...deps.timing };
@@ -474,6 +511,13 @@ export async function runDigests(deps: RunDigestsDeps = {}): Promise<RunDigestsR
   const clock: Clock = deps.now ?? (() => new Date());
   const hooks = deps.hooks ?? {};
   const baseUrl = getAppBaseUrl();
+
+  let pruned = 0;
+  try {
+    pruned = await pruneDigestRows(clock());
+  } catch (err) {
+    digestLog(`prune failed: ${digestErrorLabel(err)}`);
+  }
 
   const pairs = await listDigestPairs(prisma);
   const settingsByOrg = new Map<string, EmailSettings | null>();
@@ -523,5 +567,5 @@ export async function runDigests(deps: RunDigestsDeps = {}): Promise<RunDigestsR
       report.outcome = "failed";
     }
   }
-  return { pairs: pairs.length, reports, stopped };
+  return { pairs: pairs.length, reports, pruned, stopped };
 }

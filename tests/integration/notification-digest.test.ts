@@ -1186,6 +1186,90 @@ describe("the last re-check sits right before the connection (K184)", () => {
   });
 });
 
+// K186 (Codex diff round 2): a configuration failure that is never fixed releases a new claim on
+// every run (K179). Each run therefore deletes RELEASED and CANCELED digest rows whose last change
+// is older than 7 days, at most 500 per run. SENT and CLAIMED rows and every notification stay.
+describe("retention of released and canceled digest rows (K186)", () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  async function digestRow(
+    orgId: string,
+    userId: string,
+    status: "CLAIMED" | "RELEASED" | "CANCELED" | "SENT",
+    changedAt: Date,
+    notificationIds: string[] = [],
+  ): Promise<string> {
+    const row = await prisma.notificationDigest.create({
+      data: {
+        organizationId: orgId,
+        recipientUserId: userId,
+        status,
+        notificationIds,
+        leaseExpiresAt: new Date(Date.now() + DAY_MS),
+        sentAt: status === "SENT" ? changedAt : null,
+      },
+      select: { id: true },
+    });
+    await prisma.$executeRaw`UPDATE "NotificationDigest" SET "createdAt" = ${changedAt}, "updatedAt" = ${changedAt} WHERE id = ${row.id}`;
+    return row.id;
+  }
+
+  it("a run deletes RELEASED and CANCELED rows older than 7 days; recent ones, SENT and CLAIMED rows and the notifications stay", async () => {
+    const { orgId, members } = await seedOrg();
+    const [owner] = members;
+    if (!owner) throw new Error("no owner");
+    const t1 = await seedTicket(orgId);
+    const n1 = await notify(orgId, owner.id, "ASSIGNED", t1.id);
+    // Not pending, so the run claims nothing for this pair and only the retention acts here.
+    const stampedAt = new Date(Date.now() - 9 * DAY_MS);
+    await prisma.notification.update({ where: { id: n1 }, data: { digestedAt: stampedAt } });
+    const before = await prisma.notification.findUniqueOrThrow({ where: { id: n1 } });
+
+    const old = new Date(Date.now() - 8 * DAY_MS);
+    const recent = new Date(Date.now() - 6 * DAY_MS);
+    const oldReleased = await digestRow(orgId, owner.id, "RELEASED", old);
+    const oldCanceled = await digestRow(orgId, owner.id, "CANCELED", old, [n1]);
+    const recentReleased = await digestRow(orgId, owner.id, "RELEASED", recent);
+    const recentCanceled = await digestRow(orgId, owner.id, "CANCELED", recent, [n1]);
+    const oldSent = await digestRow(orgId, owner.id, "SENT", old, [n1]);
+    const oldClaimed = await digestRow(orgId, owner.id, "CLAIMED", old);
+
+    const result = await runDigests({ timing: FAST });
+    expect(result.pruned).toBeGreaterThanOrEqual(2);
+    const left = (await digestsOf(orgId, owner.id)).map((d) => d.id).sort();
+    expect(left).toEqual([recentReleased, recentCanceled, oldSent, oldClaimed].sort());
+    expect(left).not.toContain(oldReleased);
+    expect(left).not.toContain(oldCanceled);
+    // The notification is untouched.
+    expect(await prisma.notification.findUniqueOrThrow({ where: { id: n1 } })).toEqual(before);
+    expect(reportFor(result, orgId)).toEqual([]);
+  });
+
+  it("the batch is bounded: 501 old RELEASED rows take two runs (500, then 1)", async () => {
+    const { orgId, members } = await seedOrg();
+    const [owner] = members;
+    if (!owner) throw new Error("no owner");
+    const old = new Date(Date.now() - 30 * DAY_MS);
+    await prisma.notificationDigest.createMany({
+      data: Array.from({ length: 501 }, () => ({
+        organizationId: orgId,
+        recipientUserId: owner.id,
+        status: "RELEASED" as const,
+        notificationIds: [],
+        leaseExpiresAt: old,
+      })),
+    });
+    await prisma.$executeRaw`UPDATE "NotificationDigest" SET "createdAt" = ${old}, "updatedAt" = ${old} WHERE "organizationId" = ${orgId}`;
+
+    const first = await runDigests({ timing: FAST });
+    expect(first.pruned).toBe(500);
+    expect(await prisma.notificationDigest.count({ where: { organizationId: orgId } })).toBe(1);
+    const second = await runDigests({ timing: FAST });
+    expect(second.pruned).toBe(1);
+    expect(await prisma.notificationDigest.count({ where: { organizationId: orgId } })).toBe(0);
+  });
+});
+
 // K166 (c-WR-01, V-28): one rule for unassigned-fallback rows on both surfaces. A fallback row
 // follows the "Unassigned tickets" switch and the recipient's owner or admin role only ("Owners and
 // admins get these, in the app and in the digest"); the per-type switches ("… on my tickets",
