@@ -614,3 +614,206 @@ Token-only colours (no oklch/hex in new files); no new EmptyState (the existing 
 - [ ] Dimension 7 Inventory Provenance: PASS
 
 **Approval:** pending
+
+---
+
+## Addendum 2026-11-13: auto-close customer notice (queue row 11-o2)
+
+> Written by gsd-ui-researcher under the run charter (unattended, no user questions). Inputs: `11-CONTEXT.md` → "Update 2026-11-13: owner item O-2 decided" and its "Decided after the Codex brainstorm (2026-11-13)" W-01 to W-18 (they win over the candidates); code at `2b3fce6` (`src/app/(app)/settings/sla/*`, `src/components/tickets/activity-feed.tsx`, `activity-event-row.tsx`, `thread-system-event.tsx`, `src/lib/tickets/activity-copy.ts`). Source legend as above, plus **[W-nn]** = a final decision in that subsection. Everything not fixed by a W-decision is **[RL]**.
+>
+> **Scope of the addendum (closed list):** (A) a second card, "Customer notice on auto-close", under the auto-close card on `/settings/sla` [W-13]; (B) one system row per notice record in the agent's ticket activity feed [W-07]; (C) two copy rows of Surface 6 that D-19 made stale. Nothing else changes. The public status page, the ticket list, the inbox and the composer get no notice UI [W-08]. **This addendum replaces scope item (6)'s D-19 reading, the Surface 6 line "No customer-notice control of any kind (D-19, owner item O-2)", Assumption 13's "no notice toggle (D-19)", and the E10 "partial" row's implied absence of a notice; all other parts of Surface 6 stand.**
+
+### Addendum: inventory and tokens
+
+Enumerated by `ls src/components/ui/*.tsx | wc -l` — 20 components — shadcn@4.12.0 (radix-ui@1.6.0) — 2026-11-13. (`npx shadcn info` was not run: this run forbids network commands. The 20 files now include `switch.tsx`, `textarea.tsx`, `separator.tsx`, `input-group.tsx` and `avatar.tsx`, which the 2026-11-08 list did not name.) Non-exhaustive; any installed component may be used.
+
+| Component | Import path | Use in the addendum |
+|-----------|-------------|---------------------|
+| Card | `@/components/ui/card` | Notice card, `border-border/70 p-4 shadow-sm` [W-13, DS §4.5] |
+| Switch | `@/components/ui/switch` | The on/off control; checked fill is the shipped `bg-primary` |
+| Input, Textarea, Label, Form | `@/components/ui/input`, `textarea`, `label`, `form` | Subject field, body field, labels, `FormMessage` errors |
+| Button | `@/components/ui/button` | "Save customer notice" (default) |
+| sonner `toast` | `sonner` | Success only |
+| ActivityEventRow pattern | `@/components/tickets/activity-event-row` | Visual base of the notice row (Surface B) |
+
+No new package, no new shadcn component, no new token. Lucide icons: `Mail`, `MailCheck`, `MailX`, `TriangleAlert`, `Loader2` [RL; the executor confirms each export exists in `lucide-react@1.22.0` and uses `Mail` for any that does not].
+
+Spacing, typography and colour follow the parent contract exactly: spacing 4/8/16/24 only; sizes 12px (help, counters, captions, thread rows), 13px (labels, body copy, inputs, preview, callouts), 15px/600 (card `<h2>`); weights 400 and 600; `text-[Npx]` only, including overrides on `Input`, `Textarea` and `FormMessage` (`text-[13px]` on fields, `text-[12px] font-normal` on messages). Accent additions to the reserved list: the "Save customer notice" button and the checked Switch fill (shadcn default). Warning callouts use the Color → Warning pattern; error callouts use the Color → Destructive pattern. No new 14px or 18px text; the page keeps one `<h1>` ("SLA Policies").
+
+### Surface A — Notice card on the SLA page [W-01 to W-04, W-10, W-12, W-13]
+
+Placement: `src/app/(app)/settings/sla/page.tsx` renders, in this order, `<h1>`, `SlaForm`, `AutoCloseForm`, then the new `AutoCloseNoticeForm` (client, `src/app/(app)/settings/sla/auto-close-notice-form.tsx`) [RL: file name]. The page's `space-y-6` gives 24px between cards. `requirePageAccess()` stays the first statement [Rule B]. The page passes stored values only: `enabled`, `subject` (or null), `body` (or null), the stored auto-close days, `emailReady` (email channel on and outgoing mail configured, read on the server through the existing email settings read), the branding workspace name (for the preview), and `canEdit` (display only, as today) [RL: prop list; the planner names the reads]. After either card saves, `revalidatePath("/settings/sla")` refreshes both cards' stored props, so the notice card always reflects the stored days [RL].
+
+Card: `<Card className="border-border/70 p-4 shadow-sm">` → `<section aria-labelledby="auto-close-notice-heading" className="space-y-4">`, then:
+
+1. **Heading block** (`space-y-1`): `<h2 id="auto-close-notice-heading" className="text-[15px] font-semibold tracking-tight">` Copywriting "Notice heading"; 13px muted Copywriting "Notice description".
+2. **Status line**, `<p id="auto-close-notice-status" role="status" className="text-[13px] text-foreground">`, from **stored** values only (never the unsaved switch): one of Copywriting "Notice status on", "Notice status off", "Notice status inert: auto-close off", "Notice status inert: email". This is the live region for the save result (see A11y).
+3. **Prerequisite warnings** (only when they apply; both may show, auto-close first), each the Warning callout with `TriangleAlert size-4 shrink-0`, `role="status"` [W-10, W-13]:
+   - Stored days are 0: Copywriting "Notice warning: auto-close off" (`id="auto-close-notice-warn-days"`).
+   - `emailReady` is false: Copywriting "Notice warning: email", ending with a `Link` "Go to email settings" to `/settings/email` (`text-foreground underline underline-offset-4`; the callout text itself stays `text-warning` per the parent pattern) (`id="auto-close-notice-warn-email"`).
+4. **Switch row** `flex items-start justify-between gap-4`: left `space-y-1`: `<Label htmlFor="auto-close-notice-enabled" className="text-[13px] font-semibold">` Copywriting "Notice switch label" + `<p id="auto-close-notice-enabled-help" className="text-[12px] text-muted-foreground">` Copywriting "Notice switch help"; right `<Switch id="auto-close-notice-enabled" aria-describedby="auto-close-notice-enabled-help {warning ids shown}">`.
+5. **Subject field** (`FormItem` `space-y-2`): label 13px/600 "Subject"; `Input` `id="auto-close-notice-subject" maxLength={150} autoComplete="off" className="text-[13px]"`; under it a `flex flex-wrap items-start justify-between gap-2` line: help `<p id="auto-close-notice-subject-help">` 12px muted Copywriting "Notice subject help" and counter `<p id="auto-close-notice-subject-count" className="shrink-0 text-[12px] tabular-nums text-muted-foreground">` "{n} / 150"; then `FormMessage` (`id` from the form library).
+6. **Body field** (`FormItem` `space-y-2`): label 13px/600 "Message"; `Textarea` `id="auto-close-notice-body" rows={8} maxLength={2000} className="min-h-[160px] text-[13px]"`; help + counter line as above: Copywriting "Notice body help" and "{n} / 2000"; then `FormMessage`.
+   - Counters show the field's current length, with a CRLF counted as one character as the server stores it [RL]; they never change colour; `maxLength` stops typing and pasting at the limit.
+7. **Placeholders** (`space-y-2`): 13px/600 "Placeholders" + 12px muted Copywriting "Placeholders intro"; `<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[12px]">`, two rows: `<dt>` is a `<code className="rounded border border-border bg-muted px-1 font-mono text-[12px] text-foreground">` with the literal token, `<dd className="text-muted-foreground">` its Copywriting row. No insert buttons, no other placeholder is ever listed [W-04; RL: no insert buttons, to keep the focus order short].
+8. **Preview** (`space-y-2`): 13px/600 "Preview" + 12px muted Copywriting "Preview intro"; box `<div role="group" aria-label="Preview with sample values" className="space-y-2 rounded-lg border border-border/70 bg-muted p-4 text-[13px]">` with a 12px muted "Subject" caption, the rendered subject line (13px/600, `break-words`, ending in ` [#1042]`), a 12px muted "Message" caption, and the rendered body (`whitespace-pre-wrap break-words`). Rendered from the **unsaved** field values as plain text with `{ticketNumber}` → `1042` and `{workspaceName}` → the stored branding workspace name cut to one line [W-04]; it never parses HTML or Markdown. An unknown `{…}` stays as typed in the preview (the field error explains it). Not a live region.
+9. **Who receives it** (`<div id="auto-close-notice-scope" className="space-y-1 text-[12px] text-muted-foreground">`): Copywriting "Notice scope: recipients", "Notice scope: not ownership", "Notice scope: once", "Notice scope: timing", "Notice scope: status page" [W-05, W-06, W-08, W-12]. Always visible, also to members.
+10. **Error callout** (server refusals), Destructive pattern, `role="alert"`, directly above the actions.
+11. **Actions**: `Button` default "Save customer notice" (type submit). Pending: `Loader2 className="mr-2 size-4 animate-spin"` + "Saving…"; switch and fields disabled while pending.
+12. **Suggested text note**: when nothing is stored yet, the fields are pre-filled with Copywriting "Suggested subject" and "Suggested message", and a 12px muted line under the heading block reads Copywriting "Suggested text note". Nothing is stored until Save [W-04].
+
+States:
+
+| State | Render |
+|-------|--------|
+| Default (nothing stored) | Switch off; fields pre-filled with the suggested text and the suggested-text note; status "Notice status off" [W-02, W-04] |
+| Prerequisite missing, switch stored off | The matching warning(s); the Switch is `disabled` (cannot be turned on); subject, message and Save stay usable so the template can be prepared [RL: a UI guard only; the server rule of W-02, switch stored independently and inert at days 0, is unchanged] |
+| Prerequisite missing, switch stored on | The matching warning(s); status "Notice status inert: …"; the Switch stays usable so it can be turned off (it can never be turned back on until the prerequisite returns) [RL] |
+| Editable, prerequisites met | All controls enabled |
+| Client validation error | Field-level `FormMessage` (12px `text-destructive`), `aria-invalid="true"`, focus moves to the first invalid field on submit (react-hook-form `shouldFocusError`). Subject and message are required on every save, whatever the switch [RL: one rule, and the pre-fill makes it easy]. Rows "Notice invalid: …" |
+| Saving | Spinner + "Saving…", controls disabled |
+| Saved | `toast.success` Copywriting "Notice saved toast (on)" or "(off)"; the status line updates from the returned stored values; the suggested-text note disappears |
+| Server refusal | Exactly one "Notice error: …" row in the error callout; field values are kept. A server `INVALID` with a field code maps to that field's `FormMessage` instead |
+| Read-only (member, `canEdit` false) | Switch `disabled`; Input and Textarea `readOnly` with `aria-readonly="true"` (text stays selectable and readable; counters still shown); no Save button; a 13px muted line in its place: Copywriting "Notice members note". Preview, placeholders, scope lines and warnings show as for admins [W-03, W-13] |
+
+The card never shows a ticket count, a recipient, an address or a sent-notices list [RL; W-11].
+
+### Surface B — Notice row in the agent's ticket feed [W-07, W-08, W-10, W-17]
+
+The feed (`ActivityFeed`) gains a third item kind, one per `AutoCloseNotice` record of the ticket, placed directly after the `AUTO_CLOSED` event it belongs to (`closeAuditEventId`); a record whose event is not in the feed sorts by its `createdAt` [RL]. Server-rendered and agent-only, like every feed row; no `(public)` route imports it; the status page renders nothing [W-08].
+
+Row markup reuses the `ActivityEventRow` classes: `<li className="flex flex-col items-center gap-1 py-1 text-center text-[12px] text-muted-foreground">` containing:
+- line 1 `flex items-center justify-center gap-2`: icon `size-3 shrink-0 aria-hidden` + `<span className="min-w-0 break-words">` the status sentence, ` · `, relative time via `TimeWithLocalTitle` of the **latest** time on the record (`finishedAt`, else `attemptedAt`, else `createdAt`) [RL];
+- line 2: `<details className="max-w-full">` with `<summary className="cursor-pointer text-[12px] text-foreground underline-offset-4 hover:underline">` Copywriting "Notice row disclosure", opening `<div className="mt-2 space-y-1 rounded-lg border border-border/70 bg-muted p-4 text-left text-[13px] text-foreground">`: the snapshot subject (600, `break-words`) and body (`whitespace-pre-wrap break-words`), escaped text only [RL: agents may open the sent text; native `<details>` needs no client script and is keyboard operable].
+
+| Record status (reason) | Icon (colour) | Sentence (Copywriting) |
+|------------------------|---------------|------------------------|
+| `PENDING`, `ATTEMPTING` | `Mail` (muted) | "Notice row: pending" |
+| `SENT` | `MailCheck` (muted) | "Notice row: sent" |
+| `SKIPPED` (`CHANNEL_OFF`, `NOTICE_OFF`, `NO_PRIOR_REPLY`, `INVALID_ADDRESS`, `TICKET_CHANGED`, `EXPIRED`) | `MailX` (muted) | "Notice row: skipped prefix" + the matching "Notice reason: …" row |
+| `FAILED` (`REJECTED_PERMANENT`, `REJECTED_TRANSIENT`) | `MailX` (`text-destructive`) | "Notice row: failed prefix" + the matching reason row, then " Server code {code}." when `responseCode` is set |
+| `AMBIGUOUS` | `Mail` (muted) | "Notice row: ambiguous" |
+| Unknown status or reason (a value added later) | `Mail` (muted) | "Notice row: skipped prefix" + "Notice reason: other" (or the failed prefix for `FAILED`) |
+
+Rules: text carries the meaning, colour never alone; the sentence never names the customer, the address, a member or the SMTP error text [W-10, W-11]; there is **no retry or resend control** on any row, because delivery is at most once [W-06]; the existing `AUTO_CLOSED` row text is unchanged. Copy lives in `src/lib/tickets/activity-copy.ts` next to the event copy, with a unit test that every status and reason enum value has a row (as `ACTIVITY_COPY` does) [RL].
+
+### Surface C — Stale Surface 6 copy (changed rows)
+
+Two Copywriting rows of Surface 6 change, because the D-19 sentence is no longer true: "Auto-close description" → Copywriting "Auto-close description (amended 2026-11-13)"; the `auto-close-form.tsx` header comment that cites D-19 is updated by the plan [W-18 spirit]. No other auto-close copy or behaviour changes.
+
+### Addendum copywriting (verbatim, English, written for AIDA)
+
+`{…}` in the right column are runtime values rendered as escaped text, except where the literal tokens `{ticketNumber}` and `{workspaceName}` are meant (shown as such).
+
+| Element | Copy |
+|---------|------|
+| Auto-close description (amended 2026-11-13) | Close tickets that stay resolved for a set number of days. Customers are told only when the customer notice below is on. |
+| Notice heading | Customer notice on auto-close |
+| Notice description | Send your own short message to the customer when AIDA closes their ticket automatically. It is off until an owner or admin turns it on. |
+| Notice status on | The customer notice is on. |
+| Notice status off | The customer notice is off. |
+| Notice status inert: auto-close off | The customer notice is on, but nothing is sent while auto-close is off. |
+| Notice status inert: email | The customer notice is on, but nothing is sent until email is set up. |
+| Notice warning: auto-close off | Auto-close is off, so no ticket closes on its own and no notice is sent. Set the number of days in the card above first. |
+| Notice warning: email | Outgoing email is not set up for this workspace, so no notice can be sent. / link "Go to email settings" |
+| Notice switch label | Send a notice when a ticket closes automatically |
+| Notice switch help | When this is on, AIDA sends the text below by itself. Nobody approves each message before it goes out. |
+| Notice subject label / help | Subject / One line, up to 150 characters. AIDA adds the ticket number in brackets at the end, for example [#1042]. |
+| Notice body label / help | Message / Plain text, up to 2,000 characters. Line breaks are kept. Formatting and HTML are sent exactly as typed. |
+| Counter | {n} / 150 · {n} / 2000 |
+| Placeholders heading / intro | Placeholders / AIDA replaces these with real values when it sends the notice. No other placeholder is accepted. |
+| Placeholder rows | `{ticketNumber}` — The ticket's number, for example 1042. / `{workspaceName}` — Your workspace name, as set in Settings → Branding. |
+| Preview heading / intro / captions | Preview / How the notice reads with sample values. Your changes show here before you save. / Subject / Message |
+| Notice scope: recipients | The notice goes only to the customer on tickets where someone on your team already emailed them. |
+| Notice scope: not ownership | That rule limits who gets an automatic email. It does not prove that the address belongs to the customer. |
+| Notice scope: once | At most one notice is sent each time a ticket closes automatically. A notice that fails is not sent again. |
+| Notice scope: timing | A notice that cannot go out within an hour of the closing is skipped. |
+| Notice scope: status page | The notice is not shown on the customer's status page. Agents see it in the ticket's activity. |
+| Suggested text note | This is suggested text. Nothing is saved until you select Save customer notice. |
+| Suggested subject | Your request has been closed |
+| Suggested message | Hello,⏎⏎We have closed request #{ticketNumber} because it was resolved and we have not heard back since.⏎⏎If you still need help, reply to this email and the request opens again.⏎⏎{workspaceName} (⏎ = line break; the placeholders are literal tokens) |
+| Notice save / pending | Save customer notice / Saving… |
+| Notice saved toast (on) / (off) | Customer notice saved. It is on. / Customer notice saved. It is off. |
+| Notice invalid: subject empty | Enter a subject. |
+| Notice invalid: subject too long | Keep the subject to 150 characters or fewer. |
+| Notice invalid: subject not one line | The subject must be a single line without special characters. |
+| Notice invalid: body empty | Enter the message. |
+| Notice invalid: body too long | Keep the message to 2,000 characters or fewer. |
+| Notice invalid: body control characters | Remove the special characters from the message. Line breaks are fine. |
+| Notice invalid: unknown placeholder | "{token}" is not a placeholder AIDA can fill. Use {ticketNumber} or {workspaceName}. |
+| Notice invalid: stray brace | A curly bracket must be part of {ticketNumber} or {workspaceName}. |
+| Notice members note | Only workspace owners and admins can change this. |
+| Notice error: not allowed | Only workspace owners and admins can change this. |
+| Notice error: membership ended | Your access to this workspace has ended. Sign out, then sign in again. |
+| Notice error: unknown | The customer notice could not be saved. Wait a moment and try again. |
+| Notice row disclosure | Notice text |
+| Notice row: pending | A closing notice to the customer is waiting to be sent. |
+| Notice row: sent | A closing notice was sent to the customer. |
+| Notice row: skipped prefix | No closing notice was sent: |
+| Notice row: failed prefix | The closing notice was not delivered: |
+| Notice row: ambiguous | The closing notice may not have been delivered: the connection ended before the mail server confirmed it. It is not sent again. |
+| Notice reason: CHANNEL_OFF | email was not set up for this workspace. |
+| Notice reason: NOTICE_OFF | the notice was turned off before it went out. |
+| Notice reason: NO_PRIOR_REPLY | no one on the team had emailed the customer on this ticket. |
+| Notice reason: INVALID_ADDRESS | the customer's email address cannot receive mail. |
+| Notice reason: TICKET_CHANGED | the ticket changed after it closed. |
+| Notice reason: EXPIRED | it could not go out within an hour of the closing. |
+| Notice reason: REJECTED_PERMANENT | the mail server refused it. It is not sent again. |
+| Notice reason: REJECTED_TRANSIENT | the mail server could not take it at that moment. It is not sent again. |
+| Notice reason: other | the reason is not known. |
+| Server code suffix | Server code {code}. |
+
+Destructive actions: none. Turning the notice off is reversible and needs no confirmation [RL]. Error codes map to exactly one row; raw server text is never shown.
+
+### Addendum accessibility and 360px
+
+- **Labels:** every control has a visible `<Label htmlFor>`; the Switch's accessible name is the switch label, its description the help plus any shown warning ids (so a screen-reader user learns why it is disabled).
+- **`aria-describedby`:** subject → `auto-close-notice-subject-help auto-close-notice-subject-count` plus the `FormMessage` id while an error shows; body likewise with its own ids; `aria-invalid="true"` only while an error shows. The scope block (`auto-close-notice-scope`) is added to the Switch's describedby so the recipient rule is read before turning it on [RL].
+- **Focus order** (DOM order, no `tabIndex` > 0): email-settings link (if shown) → Switch → Subject → Message → Save. Placeholders, preview and scope lines are static text. On a failed client submit focus moves to the first invalid field; after a server refusal focus stays on Save and the `role="alert"` callout is announced; after success focus stays on Save.
+- **Live region for the save result:** the status line (`role="status"`, polite) re-renders from the stored values after each save, so the new state is announced even if the toast is missed; the toast is supplementary. Counters are not live (they are read through describedby on focus).
+- **Feed row:** the `<summary>` is a native disclosure (expanded state announced by the browser); icons are `aria-hidden`; meaning is in the text.
+- **Contrast:** callout text uses the parent Warning and Destructive patterns unchanged; the email-settings link inside the warning is `text-foreground underline`; `text-destructive` on the failed-row icon only.
+- **360px:** the card is full width inside the page's existing padding; the switch row keeps the Switch at the right with the label wrapping (`min-w-0` on the text column); help and counter lines wrap (`flex-wrap`); `Input` and `Textarea` are `w-full`; the preview and the `<details>` box use `break-words` and `whitespace-pre-wrap`, so a 150-character subject, a 2,000-character message with no spaces and a long workspace name never cause horizontal scroll; the Save button keeps its natural width. Feed rows wrap centred; the disclosure box is `max-w-full`.
+
+### Addendum UI considerations (E11, E12)
+
+E11 = notice card (form); E12 = notice feed row (static-content, interactive-control).
+
+| Category | Element | Status | Resolution / Reason |
+|----------|---------|--------|---------------------|
+| empty | E11 | ✅ covered | Nothing stored → suggested text, note, switch off, status off [Surface A] |
+| loading | E11 | ✅ covered | Server-rendered with stored values; saving shows spinner and disables controls [Surface A] |
+| error | E11 | ✅ covered | Field errors per "Notice invalid" rows; one "Notice error" row in a `role="alert"` callout [Surface A] |
+| partial | E11 | ✅ covered | Prerequisite warnings and the disabled or turn-off-only Switch; member read-only view [Surface A] |
+| overflow | E11 | ✅ covered | `maxLength` 150 and 2000 plus counters; server refuses beyond [W-01, W-04] |
+| long-text | E11 | 🧪 backstop | `{ statement: "At a 360px viewport a 150-character subject, a 2,000-character message without spaces and an 80-character workspace name wrap in the fields and the preview without horizontal scroll", verification: backstop }` |
+| permission | E11 | ✅ covered | Owners and admins edit; members see a read-only card; the server gate is W-03's locking read [Surface A] |
+| empty | E12 | ✅ covered | A ticket with no notice record shows no row [Surface B] |
+| populated | E12 | ✅ covered | One row per record after its `AUTO_CLOSED` row, sentence per status and reason, disclosure with the snapshot [Surface B] |
+| zero-one-many | E12 | ✅ covered | A ticket closed automatically twice shows two rows, each after its own close [W-06] |
+| error | E12 | ✅ covered | `FAILED`, `AMBIGUOUS` and unknown values each have a sentence; no retry control [Surface B] |
+| long-text | E12 | 🧪 backstop | `{ statement: "The longest reason sentence and an opened 2,000-character snapshot wrap inside the 360px reading pane without horizontal scroll", verification: backstop }` |
+| security | E11, E12 | ✅ covered | No address, member name, customer text or SMTP error text in the card or row; the status page shows nothing [W-08, W-10, W-11] |
+| dark mode | E11, E12 | 🧪 backstop | `{ statement: "Notice card (warnings, Switch, preview box, error callout) and the feed row with its open disclosure are reviewed in dark mode; human item, left open", verification: backstop }` |
+
+### Addendum assumptions [RL]
+
+16. The Switch cannot be turned **on** while stored days are 0 or email is not ready; it can always be turned off. Server rules (W-02) are unchanged; this is a UI guard.
+17. Subject and message are required on every save, whatever the switch.
+18. No placeholder insert buttons; the placeholders are a static list.
+19. The preview uses `1042` and the stored branding workspace name.
+20. Agents can open the snapshot text through a native `<details>` on the feed row; no client script.
+21. `ATTEMPTING` reads as pending; the row time is the latest time on the record.
+22. The notice row sits right after its `AUTO_CLOSED` row; copy lives in `activity-copy.ts` with an enum-coverage unit test.
+23. `emailReady` means the email channel is on and outgoing mail is configured; the planner names the exact read.
+24. The inventory was counted from `src/components/ui/` because network commands were not allowed in this run.
+
+### Addendum design checklist hooks (DS §9, run in the final gate)
+
+- Token-only colours in `auto-close-notice-form.tsx`, the feed row and any copy module (no oklch or hex; `rg "oklch|#[0-9a-fA-F]{3,6}"` over the new files is empty).
+- No new EmptyState: an empty template is pre-filled text and a ticket without a notice shows no row (justified above).
+- No sidebar, top bar or auth page change; the SLA page keeps one `<h1>`.
+- Explicit `text-[Npx]` on every new element and on `Input`, `Textarea`, `FormMessage`, `Label` instances; no `text-xs`/`text-sm`.
+- Card is `border-border/70 p-4 shadow-sm`; warnings use the Warning pattern; errors the Destructive pattern; spacing only 4/8/16/24.
+- `tsc --noEmit` clean.
+- Manual items, left open and never claimed: visual approval of the notice card and the feed row, dark mode, 360px, a screen-reader pass of the Switch description and the status-line announcement, and any check with real mail [CTX "Owner items and human checks"].
