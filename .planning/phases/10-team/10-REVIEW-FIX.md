@@ -906,3 +906,107 @@ A recipient's permanent 5xx (550 at RCPT, 554 at or after the data) keeps the K1
 ### `.next` moves
 
 None. Global setup did not stall.
+
+## F7
+
+**Date:** 2026-11-13. **Scope:** K183 to K186 and the two extra rows (the V-23 limit, the `/no-access` recovery sentence), the dispositions of the Codex diff critique round 2 (`10-REVIEW.md`, "Codex diff critique round 2 dispositions"; answer `.planning/run-loop/codex/fase10-diff-r2-jawab.md`). **Where it ran:** the main checkout on `v2/run-loop`, no worktree (`workflow.use_worktrees` is `false`). Runs used `AIDA_TEST_RUN_ID=mwel6ja1-f0381070d1ae482a`. **Result:** 4 of 4 decisions and both extra rows done, 7 commits. **Schema:** unchanged.
+
+**How red was shown.** Each new test was run and seen failing before its fix. The K183 integration assertions were also run against a `TEMP-RED` copy (the pre-K183 `composer-tokens.ts` from `git show HEAD:` with stub exports) and the current file was restored from a copy in the run's temporary directory, compared byte for byte. Nothing `TEMP-RED` was committed. No `git checkout`, `git restore` or `git stash` was used.
+
+### K183 (MEDIUM): the held Send has its own copy; an edit re-arms the guard
+
+**Change.** `composer-tokens.ts` exports `MENTION_SWITCH_NOTE`, `MENTION_HOLD_NOTE` and `composerNote(state)`, and the composer renders the note `composerNote` picks.
+- The guard sets `publicSendHeld` and turns `switchNote` off. A hold shows the hold note (amendment A10): "Mentions only work in internal notes. This reply was not sent because it still contains "@" followed by the name of a member you mentioned (an email address can match too). Review it, then select Send Reply again to send it as written."
+- "The mentioned names were removed from this reply." shows only after a switch to public really removed something.
+- Any `edit` that changes the body clears `publicSendHeld`, so the guard is armed again. An edit that leaves the text as it is keeps the hold.
+- The unbounded match stays. The copy explains its false positives (an address).
+
+**Tests.**
+- Unit (`mention-tokens`): the six pasted forms now expect the hold note, not the switch note. A new block covers the strip note only after a real strip, the hold note replacing it right after a strip, a name added after a hold being held again, an edit that removes the name sending at once, and an unchanged edit keeping the hold.
+- Integration (`mention-mode-switch`): both hold cases assert `publicSendHeld` and the hold note. The edit in the first case clears the hold.
+
+**Runs.** Red: unit exit 1, 10 failed, 38 passed. Integration `TEMP-RED`: exit 1, 2 failed, 2 passed, then restored. Green: unit 48 passed; `mention-mode-switch` and `mentions` 19 passed.
+
+**Commit:** `1814d7b`
+
+### K185 (LOW): the bare-origin rule checks the raw text
+
+**Change.** `isBareOrigin` (`app-url.ts`) also requires `BARE_ORIGIN_TEXT`: an http(s) scheme, `//`, an authority with no `/`, `\`, `?`, `#`, `@` or whitespace, then at most one `/`. The rule covers `BETTER_AUTH_URL` (every reader and the start-up check) and every trusted-origin entry.
+
+**Tests.** Unit (`app-url`): `/a/..`, `/a/../`, `/%2e`, `/%2E`, `/%2e%2e`, `/.`, `/./`, `/..` and `\a\..`. Each one parses to the path `/`, and each is refused (`not_origin`) by `getAppBaseUrl`, `getAppOrigin`, `getTrustedAppOrigins` and `assertAppUrlAtStart`. The same suffixes are ignored as trusted entries, while a bare entry with a port and an upper-case one with a trailing slash stay. A bare URL and an IPv6 origin still pass.
+
+**Runs.** Red: exit 1, 10 failed, 18 passed. Green: 28 passed.
+
+**Commit:** `96a9d79`
+
+### K184 (MEDIUM): the member row is the last read before the connection
+
+**Change.** `recheck` (`digest.ts`) now reads in this order: the claimed rows, the preferences, the unassigned switch, the member row. After the last re-check only the clock is read (the lease check) before `sendDigestMail` opens the connection. A new test seam, `afterLastRecheck`, sits right before the send.
+
+**Tests** (`notification-digest`, "the last re-check sits right before the connection"). Pass-through `vi.mock` wrappers around `readDigestRows`, `getPreferences`, `getUnassignedSetting` and `readMemberRights` record the order of the reads and change nothing. The file header says so.
+- A real `deactivateMember` that commits inside the last re-check's rows read is seen: the outcome is `canceled`, the digest is CANCELED, there are 0 connections and nothing is stamped.
+- The recorded sequence is `beforeConnect, rows, preferences, unassigned, membership, afterLastRecheck connections=0, afterSend`. A deactivation in `afterLastRecheck` still lets that one digest through (`sent`, stamped, member row gone): this is the documented bound.
+
+**Runs.** Red: exit 1, 2 failed, 36 passed (the order began with `membership`). Green: 38 passed.
+
+**Commit:** `3cfd7d3`
+
+### K186 (LOW): retention of released and canceled digest rows
+
+**Change.** `runDigests` starts with `pruneDigestRows`, after the timing and URL checks and before the pairs. It deletes at most `DIGEST_PRUNE_BATCH` (500) rows with status RELEASED or CANCELED whose `updatedAt` is older than `DIGEST_RETENTION_MS` (7 days), oldest first. Notifications, SENT rows and CLAIMED rows are untouched. A failure is logged (`prune failed: class=…`) and the run goes on. `RunDigestsResult` gains `pruned`; the summary line is unchanged.
+
+**Tests** (`notification-digest`, "retention…").
+- Old RELEASED and CANCELED rows are deleted. Recent ones, an old SENT row, an old CLAIMED row and the notification (compared whole) stay.
+- 501 old rows take two runs: 500, then 1.
+
+**Runs.** Red: exit 1, 2 failed. Green: 40 passed; with `notification-digest-job` and `notifications-privacy`, 49 passed.
+
+**Commit:** `1e1d60b`
+
+### `/no-access` recovery sentence (amendment A11)
+
+The page body adds: "If you still belong to another workspace, sign out and sign in again to open it." Sign-in sets the session to the first remaining membership (`auth.ts` session hook). This is a copy change only, and no spec pins the body copy, so no spec was changed. `single-h1` and `csp` passed over the page.
+
+**Commit:** `0bb2666`
+
+### Documents
+
+- `a0c9c7c` `docs/OPERATIONS.md`:
+  - **K184:** the exact bound. A removal or a changed choice saved after the last check may still let that one digest through, and nothing but the clock is read before the connection.
+  - **K186:** "Old digest records". A lasting configuration failure shows in the existing run line (`rejectedConfig`, `configStopped`) and in the `send rejected (configuration)` line; there is no in-app alert.
+  - **V-23:** the new section "Accepting an invitation to another workspace". It is acceptable while v1 ships one workspace per install and must be fixed before multi-workspace support (bind every server action to the rendered organization). It is not in `docs/SECURITY.md` (08-o4).
+  - **Removing a member:** the section points at the no-access page.
+- `dc15f12` `10-GATE.md`: A10 and A11 in the amendment table; a new section "Known limits (accepted for v1)" with V-23 and the K184 bound.
+
+### Final checks
+
+`colima status` exit 0 and `docker info` exit 0 before each Docker step. Free space stayed at 48 GiB.
+
+| Command | Exit | Counts |
+|---|---|---|
+| `pnpm typecheck` (at `dc15f12`) | 0 | 0 errors |
+| `pnpm lint` (at `dc15f12`) | 0 | 774 files, 1 warning, the known `tests/unit/container-config.test.ts:160` |
+| `pnpm test` (at `dc15f12`) | 0 | 116 files, 2153 passed |
+| `membership-inventory`, `page-access-inventory` (also inside `pnpm test`) | 0 | 65 passed |
+| Touched integration suites together: `mention-mode-switch`, `mentions`, `notification-digest`, `notification-digest-job`, `notifications-privacy`, `invite-onboarding` | 0 | 6 files, 96 passed |
+| `pnpm test:integration` (full, once, at `dc15f12`, 06:32:26Z to 06:40:30Z) | 0 | 135 files, 1891 passed, 0 failed (483.34 s) |
+| E2E `mentions-leak`, `single-h1`, `csp`, run 1 (06:40:51Z) | 1 | stalled in global setup at `/setup` ("Create workspace" click timeout; next-o1) |
+| E2E the same three, run 2 after the `.next` move (06:42:01Z to 06:43:05Z) | 0 | 30 passed (1.1 min) |
+| `pnpm typecheck` after the E2E runs | 0 | 0 errors |
+
+- The session cookie cache is still off (`auth.ts:17`, `cookieCache: { enabled: false }`).
+- `readFreshSession` stays the only session read, and `auth.ts` is unchanged.
+- No `package.json`, lockfile or schema change.
+- Fake SMTP and the mocked transport only.
+
+### Not done, and limits
+
+- **K183:** no visual or screen-reader check of the hold note (it replaces the old text in the same `role="status"` paragraph). The hold note goes with the next edit, so a typing agent no longer sees it; the next Send shows it again if a name is still there. `deferred-items.md` still lists the K180 copy entry, now settled by A10; it was left to the orchestrator.
+- **K184:** the window is not zero. A deactivation saved after the last re-check (during the lease check or the transmission) is not stopped (documented).
+- **K186:** the retention step reads and deletes across organizations (digest rows only, ids only), like `listDigestPairs`. There is no index on `updatedAt`, so the step scans the table. The step's count is not in the summary line.
+- **V-23:** documented only; not fixed (by decision).
+- **Report:** this section is written and left uncommitted for the orchestrator.
+
+### `.next` moves
+
+- One: after E2E run 1 stalled in global setup, `.next` was moved to `~/.Trash/aida-next-1794552114`. The run 1 log was kept in the run's temporary directory, which is removed at the end. Run 2 passed.
