@@ -565,8 +565,8 @@ These links are softer than the parking chain in `run-loop/PIAGAM.md`, which thi
 | 12. Ticket Lifecycle (relations, merge, snooze, activity) | v2.0 | 10/10 | Verified: human_needed (visual, dark mode, layout widths and screen-reader checks open; AIDA-53 closed by owner decision 12-o1 on 2026-11-11) | - |
 | 12.1. Ticket Lifecycle (custom states, SLA pause) | v2.0 | 17/17 | Verified: human_needed (visual, dark mode, contrast by eye, screen reader and UAT open; K47 deferred) | - |
 | 12.2. Ticket Lifecycle (KB proposals) | v2.0 | 12/12 | Verified: human_needed (visual, dark mode, screen reader, UI-SPEC amendments A1 to A8 and UAT open; owner items 12.2-o1 to 12.2-o4) | - |
-| 13. Integrations | v2.0 | 0/0 | Not started (Phase 10 verified human_needed; next) | - |
+| 13. Integrations | v2.0 | 0/18 | Parked (three Codex plan review cycles left two HIGH; owner decision) | - |
 | 14. Projects Foundation | v2.0 | 13/13 | Verified: human_needed (owner items 14-o1, 14-o2, 14-o3; O-1 suites blocked) | - |
 | 15. Work Views | v2.0 | 0/0 | Not started | - |
 | 16. Workspace | v2.0 | 0/0 | Not started (needs Phases 10, 14 and 15) | - |
-| 17. Unification | v2.0 | 0/0 | Not started (needs Phases 13 to 16) | - |
+| 17. Unification | v2.0 | 0/0 | Parked (depends on parked Phase 13) | - |
