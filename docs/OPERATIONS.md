@@ -635,10 +635,18 @@ sending and then stops; the next run picks up the rest. Two runs never send the 
 batch at once.
 
 A member removed from the workspace gets no digest: membership, the member's choices and
-owner or admin rights are checked again after the digest is written and right before AIDA opens
-the connection to the SMTP server. One limit remains: a digest whose transmission has already
-started when the removal is saved is not stopped, and may still arrive (within the 45-second send
-deadline). This is the same bound as for an action already under way when a member is removed.
+owner or admin rights are checked again after the digest is written, as the last reads before AIDA
+opens the connection to the SMTP server. Between that last check and the connection AIDA reads
+nothing else (only the clock). The exact limit: a removal, or a changed choice, saved after that
+last check may still let that one digest through. This is the same bound as for an action already
+under way when a member is removed.
+
+**Old digest records.** AIDA keeps one record per digest attempt. Each run deletes records of
+attempts that were released (to be tried again) or canceled more than 7 days ago, at most 500 per
+run; notifications are never deleted by this, and sent digests are kept. While the SMTP settings
+stay broken, every run releases a new attempt for each waiting member; the run line's
+`rejectedConfig` and `configStopped` counts and the `send rejected (configuration)` line above
+show it, on every run, until the settings are fixed. AIDA shows no alert for it in the app.
 
 ### Unassigned tickets
 
@@ -671,10 +679,22 @@ Removing (deactivating) a member ends their access to every page and to the API 
 next request is refused, whatever session they still hold. Their account and their ticket history
 stay. A member who also belongs to another workspace is not switched to it: their open sessions
 then name no workspace, each page shows the no-access page and every action is refused, until
-they sign in again (or accept an invitation, which opens the workspace it is for). The dialog offers to reassign their open tickets. Removal does not change project access
+they sign in again (or accept an invitation, which opens the workspace it is for); the no-access
+page says so. The dialog offers to reassign their open tickets. Removal does not change project access
 rules: a **private project** whose only manager is removed is left with no manager, and nobody
 else can then reach it (owner item 14-o1). Before removing someone, check the private projects
 they manage.
+
+### Accepting an invitation to another workspace
+
+Accepting an invitation switches that person's session to the workspace of the invitation. A
+browser tab still open on the previous workspace then acts in the new one: its next action (a
+setting, an invitation, a reply) is carried out in the workspace the session now names, if the
+person has the right there. The switch is deliberate, but the stale tab's next action may not be.
+This is acceptable while AIDA v1 offers one workspace per install. It must be fixed before
+multi-workspace support (every server action bound to the workspace the page was rendered for).
+Until then, after accepting an invitation to another workspace, reload or close the tabs of the
+previous one.
 
 ### Upgrading Better Auth
 
