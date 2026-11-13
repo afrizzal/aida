@@ -4,8 +4,8 @@ milestone: v2.0
 milestone_name: Helpdesk & Projects
 current_phase: 10
 current_phase_name: team
-status: Phase 8 Part A verified human_needed; Phase 8.1 waits for the owner; Phases 9 and 10 verified human_needed; Phase 15 unparked, not executed; Phases 11, 12, 12.1, 12.2 and 14 verified human_needed; working on queue row 11-o2 (Phase 11 follow-up), then Phase 13
-stopped_at: queue row 11-o2 (Phase 11 follow-up, auto-close customer notice): CONTEXT decisions W-01 to W-18 after the Codex brainstorm; UI-SPEC addendum and planning next
+status: Phase 8 Part A verified human_needed; Phase 8.1 waits for the owner; Phases 9 and 10 verified human_needed; Phase 15 unparked, not executed; Phases 11, 12, 12.1, 12.2 and 14 verified human_needed; queue row 11-o2 parked (owner decision needed for an extra review cycle); next queue row is Phase 13
+stopped_at: queue row 11-o2 parked (three Codex plan review cycles left one HIGH, reply routing on an ambiguous Message-ID); next queue row is Phase 13
 last_updated: "2026-11-13T14:30:00.000Z"
 last_activity: 2026-11-13
 last_activity_desc: Phase 10 executed (17 plans), code review in four parts (0 critical, 19 warning) fixed in batches F1 to F5, three Codex diff rounds (1 HIGH then none) fixed in F6 and F7, regression R10-1 fixed by turning the session cookie cache off. Gate rerun at b96263d: lint, typecheck, unit 2153, integration 1891, full E2E 296 passed, build exit 0; audit exit 1 with 10 high; test:egress blocked by VM space. AIDA-42 to AIDA-46 have evidence for every acceptance item; human and owner items stay open.
@@ -128,7 +128,7 @@ Owner items, in the order of `run-loop/LAPORAN.md` section 3:
 ## Session Continuity
 
 **Last session:** 2026-11-13T01:50:00.000Z
-**Stopped at:** queue row 11-o2 decided (W-01 to W-18); UI-SPEC addendum and planning next, then Phase 13 (2026-11-13)
+**Stopped at:** queue row 11-o2 parked after three plan review cycles; Phase 13 next (2026-11-13)
 **Resume file:** .planning/run-loop/ANTREAN.md
 
 **Last action (2026-11-13):** Phase 10 replan (17 plans) and two plan checker passes. No tag, nothing pushed.
