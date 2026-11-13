@@ -1,0 +1,43 @@
+## HIGH
+
+**1. Egress dan penutupan fase — X-10, X-11.** **[Terverifikasi di kode/dokumen]** [CLAUDE.md:20](./CLAUDE.md#L20) dan [PROJECT.md:106](./.planning/PROJECT.md#L106) melarang egress yang dibutuhkan fase ini. Konfliknya sudah dicatat sebagai **13-o1 menunggu owner**; 08-o4 juga melarang perubahan `docs/SECURITY.md` sampai diputuskan ([ANTREAN.md:34](./.planning/run-loop/ANTREAN.md#L34), [38](./.planning/run-loop/ANTREAN.md#L38)).
+
+**Rekomendasi:** AIDA-63 dan kriteria 5 **belum bisa ditutup**; siapkan usulan teks dan bukti uji untuk keputusan owner. Perubahan kalimat `PROJECT.md` jelas keputusan owner. Plane di LAN juga perlu keputusan owner tentang cakupan/pengecualian egress; jangan diam-diam memperluas kebijakan. **Jebakan:** default 13-o1 yang mengerjakan integrasi dalam keadaan mati tidak dengan sendirinya menghapus konflik aturan.
+
+**2. Anti-replay inbound — X-14.** **[Terverifikasi di dokumen]** Riset hanya menyebut header signature, event, dan delivery Plane, tanpa menetapkan timestamp bertanda tangan ([plane-inspiration.md:89](./.planning/research/plane-inspiration.md#L89)). **[Belum terverifikasi]** Format tanda tangan dan header GitHub/Plane harus dicek terhadap dokumentasi provider; saya tidak mengakses jaringan.
+
+**Rekomendasi:** batasi ukuran byte mentah, verifikasi HMAC sebelum parsing, lalu deduplikasi atomik berdasarkan **hash body yang telah terautentikasi**, per koneksi, dengan retensi dan semantik yang dinyatakan. Simpan hasil dan catatan dalam transaksi yang sama. Delivery ID berguna sebagai metadata, tetapi tidak aman sebagai satu-satunya kunci jika tidak ikut ditandatangani. **Jebakan:** body identik yang sah bisa tertolak; sesudah retensi berakhir replay bisa lolos. Tanpa timestamp/nonce bertanda tangan, klaim “semua replay ditolak” tidak terbukti. Resolusi keterbatasan terhadap kriteria fase perlu dibahas sebelum CONTEXT dikunci.
+
+**3. SSRF dan server tiruan — X-09, X-10, X-15.** **[Terverifikasi di kode]** Belum ada guard yang disebut kandidat; test egress memakai stub privat ([docker-compose.egress-test.yml:30](./docker-compose.egress-test.yml#L30)). **[Rekomendasi]** Untuk webhook produksi, wajib HTTPS, validasi semua hasil DNS, pin koneksi ke IP tervalidasi sambil mempertahankan hostname untuk SNI dan verifikasi sertifikat, serta tolak redirect. Periksa ulang setiap percobaan; batasi skema, port, timeout, ukuran respons, dan klasifikasi alamat IPv4/IPv6.
+
+Gunakan **injeksi resolver dan transport pada test**, tanpa flag lingkungan atau CIDR bypass yang dapat diaktifkan operator pada jalur webhook produksi. Untuk pembuktian egress compose, rancang seam harness yang hanya tersedia di artefak test dan pastikan artefak produksi tidak memilikinya. **[Belum terverifikasi]** Detail pinning dan pemisahan artefak masih perlu dibuktikan saat desain. **Jebakan:** mock transport saja tidak membuktikan socket sebenarnya dipin; sertakan test transport nyata di harness terisolasi.
+
+**4. Kehilangan dan duplikasi pengiriman — X-07, X-08, X-13.** **[Terverifikasi di kode]** Pembuatan tiket melakukan enqueue sesudah commit ([create-ticket.ts:163](./src/lib/tickets/create-ticket.ts#L163)); ini bukan outbox atomik. **[Rekomendasi]** Simpan event outbox dalam transaksi domain, termasuk peristiwa worker; dispatcher pg-boss memulihkan outbox tertunda setelah crash. Pengiriman bersifat *at least once*, dengan delivery ID stabil dan konsumen idempoten. Tandatangani timestamp, delivery ID, event, dan body; secret dienkripsi dan rotasi langsung pada awalnya.
+
+Contoh awal: timeout 10 detik, lima percobaan dengan delay awal 30 detik, backoff dan jitter, batas 30 menit; nonaktif setelah lima **delivery final** gagal beruntun, bukan lima percobaan satu delivery. Tetapkan urutan dan aturan reset saat paralel, serta buat notifikasi admin dan email SMTP idempoten. **Jebakan:** klik ganda dapat dikunci lokal, tetapi timeout sesudah issue dibuat tidak menjamin idempotensi remote; gunakan idempotency key bila provider mendukung, selain itu tandai hasil ambigu untuk rekonsiliasi manual. **[Belum terverifikasi]** Dukungan provider atas idempotency key.
+
+## MEDIUM
+
+**5. Token, prinsipal, dan proxy — X-01–X-03.** **[Rekomendasi]** Secret acak 256-bit dengan SHA-256 cukup; pepper memberi perlindungan tambahan untuk kebocoran database saja, tetapi menambah pengelolaan dan rotasi kunci. Argon2 tidak memberi manfaat sepadan untuk secret acak tersebut. Gunakan expiry wajib, `revokedAt`, dan `lastUsedAt` yang di-throttle.
+
+Token mewakili pembuatnya: cek membership konservatif dan otorisasi terkini setiap request, termasuk di transaksi mutasi; setelah turun dari admin, token tetap hanya bila hak operasi masih dimiliki. Catat **user dan token ID** sebagai aktor. Proxy meneruskan tepat `/api/v1/`; setiap route wajib gate bearer, tanpa fallback sesi. Cookie boleh hadir tetapi **tidak digunakan untuk autentikasi**; menolaknya tidak diperlukan jika bearer wajib dan CSRF tidak dapat memakai cookie sebagai kredensial. Tambah inventori gate dan uji varian path. **[Terverifikasi di kode]** Prefix saat ini memakai `startsWith` mentah ([proxy.ts:159](./src/proxy.ts#L159)). **Jebakan:** pemeriksaan role hanya sebelum transaksi dapat berlomba dengan deaktivasi.
+
+**6. Rate limit — X-04.** **[Terverifikasi di kode]** Admission menolak segera bila identitas sedang diproses atau tiga slot global terisi ([check-rate-limit.ts:197](./src/lib/rate-limit/check-rate-limit.ts#L197), [268](./src/lib/rate-limit/check-rate-limit.ts#L268)). Jadi request paralel dapat menerima 429 meski kuota belum habis.
+
+**Rekomendasi:** penghitung jendela per token dengan update PostgreSQL atomik; ini tidak menambah layanan. Bedakan kuota 429 dari overload 503; batasi antrean dan waktu tunggu. Tambahkan limit IP kasar sebelum lookup bearer tanpa menjadikannya pengganti limit token. **Jebakan:** fixed window memungkinkan burst di batas jendela; dokumentasikan.
+
+**7. Adapter dan input AI — X-12–X-14.** **[Rekomendasi]** Pisahkan port domain `createIssue`/status dari kapabilitas HTTP, verifikasi webhook, dan uji koneksi; adapter `internal` tidak wajib memiliki transport atau webhook. `TrackerConnection` lebih jelas untuk identitas, kredensial terenkripsi dan relasi, tetapi mulai dengan satu koneksi per provider bila itu cukup. Pratinjau eskalasi oleh agen, minim data, dan tanpa catatan internal default.
+
+**[Terverifikasi di kode]** Triage membaca pesan pertama ([run-triage.ts:33](./src/lib/triage/run-triage.ts#L33)); draf memilih `INBOUND` ([generate-draft.ts:49](./src/lib/rag/generate-draft.ts#L49)); usulan KB memilih `PUBLIC` ([proposal-sources.ts:344](./src/lib/kb/proposal-sources.ts#L344)). **Jebakan:** catatan tracker yang salah diberi `INBOUND` dapat masuk draf; gunakan visibilitas internal, provenance, template dan teks status yang dibatasi. Prompt fencing tetap perlu; status tersanitasi bukan bukti bebas prompt-injection.
+
+**8. Audit dan payload — X-17, X-18.** **[Rekomendasi]** Gunakan `TicketAuditEvent` untuk peristiwa tiket dan model audit integrasi append-only baru untuk tindakan administrasi, termasuk aktor user/token/system dan tanpa secret. Payload webhook tipis, berversi, hanya ID dan perubahan yang diizinkan; isi pesan, email, catatan internal, setting, `statusToken`, dan input audit tidak masuk default. **Jebakan:** ID dan perubahan pun data tenant; otorisasi, retensi, dan kontrak event tetap diperlukan.
+
+## LOW
+
+**9. Tiga konflik tambahan yang perlu masuk rancangan.**
+
+- **[Terverifikasi di kode]** `scopedDb` tidak mengintersepsi `findUnique` atau `createMany` ([scoped-db.ts:82](./src/lib/scoped-db.ts#L82)); menambah model ke daftar saja tidak menjamin semua operasi ter-scope.
+- **[Terverifikasi di kode]** `createTicket` mengembalikan `statusToken` ([create-ticket.ts:155](./src/lib/tickets/create-ticket.ts#L155)); API tidak boleh meneruskan hasil layanan mentah.
+- **[Terverifikasi di kode]** Render thread mengasumsikan `bodyHtml` sudah disanitasi ([thread-message.tsx:32](./src/components/tickets/thread-message.tsx#L32)); catatan tracker harus melewati renderer yang sama.
+
+Untuk X-05/X-06, **[rekomendasi]** gunakan OpenAPI statis dengan uji paritas operasi dan scope, serializer allowlist, 404 untuk ID asing, serta pagination berkursor. **[Belum terverifikasi]** Paritas otomatis perlu juga mendeteksi operasi baru yang hilang dari dokumen, bukan hanya memvalidasi entri yang sudah tertulis.
