@@ -84,6 +84,8 @@ UI-SPEC stays approved and binding; `10-UI-SPEC.md` was not edited. Each amendme
 | A7 | Deactivation with reassignment: the skipped-ticket count in the toast, the warning callout for tickets that could not be reassigned, and "Try again" | 10-10 |
 | A8 | The bell sits between the Search button and `ThemeToggle` (UI-SPEC said "before ThemeToggle"; Search was added since) | 10-11 |
 | A9 | Mention autocomplete rows use on-scale `py-1` (4px; was the off-scale `py-0.5`), so a row is the `size-8` avatar plus 2 × 4px = 40px, and the list height for eight visible rows is `max-h-[320px]` (UI-SPEC Surface 4 said `max-h-[288px]`, which no on-scale padding meets). `max-h-[320px]` is a size, not spacing. Run decision K176, review d-WR-6; `mention-autocomplete.tsx:126`, `:137`. Re-run of the gate's off-scale spacing grep on that file after the change: exit 1 (no hit); pinned by `tests/unit/mention-autocomplete-spacing.test.ts`. | code-review fix batch F4 (`563b6dc`, `3d77f43`) |
+| A10 | The held public Send (K180) shows its own note instead of the switch note: "Mentions only work in internal notes. This reply was not sent because it still contains "@" followed by the name of a member you mentioned (an email address can match too). Review it, then select Send Reply again to send it as written." The switch note ("… The mentioned names were removed from this reply.") shows only after a switch really removed something; any edit of the body after a hold arms the guard again. Run decision K183, Codex diff round 2; `composer-tokens.ts` (`MENTION_HOLD_NOTE`, `composerNote`), `composer.tsx`. | code-review fix batch F7 (`1814d7b`) |
+| A11 | The `/no-access` body adds one sentence after A5: "If you still belong to another workspace, sign out and sign in again to open it." (K178 leaves a removed member's sessions on no workspace; sign-in opens the first remaining membership.) Codex diff round 2 (info). | code-review fix batch F7 (`0bb2666`) |
 
 ## Requirement evidence
 
@@ -252,6 +254,11 @@ Evidence still missing (a follow-up plan, not this gate):
 Upgrade note: Phase 10 is built and tested on `better-auth` 1.7.20 (`package.json:36`; `@better-auth/cli` stays 1.4.21, `:87`, so no CLI schema generation). A later Better Auth upgrade reruns every invitation and membership suite of this phase (`invitations`, `invite-onboarding`, `team-member-admin`, `member-rights`, `membership-gate`, `deactivation-race`, `auth-upgrade`, `tests/unit/better-auth-routes.test.ts` with its version guard, and the E2E specs `team-invitations` and `team-deactivation`).
 
 Blocked or failed gate rows: `pnpm test:integration` failed (one timing-dependent Phase 9 case); `pnpm test:egress` blocked (space); `pnpm audit --prod` failed (08-o3); `pnpm test:e2e` run 1 failed in global setup (next-o1), run 2 passed.
+
+## Known limits (accepted for v1)
+
+- **V-23, a stale tab after a deliberate invitation accept.** Accepting an invitation to another workspace switches the session to it; a tab still open on the previous workspace then acts in the new one (its next server action runs in the organization the session names, where the person has the right). Accepted as a written limit while v1 ships one workspace per install (`docs/OPERATIONS.md`, "Accepting an invitation to another workspace"). It becomes HIGH before multi-workspace support: bind every server action to the organization the page was rendered for. Codex diff critique round 2.
+- **K184, the digest after a removal.** A removal or a changed choice saved after the digest's last re-check (the last reads before the SMTP connection) may still let that one digest through (`docs/OPERATIONS.md`, "The email digest").
 
 ## README correction (D-26)
 
