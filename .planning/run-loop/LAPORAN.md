@@ -37,7 +37,7 @@ Keadaan per 2026-11-11, sesudah keputusan owner. Fase 08, 09, 10, 13, 15, 16, da
 
 ## 3. Menunggu owner
 
-**Keputusan owner 2026-11-13 (dicatat; diterapkan sesudah jeda sampai 2026-11-20).** 11-o2: setuju usulan, Message-ID ambigu tidak di-routing. Fase 13: dua HIGH diperbaiki. 13-o1: opsi a dengan aturan jaringan; teks `PROJECT.md:106` dan `CLAUDE.md` sudah diubah. Fase 15: HIGH 1 opsi b, HIGH 2 opsi a. Fase 16 dilepas; 17 ikut 13. Catatan parkir di bawah untuk 11-o2 dan Fase 13, 15, 16, dan 17 kini sejarah. Isi opsi dan tafsiran run T1 sampai T5 ada di `ANTREAN.md`, bagian Keputusan owner 2026-11-13.
+**Keputusan owner 2026-11-13 (dicatat; diterapkan sesudah jeda sampai 2026-11-20).** 11-o2: setuju usulan, Message-ID ambigu tidak di-routing. Fase 13: dua HIGH diperbaiki. 13-o1: opsi a dengan aturan jaringan; teks `PROJECT.md:106` dan `CLAUDE.md` sudah diubah. Fase 15: HIGH 1 opsi b, HIGH 2 opsi a. Fase 16 dilepas; 17 ikut 13. Catatan parkir di bawah untuk 11-o2 dan Fase 13, 15, 16, dan 17 kini sejarah. Owner menyetujui T1, T2, T3, T5, dan Fase 17, dan mengoreksi T4: loop boleh bekerja lagi mulai 2026-11-20 00:00 WIB. Tugas Fase 13 ditambah penyelarasan `README.md` dan kalimat "Differentiator" di `CLAUDE.md` dengan `PROJECT.md:106`. Isi opsi dan tafsiran ada di `ANTREAN.md`, bagian Keputusan owner 2026-11-13.
 
 **Selesai (2026-11-12): ruang disk host.** Loop menunggu dari 01:56 sampai 11:55 (13 putaran tunggu, 14,09 sampai 14,98 GiB). Pukul 11:55 ruang host 37,83 GiB, bukan karena tindakan loop, dan loop bekerja lagi. Ruang VM Colima untuk build image (20 GiB, aturan J) tetap butir 0a2.
 
