@@ -1,6 +1,6 @@
 # ---- Stage 1: base ----
 # Shared base with Node 22 + corepack/pnpm (D-13)
-FROM node:22-alpine AS base
+FROM node:25-alpine AS base
 RUN corepack enable
 # Telemetry off for every step built on this stage (D-27, AIDA-32): `next build`, `prisma
 # generate` and the one-shot `prisma migrate deploy` never phone home. deps, builder and the
@@ -62,7 +62,7 @@ USER node
 # ---- Stage 4: runner ----
 # Minimal production image shared by app (node server.js) and worker (node dist/worker.mjs)
 # Docker Compose overrides CMD per service — same image, different start command (D-09)
-FROM node:22-alpine AS runner
+FROM node:25-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 CHECKPOINT_DISABLE=1
 
