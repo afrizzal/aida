@@ -2,6 +2,8 @@
 
 **Jeda owner 2026-11-13 (keputusan owner 2026-11-13 butir 7):** loop berhenti sampai 2026-11-20. Putaran yang dimulai sebelum 2026-11-20 00:00 WIB (koreksi owner atas T4; cek dengan `TZ=Asia/Jakarta date '+%F %H:%M'`) tidak mengerjakan butir apa pun, tidak menulis berkas, dan tidak membuat commit: lapor satu baris di chat, lalu hentikan loop.
 
+**Catatan sha 2026-11-14 (owner):** sha commit yang ditulis sebelum 2026-11-14 adalah sha lama; pemetaan sha lama ke sha baru ada di `peta.tsv`, yang disimpan owner di luar repo.
+
 Status: `belum`, `berjalan`, `selesai`, `menunggu manusia`, `diparkir`.
 
 | Butir | Isi | Status | Catatan |
