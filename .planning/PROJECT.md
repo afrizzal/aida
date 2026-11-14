@@ -103,7 +103,7 @@ v2.0: AIDA-18 and AIDA-25 through AIDA-114, in `REQUIREMENTS.md`. All 23 v1 MVP 
 **Architecture principles:**
 - Single server, minimal moving parts (pg-boss not Redis; pgvector in the same Postgres).
 - Model-agnostic AI via one provider abstraction; AI always toggleable off.
-- Privacy-first: data + keys stay on the operator's server; no egress beyond the configured LLM.
+- Privacy-first: data + keys stay on the operator's server; no egress except destinations an admin has configured and turned on (the LLM, the mail server, signed webhooks, enabled tracker adapters), and every one of them is off by default. Webhook and tracker connections always refuse loopback and link-local addresses (including 169.254.169.254) and refuse private addresses unless they are in the operator's CIDR allowlist; the IP that DNS returns is checked at connect time, and a redirect is never followed without the same check (owner decision 13-o1, 2026-11-13).
 - Human-in-the-loop for anything customer-facing; ticket text is untrusted input.
 - Multi-tenant-ready scoping from day one (workspace/org), even if v1 ships single-workspace.
 - One-command self-host and repo health are product features.

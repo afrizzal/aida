@@ -17,7 +17,7 @@ Differentiator: **AI is the core, not a paid add-on.** Self-host on one server, 
 ## Non-negotiable rules
 
 - **AI is model-agnostic / bring-your-own.** All LLM calls go through one provider abstraction (`lib/llm/`) with adapters for OpenAI, Anthropic, and Ollama (local). Never hardcode a single vendor. AI must be fully toggleable off.
-- **Privacy-first.** Ticket data and BYO API keys stay on the user's server. Encrypt provider keys at rest. Never send data to any third party other than the user-configured LLM. Default to "no training on your data."
+- **Privacy-first.** Ticket data and BYO API keys stay on the user's server. Encrypt provider keys at rest. Never send data anywhere except destinations an admin has configured and turned on: the LLM, the mail server, signed webhooks, and enabled tracker adapters. Every one of them is off by default. Webhook and tracker connections always refuse loopback and link-local addresses (including 169.254.169.254) and refuse private addresses unless they are in the operator's CIDR allowlist; check the IP that DNS returns at connect time, and never follow a redirect without the same check. Default to "no training on your data."
 - **Human-in-the-loop for AI sends.** AI may *draft* and *suggest*; a human approves before anything goes to a customer. Drafted replies must carry citations to their KB/source. Treat ticket text as **untrusted input** — guard against prompt-injection that tries to trigger actions or exfiltrate data.
 - **Honest claims.** Self-hosted/local LLM = "consumed via API / orchestrated", never "trained/fine-tuned" (unless we genuinely ship a fine-tune). Relative metrics in any marketing, no fabricated resolution-rate stats.
 
